@@ -42,13 +42,16 @@ loaded with, as the model provider reports it, which a model's load
 configuration can set for LM Studio. Files saved by earlier versions also hold a `model` group with a local
 context-size estimate; Lys ignores it, and the next save leaves it out.
 
-The `providers` group holds the model provider every request goes to,
-chosen in Settings → Providers: LM Studio, a local Ollama server, Ollama
-Cloud, or Groq, with the address of LM Studio's and the local Ollama
-server, `null` for the default. Ollama Cloud and Groq need their keys,
-`ollamaApiKey` and `groqApiKey` in the `secrets` group, beside the Tavily
-key. The backend reads both groups at each connection attempt; Refresh on the
-Runtime pane's provider card makes one after a hand edit. See
+The `providers` group holds, in `enabled`, the model providers that are on,
+set in Settings → Providers: any of LM Studio, a local Ollama server, Ollama
+Cloud, and Groq, at the same time. It also holds the address of LM Studio's
+and the local Ollama server, `null` for the default. A file saved by an
+earlier version holds one provider in `active` instead; Lys reads it as the
+only provider on until the next save writes `enabled`. Ollama Cloud and Groq
+need their keys, `ollamaApiKey` and `groqApiKey` in the `secrets` group,
+beside the Tavily key. The backend reads both groups at each connection
+attempt of a provider; Refresh on the Runtime pane's Provider connections card makes one
+after a hand edit. See
 [Providers](/reference/configuration/#providers).
 
 The `tools` group lists, in `justRun`, the tools set to Just run in Settings →
@@ -91,7 +94,7 @@ when it starts and when the MCP pane saves, and `email` with the password in
 `secrets` for the email server; see [MCP servers](#mcp-servers) and
 [Email account](#email-account). A save from a
 settings pane writes the values Lys holds over a hand edit of its group made
-while Lys runs: the Generation pane replaces `generation`, the Model pane
+while Lys runs: the Generation pane replaces `generation`, the Models pane
 replaces `loadConfiguration.models` and leaves `default` as it is in the file,
 the Secrets pane replaces `secrets`, the Tools pane replaces `tools` and, on
 Save, `location`, the MCP pane replaces `mcp` and, on the email server's
@@ -289,8 +292,8 @@ runtime and model groups. Save status is retained across pane changes, and the
 generation pane offers a retry action. A failed save keeps the current
 in-memory edits usable.
 
-Load configuration edits in the Model pane autosave the same way, replacing
-only the `loadConfiguration` group, and the Model pane offers the same retry
+Load configuration edits in the Models pane autosave the same way, replacing
+only the `loadConfiguration` group, and the Models pane offers the same retry
 action. The Secrets pane saves the Tavily API key only on Save or Enter,
 replacing only the `secrets` group. Choosing Ask me or Just run in the Tools
 pane autosaves the same way, replacing only the `tools` group, and the Tools

@@ -124,10 +124,11 @@ repository today; it is not a promise of unreleased work.
   edits remain session-only.
 - Every model load Lys starts sends that model's load configuration: context
   length, eval batch size, flash attention, KV cache placement, and active
-  experts. The Model pane edits it for the selected default model and saves it
-  automatically.
-- The Composer label, send eligibility, and each chat request use the loaded
-  runtime projection described in [desktop model settings](/architecture/desktop/#model-settings).
+  experts. The Models pane edits it for the selected LM Studio model and saves
+  it automatically.
+- Several providers can be on at once. Each conversation's model names its
+  provider, and the composer sends only to that model while it is loaded; see
+  [the conversation's model](/architecture/desktop/#the-conversations-model).
 - On macOS, `build.sh` builds the desktop app from a source checkout, builds
   vmo and the email MCP server in release, installs the backend runtime, vmo,
   and the email server under `$LYS_HOME/runtime`, and copies `Lys.app` to

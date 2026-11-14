@@ -11,36 +11,36 @@ presentation state, not durable conversation storage.
 
 ## Main responsibilities
 
-| Area                | Current implementation                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                                                                                                                                                                                                                                                                           |
-| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                                                                                                                                                                                                                                                                   |
-| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.                                                                                                                                                                                                                                                             |
-| Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, and error presentation.                                                                                                                                                                                                                 |
-| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                                                                                                                                                                                                                                |
-| Agent state         | `src/lib/store/agents` owns the list of built-in and stored agents, the Agents pane's editor and draft, and the agent create, update, and delete calls.                                                                                                                                                                                                                    |
-| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, the session-only Tool calls switch, and the offer each request makes from them.                                                                                                                                                                                            |
-| Tool calls          | `src/lib/store/tool-calls` follows each running reply, shows the backend's approval prompts, runs the client tools' calls the backend sends, and sends every answer.                                                                                                                                                                                                       |
-| Tool approvals      | `src/lib/store/tool-settings.ts` owns each tool's switch and its Ask me or Just run, saved as the `tools` group of `settings.json`, and their automatic save.                                                                                                                                                                                                              |
-| MCP servers         | `src/lib/store/mcp-servers.ts` owns the backend's states of the MCP servers, their sync and reconnect, and the polling while one connects; the application store's `mcp-settings.ts` slice saves the `mcp` group, the added servers and every switch, and its `email-settings.ts` slice checks, saves, and removes the email account the built-in email server works with. |
-| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend and vmo run, and settings loaded from Tauri; `vmo-runtime.ts` owns vmo's state and its start and stop, and `runtime-autostart-settings.ts` saves the two startup switches.                                                                                                                         |
-| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                                                                                                                                                                                                                                               |
-| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops, approval answers, and tool results.                                                                                                                                                                                                                 |
-| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                                                                                                                                                                                                                                              |
+| Area                | Current implementation                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                                                                                                                                                                                                                                                                                   |
+| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                                                                                                                                                                                                                                                                           |
+| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.                                                                                                                                                                                                                                                                     |
+| Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, and error presentation.                                                                                                                                                                                                                         |
+| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                                                                                                                                                                                                                                        |
+| Agent state         | `src/lib/store/agents` owns the list of built-in and stored agents, the Agents pane's editor and draft, and the agent create, update, and delete calls.                                                                                                                                                                                                                            |
+| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, the session-only Tool calls switch, and the offer each request makes from them.                                                                                                                                                                                                    |
+| Tool calls          | `src/lib/store/tool-calls` follows each running reply, shows the backend's approval prompts, runs the client tools' calls the backend sends, and sends every answer.                                                                                                                                                                                                               |
+| Tool approvals      | `src/lib/store/tool-settings.ts` owns each tool's switch and its Ask me or Just run, saved as the `tools` group of `settings.json`, and their automatic save.                                                                                                                                                                                                                      |
+| MCP servers         | `src/lib/store/mcp-servers.ts` owns the backend's states of the MCP servers, their sync and reconnect, and the polling while one connects; the application store's `mcp-settings.ts` slice saves the `mcp` group, the added servers and every switch, and its `email-settings.ts` slice checks, saves, and removes the email account the built-in email server works with.         |
+| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend and vmo run, and settings loaded from Tauri; `vmo-runtime.ts` owns vmo's state and its start and stop, and `runtime-autostart-settings.ts` saves the two startup switches.                                                                                                                                 |
+| Model lifecycle     | `src/lib/store/model-actions.ts` owns each provider's inventory, load, unload, and health requests, shared by settings and the composer; `provider-status.ts` reads and reconnects each provider's connection, `provider-settings.ts` saves which providers are on, their addresses, and their keys, and `src/lib/hooks/conversationModel.ts` finds the model a conversation uses. |
+| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops, approval answers, and tool results.                                                                                                                                                                                                                         |
+| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                                                                                                                                                                                                                                                      |
 
 ## Chat state split
 
 The desktop currently has seven separate state systems:
 
-| Store                    | Owns                                                                                                                                                                                                                                           |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat Zustand store       | Active conversation, the agent selected for a new conversation, request and open tokens, local abort controllers, streamed reply parts and sources, the staged files and the last refusal of one, inline error text                            |
-| History Zustand store    | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                                                                                                 |
-| Agent Zustand store      | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent                                                                           |
-| Tool Zustand store       | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch                                                                                                                                                  |
-| Tool-call Zustand store  | Every approval prompt and tool call held until the backend takes its answer, and the reply follows that deliver them                                                                                                                           |
-| MCP server Zustand store | The backend's list of applied MCP servers and their states, and why the latest sync or reconnect failed                                                                                                                                        |
-| Shell Zustand store      | Active top-level view, loaded settings (each tool's saved approval, the saved MCP servers with their switches, and the email account included) and the latest save of the servers and of the account, backend process status, startup progress |
+| Store                    | Owns                                                                                                                                                                                                                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Chat Zustand store       | Active conversation, the agent selected for a new conversation, the model picked for the shown conversation, request and open tokens, local abort controllers, streamed reply parts and sources, the staged files and the last refusal of one, inline error text                                       |
+| History Zustand store    | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                                                                                                                                                         |
+| Agent Zustand store      | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent                                                                                                                                   |
+| Tool Zustand store       | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch                                                                                                                                                                                                          |
+| Tool-call Zustand store  | Every approval prompt and tool call held until the backend takes its answer, and the reply follows that deliver them                                                                                                                                                                                   |
+| MCP server Zustand store | The backend's list of applied MCP servers and their states, and why the latest sync or reconnect failed                                                                                                                                                                                                |
+| Shell Zustand store      | Active top-level view, loaded settings (each tool's saved approval, the saved MCP servers with their switches, and the email account included) and the latest save of the servers and of the account, backend process status, startup progress, and each model provider's status, models, and requests |
 
 The transcript shown in the window is built from backend events for the current
 request, or from the stored transcript read when a past conversation is opened.
@@ -49,9 +49,10 @@ Shell state such as backend status is managed independently.
 ## Streaming path
 
 1. The composer calls `sendMessage`.
-2. The chat store opens `POST /api/v1/chat`. The request offers the
-   switched-on tools when tool calls are on and the loaded model was trained
-   for tool use, and carries the staged files, each with its name and base64
+2. The chat store opens `POST /api/v1/chat` with the conversation's model as
+   `{ provider, modelKey }`; see [The conversation's model](#the-conversations-model).
+   The request offers the switched-on tools when tool calls are on and that
+   model was trained for tool use, and carries the staged files, each with its name and base64
    content; the tray loses them once the turn starts.
 3. The desktop parses SSE frames with `EventSourceParserStream`.
 4. Each payload is validated against `chatApiStreamEventSchema`.
@@ -81,12 +82,13 @@ persisted parts and is marked interrupted when the backend next starts.
 
 ## Context meter
 
-The composer's context meter shows how much of the loaded model's context
-window the next message would take. While the composer could send, the
+The composer's context meter shows how much of the conversation's model's
+context window the next message would take, while that model is loaded. While the composer could send, the
 `useChatContextMeasurement` hook asks
 [`POST /api/v1/chat/context`](/reference/api/#chat-context-measurement) to
 measure what sending would build: the shown conversation, or the agent a new
-one would start with; the loaded model; and the tools the Tools pane would
+one would start with; the conversation's model, which the backend measures
+on that model's provider; and the tools the Tools pane would
 offer, reading the tool list first when tool calls are on for a model trained
 for tool use and the list was never read. It measures again when any of
 those, or the shown conversation's stored messages, change; a newer
@@ -114,11 +116,11 @@ one is staged.
 
 Send is disabled while the current measurement, the draft, and the reserve
 exceed the window. While a newer measurement is pending, before the first one
-settles, and when the window cannot be measured (the provider has not loaded
-the model, the provider cannot be reached, or the request fails), the meter says so
+settles, and when the window cannot be measured (the provider no longer
+serves the model, cannot be reached, or the request fails), the meter says so
 and sending stays allowed, because the backend checks every round before sending
-it. "Change the window" opens the Model pane, where the model's load
-configuration sets the context length for its next load.
+it. "Change the window" opens the Models pane, where an LM Studio model's
+load settings set the context length for its next load.
 
 ## Composer attachments
 
@@ -130,12 +132,14 @@ already, ignoring case, and a message carries at most 8 files of at most
 10 MiB each and 20 MiB together, the limits of `@lys/share`. Each admitted
 file is then read whole and classified from its bytes, as the backend
 classifies it: an image (PNG, JPEG, or WebP) can be staged only while the
-loaded model has `vision`, a text file only while it is trained for tool use,
+conversation's model is loaded and has `vision`, a text file only while it
+is trained for tool use,
 and any other content is refused. Each file is admitted on its own, so a
 refused file does not keep the others of its selection out. One refusal per
 selection is reported in the status line under the tray, such as "The file
 notes.md is already uploaded" or "Images need a model with vision": the first
-refusal by name or size, else the first by content or by the loaded model; a
+refusal by name or size, else the first by content or by the conversation's
+model; a
 repeated refusal is announced again. A file that cannot be read keeps its
 whole selection out of the tray, and its failure is the refusal reported. A
 selection made before the conversation is reset or closed and not staged yet
@@ -280,20 +284,42 @@ Start or Stop is offered again; the failure itself is not shown
 ([#162](https://github.com/w3lt/lys/issues/162)). On the
 backend card, the heading is a polite status region, "Backend status"; the
 address and uptime line sits outside it, so the uptime is not announced every
-second. Once the backend runs, the store reads `GET /api/v1/llm/runtime`,
-joining the backend's startup attempt through
-`POST /api/v1/llm/runtime/connect` while it is still `connecting`.
+second. Once the backend runs, the store reads every provider's status at
+once, each through `GET /api/v1/llm/:provider/runtime`, and joins the
+backend's startup attempt for a provider through
+`POST /api/v1/llm/:provider/runtime/connect` while it is still `connecting`.
 
-The Runtime pane's provider card names the provider chosen in Settings →
-Providers and shows `unknown`, `connecting`, `connected`, or `unreachable`
-with where it is reached: the saved or default address of LM Studio or a
-local Ollama server, or the host of Ollama Cloud or Groq. Its **Refresh**
-button, and Test on the active provider's card in the Providers pane, ask the
-backend to reconnect; saving a provider choice does too. A failed model
-request re-reads the status, so a lost provider appears as not reachable
-without polling. The composer banner names the first missing
-prerequisite—the backend, the provider, or model weights—and opens the
-settings pane that fixes it. `initialize` shows the shell as soon as settings load; the backend and vmo
+The application store keeps what it knows of each provider in
+`providerModels` (`src/lib/store/model-runtime.ts`): its connection status,
+its inventory, its request in flight, its latest request failure and health
+observation, when its latest operation settled (`settledAt`), and the load
+configurations of its loaded models. A provider's status is `off` while it
+is turned off and `unknown` while the backend is not running or the status
+cannot be read; while the backend runs, `unknown` counts as connecting. A
+status change to `connected` reads that provider's inventory, and any other
+change releases its model observations; providers never wait for one
+another.
+
+The Runtime pane's **Provider connections** card lists every provider turned
+on in Settings → Providers, in provider order. Each row has a status dot, a
+heading such as **LM Studio connected**, **Connecting to Groq**, **Ollama
+not reachable**, or **Ollama Cloud needs a key**, and a line with where the
+provider is reached (the saved or default address of LM Studio or a local
+Ollama server, or the host of Ollama Cloud or Groq) and the next step. A
+turned-on provider that needs a key it lacks shows as needing one, whatever
+its status. Each row is its own polite status region, so one provider's
+change is one announcement. The card's one **Refresh** asks the backend to
+connect again to each listed provider that is not connecting, and is
+disabled while the backend is not running or every listed provider is
+connecting. With no provider on, the card says so and offers Open
+Providers. Test on a card in the Providers pane reconnects that provider,
+and a save that changes a provider does too. A failed model request
+re-reads its provider's status, so a lost provider appears as not reachable
+without polling. The composer banner names the first missing prerequisite
+of the conversation's model and offers the action that fixes it; see
+[The conversation's model](#the-conversations-model).
+
+`initialize` shows the shell as soon as settings load; the backend and vmo
 then start in the background, together and without waiting for each other,
 each when its startup switch is on or the host already owns its process. A
 vmo the host is still stopping, as after a window reload during Stop, is
@@ -349,54 +375,202 @@ to no later session.
 
 ## Model settings
 
-The shell store refreshes `GET /api/v1/llm/list` when the provider becomes
-connected and on entry into settings while it stays connected. While the
-provider is not connected, the model list is empty, model actions are
-disabled, and the pane explains how to recover. A manual Refresh action picks
-up changes made in the provider. Inventory metadata and each model's `loaded`
-flag drive the model rows and composer menu; several models may be loaded at
-once. The Model pane's heading names the active provider, as in
-"models · LM Studio".
+The application store reads each provider's models with
+`GET /api/v1/llm/:provider/list`: when that provider becomes connected, for
+every provider when the settings view opens while the backend runs, and on
+Refresh in the Models pane. Each provider admits one model request at a
+time, and a request for a provider whose request is in flight is dropped;
+requests for different providers run at once, so each provider's list is
+published as it arrives and one slow provider never holds back another. A
+request is admitted only while the backend runs and its provider is
+connected. While a provider is not connected its model observations are
+released: its list is unread and its model actions are disabled. Each
+provider's inventory keeps its models with their metadata and `loaded`
+flags, and who loads them, as `modelLoading`; several models may be loaded
+at once, on one provider or several.
 
-The list also says who loads the models, as `modelLoading`, and the store
-keeps it with the inventory. Load, Unload, and the load configuration appear
-in the Model pane and the Runtime pane's model card only while the inventory
-read says `lys`, and the composer's banner then offers Load model. For
-`provider`, as Ollama, Ollama Cloud, and Groq report, none of them appears,
-the banner offers Choose model, and a model is loaded while the provider
-serves it: every model of Ollama Cloud and Groq, and the models a local
-Ollama server is running. The Model pane's note then says that a model the
-provider is not running answers once it is started in the provider. Before an inventory
-is read, as while the backend is stopped, none of them appears either, and
-the notes leave out who loads the models. The desktop never decides this from
-the provider's name.
+Load and Unload are enabled only while the provider's inventory says `lys`,
+as LM Studio reports. For `provider`, as Ollama, Ollama Cloud, and Groq
+report, a model is loaded while the provider serves it: every model of
+Ollama Cloud and Groq, and the models a local Ollama server is running.
+Before an inventory is read, nothing that depends on who loads the models is
+offered.
 
-Load sends `{ modelId, configuration }` to `POST /api/v1/llm/load`. Unload sends
-`{ modelId }` to `PATCH /api/v1/llm/unload` and accepts its bodyless `204`
-response. Both operations reconcile the inventory afterward, including when the
-command fails, because a lost acknowledgement does not establish whether weights
-changed. Requests are serialized locally and mutations are never retried
-automatically.
+Load sends `{ modelId, configuration }` to `POST /api/v1/llm/:provider/load`.
+Unload sends `{ modelId }` to `PATCH /api/v1/llm/:provider/unload` and
+accepts its bodyless `204` response. Both operations reconcile that
+provider's inventory afterward, including when the command fails, because a
+lost acknowledgement does not establish whether weights changed. Mutations
+are never retried automatically. The closing inventory read records when
+the operation settled, which the Models pane shows as the last refresh or
+check.
+
+The Runtime pane's model card shows whether the model a new conversation
+uses is in memory, named with its provider, with Load and Unload while that
+provider's inventory says `lys`. It recedes unless the provider is
+connected, and while the model loads or unloads it is marked busy and shows
+an indeterminate progress bar, because the backend reports completion
+without progress. Its note says that loading and unloading go to the
+provider through the backend, or that the provider decides which models are
+in memory, and that every model is listed in Models.
+
+### The conversation's model
+
+A model is named by its provider and key, `{ provider, modelKey }`, so the
+same key on two providers is two models. The model the composer's next
+message goes to is, in order:
+
+1. the model picked in the composer's model menu;
+2. else the model of the shown conversation's latest reply that names its
+   provider; replies stored before Lys recorded providers name none;
+3. else the session's default model;
+4. else the first loaded model in provider order (LM Studio, Ollama, Ollama
+   Cloud, Groq), each provider's models in inventory order.
+
+A pick applies only to the shown conversation, or to the new one the
+composer drafts. It is kept through sending, dropped when another
+conversation or a new draft is shown, and never saved, since each reply
+stores its own model and provider. The default is `runtime.defaultModel`,
+read as a key on the first provider that is on; Set as default in the
+Models pane changes it for the session only. The Runtime pane's model card
+and the Agents, Tools, and MCP panes use the model a new conversation uses:
+the default, else the first loaded model.
+
+A message is sent only while that model can answer: the backend runs, the
+model's provider is on, has the key it needs, and is connected, its
+inventory lists the model, no load or unload of the model is in flight, and
+the model is loaded. Otherwise the field and Send are disabled, the
+placeholder says what the composer waits on, and a banner above the field
+names the first missing prerequisite with one action:
+
+| Prerequisite missing                      | Banner, for example                                | Action                                                       |
+| ----------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------ |
+| The backend is stopped or not responding  | The backend is not running on 127.0.0.1:12345.     | Start backend, or Check backend, which opens Runtime         |
+| No provider is on                         | No provider is on.                                 | Open Providers                                               |
+| The model's provider is off               | Groq is turned off.                                | Open Providers                                               |
+| The provider needs a key                  | Groq needs a key.                                  | Open Providers                                               |
+| The backend is connecting to the provider | Connecting to LM Studio…                           | Working, disabled                                            |
+| The provider can't be reached             | LM Studio can't be reached on 127.0.0.1:1234.      | Open Providers                                               |
+| The provider's models are not read        | The backend is up, but model state is unavailable. | Check models, which opens Models                             |
+| The provider does not list the model      | qwen3-8b isn't on Ollama.                          | Choose model, which opens the model menu                     |
+| Lys loads the model, and it is not loaded | qwen3-8b isn't loaded in LM Studio.                | Load qwen3-8b, which shows the model in Models to load there |
+| The provider does not run the model       | Ollama isn't running qwen3-8b.                     | Choose model                                                 |
+| No model, while a provider can answer     | The backend is up, but no model is loaded.         | Choose model                                                 |
+| The model is being loaded or unloaded     | Loading model weights…                             | Working, disabled                                            |
+
+The chat store checks again when the message is submitted: it samples the
+conversation's model once, sends it as `model` only while its availability
+is `loaded`, and otherwise records an inline error and keeps the draft and
+the conversation. No other model or provider is tried in its place. A later
+pick applies only to a later request.
+
+### The composer's model menu
+
+The model menu beside the agent menu names the conversation's model and
+lists the models of every turned-on provider, one labelled group per
+provider in provider order. A connected provider's group lists its models in
+inventory order, each row naming the model with its provider and stating
+its condition in words, so the same key on two providers is two rows. A
+provider that lists no model now has one disabled line saying why: it is
+off, needs a key, is being connected to, cannot be reached, its models are
+being read or could not be read, or it lists none. Each group appears as
+its provider's list arrives. Choosing a model picks it for the shown
+conversation; it loads nothing and changes neither the default nor the
+settings. While no provider is on, the menu says so and offers Open
+Providers.
+
+### Models pane
+
+Settings → Models starts with the session's default model: its key, a
+button that shows its details while its provider is on, and a line naming
+the provider and, when known, the context length, or saying that the
+provider is off;
+without a default, "None chosen yet". Under it, a provider card holds a
+picker of the providers that are on, cloud ones first under **Cloud** and
+the others under **On this machine**, each with its status, its model count
+(`2 of 9 loaded` for a provider on this machine, `14 models` for a cloud
+one), where Lys reaches it, and the default model when it is that
+provider's. Beside the picker are the shown provider's status (Running, Not
+running, Connected, Can't be reached, Connecting…, Off, or Backend not
+running), what the provider does with its models, when its models were
+last read ("Refreshed at 14:05"), and Refresh, which reads a connected
+provider's models again and asks the backend to connect to one that cannot
+be reached. Refresh is disabled while the provider's request runs, while it
+connects, and while the backend is not running. The provider's latest
+request failure shows as an alert.
+
+The pane shows the selected model's provider, else the provider the picker
+chose, else the default model's provider, else the first provider that is
+on; the selected model is the one the pane was asked to show, else the
+default. Both choices last across visits to settings. With no provider on, a
+notice links to Providers. When the shown provider lists no model, a notice
+says why: the backend isn't running, the provider is off, needs a key, is
+not running on this machine or can't be reached, its models are being read
+or could not be read, or it lists none. Its button opens Runtime or
+Providers when one of them fixes it.
+
+The model list filters by name (the key and the display name) and counts
+the models, "All models · 9" or "Showing 2 of 9"; a filter that matches
+nothing says so and offers to clear it. A provider on this machine groups
+its rows under **Loaded** and **On disk**. Each row is a button that selects
+the model, marked Default for the default and Loading… while it loads, with
+its size, or for Groq its context length.
+
+The details panel names the selected model and shows its status with one
+action, its facts (size and format for LM Studio, size and tag for Ollama
+and Ollama Cloud, context length and "Loading: Not needed" for Groq, and
+where it runs), its load settings, and the default action:
+
+- A model on this machine shows Loaded, Not loaded, Loading…, or
+  Unloading…, with Load or Unload in place; an indeterminate progress bar
+  runs while it loads, since nothing reports how far a load is. Unload is
+  disabled for the session's default. For a local Ollama server, Load and
+  Unload are shown disabled: Lys cannot load or unload Ollama models yet
+  ([#278](https://github.com/w3lt/lys/issues/278)).
+- A cloud model shows **Available**, since the provider runs it when a
+  message names it, and Check status. Check status asks the provider,
+  through `GET /api/v1/llm/:provider/:modelId/health`, whether it still
+  offers the model to the person's key, without generating a reply; the
+  result reads Available or Not available with the time of the check, and a
+  failed check reads Couldn't check, with Try again. Lys does not claim
+  which Ollama Cloud models are in memory
+  ([#368](https://github.com/w3lt/lys/issues/368)).
+- **Set as default** makes the model the session's default at once, and is
+  disabled while the model unloads. For an LM Studio model that is not
+  loaded, **Load and set as default** loads it and makes it the default once
+  the inventory lists it as loaded, unless another default was chosen while
+  it loaded; the button reads Loading… meanwhile. For the default itself a
+  check mark says so instead of a button.
 
 ### Load configuration
 
-Every load the desktop starts, from the Runtime pane or from a model row, sends
-that model's load configuration. The store builds it when the load is admitted:
-each setting is the model's own stored value when it has one, then the stored
-default's, then the committed default's, and the context length is lowered to
-the model's `maxContextLength` from the inventory. Edits made while the load is in flight
-do not change what it sent. The composer's "Load model" action opens the Model
-pane and starts no load.
+Every load the desktop starts, from the Runtime pane's model card, from
+Load or Load and set as default in the Models pane, or by Reload, sends
+that model's load configuration. The store builds it when the load is
+admitted: each setting is the model's own stored value when it has one,
+then the stored default's, then the committed default's, and the context
+length is lowered to the model's `maxContextLength` from the inventory.
+Edits made while the load is in flight do not change what it sent. The
+composer banner's Load action shows the model in the Models pane and starts
+no load.
 
-The Model pane's "load configuration" section edits the configuration of the
-selected default model. With no default model selected it edits nothing, even
-while a model is loaded, and asks to choose one; the selection lasts for the
-session, so after a restart the section waits for a choice. It has five rows: context length, eval batch size, flash attention, KV cache on
-GPU, and active experts. An edit is stored for that model only, applies to its
-next load, and is saved automatically to the `models` part of the
-`loadConfiguration` group of `settings.json`; the save keeps the `default` that
-is in the file. Active experts reads "auto" until it is set, because LM Studio
-reports no expert counts ([#144](https://github.com/w3lt/lys/issues/144)).
+The Models pane's load settings depend on the selected model's provider:
+
+- An LM Studio model has five editable rows: context length, a slider over
+  the model's stops up to its maximum; eval batch size; flash attention; KV
+  cache on GPU; and active experts, which reads Auto until it is set,
+  because LM Studio reports no expert counts
+  ([#144](https://github.com/w3lt/lys/issues/144)). An edit is stored for
+  that model only, applies to its next load, and is saved automatically to
+  the `models` part of the `loadConfiguration` group of `settings.json`; the
+  save keeps the `default` that is in the file.
+- A local Ollama model shows its context length and Unload when idle, at
+  Ollama's own five minutes, both disabled, because Lys cannot set them yet
+  ([#278](https://github.com/w3lt/lys/issues/278),
+  [#365](https://github.com/w3lt/lys/issues/365)).
+- An Ollama Cloud model shows its context length disabled
+  ([#366](https://github.com/w3lt/lys/issues/366)).
+- A Groq model shows the context length Groq sets, as a fact.
 
 The store holds the per-model settings as a map keyed by model key. The file
 keeps them as one `models` object, and only the Tauri settings adapter handles
@@ -405,41 +579,31 @@ it saves it.
 
 The backend does not report the settings a loaded model runs with
 ([#145](https://github.com/w3lt/lys/issues/145)), so the store keeps its own
-record for each model it observes as loaded:
+record for each LM Studio model it observes as loaded:
 
 - For a model Lys loaded in this session, the record is the configuration that
-  load sent. When the stored settings differ from it, each changed row shows
-  the loaded value, and a line under the rows lists what a reload would apply.
+  load sent.
 - For a model found already loaded, the record is the configuration stored
   when it was first observed. It only shows whether the settings changed since.
-  The pane then says that changes apply on the next load.
 
-"Reload now" unloads the model and loads it again with its stored configuration,
-as one operation. If the unload fails, no load starts. If the load fails after
-the unload, the model stays unloaded and the failure is shown. Stopping the
+After an edit, a note under the rows compares the stored settings with a
+baseline: the record of a loaded model, or the settings a model that is not
+loaded had when it was shown. While they differ, it says "Saved. Reload
+qwen3-8b to apply it." for a loaded model, or "Saved. Applies when you load
+it.", and offers Undo, which gives the model the baseline as its own
+settings again, saved like any edit. Reload, offered only for a loaded
+model and disabled while one of LM Studio's requests is in flight, unloads
+the model and loads it again with its stored configuration, as one
+operation. If the unload fails, no load starts. If the load fails after the
+unload, the model stays unloaded and the failure is shown. Stopping the
 backend or losing LM Studio discards the records.
-
-Test calls `GET /api/v1/llm/:modelId/health` with the canonical key encoded as
-one path segment. Its result reports a fresh loaded-state observation and query
-latency, not inference success. The frontend validates responses against the
-shared protocol and exposes request failures inline.
 
 The application store owns requests across pane changes. Stopping the backend
 invalidates pending observations before aborting their local HTTP transport;
-a late response cannot restore obsolete residency. The provider owns weights
-separately from the backend process, so a reconnect queries their actual state.
-Until the inventory can be read again, the Runtime pane shows the model state
-as unavailable rather than as no model loaded, and the Composer label keeps
-naming the chosen default.
-
-The Composer label, send eligibility, and chat request use that same compact
-runtime projection. The [default-model setting](/reference/configuration/#persisted-settings-json)
-defines the preference and fallback selection. A send is admitted only while
-the backend is running and the projection is loaded. A submission rejected
-because no model is eligible produces an inline chat error without discarding the draft or conversation;
-Model settings provide inventory refresh and load controls for recovery. The
-chat store samples that model key once at submission, so a later selection
-change applies only to a later request.
+a late response cannot restore obsolete residency. Providers own weights
+separately from the backend process, so a reconnect queries their actual
+state. The frontend validates responses against the shared protocol and
+shows request failures inline.
 
 ## Generation settings
 
@@ -500,8 +664,9 @@ code is shown and nothing is sent; built-in agents count among the listed
 names and codes. Under the system prompt, of a built-in agent as of the
 user's own, a measure states its length in characters, its tokens estimated
 at 3.7 characters per token, and the share of the window they take: the
-`loadedContextLength` the inventory reports for the loaded model, as the
-composer's context meter uses. While no model is loaded, or the inventory
+`loadedContextLength` the inventory reports for the model a new
+conversation uses while it is loaded, as the composer's context meter uses.
+While that model is not loaded, or the inventory
 does not report its context length, the share is left out. Once the field is marked invalid, focus moves
 to it. Names need not be unique to the backend, so a stored agent that keeps
 its own name can be saved even when another agent shares it. The backend still
@@ -584,8 +749,9 @@ accepted values are not listed. It also shows where
 the tool runs and whether Lys asks before it runs.
 
 The tool-calls card holds the master switch and a status line. The status line
-names the loaded model and how many tools are offered with their summed
-estimate. When the loaded model's `trainedForToolUse` is false, Lys offers it
+names the model a new conversation uses, while it is loaded, and how many
+tools are offered with their summed estimate. When that model's
+`trainedForToolUse` is false, Lys offers it
 no tools: a card says the model isn't trained for tool calls, and every control
 below it recedes and is disabled. An expanded row closes while the controls are
 locked and opens again when they unlock.
@@ -700,8 +866,8 @@ says. Without added servers, a note under the rows says what an added server
 is for and offers two cards, Local program (`stdio`) and Remote server
 (`http`), each opening the editor for that transport. While a server is
 switched on, a warning above the list says when nothing from the servers is
-offered, because tool calls are off or the loaded model is not trained for
-tool calls, with Open Tools, which opens the Tools pane.
+offered, because tool calls are off or the model a new conversation uses is
+not trained for tool calls, with Open Tools, which opens the Tools pane.
 
 Each server is a row whose summary is a button that shows or hides its
 details; at most one row shows them. The summary shows a dot coloured by the
@@ -982,22 +1148,23 @@ included, and the slice refuses a second save or removal meanwhile.
 
 ## Providers
 
-The Providers pane lists three cards as native radio buttons in one group:
-LM Studio, Ollama, and Groq, each with its logo, its name, a `local`
-or `cloud` tag, a line on where requests go, and a badge: `standby` for the
-cards not chosen, `needs key` for the chosen provider without its key, and
-otherwise the connection status. The Ollama card stands for two providers, a
-local Ollama server and Ollama Cloud, and is chosen while either is active.
-Picking a card saves its provider as active at once, the local server for
-the Ollama card; the radio buttons are disabled while a save runs. The logos
+The Providers pane lists four cards in provider order: LM Studio, Ollama,
+Ollama Cloud, and Groq, each with its logo, its name, a `local` or `cloud`
+tag, a line on where requests go, a badge, and a switch that turns the
+provider on or off. Any number of providers may be on at once, none
+included. The badge is `off` for a provider that is off, `needs key` for a
+turned-on provider without its key, whatever its status, and otherwise its
+connection status: `unknown`, `connecting`, `connected`, or `not
+reachable`. Flipping a switch saves the `enabled` list with that provider
+added or removed, in provider order, and leaves the other providers as they
+are; the switches are disabled while a save runs. The logos
 are the providers' monochrome marks from `@lobehub/icons`, imported one by one
 so the rest of the icon set and its `@lobehub/ui` peer stay out of the bundle.
 They take the text color, so they follow the theme, and are hidden from
 assistive technology, because each card's name says the same.
 
-Only the active card opens. On the Ollama card, Local and Cloud buttons make
-the local server or Ollama Cloud the active provider, and the tag follows.
-LM Studio and a local Ollama server show a Server address form:
+Only a card whose provider is on shows its settings. LM Studio and Ollama
+show a Server address form:
 an `http://` prefix, a field that starts empty with the saved or default
 address as its placeholder, and one button that reads Save while the field
 holds a new valid address and Test otherwise. Ollama Cloud and Groq show a
@@ -1005,20 +1172,30 @@ key form like the Tavily card: a password field with the masked key as its
 placeholder, a show button, a link to the provider's key page, Save, and,
 once a key is saved, Test and Remove. Enter saves a valid new draft, Escape
 discards it, and an emptied address saves the default. A polite status line
-under the form describes the field: what an edit means, a running or failed
-save, a missing key, or the connection with its address. While the
-connection is unknown, it says what the backend is doing, as the Runtime
-pane's provider card does: not running, starting, stopping, or not
-responding, and, while it runs, that Test checks again.
+under the form describes the field: what an edit means, a missing key, or
+the connection with its address. While the connection is unknown, it says
+what the backend is doing: not running, starting, stopping, or not
+responding, and, while it runs, that Test checks again. Test asks the
+backend to connect to that provider again.
+
+Each card also has a save line, a polite status region named after the
+provider that stays in the card whether the provider is on or off. While a
+save that the card asked for runs, of its switch, address, or key, it says
+so, and after one failed it says why; a save of another provider leaves it
+empty.
 
 The application store's provider slice owns the saves, serialized with the
-other group saves. A choice or address replaces only the `providers`
-group; a key replaces only its own key of the `secrets` group. After a
-save that changes where requests go, including a key the active provider
-uses, the store asks the backend to reconnect, and the model inventory
-follows the new connection. The pane owns only the field's draft and
-whether a key is shown, which reset after a save and whenever the form
-changes between address and key.
+other group saves. One provider save runs at a time, and a save asked for
+while one runs is refused without saving. A switch or an address replaces
+only the `providers` group; a key replaces only its own key of the
+`secrets` group. The store's settings change only once the file holds the
+change. After a save, the store asks the backend to connect again to each
+provider the save changed, turned on or off or given another address, all
+at once; a key save reconnects its provider while it is on. The backend
+answers `off` for a provider turned off, and each provider's model
+inventory follows its new connection. The pane owns only the field's draft
+and whether a key is shown, which reset after a save that succeeded and
+when the provider is turned off.
 
 ## Secrets
 
@@ -1048,7 +1225,7 @@ the field.
 ## Tool calls
 
 A chat request offers the switched-on tools when tool calls are on and the
-loaded model's `trainedForToolUse` is true: client tools by their definitions,
+conversation's model's `trainedForToolUse` is true: client tools by their definitions,
 backend tools and MCP tools by name in `backendToolNames`, leaving out every
 backend tool that cannot run now. For such a model it also names, in
 `switchedOffToolNames`, every listed Lys tool whose switch is off, and, in
@@ -1160,7 +1337,9 @@ starts.
 
 ## Current limitations
 
-- Runtime edits other than the two startup switches remain session-only.
+- Runtime edits other than the two startup switches remain session-only:
+  Set as default changes the default model for the session, and a pick in
+  the composer's model menu lasts while its conversation is shown.
   Generation settings, load configurations, and the startup switches save
   automatically; a failed save leaves the edits available for the current
   session.
@@ -1172,16 +1351,28 @@ starts.
   unknown until the conversation, the model, or the tools change.
 - The KV cache load setting has no effect with the installed LM Studio SDK; see
   the [load request](/reference/api/#model-load-request).
-- Model observations refresh on provider connection, entry into settings,
-  manual refresh, and model operations. The provider status changes only on
-  backend start, Refresh, a provider save, and failed model requests; it is
-  not polled. Changes made by another client of the provider between
-  observations are not pushed to the desktop.
-- The provider card's status follows the provider the backend last tried. A
-  save that fails leaves the backend on the provider last saved.
-- The composer's attachment tray takes only files the loaded model can use: an
-  image only for a model with vision, a text file only for one trained for
-  tool use, and nothing while no loaded model is listed. An image pasted from
+- A provider's models are read when it connects, when settings open, on
+  Refresh in the Models pane, and after each of its model operations. A
+  provider's status changes only on backend start, Refresh or Test, a save
+  that changes it, and its failed model requests; it is not polled. Changes
+  made by another client of a provider between observations are not pushed
+  to the desktop.
+- A provider's status follows the backend's latest attempt for it. A save
+  that fails changes nothing, so the backend keeps reaching the providers
+  last saved.
+- Lys cannot load or unload a local Ollama server's models or set their
+  context length ([#278](https://github.com/w3lt/lys/issues/278)), unload an
+  idle Ollama model after a chosen time
+  ([#365](https://github.com/w3lt/lys/issues/365)), or set an Ollama Cloud
+  model's context length ([#366](https://github.com/w3lt/lys/issues/366));
+  the Models pane shows those controls disabled. It does not show which
+  Ollama Cloud models are in memory
+  ([#368](https://github.com/w3lt/lys/issues/368)): a cloud model reads
+  Available until Check status says otherwise.
+- The composer's attachment tray takes only files the conversation's model
+  can use while it is loaded: an image only for a model with vision, a text
+  file only for one trained for tool use, and nothing while the model cannot
+  answer. An image pasted from
   the clipboard is not staged; images are chosen or dropped as files. The
   transcript shows an attachment's kind and name only, without a preview or a
   way to open it.

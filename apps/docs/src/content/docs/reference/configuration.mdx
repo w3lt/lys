@@ -88,7 +88,7 @@ not find a runtime that `build.sh` installed under another directory.
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend listen address         | `BACKEND_HOST` and `BACKEND_PORT`                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)                                                                                                                                                                                                                                                                                                                                                                                          |
-| Settings file path             | `$LYS_HOME/settings.json`, as `settingsFilePath`; read for the model provider, its address and key, the Tavily API key, the Just run choices, the MCP servers with their switches, and the email account with its password; a tool call that names it is denied                                                                                                                                                                                                   |
+| Settings file path             | `$LYS_HOME/settings.json`, as `settingsFilePath`; read for the model providers that are on, their addresses and keys, the Tavily API key, the Just run choices, the MCP servers with their switches, and the email account with its password; a tool call that names it is denied                                                                                                                                                                                 |
 | Attachments directory          | `$LYS_HOME/attachments`, as `attachmentsDirectoryPath`; created with its folders on the first attachment stored                                                                                                                                                                                                                                                                                                                                                   |
 | MCP process groups file        | `$LYS_HOME/mcp-process-groups`, as `mcpProcessGroupsFilePath`; written once the first stdio MCP server's group starts                                                                                                                                                                                                                                                                                                                                             |
 | Email server path              | `$LYS_HOME/runtime/email/email`, or the file `LYS_EMAIL_SERVER_PATH` names when the variable is set and not empty, as `emailServerPath`; the email MCP server Lys ships, started once it is switched on and run for each email account check; see [the email server](/architecture/backend/#the-email-server). A path that is not absolute, is longer than 1,024 characters, or has a control character or white space at either end stops the backend at startup |
@@ -164,7 +164,7 @@ defaults:
     "emailPassword": null
   },
   "providers": {
-    "active": "lmStudio",
+    "enabled": ["lmStudio"],
     "lmStudio": { "address": null },
     "ollama": { "address": null }
   },
@@ -189,34 +189,34 @@ defaults:
 }
 ```
 
-| Key                         | Type                    | Meaning                                                                                                                               |
-| --------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `runtime.autoStartBackend`  | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically                                                    |
-| `runtime.autoStartVmo`      | `boolean`               | Whether desktop initialization should ask Tauri to start vmo, the page reader `read_page` uses                                        |
-| `runtime.defaultModel`      | `string \|null`         | Preferred model used when it is loaded; otherwise the first loaded inventory entry is the fallback                                    |
-| `runtime.backendAddress`    | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address                                           |
-| `generation.temperature`    | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                                                                  |
-| `generation.replyCeiling`   | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                                            |
-| `loadConfiguration`         | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                                     |
-| `secrets.tavilyApiKey`      | `string \|null`         | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets)                      |
-| `secrets.ollamaApiKey`      | `string \|null`         | API key of Ollama Cloud, under the same rule; see [Secrets](#secrets)                                                                 |
-| `secrets.groqApiKey`        | `string \|null`         | Groq API key, under the same rule; see [Secrets](#secrets)                                                                            |
-| `secrets.emailPassword`     | `string \|null`         | Password of the saved email account, 1 to 1,024 characters without a control character, stored as plain text; see [Secrets](#secrets) |
-| `providers`                 | object                  | The model provider every request goes to, and where to find it; see [Providers](#providers)                                           |
-| `tools.justRun`             | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                                     |
-| `tools.switches`            | object of `boolean`     | Whether each tool the person switched is on, by tool name; any other tool starts at its default; see [Tools](#tools)                  |
-| `tools.approvedFolders`     | array of absolute paths | Folders tool calls may name paths in; absent or empty lets them name any path; see [Approved folders](#approved-folders)              |
-| `location.city`             | `string \|null`         | City the person saved for `get_location`; see [Location](#location)                                                                   |
-| `location.region`           | `string \|null`         | State, province, or other region the person saved; see [Location](#location)                                                          |
-| `location.country`          | `string \|null`         | Country the person saved; see [Location](#location)                                                                                   |
-| `mcp.servers`               | array of server objects | MCP servers Lys connects to, in the order Settings → MCP lists them; see [MCP servers](#mcp-servers)                                  |
-| `mcp.servers[].enabled`     | `boolean`               | Whether Lys connects to that server and offers its tools; on when omitted; see [MCP servers](#mcp-servers)                            |
-| `mcp.builtIn.email.enabled` | `boolean`               | Whether the email MCP server Lys ships is on; off when omitted; see [MCP servers](#mcp-servers)                                       |
-| `email.account`             | object or `null`        | The one email account the email MCP server works with; see [Email account](#email-account)                                            |
+| Key                         | Type                    | Meaning                                                                                                                                                                                                   |
+| --------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime.autoStartBackend`  | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically                                                                                                                        |
+| `runtime.autoStartVmo`      | `boolean`               | Whether desktop initialization should ask Tauri to start vmo, the page reader `read_page` uses                                                                                                            |
+| `runtime.defaultModel`      | `string \|null`         | Key of the model a new conversation starts with, read as a model of the first provider that is on, in provider order; without one, the first loaded model in provider order; the desktop never changes it |
+| `runtime.backendAddress`    | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address                                                                                                               |
+| `generation.temperature`    | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                                                                                                                                      |
+| `generation.replyCeiling`   | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                                                                                                                |
+| `loadConfiguration`         | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                                                                                                         |
+| `secrets.tavilyApiKey`      | `string \|null`         | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets)                                                                                          |
+| `secrets.ollamaApiKey`      | `string \|null`         | API key of Ollama Cloud, under the same rule; see [Secrets](#secrets)                                                                                                                                     |
+| `secrets.groqApiKey`        | `string \|null`         | Groq API key, under the same rule; see [Secrets](#secrets)                                                                                                                                                |
+| `secrets.emailPassword`     | `string \|null`         | Password of the saved email account, 1 to 1,024 characters without a control character, stored as plain text; see [Secrets](#secrets)                                                                     |
+| `providers`                 | object                  | The model providers that are on, and where to find them; see [Providers](#providers)                                                                                                                      |
+| `tools.justRun`             | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                                                                                                         |
+| `tools.switches`            | object of `boolean`     | Whether each tool the person switched is on, by tool name; any other tool starts at its default; see [Tools](#tools)                                                                                      |
+| `tools.approvedFolders`     | array of absolute paths | Folders tool calls may name paths in; absent or empty lets them name any path; see [Approved folders](#approved-folders)                                                                                  |
+| `location.city`             | `string \|null`         | City the person saved for `get_location`; see [Location](#location)                                                                                                                                       |
+| `location.region`           | `string \|null`         | State, province, or other region the person saved; see [Location](#location)                                                                                                                              |
+| `location.country`          | `string \|null`         | Country the person saved; see [Location](#location)                                                                                                                                                       |
+| `mcp.servers`               | array of server objects | MCP servers Lys connects to, in the order Settings → MCP lists them; see [MCP servers](#mcp-servers)                                                                                                      |
+| `mcp.servers[].enabled`     | `boolean`               | Whether Lys connects to that server and offers its tools; on when omitted; see [MCP servers](#mcp-servers)                                                                                                |
+| `mcp.builtIn.email.enabled` | `boolean`               | Whether the email MCP server Lys ships is on; off when omitted; see [MCP servers](#mcp-servers)                                                                                                           |
+| `email.account`             | object or `null`        | The one email account the email MCP server works with; see [Email account](#email-account)                                                                                                                |
 
 A missing group, or a missing field in one of them, uses the host defaults;
 for `loadConfiguration` that default is empty, for `secrets` it holds no
-key, for `providers` it is LM Studio at its default address, for `tools` it
+key, for `providers` it is LM Studio on at its default address, for `tools` it
 puts no tool on Just run and switches no tool, for `location` it saves no
 location, for `mcp` it lists no server and keeps every server Lys ships
 off, and for `email` it holds no account. A `model` group, which
@@ -237,7 +237,8 @@ of a write. A save that stops midway leaves its temporary file,
 `settings.json.<process id>.<number>.tmp`; the tool call policy and the
 desktop's file tools refuse it as they refuse `settings.json`. The Tauri host
 is the file's only writer; the backend reads it for
-the model provider and its key, the Tavily API key, the Just run choices,
+the model providers that are on with their addresses and keys, the Tavily
+API key, the Just run choices,
 the MCP servers with their switches, and the email account with its password.
 
 The file carries no version marker. The maintainer accepted that for
@@ -250,21 +251,21 @@ The `loadConfiguration` group holds the settings Lys sends when it loads a
 model. The [load request](/reference/api/#model-load-request) defines each
 setting.
 
-| Key                         | Type                        | Meaning                                                                       |
-| --------------------------- | --------------------------- | ----------------------------------------------------------------------------- |
-| `loadConfiguration.default` | object                      | Settings for every model, used where a model has none of its own; starts `{}` |
-| `loadConfiguration.models`  | object keyed by model key   | Settings each model has of its own; an entry holds only the changed values    |
-| `contextLength`             | integer, 1 to 4,294,967,295 | Context window, in tokens                                                     |
-| `evalBatchSize`             | integer, 1 to 4,294,967,295 | Prompt tokens evaluated in one batch                                          |
-| `flashAttention`            | boolean                     | Whether flash attention is on                                                 |
-| `offloadKVCacheToGpu`       | boolean                     | Whether the KV cache is kept in GPU memory                                    |
-| `numExperts`                | integer, 1 to 4,294,967,295 | Experts active per token                                                      |
+| Key                         | Type                        | Meaning                                                                              |
+| --------------------------- | --------------------------- | ------------------------------------------------------------------------------------ |
+| `loadConfiguration.default` | object                      | Settings for every model, used where a model has none of its own; starts `{}`        |
+| `loadConfiguration.models`  | object keyed by model key   | Settings each LM Studio model has of its own; an entry holds only the changed values |
+| `contextLength`             | integer, 1 to 4,294,967,295 | Context window, in tokens                                                            |
+| `evalBatchSize`             | integer, 1 to 4,294,967,295 | Prompt tokens evaluated in one batch                                                 |
+| `flashAttention`            | boolean                     | Whether flash attention is on                                                        |
+| `offloadKVCacheToGpu`       | boolean                     | Whether the KV cache is kept in GPU memory                                           |
+| `numExperts`                | integer, 1 to 4,294,967,295 | Experts active per token                                                             |
 
 - Every setting is optional, in `default` and in a `models` entry.
-- `default` holds only what you write into it by hand; the Model pane edits
+- `default` holds only what you write into it by hand; the Models pane edits
   only `models` entries, and its saves leave `default` as it is in the file.
 - Lys reads `settings.json` when it starts. A hand edit made while Lys runs
-  takes effect the next time Lys starts. Until then a save from the Model pane
+  takes effect the next time Lys starts. Until then a save from the Models pane
   keeps an edited `default`, and replaces `models` with the entries Lys holds.
 - When Lys loads a model, each setting comes from the first of these that sets
   it: the model's own entry, then `default`, then the committed default below.
@@ -320,15 +321,29 @@ provider key at each connection attempt; see [Providers](#providers).
 
 ### Providers
 
-The `providers` group holds the model provider every request goes to, chosen
-in Settings → Providers, and where to find it.
+The `providers` group holds the model providers that are on, set in
+Settings → Providers, and where to find LM Studio and a local Ollama server.
+Every provider that is on answers at the same time: each message goes to the
+provider of the model it names, and never to another one.
 
-| Key                          | Type                                             | Meaning                                                                                  |
-| ---------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| `providers.active`           | `"lmStudio" \|"ollama" \|"ollamaCloud" \|"groq"` | Provider every request goes to: LM Studio, a local Ollama server, Ollama Cloud, or Groq  |
-| `providers.lmStudio.address` | `string \|null`                                  | LM Studio's server, or `null` for `LMSTUDIO_HOST:LMSTUDIO_PORT`                          |
-| `providers.ollama.address`   | `string \|null`                                  | The local Ollama server, or `null` for `OLLAMA_HOST:OLLAMA_PORT`; unused by Ollama Cloud |
+| Key                          | Type                                                      | Meaning                                                                                                          |
+| ---------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `providers.enabled`          | array of `"lmStudio" \|"ollama" \|"ollamaCloud" \|"groq"` | Providers that are on: LM Studio, a local Ollama server, Ollama Cloud, and Groq, each at most once; may be empty |
+| `providers.active`           | `"lmStudio" \|"ollama" \|"ollamaCloud" \|"groq"`          | Read only: the one provider on in a file saved before several providers could be on; never written               |
+| `providers.lmStudio.address` | `string \|null`                                           | LM Studio's server, or `null` for `LMSTUDIO_HOST:LMSTUDIO_PORT`                                                  |
+| `providers.ollama.address`   | `string \|null`                                           | The local Ollama server, or `null` for `OLLAMA_HOST:OLLAMA_PORT`; unused by Ollama Cloud                         |
 
+- `enabled` may list the providers in any order, and an empty list turns
+  every provider off. A provider listed twice, a provider Lys does not know,
+  `null`, or a value that is not a list makes loading the settings fail. A
+  save writes the list in provider order, `lmStudio`, `ollama`,
+  `ollamaCloud`, `groq`, whatever order it was read in.
+- A file saved before several providers could be on has `active`, the one
+  provider every request went to, instead of `enabled`. When `enabled` is
+  missing, the `active` provider is the one on, LM Studio when `active` is
+  missing too. When `enabled` is present, `active` is ignored, but it must
+  still name a provider Lys knows. Lys never writes `active`: the next save
+  writes `enabled` without it.
 - An address is a host name or IPv4 address, a colon, and a port from 1 to
   65535, such as `127.0.0.1:1234`. A scheme, a path, a user name, or an IPv6
   address is not an address. It may name another machine; Lys reaches it over
@@ -336,19 +351,31 @@ in Settings → Providers, and where to find it.
 - A `null` address means the default, which only `@lys/protocol` declares, so
   changing a default moves every file that saved none.
 - Ollama Cloud and Groq need their key in the `secrets` group.
-  Without it the backend does not connect, and reports the provider as not
-  reachable.
-- A missing group or field means LM Studio at its default address, as before
-  providers could be chosen. An unknown provider or field, or an
-  invalid address, makes loading the settings fail.
-- The backend reads the group, and the key it needs, at each connection
-  attempt: when it starts, and each time the desktop asks it to reconnect.
-  The desktop asks after every save from the Providers pane that changes
-  where requests go. When it cannot read the file, or the group or the key is
-  invalid, it does not connect. It never writes the file.
+  Without it the backend does not connect to that provider while it is on,
+  and reports it as not reachable.
+- A missing group means LM Studio on at its default address and every other
+  provider off, as before providers could be chosen; a missing address means
+  the default. An unknown field or an invalid address makes loading the
+  settings fail.
+- `runtime.defaultModel` stays a model key without a provider: it names a
+  model of the first provider that is on, in provider order. The keys of
+  `loadConfiguration.models` name LM Studio's models, the only provider whose
+  models Lys loads.
+- The backend reads the group, and the key a provider needs, at each
+  connection attempt of that provider: when it starts, for every provider at
+  once, and each time the desktop asks it to connect to one provider again.
+  The desktop asks after every save that turns a provider on or off, changes
+  its address, or changes the key of a provider that is on. The backend reads
+  the group by the host's rules, so it never reaches a provider from a file
+  the host refuses. A provider that is off is never contacted. When the
+  backend cannot read the file, or the group or the key the provider needs is
+  invalid, it does not connect to that provider. It never writes the file.
 
-An older Lys build does not know the group or the two provider keys. It
-ignores them and removes them the next time it saves settings, so it goes
+A Lys build from before several providers could be on knows the group but not
+`enabled`, so it refuses a file this build saved: the file fails to load in
+it, every setting with it, until `enabled` is replaced by `active` by hand.
+An older Lys build that does not know the group or the two provider keys at
+all ignores them and removes them the next time it saves settings, so it goes
 back to LM Studio at its default address.
 
 ### Tools
@@ -670,7 +697,7 @@ only its `generation` group, preserving the other values already on disk.
 Saves are serialized and newer edits are saved after the active write settles.
 Save failure leaves the current values usable and exposes a retry action.
 
-Load configuration edits in the Model pane are saved the same way, replacing
+Load configuration edits in the Models pane are saved the same way, replacing
 only the `models` part of the `loadConfiguration` group. The save keeps the
 `default` that is in the file, because only a hand edit changes it. The edits
 apply to the next load of the model they belong to. The desktop runs the two
@@ -681,14 +708,15 @@ The Secrets pane saves the Tavily API key only when the person presses Save or
 Enter, replacing only that key of the `secrets` group in the same serialized
 way; Remove saves `null`.
 
-The Providers pane saves a picked provider, including Local or Cloud on the
-Ollama card, or an address at
-once, replacing only the `providers` group in the same serialized way; an
+The Providers pane saves which providers are on at once, and an address,
+replacing only the `providers` group in the same serialized way; an
 address is saved when the person presses Save or Enter, and an emptied field
 saves `null`. A provider key is saved like the Tavily key, replacing only that
-key. After a save that changes where requests go, including a key the active
-provider uses, the desktop asks the backend to reconnect. After a failed save,
-the backend keeps the provider last saved, and the pane says the save failed.
+key. After a save that turns a provider on or off, changes its address, or
+changes the key of a provider that is on, the desktop asks the backend to
+connect to that provider again; the backend answers `off` for a provider
+turned off. After a failed save, the backend keeps the providers last saved,
+and the pane says the save failed.
 
 Choosing Ask me or Just run in the Tools pane, and switching a tool on or off,
 is saved automatically the same way, replacing only the `tools` group. An

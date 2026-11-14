@@ -2950,11 +2950,18 @@ legend.settings-view__mcp-field-label {
   text-align: right;
 }
 
+/*
+ * The stepper is a fieldset that groups its buttons under the row's label, so
+ * the browser's fieldset margin and min-content width are reset; its own
+ * padding and border replace the browser's.
+ */
 .settings-view__models-stepper {
   display: flex;
   flex: none;
   align-items: center;
   gap: 4px;
+  min-inline-size: 0;
+  margin: 0;
   padding: 2px;
   border: 1px solid var(--app-border-default);
   border-radius: var(--radius-control);

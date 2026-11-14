@@ -241,7 +241,11 @@ function ModelProviderRefresh({
 }: ModelProviderRefreshProps): ReactElement {
   return (
     <div className="settings-view__models-refresh">
-      <span className="settings-view__models-note" role="status">
+      <span
+        aria-live="polite"
+        className="settings-view__models-note"
+        role="status"
+      >
         {refreshNote}
       </span>
       <Button

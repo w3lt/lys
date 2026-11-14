@@ -212,9 +212,9 @@ export default function ModelList({
             value={query}
           />
         </div>
-        <p aria-label="Filter results" className="sr-only" role="status">
+        <output aria-label="Filter results" className="sr-only">
           {formatModelFilterResult(matches.length, models.length, query)}
-        </p>
+        </output>
         <div className="settings-view__models-list-heading">
           <h3 id={headingId}>
             {formatModelListHeading(matches.length, models.length)}

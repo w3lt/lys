@@ -480,7 +480,7 @@ export async function loadSettings(): Promise<LysSettings> {
  * @throws The Tauri invoke rejection when the settings path cannot be read or
  * parsed.
  */
-async function readSettingsDocument(): Promise<SettingsDocument> {
+function readSettingsDocument(): Promise<SettingsDocument> {
   return invoke<SettingsDocument>("load_settings")
 }
 

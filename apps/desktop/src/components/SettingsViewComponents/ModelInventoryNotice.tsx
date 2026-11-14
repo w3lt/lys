@@ -33,7 +33,7 @@ export default function ModelInventoryNotice({
   const { settingsPane } = state
   return (
     <div className="settings-view__models-notice">
-      <div role="status">
+      <div aria-live="polite" role="status">
         <p className="settings-view__models-notice-title">{state.title}</p>
         {state.body === "" ? null : (
           <p className="settings-view__models-note">{state.body}</p>

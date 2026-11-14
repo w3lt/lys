@@ -266,10 +266,9 @@ function ExpertCountField({
       note="Experts the model uses for each token. Fewer is faster; Auto leaves the count to the model."
       noteId={noteId}
     >
-      <div
+      <fieldset
         aria-labelledby={labelId}
         className="settings-view__models-stepper"
-        role="group"
       >
         <Button
           aria-describedby={noteId}
@@ -296,7 +295,7 @@ function ExpertCountField({
         >
           <Plus aria-hidden="true" />
         </Button>
-      </div>
+      </fieldset>
     </LoadSettingRow>
   )
 }

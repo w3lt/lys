@@ -68,7 +68,7 @@ export default function ModelRow({
               className="settings-view__status-dot settings-view__status-dot--small"
               data-tone="pending"
             />
-            Loading…
+            {"Loading…"}
           </span>
         ) : null}
         <span className="settings-view__models-column">

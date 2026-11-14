@@ -174,9 +174,9 @@ async function connectLlmProviderRuntime(
 ): Promise<void> {
   try {
     await llmRuntimeConnector.connectLlmRuntime()
-  } catch (failure) {
+  } catch (error) {
     log.error(
-      { provider, err: failure },
+      { provider, err: error },
       "Model provider runtime connection attempt failed"
     )
   }

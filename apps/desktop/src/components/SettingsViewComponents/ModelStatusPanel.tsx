@@ -193,7 +193,12 @@ function ModelStatusLines({
         <span>{status.word}</span>
         <span>{status.place}</span>
       </p>
-      <p className="settings-view__models-note" id={noteId} role="status">
+      <p
+        aria-live="polite"
+        className="settings-view__models-note"
+        id={noteId}
+        role="status"
+      >
         {status.note}
       </p>
     </div>

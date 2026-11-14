@@ -240,6 +240,7 @@ function ModelLoadChangeNotice({
   return (
     <div
       aria-label="Load settings changes"
+      aria-live="polite"
       className="settings-view__models-change"
       ref={regionRef}
       role="status"

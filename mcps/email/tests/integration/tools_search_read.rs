@@ -1014,10 +1014,7 @@ async fn refuses_ids_that_are_not_ids_or_no_longer_valid() {
     let invalid = Err(ToolFailure::InvalidId(Mailbox::Person));
     assert_eq!(read("nonsense").await, invalid);
     assert_eq!(read("0.1001.INBOX").await, invalid);
-    assert_eq!(
-        read("lys.24.1001.INBOX").await,
-        Err(ToolFailure::OtherMailboxId(Mailbox::Lys))
-    );
+    assert_eq!(read("lys.24.1001.INBOX").await, invalid);
     assert_eq!(read("99.1001.INBOX").await, Err(ToolFailure::StaleId));
     assert_eq!(read("24.9999.INBOX").await, Err(ToolFailure::StaleId));
     assert_eq!(read("24.1001.Nowhere").await, Err(ToolFailure::StaleId));

@@ -40,7 +40,6 @@ fn build_draft(subject: &str) -> SaveDraftArguments {
 fn build_send(draft_id: &str, draft: &SaveDraftArguments) -> SendDraftArguments {
     SendDraftArguments {
         draft_id: draft_id.to_owned(),
-        from: crate::support::ADDRESS.to_owned(),
         to: draft.to.clone(),
         cc: draft.cc.clone(),
         bcc: draft.bcc.clone(),
@@ -54,7 +53,6 @@ fn build_send(draft_id: &str, draft: &SaveDraftArguments) -> SendDraftArguments 
 fn build_unnamed_send(draft_id: &str) -> SendDraftArguments {
     SendDraftArguments {
         draft_id: draft_id.to_owned(),
-        from: crate::support::ADDRESS.to_owned(),
         to: Vec::new(),
         cc: Vec::new(),
         bcc: Vec::new(),

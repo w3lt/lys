@@ -67,8 +67,6 @@ pub struct SaveDraftArguments {
 pub struct SendDraftArguments {
     /// The id of the draft, a message in the Drafts folder, such as 15.345.Drafts.
     pub draft_id: String,
-    /// The address the draft is sent from: this mailbox's own address, which the tool's description names. Any other address is refused, and nothing is sent.
-    pub from: String,
     /// The draft's To recipients, each as name@example.com or Name <name@example.com>; omitted means it has none.
     #[serde(default)]
     pub to: Vec<String>,
@@ -188,7 +186,6 @@ pub async fn run_save_draft(
     const DRAFT_FLAGS: &str = "(\\Draft)";
 
     let message = MessageArguments {
-        from: context.account.address.to_string(),
         to: arguments.to,
         cc: arguments.cc,
         bcc: arguments.bcc,
@@ -487,7 +484,6 @@ pub async fn run_send_draft(
     progress: &SendProgress,
 ) -> ToolResult {
     let id = parse_email_id(&arguments.draft_id, context.mailbox)?;
-    context.check_sender(&arguments.from)?;
     let given = build_compared_fields(parse_message_arguments(&build_given_fields(arguments))?)?;
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
@@ -621,7 +617,6 @@ fn format_deletion_clause(deletion: Deletion, drafts: &str) -> String {
 /// The fields `send_draft` was given, as a message's fields.
 fn build_given_fields(arguments: SendDraftArguments) -> MessageArguments {
     MessageArguments {
-        from: arguments.from,
         to: arguments.to,
         cc: arguments.cc,
         bcc: arguments.bcc,
@@ -773,7 +768,6 @@ fn parse_stored_draft(sender: &Address, bytes: &[u8]) -> Result<PreparedDraft, T
         .ok_or_else(|| ToolFailure::Argument("The draft is not a message.".to_owned()))?;
     let view = build_message_view(&parsed);
     let fields = MessageArguments {
-        from: sender.to_string(),
         to: list_draft_recipients("To", &view.addresses.to)?,
         cc: list_draft_recipients("Cc", &view.addresses.cc)?,
         bcc: list_draft_recipients("Bcc", &view.addresses.bcc)?,
@@ -1029,7 +1023,6 @@ mod tests {
         assert_eq!(
             prepared.fields,
             MessageArguments {
-                from: "person@example.com".to_owned(),
                 to: vec![
                     "Jane <jane@example.com>".to_owned(),
                     "a@example.com".to_owned()

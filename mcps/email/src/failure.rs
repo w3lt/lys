@@ -286,12 +286,11 @@ pub enum ToolFailure {
     /// before it in Lys's mailbox; it names the mailbox of the tool it was
     /// given to.
     InvalidId(Mailbox),
-    /// The id is valid but names a message of the other mailbox: the
-    /// mailbox named here, which the tool it was given to does not serve.
-    OtherMailboxId(Mailbox),
-    /// A send was asked to go out from an address other than the
-    /// mailbox's own, named here; nothing was sent.
-    SenderNotMailbox(String),
+    /// The id is valid but names a message of the person's mailbox, and
+    /// was given to one of Lys's tools. The person's tools refuse an id of
+    /// Lys's mailbox as `InvalidId`, so that nothing they answer names her
+    /// mailbox, which only Caliginia and Lysiptera are told of.
+    OtherMailboxId,
     /// The id's folder, UIDVALIDITY, or UID no longer matches.
     StaleId,
     /// No folder has the given name.
@@ -352,8 +351,7 @@ impl ToolFailure {
             | Self::TimedOut
             | Self::Cancelled
             | Self::InvalidId(_)
-            | Self::OtherMailboxId(_)
-            | Self::SenderNotMailbox(_)
+            | Self::OtherMailboxId
             | Self::StaleId
             | Self::FolderMissing(_)
             | Self::NoRoleFolder(_)
@@ -406,8 +404,7 @@ impl ToolFailure {
             Self::TimedOut => "timed-out".to_owned(),
             Self::Cancelled => "cancelled".to_owned(),
             Self::InvalidId(_) => "invalid-id".to_owned(),
-            Self::OtherMailboxId(_) => "other-mailbox-id".to_owned(),
-            Self::SenderNotMailbox(_) => "sender-not-mailbox".to_owned(),
+            Self::OtherMailboxId => "other-mailbox-id".to_owned(),
             Self::StaleId => "stale-id".to_owned(),
             Self::FolderMissing(_) => "folder-missing".to_owned(),
             Self::NoRoleFolder(role) => format!("no-{}-folder", role.name().to_ascii_lowercase()),
@@ -472,9 +469,9 @@ impl fmt::Display for ToolFailure {
             Self::TimedOut => format!("The call {}.", Stop::TimedOut.format_clause()),
             Self::Cancelled => format!("The call {}.", Stop::Cancelled.format_clause()),
             Self::InvalidId(mailbox) => format_invalid_id_sentence(*mailbox),
-            Self::OtherMailboxId(mailbox) => format_other_mailbox_id_sentence(*mailbox).to_owned(),
-            Self::SenderNotMailbox(address) => {
-                format!("This mailbox sends only from {address}. Nothing was sent.")
+            Self::OtherMailboxId => {
+                "This id is from the person's mailbox. Use the tools without lys_ for it."
+                    .to_owned()
             }
             Self::StaleId => STALE_ID_SENTENCE.to_owned(),
             Self::FolderMissing(name) => format_folder_missing_sentence(name),
@@ -512,21 +509,6 @@ fn format_invalid_id_sentence(mailbox: Mailbox) -> String {
         mailbox.tool_prefix(),
         mailbox.id_prefix()
     )
-}
-
-/// Formats the sentence of an id of the other mailbox: whose mailbox it is
-/// from, and which tools take it.
-///
-/// # Arguments
-///
-/// * `mailbox` - The mailbox the id is from.
-fn format_other_mailbox_id_sentence(mailbox: Mailbox) -> &'static str {
-    match mailbox {
-        Mailbox::Person => {
-            "This id is from the person's mailbox. Use the tools without lys_ for it."
-        }
-        Mailbox::Lys => "This id is from Lys's mailbox. Use the lys_ tools for it.",
-    }
 }
 
 /// Formats the sentence of a failed sign-in.
@@ -844,10 +826,9 @@ mod tests {
         }
     }
 
-    /// Each failure about which mailbox an id or a sender belongs to, with
-    /// the class the log gives it, which names no address, and the
-    /// sentence the model reads.
-    fn build_mailbox_failures() -> [(ToolFailure, &'static str, &'static str); 5] {
+    /// Each failure about which mailbox an id belongs to, with the class
+    /// the log gives it and the sentence the model reads.
+    fn build_mailbox_failures() -> [(ToolFailure, &'static str, &'static str); 3] {
         [
             (
                 ToolFailure::InvalidId(Mailbox::Person),
@@ -860,29 +841,18 @@ mod tests {
                 "That is not a message id. Use an id from lys_search_emails, such as lys.12.345.INBOX.",
             ),
             (
-                ToolFailure::OtherMailboxId(Mailbox::Lys),
-                "other-mailbox-id",
-                "This id is from Lys's mailbox. Use the lys_ tools for it.",
-            ),
-            (
-                ToolFailure::OtherMailboxId(Mailbox::Person),
+                ToolFailure::OtherMailboxId,
                 "other-mailbox-id",
                 "This id is from the person's mailbox. Use the tools without lys_ for it.",
-            ),
-            (
-                ToolFailure::SenderNotMailbox("lys@example.net".to_owned()),
-                "sender-not-mailbox",
-                "This mailbox sends only from lys@example.net. Nothing was sent.",
             ),
         ]
     }
 
-    /// Checks that an id that is not one, an id of the other mailbox, and a
-    /// sender other than the mailbox's own each have their log class and
-    /// the sentence the model reads, which names the tools or the address
-    /// to use instead.
+    /// Checks that an id that is not one and an id of the person's mailbox
+    /// given to Lys's tools each have their log class and the sentence the
+    /// model reads, which names the tools to use instead.
     #[test]
-    fn tells_which_mailbox_an_id_or_a_sender_belongs_to() {
+    fn tells_which_mailbox_an_id_belongs_to() {
         for (failure, class, sentence) in build_mailbox_failures() {
             assert_eq!(failure.class(), class);
             assert_eq!(failure.to_string(), sentence);

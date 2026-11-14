@@ -183,7 +183,7 @@ async fn logs_a_send_cancelled_after_the_hand_over_as_unconfirmed() {
     let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
     smtp.add_fault(DATA_END, SmtpFault::Stall);
     let variable = build_plain_account_json(imap.port, smtp.port);
-    let call = json!({"name": "send_email", "arguments": {"from": ADDRESS, "to": ["jane@example.com"], "subject": "Hi", "body": "Hello"}});
+    let call = json!({"name": "send_email", "arguments": {"to": ["jane@example.com"], "subject": "Hi", "body": "Hello"}});
     let (release, released) = mpsc::channel();
 
     let dialogue = tokio::task::spawn_blocking(move || cancel_held_call(variable, call, released));
@@ -278,8 +278,8 @@ fn build_dialogue_messages() -> Vec<Value> {
         json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "read_email", "arguments": {"id": "2.1001.INBOX"}}}),
         json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "read_email", "arguments": {"id": "nonsense"}}}),
         json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "search_emails", "arguments": {"page": 0}}}),
-        json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "send_draft", "arguments": {"draft_id": "1.1003.Drafts", "from": ADDRESS}}}),
-        json!({"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "send_draft", "arguments": {"draft_id": "1.1003.Drafts", "from": ADDRESS, "to": ["Jane Doe <jane@example.com>"], "bcc": ["hidden@example.com"], "subject": "Plans", "body": "See you there."}}}),
+        json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "send_draft", "arguments": {"draft_id": "1.1003.Drafts"}}}),
+        json!({"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "send_draft", "arguments": {"draft_id": "1.1003.Drafts", "to": ["Jane Doe <jane@example.com>"], "bcc": ["hidden@example.com"], "subject": "Plans", "body": "See you there."}}}),
     ]
 }
 
@@ -355,9 +355,8 @@ fn assert_tools_listed(listed: &Value) {
     );
 }
 
-/// Asserts that `send_draft` requires the draft's id and the address it
-/// sends from, and takes the fields the draft must hold, and that
-/// `delete_draft` takes only the id.
+/// Asserts that `send_draft` requires the draft's id and takes the fields
+/// the draft must hold, and that `delete_draft` takes only the id.
 fn assert_draft_tool_fields(listed: &Value) {
     let send_draft = get_listed_tool(listed, "send_draft");
     let mut send_draft_fields: Vec<&str> = send_draft["inputSchema"]["properties"]
@@ -369,12 +368,9 @@ fn assert_draft_tool_fields(listed: &Value) {
     send_draft_fields.sort_unstable();
     assert_eq!(
         send_draft_fields,
-        ["bcc", "body", "cc", "draft_id", "from", "subject", "to"]
+        ["bcc", "body", "cc", "draft_id", "subject", "to"]
     );
-    assert_eq!(
-        send_draft["inputSchema"]["required"],
-        json!(["draft_id", "from"])
-    );
+    assert_eq!(send_draft["inputSchema"]["required"], json!(["draft_id"]));
     let delete_draft = get_listed_tool(listed, "delete_draft");
     assert_eq!(
         delete_draft["inputSchema"]["properties"]
@@ -530,8 +526,8 @@ async fn logs_a_failed_start_and_exits_with_1_when_its_input_ends_before_initial
 /// The messages of the dialogue with both mailboxes: the handshake, the
 /// tool list, a folder list of Lys's, each mailbox's tool given the other's
 /// id, a search and a read of Lys's, a send from Lys's mailbox first
-/// with the person's address, then with its own, and a call of a tool
-/// neither mailbox has.
+/// given a `from`, which no send tool takes, then without it, and a call
+/// of a tool neither mailbox has.
 fn build_two_mailbox_messages() -> Vec<Value> {
     vec![
         json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "lys-test", "version": "0"}}}),
@@ -543,7 +539,7 @@ fn build_two_mailbox_messages() -> Vec<Value> {
         json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "lys_search_emails", "arguments": {}}}),
         json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "lys_read_email", "arguments": {"id": "lys.1.1001.INBOX"}}}),
         json!({"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "lys_send_email", "arguments": {"from": ADDRESS, "to": ["jane@example.com"], "subject": "Hi", "body": "Hello"}}}),
-        json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "lys_send_email", "arguments": {"from": LYS_ADDRESS, "to": ["jane@example.com"], "subject": "Hi", "body": "Hello"}}}),
+        json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "lys_send_email", "arguments": {"to": ["jane@example.com"], "subject": "Hi", "body": "Hello"}}}),
         json!({"jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": {"name": "lys_nothing", "arguments": {}}}),
     ]
 }
@@ -560,8 +556,8 @@ fn get_answer_text(answer: &Value) -> &str {
 }
 
 /// Asserts that the answer to `tools/list` names the person's ten tools,
-/// then Lys's ten, each with `lys_` before its name, and that each send
-/// tool's description ends with the address of its own mailbox.
+/// then Lys's ten, each with `lys_` before its name, and that no
+/// description names either mailbox's address.
 fn assert_two_mailbox_tools(listed: &Value) {
     let names: Vec<&str> = listed["result"]["tools"]
         .as_array()
@@ -577,20 +573,16 @@ fn assert_two_mailbox_tools(listed: &Value) {
         "{names:?}"
     );
     assert_eq!(lys, renamed, "{names:?}");
-    for (tool, address) in [("send_email", ADDRESS), ("lys_send_email", LYS_ADDRESS)] {
-        let described = get_listed_tool(listed, tool)["description"].as_str();
-        let ending = format!("This mailbox's address is {address}.");
-        assert!(
-            described.is_some_and(|text| text.ends_with(&ending)),
-            "{tool}"
-        );
-    }
+    let tools = listed["result"]["tools"].to_string();
+    assert!(!tools.contains(ADDRESS), "{tools}");
+    assert!(!tools.contains(LYS_ADDRESS), "{tools}");
 }
 
 /// Asserts that Lys's tools listed its folders, found its messages under
-/// ids of its own and read one, refused the person's id, and refused to
-/// send from the person's address; that the person's tool refused Lys's
-/// id; and that a tool neither mailbox has is an invalid parameter.
+/// ids of its own and read one, refused the person's id, and refused a
+/// send given a `from`; that the person's tool refused Lys's id as no
+/// id, without naming her mailbox; and that a tool neither mailbox has is
+/// an invalid parameter.
 fn assert_two_mailbox_answers(answers: &[Value]) {
     /// The JSON-RPC code of an invalid parameter.
     const INVALID_PARAMS: i32 = -32_602;
@@ -601,7 +593,7 @@ fn assert_two_mailbox_answers(answers: &[Value]) {
         lys_id,
         found,
         read,
-        wrong_sender,
+        given_from,
         _,
         unknown,
     ] = answers
@@ -615,18 +607,18 @@ fn assert_two_mailbox_answers(answers: &[Value]) {
     );
     assert_eq!(
         get_answer_text(lys_id),
-        "This id is from Lys's mailbox. Use the lys_ tools for it."
+        "That is not a message id. Use an id from search_emails, such as 12.345.INBOX."
     );
     assert!(
         get_answer_text(found).contains("lys.1.1001.INBOX"),
         "{found}"
     );
     assert!(get_answer_text(read).contains("Short body."), "{read}");
-    assert_eq!(
-        get_answer_text(wrong_sender),
-        format!("This mailbox sends only from {LYS_ADDRESS}. Nothing was sent.")
+    assert!(
+        get_answer_text(given_from).contains("unknown field `from`"),
+        "{given_from}"
     );
-    for refused in [person_id, lys_id, wrong_sender] {
+    for refused in [person_id, lys_id, given_from] {
         assert_eq!(refused["result"]["isError"], true, "{refused}");
     }
     assert_eq!(unknown["error"]["code"], INVALID_PARAMS, "{unknown}");
@@ -641,8 +633,7 @@ fn assert_two_mailboxes_logged(stderr: &str) {
         "server: serving MCP over stdio for person and lys",
         "tool lys_list_folders: done (folders: 7 listed)",
         "tool lys_read_email: failed (other-mailbox-id)",
-        "tool read_email: failed (other-mailbox-id)",
-        "tool lys_send_email: failed (sender-not-mailbox)",
+        "tool read_email: failed (invalid-id)",
     ];
     for line in lines {
         assert!(logged.contains(&line), "{stderr}");
@@ -659,8 +650,8 @@ fn assert_two_mailboxes_logged(stderr: &str) {
 
 /// Checks that the binary, given both account variables, serves the
 /// person's tools and Lys's `lys_` twins in one process, keeps each
-/// mailbox's ids to its own tools, sends from Lys's mailbox only from its
-/// own address and through its own SMTP server, and logs neither address.
+/// mailbox's ids to its own tools, sends from Lys's mailbox from its own
+/// address through its own SMTP server, and logs neither address.
 #[tokio::test(flavor = "multi_thread")]
 async fn serves_lys_s_own_mailbox_next_to_the_person_s() {
     let person_imap =

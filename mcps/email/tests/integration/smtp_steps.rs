@@ -19,7 +19,6 @@ use crate::support::{SecurityName, TestServers, assert_about, build_account, sta
 /// A message to Jane.
 fn build_message() -> MessageArguments {
     MessageArguments {
-        from: crate::support::ADDRESS.to_owned(),
         to: vec!["Jane Doe <jane@example.com>".to_owned()],
         subject: "Hi".to_owned(),
         body: "Hello".to_owned(),
@@ -207,7 +206,6 @@ async fn an_address_beyond_ascii_is_not_offered_to_a_server_without_smtputf8() {
     let sent = run_send_email(
         &stack.context,
         MessageArguments {
-            from: crate::support::ADDRESS.to_owned(),
             to: vec!["jöran@example.com".to_owned()],
             ..build_message()
         },

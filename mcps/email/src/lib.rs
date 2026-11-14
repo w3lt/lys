@@ -8,12 +8,13 @@
 //! account, given in `LYS_EMAIL_ACCOUNT`, before it is saved. One process
 //! serves either mailbox or both: Lys's tools are named with `lys_` before
 //! them and its ids with `lys.`, so that no call reaches the other mailbox,
-//! and each mailbox sends only from its own address. Every tool call opens
-//! at most one IMAP and one SMTP connection of its own and closes them
-//! before answering. A reply, a forward, and a draft being sent keep their
-//! IMAP connection open while they send; any other send that files a Sent
-//! copy opens IMAP only after the send. Nothing stays open between calls,
-//! so stopping the process closes every connection.
+//! and each mailbox sends only from its own address, which no tool
+//! description names. Every tool call opens at most one IMAP and one SMTP
+//! connection of its own and closes them before answering. A reply, a
+//! forward, and a draft being sent keep their IMAP connection open while
+//! they send; any other send that files a Sent copy opens IMAP only after
+//! the send. Nothing stays open between calls, so stopping the process
+//! closes every connection.
 //!
 //! The modules follow the data path: [`account`] reads the environment,
 //! [`mailbox`] names the mailboxes, [`trust`] decides which server

@@ -149,24 +149,6 @@ impl ToolContext {
                 failure,
             })
     }
-
-    /// Checks that a send goes out from the mailbox's own address, compared
-    /// without regard to ASCII case.
-    ///
-    /// # Arguments
-    ///
-    /// * `from` - The address the call asked to send from.
-    ///
-    /// # Returns
-    ///
-    /// Nothing for the mailbox's address, or `SenderNotMailbox` naming it.
-    pub fn check_sender(&self, from: &str) -> Result<(), ToolFailure> {
-        let address: &str = self.account.address.as_ref();
-        if from.eq_ignore_ascii_case(address) {
-            return Ok(());
-        }
-        Err(ToolFailure::SenderNotMailbox(address.to_owned()))
-    }
 }
 
 /// What a tool answers when it did its work.
@@ -455,20 +437,6 @@ mod tests {
         ];
 
         assert_eq!(numbers, [1, 2, 3]);
-    }
-
-    /// Checks that a mailbox sends from its own address in any ASCII
-    /// letter case, and refuses any other address, naming its own.
-    #[test]
-    fn sends_only_from_the_mailbox_s_own_address() {
-        let shared = SharedCalls::new(Trust::create_with_extra_roots(Vec::new()));
-        let lys = ToolContext::build_without_sign_in(Mailbox::Lys, "lys@example.net", &shared);
-        let refused = Err(ToolFailure::SenderNotMailbox("lys@example.net".to_owned()));
-
-        assert_eq!(lys.check_sender("lys@example.net"), Ok(()));
-        assert_eq!(lys.check_sender("LYS@Example.NET"), Ok(()));
-        assert_eq!(lys.check_sender("person@example.com"), refused);
-        assert_eq!(lys.check_sender("lys@example.net "), refused);
     }
 
     /// Checks that a result of `RESULT_LIMIT` UTF-16 units stays whole and

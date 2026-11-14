@@ -3,41 +3,30 @@
 //!
 //! Both mailboxes offer the same ten tools, each from one definition. This
 //! module names a mailbox's copy of a tool, with `lys_` before Lys's, and
-//! begins each description with the mailbox the tool works on. The two send
-//! tools' descriptions end with the mailbox's address, the only one they
-//! send from, so that the model can give it as `from`. The address reaches
-//! the model; the log never holds it.
+//! begins each description with the mailbox the tool works on. No
+//! description names an address: each tool sends only from its mailbox's,
+//! so the model never gives one.
 
 use rmcp::model::Tool;
 
 use crate::mailbox::Mailbox;
 
-/// The tools that send mail, whose descriptions name the address they send
-/// from.
-const SENDING_TOOL_NAMES: [&str; 2] = ["send_email", "send_draft"];
-
 /// Builds one mailbox's copy of a tool: its name with the mailbox's tool
 /// prefix, and its description after the sentence of the mailbox it works
-/// on, with the address it sends from for a send tool.
+/// on.
 ///
 /// # Arguments
 ///
 /// * `tool` - The tool as its definition describes it.
 /// * `mailbox` - The mailbox the copy works on.
-/// * `address` - The mailbox's address.
 ///
 /// # Returns
 ///
 /// The copy; everything else about the tool, such as its schema and its
 /// annotations, is kept.
-pub fn build_mailbox_tool(tool: Tool, mailbox: Mailbox, address: &str) -> Tool {
-    let sender = if SENDING_TOOL_NAMES.contains(&tool.name.as_ref()) {
-        format!(" This mailbox's address is {address}.")
-    } else {
-        String::new()
-    };
+pub fn build_mailbox_tool(tool: Tool, mailbox: Mailbox) -> Tool {
     let description = format!(
-        "{} {}{sender}",
+        "{} {}",
         describe_tool_mailbox(mailbox),
         tool.description.as_deref().unwrap_or_default()
     );
@@ -111,18 +100,13 @@ mod tests {
             .annotate(ToolAnnotations::new().read_only(true))
     }
 
-    /// Checks that a mailbox's copy of a tool that does not send keeps its
-    /// name for the person and gains `lys_` for Lys, begins its
-    /// description with the mailbox, names no address, and keeps its
-    /// annotations.
+    /// Checks that a mailbox's copy of a tool keeps its name for the
+    /// person and gains `lys_` for Lys, begins its description with the
+    /// mailbox, and keeps its annotations.
     #[test]
     fn names_and_describes_each_mailbox_s_copy_of_a_tool() {
-        let person = build_mailbox_tool(
-            build_tool("read_email"),
-            Mailbox::Person,
-            "person@example.com",
-        );
-        let lys = build_mailbox_tool(build_tool("read_email"), Mailbox::Lys, "lys@example.net");
+        let person = build_mailbox_tool(build_tool("read_email"), Mailbox::Person);
+        let lys = build_mailbox_tool(build_tool("read_email"), Mailbox::Lys);
 
         assert_eq!(person.name, "read_email");
         assert_eq!(
@@ -137,21 +121,6 @@ mod tests {
             )
         );
         assert_eq!(lys.annotations, build_tool("read_email").annotations);
-    }
-
-    /// Checks that each send tool's copy ends its description with the
-    /// mailbox's address.
-    #[test]
-    fn names_the_address_each_send_tool_sends_from() {
-        for name in SENDING_TOOL_NAMES {
-            let copy = build_mailbox_tool(build_tool(name), Mailbox::Lys, "lys@example.net");
-
-            assert!(
-                copy.description.as_deref().is_some_and(|text| text
-                    .ends_with("Does the thing. This mailbox's address is lys@example.net.")),
-                "{copy:?}"
-            );
-        }
     }
 
     /// Checks that the instructions name the tools and the ids of each

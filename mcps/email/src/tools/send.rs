@@ -32,13 +32,10 @@ const MAXIMUM_BODY_LENGTH: usize = 500_000;
 
 /// The fields of a message to send or to save as a draft, as the model
 /// gives them; also a stored draft's, which `send_draft` compares with
-/// its call. `from` is the model's for a message it sends, and the
-/// mailbox's own address for a draft it saves and for a stored draft.
+/// its call.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct MessageArguments {
-    /// The address the message is sent from: this mailbox's own address, which the tool's description names. Any other address is refused, and nothing is sent.
-    pub from: String,
     /// The To recipients, each as name@example.com or Name <name@example.com>. Every message, a reply or a forward too, needs at least one recipient in to, cc, or bcc; none is taken from another message.
     #[serde(default)]
     pub to: Vec<String>,
@@ -111,12 +108,13 @@ impl SentCopy {
 ///
 /// The report of the sent message, with what became of its Sent copy,
 /// which never fails the call; otherwise why nothing was sent, or may
-/// have been: `SenderNotMailbox` when `from` is not the mailbox's own
-/// address; `Argument` for a field that breaks a rule, a reply or a
+/// have been: `Argument` for a field that breaks a rule, a reply or a
 /// forward without its own recipients or subject, or a message that
 /// cannot be built from the fields, such as one without a recipient;
 /// `InvalidId` for a `reply_to_id` or `forward_id` that is not one a tool
-/// gives; `OtherMailboxId` for one of the other mailbox; `StaleId` when
+/// gives, or one of Lys's mailbox given to the person's tools;
+/// `OtherMailboxId` for one of the person's mailbox given to Lys's
+/// tools; `StaleId` when
 /// that id no longer names a message; `SignIn` when
 /// signing in to the SMTP server failed, or to the IMAP server for a reply
 /// or a forward; the IMAP server's refusal (`ImapRefused`) or a failure of
@@ -130,7 +128,6 @@ pub async fn run_send_email(
     arguments: MessageArguments,
     progress: &SendProgress,
 ) -> ToolResult {
-    context.check_sender(&arguments.from)?;
     parse_message_arguments(&arguments)?;
     let mut session = None;
     let composition = build_composition(context, &mut session, &arguments).await?;

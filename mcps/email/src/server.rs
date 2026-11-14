@@ -259,7 +259,7 @@ impl MailboxServer {
     /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "send_email",
-        description = "Sends a message from this mailbox: from must be its own address. With reply_to_id it is a reply in that conversation; with forward_id it forwards that message, quoting its text and attaching its attachments. The recipients and the subject are always this call's own, a reply's and a forward's too. A copy is kept in Sent. Sending is permanent.",
+        description = "Sends a message from this mailbox. With reply_to_id it is a reply in that conversation; with forward_id it forwards that message, quoting its text and attaching its attachments. The recipients and the subject are always this call's own, a reply's and a forward's too. A copy is kept in Sent. Sending is permanent.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -334,7 +334,7 @@ impl MailboxServer {
     /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "send_draft",
-        description = "Sends a message of the Drafts folder as it is stored, from this mailbox: from must be its own address. It keeps a copy in Sent, and deletes the draft, or only marks it as deleted on a server that cannot remove one message on its own. Give the draft's to, cc, bcc, subject, and body: it is sent only when each recipient field names the same addresses as the draft's, in any order, and the subject and the text equal its own; otherwise the answer names the draft's fields and nothing is sent. Sending is permanent.",
+        description = "Sends a message of the Drafts folder as it is stored, from this mailbox. It keeps a copy in Sent, and deletes the draft, or only marks it as deleted on a server that cannot remove one message on its own. Give the draft's to, cc, bcc, subject, and body: it is sent only when each recipient field names the same addresses as the draft's, in any order, and the subject and the text equal its own; otherwise the answer names the draft's fields and nothing is sent. Sending is permanent.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -435,10 +435,9 @@ impl ServedMailbox {
     ///
     /// * `context` - The mailbox, its account, and what the calls share.
     fn new(context: ToolContext) -> Self {
-        let address = context.account.address.to_string();
         let mut router = ToolRouter::new();
         for mut route in MailboxServer::tool_router() {
-            route.attr = build_mailbox_tool(route.attr.clone(), context.mailbox, &address);
+            route.attr = build_mailbox_tool(route.attr.clone(), context.mailbox);
             router.add_route(route);
         }
         Self {
@@ -901,8 +900,8 @@ mod tests {
     }
 
     /// Checks that the server finds each mailbox's copy of a tool by the
-    /// name the client calls, the send tools described with their own
-    /// mailbox's address, and no tool by a name neither mailbox has.
+    /// name the client calls, no description names an address, and no tool
+    /// has a name neither mailbox has.
     #[test]
     fn finds_each_mailbox_s_copy_of_a_tool_by_its_name() {
         let shared = SharedCalls::new(Trust::create_with_extra_roots(Vec::new()));
@@ -915,18 +914,20 @@ mod tests {
                 .find_mailbox(name)
                 .map(|served| served.server.context.mailbox)
         };
-        let sends_from = |name: &str, address: &str| {
-            let ending = format!("This mailbox's address is {address}.");
-            let described = server.get_tool(name).and_then(|tool| tool.description);
-            described.is_some_and(|text| text.ends_with(&ending))
-        };
+        let names_an_address = server
+            .mailboxes
+            .iter()
+            .flat_map(|served| served.router.list_all())
+            .any(|tool| {
+                tool.description
+                    .as_deref()
+                    .is_some_and(|text| text.contains("@example."))
+            });
 
         assert_eq!(found_in("read_email"), Some(Mailbox::Person));
         assert_eq!(found_in("lys_read_email"), Some(Mailbox::Lys));
         assert_eq!(found_in("lys_nothing"), None);
-        assert!(sends_from("send_email", "person@example.com"));
-        assert!(sends_from("lys_send_email", "lys@example.net"));
-        assert!(sends_from("lys_send_draft", "lys@example.net"));
+        assert!(!names_an_address);
         assert_eq!(server.get_tool("lys_nothing"), None);
     }
 

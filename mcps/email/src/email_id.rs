@@ -79,8 +79,10 @@ impl FolderPlace<'_> {
 ///
 /// The id, `InvalidId` when the text is not `uid.uidvalidity.folder`, with
 /// `lys.` before it for an id of Lys's mailbox, with two positive numbers
-/// and a folder name without control characters, or `OtherMailboxId` for
-/// a valid id of the other mailbox.
+/// and a folder name without control characters, or for a valid id of
+/// Lys's mailbox given to the person's tools, which never name her
+/// mailbox; or `OtherMailboxId` for a valid id of the person's mailbox
+/// given to Lys's tools.
 pub fn parse_email_id(text: &str, mailbox: Mailbox) -> Result<EmailId, ToolFailure> {
     let (found, rest) = match text.strip_prefix(Mailbox::Lys.id_prefix()) {
         Some(rest) => (Mailbox::Lys, rest),
@@ -94,8 +96,10 @@ pub fn parse_email_id(text: &str, mailbox: Mailbox) -> Result<EmailId, ToolFailu
     if folder.is_empty() || folder.chars().any(char::is_control) {
         return Err(invalid());
     }
-    if found != mailbox {
-        return Err(ToolFailure::OtherMailboxId(found));
+    match (found, mailbox) {
+        (Mailbox::Person, Mailbox::Lys) => return Err(ToolFailure::OtherMailboxId),
+        (Mailbox::Lys, Mailbox::Person) => return Err(invalid()),
+        (Mailbox::Person, Mailbox::Person) | (Mailbox::Lys, Mailbox::Lys) => {}
     }
     Ok(EmailId {
         mailbox,
@@ -195,17 +199,19 @@ mod tests {
         }
     }
 
-    /// Checks that a valid id of one mailbox, given to a tool of the other,
-    /// is refused with `OtherMailboxId` naming the id's mailbox.
+    /// Checks that a valid id of the person's mailbox, given to Lys's
+    /// tools, is refused with `OtherMailboxId`, and one of Lys's mailbox,
+    /// given to the person's tools, as `InvalidId`, which names no other
+    /// mailbox.
     #[test]
     fn refuses_a_valid_id_of_the_other_mailbox() {
         assert_eq!(
-            parse_email_id("lys.12.345.INBOX", Mailbox::Person),
-            Err(ToolFailure::OtherMailboxId(Mailbox::Lys))
+            parse_email_id("12.345.INBOX", Mailbox::Lys),
+            Err(ToolFailure::OtherMailboxId)
         );
         assert_eq!(
-            parse_email_id("12.345.INBOX", Mailbox::Lys),
-            Err(ToolFailure::OtherMailboxId(Mailbox::Person))
+            parse_email_id("lys.12.345.INBOX", Mailbox::Person),
+            Err(ToolFailure::InvalidId(Mailbox::Person))
         );
     }
 }

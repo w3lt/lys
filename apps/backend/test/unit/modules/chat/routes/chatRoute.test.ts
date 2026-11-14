@@ -2948,16 +2948,6 @@ describe("updateFastifyWithChatRoute", () => {
     })
 
     /**
-     * Arguments of a `delegate_work` call that gives the web researcher a
-     * new job.
-     */
-    const RESEARCHER_JOB_ARGUMENTS = JSON.stringify({
-      agent: WEB_RESEARCHER_DEFINITION.code,
-      title: "Moths",
-      instructions: "Find what moths eat"
-    })
-
-    /**
      * Sends {@link DELEGATING_REQUEST} to a test application whose model
      * first calls `delegate_work` for the web researcher, allows the call
      * once the person is asked, and waits until the researcher's reply
@@ -2971,6 +2961,16 @@ describe("updateFastifyWithChatRoute", () => {
     async function sendDelegatingRequest(
       testApp: ChatRouteTestApp
     ): Promise<DelegatedRequest> {
+      /**
+       * Arguments of a `delegate_work` call that gives the web researcher a
+       * new job.
+       */
+      const researcherJobArguments = JSON.stringify({
+        agent: WEB_RESEARCHER_DEFINITION.code,
+        title: "Moths",
+        instructions: "Find what moths eat"
+      })
+
       const toolNames: ReadonlySet<string> = new Set()
       testApp.app.agentService.createAgent(WEB_RESEARCHER_DEFINITION)
       testApp.readJustRunToolNames.mockResolvedValue({
@@ -2978,7 +2978,7 @@ describe("updateFastifyWithChatRoute", () => {
         toolNames
       })
       testApp.completeChatStream.mockImplementationOnce(async () =>
-        createToolCallStream("delegate_work", RESEARCHER_JOB_ARGUMENTS)
+        createToolCallStream("delegate_work", researcherJobArguments)
       )
       const startReplyGeneration = vi.spyOn(
         testApp.generations,

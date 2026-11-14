@@ -96,6 +96,22 @@ function createCompletedReply(sequence: number, text: string) {
   )
 }
 
+/**
+ * Builds a PNG image as a reply's context carries it.
+ *
+ * @param width - Width of the image in pixels.
+ * @param height - Height of the image in pixels.
+ * @param data - Bytes of the image.
+ * @returns The image.
+ */
+function buildPngContextImage(
+  width: number,
+  height: number,
+  data: Uint8Array
+): ReplyContextImage {
+  return { mediaType: "image/png", width, height, data }
+}
+
 describe("buildAgentContext", () => {
   it("sends the system prompt first and the new message last", () => {
     expect(
@@ -505,35 +521,24 @@ describe("buildAgentContext", () => {
         width: 30,
         height: 40
       })
-      const otherBytes = new Uint8Array([9])
-      const firstImage: ReplyContextImage = {
-        mediaType: "image/png",
-        width: 10,
-        height: 20,
-        data: PHOTO_BYTES
+      const firstImage = buildPngContextImage(10, 20, PHOTO_BYTES)
+      const thirdImage = buildPngContextImage(30, 40, new Uint8Array([9]))
+      const userMessage: AgentContextUserMessage = {
+        content: "Look",
+        attachments: [first, second, third],
+        reports: []
       }
-      const thirdImage: ReplyContextImage = {
-        mediaType: "image/png",
-        width: 30,
-        height: 40,
-        data: otherBytes
-      }
+      const foundImages = new Map([
+        [3, thirdImage],
+        [1, firstImage]
+      ])
+      const images: AgentContextImages = { status: "seen", images: foundImages }
 
       const context = buildAgentContext({
         systemPrompt: "You are Lys.",
         history: [],
-        userMessage: {
-          content: "Look",
-          attachments: [first, second, third],
-          reports: []
-        },
-        images: {
-          status: "seen",
-          images: new Map([
-            [3, thirdImage],
-            [1, firstImage]
-          ])
-        }
+        userMessage,
+        images
       })
 
       expect(context[1]).toEqual({

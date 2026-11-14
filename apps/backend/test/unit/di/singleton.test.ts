@@ -9,6 +9,7 @@ import ActivityHub from "../../../src/modules/activity/activityHub"
 import type { AgentTurn } from "../../../src/modules/agent/agent"
 import AgentRuntimeService from "../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../src/modules/agent/agentService"
+import type { JobMessageDraft } from "../../../src/modules/agent/turnDelegation"
 import { NO_UNOFFERED_TOOLS } from "../../../src/modules/agent/unofferedTools"
 import ChatService from "../../../src/modules/chat/chatService"
 import type {
@@ -19,7 +20,10 @@ import type ReplyGeneration from "../../../src/modules/chat/replyGeneration"
 import ReplyGenerationRegistry, {
   type ReplyTarget
 } from "../../../src/modules/chat/replyGenerationRegistry"
-import type { TurnSettings } from "../../../src/modules/chat/turnStart"
+import type {
+  TurnDelegationContext,
+  TurnSettings
+} from "../../../src/modules/chat/turnStart"
 import StoredConversationHistoryEditor from "../../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../../src/modules/conversation/historyReader"
 import AttachmentFileStore from "../../../src/modules/attachment/attachmentFileStore"
@@ -383,6 +387,47 @@ function createModelSpies(
   return { findLlmContextMeasurement, completeChatStream, generateTitle }
 }
 
+/** A bundle whose member the lead's stored turn may give work. */
+type DelegatingBundle = Readonly<{
+  /** The bundle, closed when the test finishes. */
+  services: SingletonServices
+  /** Reporters the bundle was created with, which record what they receive. */
+  reporters: ReturnType<typeof createLogReporters>
+  /** The lead's stored turn, whose reply streams and has no generation. */
+  delegating: TurnDelegationContext
+  /** The job message the lead's turn sends the researcher about moths. */
+  draft: JobMessageDraft
+}>
+
+/**
+ * Creates a bundle that stores the researcher as a member, stores a turn of
+ * the lead, and drafts the job message that turn sends the researcher.
+ *
+ * @returns The bundle, its reporters, the lead's turn, and the draft.
+ * @remarks The bundle is created from recorded factories and closed when
+ * the test finishes. Its model calls are spied on as
+ * {@link createModelSpies} spies on them, so every reply is `Hi`.
+ */
+async function openDelegatingBundle(): Promise<DelegatingBundle> {
+  const { factories } = createRecordedFactories()
+  const reporters = createLogReporters()
+  const services = await createSingletonServices(
+    TEST_BACKEND_CONFIG,
+    reporters,
+    factories
+  )
+  onTestFinished(async () => await closeSingletonServices(services))
+  createModelSpies(services)
+  services.agentService.createAgent(FIRST_MEMBER_DEFINITION)
+  const delegating = createPersonTurn(services.conversationTurns)
+  const draft = createJobMessageDraft(
+    services.replyParts,
+    delegating,
+    MOTHS_REQUEST
+  )
+  return Object.freeze({ services, reporters, delegating, draft })
+}
+
 /**
  * Starts a person's turn that says `Hello` in a new conversation through a
  * bundle's turn start, for the bundle's live Caliginia to answer.
@@ -605,23 +650,9 @@ describe("createSingletonServices", () => {
   })
 
   it("gives a member work through the bundle's delegation hooks: the job's turn is stored and answered by the member, and its result waits while the lead's reply streams", async () => {
-    const { factories } = createRecordedFactories()
-    const reporters = createLogReporters()
-    const services = await createSingletonServices(
-      TEST_BACKEND_CONFIG,
-      reporters,
-      factories
-    )
-    onTestFinished(async () => await closeSingletonServices(services))
-    createModelSpies(services)
-    services.agentService.createAgent(FIRST_MEMBER_DEFINITION)
-    const delegating = createPersonTurn(services.conversationTurns)
+    const { services, reporters, delegating, draft } =
+      await openDelegatingBundle()
     const conversationId = delegating.turn.conversation.id
-    const draft = createJobMessageDraft(
-      services.replyParts,
-      delegating,
-      MOTHS_REQUEST
-    )
     const delegation = services.createTurnDelegation(delegating)
 
     const outcome = delegation.createJobMessage(draft)

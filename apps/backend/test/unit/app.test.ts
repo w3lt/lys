@@ -27,6 +27,7 @@ import AgentRuntimeService from "../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../src/modules/agent/agentService"
 import AttachmentFileStore from "../../src/modules/attachment/attachmentFileStore"
 import type { CompleteChatOptions } from "../../src/modules/chat/chatService"
+import type { ReplyTarget } from "../../src/modules/chat/replyGenerationRegistry"
 import StoredConversationHistoryEditor from "../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../src/modules/conversation/historyReader"
 import StoredReplyParts from "../../src/modules/conversation/replyParts"
@@ -189,6 +190,32 @@ async function waitForCancelledCompletion(
   const signal = options.signal ?? new AbortController().signal
   if (!signal.aborted) await once(signal, "abort")
   throw new ChatCompletionCancelledError(signal.reason)
+}
+
+/**
+ * Starts a generation in an application's decorated registry whose reply
+ * task stays pending until the case settles it, without a title task.
+ *
+ * @param app - Ready application whose registry admits the generation.
+ * @param target - The reply and the conversation that holds it.
+ * @returns The reply task. It begins after the current synchronous step, and
+ * it is resolved when the test finishes, so a case that fails early does
+ * not leave the application's close waiting.
+ */
+function startControlledReply(
+  app: FastifyInstance,
+  target: ReplyTarget
+): ControlledReplyTask {
+  const replyTask = new ControlledReplyTask()
+  app.replyGenerations.startReplyGeneration(target, {
+    startReplyTask: (context) => replyTask.start(context),
+    startTitleTask: undefined,
+    reportTaskFailure: vi.fn()
+  })
+  onTestFinished(() => {
+    replyTask.resolve()
+  })
+  return replyTask
 }
 
 /** A job that works while its backend closes. */
@@ -436,7 +463,7 @@ describe("buildApp", () => {
     ])
   })
 
-  it("decorates the person's stops, which the reply-stop and jobs-stop routes use, and logs each stop with its logger", async () => {
+  it("decorates the person's stop of a reply, which the reply-stop route uses, and logs the stop with its logger", async () => {
     const log = new CapturedLogDestination()
     const app = await buildApp({
       config: createOwnedBackendConfig(),
@@ -447,17 +474,9 @@ describe("buildApp", () => {
     const lead = createPersonTurn(app.conversationTurns)
     const conversationId = lead.turn.conversation.id
     const assistantMessageId = lead.turn.assistantMessage.id
-    const replyTask = new ControlledReplyTask()
-    app.replyGenerations.startReplyGeneration(
-      { conversationId, assistantMessageId },
-      {
-        startReplyTask: (context) => replyTask.start(context),
-        startTitleTask: undefined,
-        reportTaskFailure: vi.fn()
-      }
-    )
-    onTestFinished(() => {
-      replyTask.resolve()
+    const replyTask = startControlledReply(app, {
+      conversationId,
+      assistantMessageId
     })
 
     const replyStop = app.inject({
@@ -470,17 +489,9 @@ describe("buildApp", () => {
       expect(replyTask.context.abortSignal.aborted).toBe(true)
     })
     replyTask.resolve()
-    const replyStopResponse = await replyStop
-    const jobsStopResponse = await app.inject({
-      method: stopConversationJobsApi.method,
-      url: stopConversationJobsApi.path.replace(
-        ":conversationId",
-        conversationId
-      )
-    })
+    const response = await replyStop
 
-    expect(replyStopResponse.statusCode).toBe(204)
-    expect(jobsStopResponse.statusCode).toBe(204)
+    expect(response.statusCode).toBe(204)
     expect(
       log.records.filter(
         (record) => record["msg"] === "Jobs were asked to stop"
@@ -491,7 +502,35 @@ describe("buildApp", () => {
         conversationId,
         requester: "person",
         stoppedReplyCount: 1
-      }),
+      })
+    ])
+  })
+
+  it("decorates the person's stop of a conversation's jobs, which the jobs-stop route uses, and logs the stop with its logger", async () => {
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(log)
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    const lead = createPersonTurn(app.conversationTurns)
+    const conversationId = lead.turn.conversation.id
+
+    const response = await app.inject({
+      method: stopConversationJobsApi.method,
+      url: stopConversationJobsApi.path.replace(
+        ":conversationId",
+        conversationId
+      )
+    })
+
+    expect(response.statusCode).toBe(204)
+    expect(
+      log.records.filter(
+        (record) => record["msg"] === "Jobs were asked to stop"
+      )
+    ).toEqual([
       expect.objectContaining({
         level: "info",
         conversationId,
@@ -613,20 +652,9 @@ describe("buildApp", () => {
     app.createTurnDelegation(delegating).createJobMessage(draft)
     // The job's result now waits for the lead's reply, which still streams.
     await waitForFirstJobReplyEnd(app, conversationId)
-    const replyTask = new ControlledReplyTask()
-    app.replyGenerations.startReplyGeneration(
-      {
-        conversationId: createFixtureUuidV7(1),
-        assistantMessageId: createFixtureUuidV7(2)
-      },
-      {
-        startReplyTask: (context) => replyTask.start(context),
-        startTitleTask: undefined,
-        reportTaskFailure: vi.fn()
-      }
-    )
-    onTestFinished(() => {
-      replyTask.resolve()
+    const replyTask = startControlledReply(app, {
+      conversationId: createFixtureUuidV7(1),
+      assistantMessageId: createFixtureUuidV7(2)
     })
 
     const closing = app.close()

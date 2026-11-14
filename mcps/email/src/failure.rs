@@ -209,6 +209,8 @@ impl SmtpExtension {
 pub enum ToolFailure {
     /// Signing in to a server failed.
     SignIn {
+        /// The mailbox whose account signed in.
+        mailbox: Mailbox,
         /// Which server.
         protocol: Protocol,
         /// Why.
@@ -370,7 +372,9 @@ impl ToolFailure {
     /// text, name, or address.
     pub fn class(&self) -> String {
         match self {
-            Self::SignIn { protocol, failure } => {
+            Self::SignIn {
+                protocol, failure, ..
+            } => {
                 format!(
                     "{}-sign-in-{}",
                     protocol.name().to_ascii_lowercase(),
@@ -446,7 +450,11 @@ impl fmt::Display for ToolFailure {
         const NOT_IN_DRAFTS_SENTENCE: &str = "That id is not in the Drafts folder. Only a message in the Drafts folder can be sent or deleted as a draft.";
 
         let sentence = match self {
-            Self::SignIn { protocol, failure } => format_sign_in_sentence(*protocol, *failure),
+            Self::SignIn {
+                mailbox,
+                protocol,
+                failure,
+            } => format_sign_in_sentence(*mailbox, *protocol, *failure),
             Self::ImapRefused { operation, text } => {
                 format!("The IMAP server refused to {operation}: {text}.")
             }
@@ -511,17 +519,20 @@ fn format_invalid_id_sentence(mailbox: Mailbox) -> String {
     )
 }
 
-/// Formats the sentence of a failed sign-in.
+/// Formats the sentence of a failed sign-in, which names where the
+/// person edits the mailbox's account.
 ///
 /// # Arguments
 ///
+/// * `mailbox` - The mailbox whose account signed in.
 /// * `protocol` - Which server.
 /// * `failure` - Why it failed.
-fn format_sign_in_sentence(protocol: Protocol, failure: SignInFailure) -> String {
+fn format_sign_in_sentence(mailbox: Mailbox, protocol: Protocol, failure: SignInFailure) -> String {
     format!(
-        "Signing in to the {} server failed: {}. Check the email account in Settings → MCP.",
+        "Signing in to the {} server failed: {}. Check the email account in {}.",
         protocol.name(),
-        failure.format_clause()
+        failure.format_clause(),
+        mailbox.settings_place()
     )
 }
 
@@ -658,8 +669,9 @@ mod tests {
 
     /// Checks that each sign-in failure serializes to its name and, in a
     /// `SignIn` failure, reads as the sentence that names the IMAP or SMTP
-    /// server, gives the failure's clause, and points to the account in
-    /// Settings.
+    /// server, gives the failure's clause, and points to where the
+    /// mailbox's account is edited: Settings → MCP for the person's,
+    /// Settings → Lys for Lys's.
     #[test]
     fn names_and_describes_every_sign_in_failure() {
         /// Each sign-in failure, with its name and the clause the model reads.
@@ -699,6 +711,7 @@ mod tests {
         for (failure, name, clause) in SIGN_IN_FAILURES {
             let json = serde_json::to_string(&failure).expect("json");
             let sign_in = ToolFailure::SignIn {
+                mailbox: Mailbox::Person,
                 protocol: Protocol::Imap,
                 failure,
             };
@@ -712,11 +725,12 @@ mod tests {
         }
         assert_eq!(
             ToolFailure::SignIn {
+                mailbox: Mailbox::Lys,
                 protocol: Protocol::Smtp,
                 failure: SignInFailure::TimedOut
             }
             .to_string(),
-            "Signing in to the SMTP server failed: it did not answer in time. Check the email account in Settings → MCP."
+            "Signing in to the SMTP server failed: it did not answer in time. Check the email account in Settings → Lys."
         );
     }
 
@@ -876,6 +890,7 @@ mod tests {
         assert_eq!(refused.class(), "imap-refused-to-select-the-folder");
         assert_eq!(
             ToolFailure::SignIn {
+                mailbox: Mailbox::Lys,
                 protocol: Protocol::Smtp,
                 failure: SignInFailure::WrongPassword
             }

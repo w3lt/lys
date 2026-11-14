@@ -145,6 +145,7 @@ impl ToolContext {
         open_imap_session(&self.account, &self.trust)
             .await
             .map_err(|failure| ToolFailure::SignIn {
+                mailbox: self.mailbox,
                 protocol: Protocol::Imap,
                 failure,
             })

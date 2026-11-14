@@ -1807,7 +1807,7 @@ describe("pane notes", () => {
       "claude_desktop_config.json, .cursor/mcp.json or a single server object"
     )
     expect(MCP_TOOL_CHOICES_NOTE).toBe(
-      "Ask waits for your yes before each call, Run goes ahead without asking, and Off keeps the tool out of the agents' reach. Every tool that is not off is described to the model with each request."
+      "Ask waits for your yes before each call, Run goes ahead without asking, and Off keeps the tool out of the agents' reach. A request carries the description of a tool that is not off once Armitage finds that tool for it."
     )
   })
 })

@@ -386,7 +386,7 @@ export const MCP_TOOL_LIST_CUT_NOTE = `The server lists more tools than Lys read
 
 /** Note shown under a server's listed tools. */
 export const MCP_TOOL_CHOICES_NOTE =
-  "Ask waits for your yes before each call, Run goes ahead without asking, and Off keeps the tool out of the agents' reach. Every tool that is not off is described to the model with each request."
+  "Ask waits for your yes before each call, Run goes ahead without asking, and Off keeps the tool out of the agents' reach. A request carries the description of a tool that is not off once Armitage finds that tool for it."
 
 /** Note shown once the most servers the settings allow are saved. */
 export const MCP_SERVER_LIMIT_NOTE = `Lys keeps up to ${MAXIMUM_MCP_SERVER_COUNT} servers. Remove one to add another.`

@@ -88,7 +88,10 @@ function ToolListStatus({
 
 /** Properties accepted by {@link ToolGroupList}. */
 type ToolGroupListProps = {
-  /** Every tool, the app's then the backend's, in the order Settings lists them. */
+  /**
+   * Lys's own tools, the app's then the backend's, in the order Settings
+   * lists them; the MCP servers' tools are listed in the MCP pane.
+   */
   readonly tools: readonly ToolDefinition[]
   /** Name of the tool whose details are shown, or null when none is. */
   readonly expandedToolName: string | null
@@ -112,8 +115,7 @@ type ToolGroupListProps = {
  * which it saves; the component passes each change to it. The parent owns
  * which tool is
  * expanded, the lock, the dimming, and the availability. Groups keep the
- * order in which the listed tools first name them; each MCP server's tools
- * form a group of their own, after Lys's groups. A tool that cannot run
+ * order in which the listed tools first name them. A tool that cannot run
  * now offers to open the Secrets pane, which the application store selects.
  * @param props - Listed tools, expansion, lock, dimming, availability, and
  * the expansion proposal.
@@ -411,8 +413,9 @@ function ToolListBody({ list }: ToolListBodyProps): ReactElement | null {
 }
 
 /**
- * Presents the Tools pane: Lys's tools, in the app and in the backend, the
- * tools of the connected MCP servers, and the choices about them.
+ * Presents the Tools pane: Lys's own tools, in the app and in the backend,
+ * and the choices about them; the MCP servers' tools are switched in the
+ * MCP pane.
  *
  * @remarks The tool store owns the list and the session's tool-calls switch,
  * and the application store owns the saved switches and approvals. The pane

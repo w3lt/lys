@@ -1,7 +1,8 @@
 //! The email accounts stored under the `email` settings group.
 //!
-//! The person saves up to two email accounts on the email server's cards in
-//! Settings → MCP: their own, as `account`, and Lys's own, as `lysAccount`.
+//! The person saves up to two email accounts: their own, as `account`, on
+//! the email server's card in Settings → MCP, and Lys's own, as
+//! `lysAccount`, in Settings → Lys.
 //! Each holds the address mail is sent from and received at, the name sent
 //! with it, the user name the account signs in with, and the IMAP and SMTP
 //! servers Lys reaches. A missing group, a missing field, and a settings file

@@ -277,7 +277,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     value: "tools",
     label: "Tools",
     ordinal: "07",
-    note: "Lys's own tools. Every tool that is on is described to the model with each request, so off is cheaper than unused.",
+    note: "Lys's own tools. A request carries the description of a tool that is on once Armitage finds that tool for it; a tool that is off is never offered.",
     footNote: null,
     layout: "panels",
     sections: [],

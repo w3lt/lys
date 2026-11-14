@@ -12,6 +12,7 @@ import {
   sendMcpServerSyncRequest,
   type ReconnectMcpServerResult
 } from "@/lib/apis/http/mcp"
+import type { EmailMailbox } from "@/lib/models/email-mailbox"
 import { useLysStore } from "@/lib/store"
 import type { McpSettingsSaveOutcome } from "@/lib/store/mcp-settings"
 import { useToolStore } from "@/lib/store/tools"
@@ -132,6 +133,20 @@ type McpServerStoreActions = {
     isOn: boolean
   ) => Promise<McpSettingsSaveOutcome>
   /**
+   * Saves the switch of one mailbox of the email server and, once it is
+   * saved while the backend runs, asks the backend to apply it.
+   *
+   * @param mailbox - The mailbox.
+   * @param isOn - Whether the email server serves it.
+   * @returns The save outcome, once the save settled; it never rejects. The
+   * request to apply the group is handled like
+   * {@link McpServerStoreActions.saveMcpServers}'s.
+   */
+  saveEmailMailboxSwitch: (
+    mailbox: EmailMailbox,
+    isOn: boolean
+  ) => Promise<McpSettingsSaveOutcome>
+  /**
    * Forgets the list and any failure, as when the backend stops; an answer
    * still in flight is discarded, so a reconnect answered later applies
    * nothing either, and a later read joins no action started before.
@@ -159,6 +174,11 @@ type McpServerStoreDependencies = {
   /** Saves a built-in server's switch through the application store; never rejects. */
   readonly saveBuiltInMcpServerSwitch: (
     serverName: BuiltInMcpServerName,
+    isOn: boolean
+  ) => Promise<McpSettingsSaveOutcome>
+  /** Saves an email mailbox's switch through the application store; never rejects. */
+  readonly saveEmailMailboxSwitch: (
+    mailbox: EmailMailbox,
     isOn: boolean
   ) => Promise<McpSettingsSaveOutcome>
   /** Answers whether the backend is running now. */
@@ -520,6 +540,22 @@ function createMcpServerStore(
       )
     }
 
+    /**
+     * Implements {@link McpServerStoreActions.saveEmailMailboxSwitch}.
+     *
+     * @param mailbox - The mailbox.
+     * @param isOn - Whether the email server serves it.
+     * @returns The save outcome.
+     */
+    async function saveEmailMailboxSwitch(
+      mailbox: EmailMailbox,
+      isOn: boolean
+    ): Promise<McpSettingsSaveOutcome> {
+      return handleGroupSave(
+        await dependencies.saveEmailMailboxSwitch(mailbox, isOn)
+      )
+    }
+
     /** Implements {@link McpServerStoreActions.resetMcpServers}. */
     function resetMcpServers(): void {
       latestCommittedRequest = latestStartedRequest
@@ -537,6 +573,7 @@ function createMcpServerStore(
       sendMcpServerReconnect,
       saveMcpServers,
       saveBuiltInMcpServerSwitch,
+      saveEmailMailboxSwitch,
       resetMcpServers
     }
   }
@@ -571,6 +608,8 @@ export const useMcpServerStore: UseBoundStore<StoreApi<McpServerStore>> =
       useLysStore.getState().saveMcpServers(servers),
     saveBuiltInMcpServerSwitch: (serverName, isOn) =>
       useLysStore.getState().saveBuiltInMcpServerSwitch(serverName, isOn),
+    saveEmailMailboxSwitch: (mailbox, isOn) =>
+      useLysStore.getState().saveEmailMailboxSwitch(mailbox, isOn),
     isBackendRunning: () =>
       useLysStore.getState().backendServerInfo.status === "running"
   })

@@ -28,6 +28,7 @@ import updateFastifyWithChatRoute, {
 import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRuntimeTypes"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
+import type { BuiltInMcpServer } from "../../../../../src/modules/mcp/mcpServerRegistry"
 import {
   TOOL_CALL_POLICY_ID,
   formatToolCallDenial,
@@ -1654,6 +1655,61 @@ describe("updateFastifyWithChatRoute", () => {
 
       return { testApp, getGeneration }
     }
+
+    it("offers an MCP tool only Lys may use to Caliginia's turn and never to a stored agent's", async () => {
+      /** Name the model calls the built-in email server's echo tool by. */
+      const LYS_ONLY_TOOL_NAME = "mcp__email__echo"
+      const emailServer: BuiltInMcpServer = Object.freeze({
+        name: "email",
+        transport: "stdio",
+        readServer: () =>
+          Promise.resolve({
+            status: "read" as const,
+            settings: buildFakeStdioServerSettings("email")
+          }),
+        isLysOnlyTool: (toolName: string) => toolName === LYS_ONLY_TOOL_NAME
+      })
+      const testApp = await createChatRouteTestApp([emailServer])
+      testApp.readMcpSettings.mockResolvedValue({
+        status: "read",
+        settings: mcpSettingsSchema.parse({
+          builtIn: { email: { enabled: true } }
+        })
+      })
+      await testApp.app.mcpServerRegistry.updateServers()
+      await vi.waitFor(
+        () => {
+          expect(
+            testApp.app.mcpServerRegistry.findTurnTool(LYS_ONLY_TOOL_NAME)
+          ).toMatchObject({ status: "found" })
+        },
+        { timeout: 10_000 }
+      )
+      registerStoringChatRoute(testApp)
+      testApp.app.agentService.createAgent(WEB_RESEARCHER_DEFINITION)
+      const tools = {
+        definitions: [],
+        backendToolNames: ["look_up_word", LYS_ONLY_TOOL_NAME]
+      }
+
+      const caliginia = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        tools
+      })
+      const webResearcher = await sendChatRequest(testApp.app, {
+        ...WEB_RESEARCHER_REQUEST,
+        tools
+      })
+
+      expect([caliginia.statusCode, webResearcher.statusCode]).toEqual([
+        200, 200
+      ])
+      expect(listOfferedToolNames(testApp, 0)).toEqual([
+        "look_up_word",
+        LYS_ONLY_TOOL_NAME
+      ])
+      expect(listOfferedToolNames(testApp, 1)).toEqual(["look_up_word"])
+    })
 
     it("refuses an MCP tool whose server is not connected before storing a turn, naming it and why", async () => {
       const testApp = await createChatRouteTestApp()

@@ -99,6 +99,9 @@ export {
   emailAddressSchema,
   emailSecuritySchema,
   emailSettingsSchema,
+  isSameEmailAddress,
+  isSameEmailMailbox,
+  isSameEmailSignIn,
   LOOPBACK_EMAIL_HOSTS,
   MAXIMUM_EMAIL_ADDRESS_LENGTH,
   MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH,
@@ -106,6 +109,7 @@ export {
   MAXIMUM_EMAIL_USER_NAME_LENGTH,
   type EmailAccount,
   type EmailAccountCandidate,
+  type EmailAddress,
   type EmailSecurity,
   type EmailServerSettings,
   type EmailSettings
@@ -114,6 +118,7 @@ export { MAXIMUM_TCP_PORT } from "./hostName"
 export {
   BUILT_IN_MCP_SERVER_NAMES,
   buildMcpToolNamePrefix,
+  isBuiltInMcpServerOn,
   MAXIMUM_MCP_COMMAND_ARGUMENT_COUNT,
   MAXIMUM_MCP_COMMAND_ARGUMENT_LENGTH,
   MAXIMUM_MCP_COMMAND_LENGTH,

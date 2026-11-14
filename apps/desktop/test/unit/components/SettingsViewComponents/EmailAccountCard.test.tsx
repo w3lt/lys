@@ -71,12 +71,14 @@ const FASTMAIL_CHOICES: ShownServerChoices = Object.freeze({
 })
 
 /**
- * Renders the card for the stored account and password with no save and no
- * check, the backend running, and a spy for every request; saves and
- * removals resolve with `saved` unless the case changes them.
+ * Renders the person's card for the stored account and password with no
+ * save and no check, no account of Lys's, the mailbox off, the backend
+ * running, and a spy for every request; saves and removals resolve with
+ * `saved` unless the case changes them.
  *
  * @param props - Card facts and requests the case varies.
- * @returns The request spies and the render result.
+ * @returns The request spies, the render result, and the properties
+ * rendered.
  */
 function startEmailAccountCard(props: Partial<EmailAccountCardProps> = {}) {
   const requests = {
@@ -85,9 +87,14 @@ function startEmailAccountCard(props: Partial<EmailAccountCardProps> = {}) {
     ),
     onRemoveEmailAccount: vi.fn<EmailAccountCardProps["onRemoveEmailAccount"]>(
       () => Promise.resolve("saved")
-    )
+    ),
+    onMailboxOnChange: vi.fn<EmailAccountCardProps["onMailboxOnChange"]>()
   }
   const cardProps: EmailAccountCardProps = {
+    mailbox: "person",
+    otherAccount: null,
+    isMailboxOn: false,
+    isMailboxSwitchSaving: false,
     savedAccount: STORED_EMAIL_ACCOUNT,
     savedPassword: STORED_EMAIL_PASSWORD,
     saveState: IDLE_SAVE_STATE,
@@ -97,7 +104,7 @@ function startEmailAccountCard(props: Partial<EmailAccountCardProps> = {}) {
     ...props
   }
   const rendered = render(<EmailAccountCard {...cardProps} />)
-  return { requests, rendered }
+  return { requests, rendered, cardProps }
 }
 
 /**
@@ -117,12 +124,21 @@ function startEmptyEmailAccountCard(
 }
 
 /**
- * Gets the card.
+ * Gets the card, the only form a case renders.
  *
- * @returns The form named Email account.
+ * @returns The form, named after its mailbox.
  */
 function getCard(): HTMLElement {
-  return screen.getByRole("form", { name: "Email account" })
+  return screen.getByRole("form")
+}
+
+/**
+ * Gets the switch that has the email server serve the card's mailbox.
+ *
+ * @returns The switch named Use this mailbox.
+ */
+function getMailboxSwitch(): HTMLElement {
+  return within(getCard()).getByRole("switch", { name: "Use this mailbox" })
 }
 
 /**
@@ -281,6 +297,7 @@ describe("EmailAccountCard", () => {
   it("names the card, shows the saved account, and keeps the saved password out of the field", () => {
     startEmailAccountCard()
 
+    expect(getCard()).toHaveAccessibleName("Your email account")
     expect(getCard()).toHaveTextContent(
       "Lys signs in to IMAP and SMTP before saving. Gmail, iCloud, Yahoo, and Fastmail need an app password."
     )
@@ -335,7 +352,7 @@ describe("EmailAccountCard", () => {
       screen.getByRole("switch", { name: "Server keeps a copy of sent mail" })
     ).not.toBeChecked()
     expect(getStatusLine()).toHaveTextContent(
-      "No account yet. The email server stays off until you save one."
+      "No account yet. This mailbox stays off until you save one."
     )
     expect(
       within(getCard()).queryByRole("button", { name: "Remove account" })
@@ -545,7 +562,7 @@ describe("EmailAccountCard", () => {
     const user = userEvent.setup()
 
     expect(getStatusLine()).toHaveTextContent(
-      "No account yet. The email server stays off until you save one."
+      "No account yet. This mailbox stays off until you save one."
     )
 
     await user.type(getField("Address"), "ada@fastmail.com")
@@ -914,7 +931,7 @@ describe("EmailAccountCard", () => {
     )
 
     const question = within(getCard()).getByRole("group", {
-      name: "Remove the email account and its password? The email server is switched off."
+      name: "Remove the email account and its password? This mailbox is switched off."
     })
     expect(
       within(question).getByRole("button", { name: "Keep the email account" })
@@ -980,7 +997,12 @@ describe("EmailAccountCard", () => {
       <EmailAccountCard
         checkState={IDLE_CHECK_STATE}
         isBackendRunning
+        isMailboxOn={false}
+        isMailboxSwitchSaving={false}
+        mailbox="person"
+        onMailboxOnChange={vi.fn()}
         onRemoveEmailAccount={onRemoveEmailAccount}
+        otherAccount={null}
         onSaveEmailAccount={vi.fn()}
         savedAccount={null}
         savedPassword={null}
@@ -994,7 +1016,7 @@ describe("EmailAccountCard", () => {
     expect(getField("Address")).toHaveValue("")
     expect(getField("Address")).toHaveFocus()
     expect(getStatusLine()).toHaveTextContent(
-      "No account yet. The email server stays off until you save one."
+      "No account yet. This mailbox stays off until you save one."
     )
   })
 
@@ -1073,7 +1095,12 @@ describe("EmailAccountCard", () => {
       <EmailAccountCard
         checkState={imapRefusedCheckState}
         isBackendRunning
+        isMailboxOn={false}
+        isMailboxSwitchSaving={false}
+        mailbox="person"
+        onMailboxOnChange={requests.onMailboxOnChange}
         onRemoveEmailAccount={requests.onRemoveEmailAccount}
+        otherAccount={null}
         onSaveEmailAccount={onSaveEmailAccount}
         savedAccount={STORED_EMAIL_ACCOUNT}
         savedPassword={STORED_EMAIL_PASSWORD}
@@ -1091,5 +1118,71 @@ describe("EmailAccountCard", () => {
     expect(getStatusLine()).toHaveTextContent(
       "Unsaved · Save signs in to both servers first."
     )
+  })
+
+  describe("Lys's own mailbox", () => {
+    it("names Lys's card and starts it empty with her name as the display name", () => {
+      startEmptyEmailAccountCard({ mailbox: "lys" })
+
+      expect(getCard()).toHaveAccessibleName("Lys's email account")
+      expect(getField("Display name")).toHaveValue("Lys")
+      expect(getField("Address")).toHaveValue("")
+    })
+
+    it("marks the address of the person's account on Save, and asks for no save", async () => {
+      const { requests } = startEmptyEmailAccountCard({
+        mailbox: "lys",
+        otherAccount: STORED_EMAIL_ACCOUNT
+      })
+      const user = userEvent.setup()
+
+      await user.type(getField("Address"), "ada@fastmail.com")
+      await user.type(getField("User name"), "lys@fastmail.com")
+      await user.type(getPasswordField(), "app-password{Enter}")
+
+      expect(getField("Address")).toHaveFocus()
+      expect(getField("Address")).toHaveAccessibleDescription(
+        `${ADDRESS_HINT} This is the address of your own account. Lys needs an address of her own. Preset: Fastmail`
+      )
+      expect(getField("User name")).not.toHaveAttribute("aria-invalid")
+      expect(requests.onSaveEmailAccount).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("Use this mailbox", () => {
+    it("can't be switched on before the account is saved, and says so", () => {
+      startEmptyEmailAccountCard()
+
+      expect(getMailboxSwitch()).toHaveAttribute("aria-disabled", "true")
+      expect(getMailboxSwitch()).not.toBeChecked()
+      expect(getMailboxSwitch()).toHaveAccessibleDescription(
+        "Save this account first."
+      )
+    })
+
+    it("proposes serving the mailbox once its account is saved", async () => {
+      const { requests } = startEmailAccountCard()
+      const user = userEvent.setup()
+
+      await user.click(getMailboxSwitch())
+
+      expect(getMailboxSwitch()).not.toHaveAccessibleDescription()
+      expect(requests.onMailboxOnChange).toHaveBeenCalledExactlyOnceWith(true)
+    })
+
+    it("can be switched off while on without an account, and waits while a save of the MCP servers runs", () => {
+      const { rendered, cardProps } = startEmptyEmailAccountCard({
+        isMailboxOn: true
+      })
+      const isEnabledWhileOn = !getMailboxSwitch().hasAttribute("aria-disabled")
+
+      rendered.rerender(
+        <EmailAccountCard {...cardProps} isMailboxSwitchSaving />
+      )
+
+      expect(isEnabledWhileOn).toBe(true)
+      expect(getMailboxSwitch()).toBeChecked()
+      expect(getMailboxSwitch()).toHaveAttribute("aria-disabled", "true")
+    })
   })
 })

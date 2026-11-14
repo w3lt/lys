@@ -88,6 +88,7 @@ import {
 } from "../../support/mcpFixtures"
 import {
   EMAIL_ON_MCP_SETTINGS,
+  LYS_MAILBOX_ON_SETTINGS,
   STORED_EMAIL_SETTINGS,
   STORED_MCP_SETTINGS
 } from "../../support/settingsFixtures"
@@ -335,7 +336,7 @@ describe("listed servers", () => {
       name: "email"
     }
     const mcp = { ...EMAIL_ON_MCP_SETTINGS, servers: [emailNamedServer] }
-    const noAccount = { account: null }
+    const noAccount = { account: null, lysAccount: null }
 
     const servers = listMcpServers({ mcp, email: noAccount })
 
@@ -345,6 +346,20 @@ describe("listed servers", () => {
       isReady: false
     })
     expect(Object.isFrozen(servers)).toBe(true)
+  })
+
+  it("lists the email server as on and ready while only Lys's mailbox is on and only her account is saved", () => {
+    const lysOnly = {
+      ...LYS_MAILBOX_ON_SETTINGS.email,
+      account: null
+    }
+
+    const servers = listMcpServers({
+      mcp: LYS_MAILBOX_ON_SETTINGS.mcp,
+      email: lysOnly
+    })
+
+    expect(servers[0]).toEqual(EMAIL_SERVER)
   })
 
   it("names, keys, and tells the transport and switch of each kind", () => {
@@ -423,7 +438,7 @@ describe("formatMcpServerTarget", () => {
 
   it("says what a server Lys ships does", () => {
     expect(formatMcpServerTarget(EMAIL_SERVER)).toBe(
-      "Reads, searches, and sends your email over IMAP and SMTP."
+      "Reads, searches, and sends your email and Lys's own over IMAP and SMTP."
     )
   })
 
@@ -581,7 +596,7 @@ describe("formatMcpServerStatus", () => {
   })
 
   it("says what the email server needs while it is off without an account, whether or not the backend runs", () => {
-    const needsNote = "Needs an email account. Add one below."
+    const needsNote = "Needs an email account. Add yours or Lys's below."
 
     expect(
       formatMcpServerStatus({
@@ -692,7 +707,7 @@ describe("formatMcpServerStatus", () => {
   )
 
   it.each([
-    ["account-missing", "Needs an email account. Add one below."],
+    ["account-missing", "Needs an email account. Add yours or Lys's below."],
     [
       "account-invalid",
       "The saved email account is not usable. Save it again below."

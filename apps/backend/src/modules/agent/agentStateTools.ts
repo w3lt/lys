@@ -4,6 +4,7 @@ import {
   READ_AGENT_STATE_TOOL_NAME,
   READ_MY_STATE_TOOL_NAME,
   toolDefinitionSchema,
+  type EmailAddress,
   type ToolDefinition
 } from "@lys/share"
 import type {
@@ -24,6 +25,7 @@ import {
   type AgentIdentity,
   type AgentRole
 } from "./agentRoles"
+import { isLysAgentCode } from "./builtInAgents"
 import { MAXIMUM_AGENT_SEARCH_MATCHES } from "./capabilities"
 
 /** Inclusive maximum length of a trimmed agent query, in UTF-16 code units. */
@@ -171,6 +173,12 @@ export type AgentStateToolContext = Readonly<{
   requestId: string
   /** Reads agents and their state; lent for the turn. */
   reader: AgentStateReader
+  /**
+   * Email address that is the agent's own when the turn began: Lys's own
+   * mailbox's while it is in use, for Caliginia and Lysiptera only; null
+   * otherwise. Personal data.
+   */
+  emailAddress: EmailAddress | null
 }>
 
 /** One run of a state tool: the reply that calls it, and when it runs. */
@@ -231,7 +239,7 @@ function buildReadMyStateDefinition(role: AgentRole): ToolDefinition {
     : "You can see only your own state."
   return toolDefinitionSchema.parse({
     name: READ_MY_STATE_TOOL_NAME,
-    description: `Read your own state: who you are, your role, how many of your request slots are in use, and each request you are working on right now, the reply you are writing included, or that waits for a free slot, with its conversation, model, start time, and step. ${scope}`,
+    description: `Read your own state: who you are, your role, your email address when you have one, how many of your request slots are in use, and each request you are working on right now, the reply you are writing included, or that waits for a free slot, with its conversation, model, start time, and step. ${scope}`,
     group: "agents",
     access: "reads",
     runner: "backend",
@@ -462,12 +470,34 @@ function formatRequests(
  * Formats who the calling agent is.
  *
  * @param state - The calling agent's state.
- * @returns Its name, code, role, deletion, and what its role lets it see.
+ * @param emailAddress - The agent's own email address, or null.
+ * @returns Its name, code, role, deletion, what its role lets it see, and
+ * its email address, or for Caliginia and Lysiptera that none is in use.
  */
-function formatOwnHeader(state: AgentStateView): string {
+function formatOwnHeader(
+  state: AgentStateView,
+  emailAddress: EmailAddress | null
+): string {
   const deletion =
     state.deletedAt === null ? "" : ` You were deleted on ${state.deletedAt}.`
-  return `You are ${formatOneLine(state.name)} (code ${state.code}), a ${state.role}.${deletion} ${ROLE_SCOPE_TEXT[state.role]}`
+  return `You are ${formatOneLine(state.name)} (code ${state.code}), a ${state.role}.${deletion} ${ROLE_SCOPE_TEXT[state.role]}${formatOwnEmailAddress(state.code, emailAddress)}`
+}
+
+/**
+ * Formats the calling agent's own email address.
+ *
+ * @param code - Code of the calling agent.
+ * @param emailAddress - Its own email address, or null.
+ * @returns The sentence that gives the address, after a space; for
+ * Caliginia and Lysiptera without one, the sentence that none is in use;
+ * else nothing, as no other agent has a mailbox of its own.
+ */
+function formatOwnEmailAddress(
+  code: string,
+  emailAddress: EmailAddress | null
+): string {
+  if (emailAddress !== null) return ` Your email address is ${emailAddress}.`
+  return isLysAgentCode(code) ? " You have no email address in use." : ""
 }
 
 /**
@@ -518,7 +548,7 @@ function runReadMyState(
   if (outcome.status !== "found")
     return buildRefusedStateResult(outcome, context.self.code)
   return buildSucceededResult([
-    formatOwnHeader(outcome.state),
+    formatOwnHeader(outcome.state, context.emailAddress),
     ...formatRequests(outcome.state, context.requestId, now)
   ])
 }

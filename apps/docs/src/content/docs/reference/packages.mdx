@@ -44,8 +44,9 @@ crate of the email MCP server Lys ships.
 - The MCP settings pane saves the MCP servers through Tauri, asks the backend
   to apply them, and shows each server's state, tools, and skipped tools,
   with a button that reconnects it; it switches each server on or off, and
-  saves the email account the built-in email server works with, once the
-  backend signed in with it.
+  saves the email accounts the built-in email server works with, the
+  person's and Lys's own, each once the backend signed in with it, and each
+  mailbox's switch.
 
 ### `@lys/backend`
 
@@ -62,8 +63,9 @@ crate of the email MCP server Lys ships.
   (`caliginia.txt`, `lysiptera.txt`, `armitage.txt`, `title-generation.txt`),
   because the bundle reads them from its own directory; `build.sh` installs
   that output as the release backend.
-- Starts the email MCP server Lys ships, `mcps/email`, as a built-in stdio
-  server once it is switched on, and runs its `check` subcommand for the
+- Starts the email MCP server Lys ships, `mcps/email`, as one built-in stdio
+  server for the mailboxes switched on, the person's and Lys's own, tells
+  Caliginia and Lysiptera Lys's address through `read_my_state`, and runs its `check` subcommand for the
   email account check; the executable is the file `LYS_EMAIL_SERVER_PATH`
   names, else `$LYS_HOME/runtime/email/email`.
 
@@ -95,7 +97,8 @@ crate of the email MCP server Lys ships.
 
 - Exports Zod schemas and inferred TypeScript types for conversations,
   messages, agents, tools, MCP tool definitions, the MCP server settings with
-  their switches, the email account and mail server rules, JSON values, and
+  their switches, the email account and mail server rules with the rule that
+  the person's and Lys's accounts open two mailboxes, JSON values, and
   the API key and email password formats
 - Used by both backend persistence code and desktop chat state; the agent
   schemas and limits are used by the backend, `@lys/protocol`, and the desktop

@@ -32,14 +32,15 @@ The desktop host owns a JSON settings file at `$LYS_HOME/settings.json`.
   `save_settings` command is called
 - read, never written, by the backend for the model provider, its address
   and key, the Tavily API key, the Just run list, the MCP servers with their
-  switches, and the email account with its password
+  switches, and the email accounts, the person's and Lys's own, with their
+  passwords
 - read, never created or written, by the host's `get_location` tool for the
   location the person saved
 
 The desktop loads this file at initialization and autosaves generation, load
 configuration, tool approval, runtime startup switch, and MCP server switch
 edits; it saves the
-Tavily API key, the location, the MCP servers, and the email account with its
+Tavily API key, the location, the MCP servers, and each email account with its
 password when the person saves them. Each save
 replaces only its own part and preserves the rest already on disk, including a
 `loadConfiguration.default` written by hand; the other runtime edits in the

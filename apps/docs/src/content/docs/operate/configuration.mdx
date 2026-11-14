@@ -87,15 +87,16 @@ The desktop reads the file when Lys starts, so a hand edit of `runtime`,
 starts. The backend reads `tools.justRun`, `tools.approvedFolders`, and the
 Tavily API key from the file itself, so a hand edit of any of them applies
 without a restart, as the `tools` paragraphs above and [Tavily API key](#tavily-api-key) describe. It reads `mcp`
-when it starts and when the MCP pane saves, and `email` with the password in
+when it starts and when the MCP pane saves, and `email` with the passwords in
 `secrets` for the email server; see [MCP servers](#mcp-servers) and
 [Email account](#email-account). A save from a
 settings pane writes the values Lys holds over a hand edit of its group made
 while Lys runs: the Generation pane replaces `generation`, the Model pane
 replaces `loadConfiguration.models` and leaves `default` as it is in the file,
 the Secrets pane replaces `secrets`, the Tools pane replaces `tools` and, on
-Save, `location`, the MCP pane replaces `mcp` and, on the email server's
-card, `email` and `secrets.emailPassword`, and the
+Save, `location`, the MCP pane replaces `mcp` and, on an email account card,
+that account in `email` and its password, `secrets.emailPassword` or
+`secrets.lysEmailPassword`, and the
 Runtime pane replaces `runtime.autoStartBackend` and `runtime.autoStartVmo`
 and leaves the rest of `runtime` as it is in the file.
 
@@ -135,9 +136,9 @@ characters, or the settings file fails to load.
 ## MCP servers
 
 Settings → MCP lists the MCP servers whose tools the agents can use: first the
-server Lys ships, `email`, marked `built-in`, which reads and sends your mail
-once you save an [email account](#email-account) and switch it on, then the
-servers you add. Each server runs as you or receives the headers you give it,
+server Lys ships, `email`, marked `built-in`, which reads and sends your mail,
+or mail of Lys's own, once you save an [email account](#email-account) and
+switch its mailbox on, then the servers you add. Each server runs as you or receives the headers you give it,
 so add only servers you trust. The switch beside each server turns it on or
 off, and the choice is kept across restarts: off, the server is neither
 started nor reached, and its tools are not offered; an added server starts
@@ -233,12 +234,20 @@ the states and failure reasons.
 
 ### Email account
 
-The email server Lys ships works with one email account, saved on its card in
-Settings → MCP, under the server's details. Lys signs in to the account's
-IMAP and SMTP servers before it saves anything, so the backend must be
-running; the card says so otherwise. To add the account:
+The email server Lys ships works with up to two email accounts, each saved
+on its own card in Settings → MCP, under the server's details: "Your email
+account", your own mailbox, and "Lys's email account", a mailbox of Lys's own,
+which she reads and sends from as an agent of her own, so that her mail
+leaves under her name and address and you need not give her the password of
+yours. One server process serves both. Lys signs in to an account's IMAP and
+SMTP servers before it saves anything, so the backend must be running; the
+card says so otherwise. To add an account:
 
-1. Open Settings → MCP and expand the `email` row, then enter the address.
+1. Open Settings → MCP and expand the `email` row, then enter the address on
+   the card of the mailbox, yours or Lys's. Lys's card starts with `Lys` as
+   the display name. The two accounts must be two mailboxes: a card refuses
+   the other card's address, in any letter case, and its user name on the
+   same IMAP server.
    For Gmail, iCloud, Yahoo, and Fastmail, the server fields and the Sent
    copy switch fill themselves from a preset; the note under the address
    says which, or that there is none, in which case enter the IMAP and SMTP
@@ -256,27 +265,37 @@ running; the card says so otherwise. To add the account:
 4. Press Save. Lys signs in to both servers, up to 20 seconds each, and the
    status line says what each answered; a refused sign-in saves nothing.
    Once both accepted, the account and the password are saved together.
-5. Switch the server on with the switch beside its row. Its ten tools then
-   appear in Settings → Tools under `MCP · email`, each asking before it
-   runs until you choose Just run, unless a Just run choice saved for a tool
-   of the same name of an earlier server named `email` was kept; see
-   [Choices kept by name](/architecture/security/#mcp-servers).
-6. To stop using the account, press **Remove account** and confirm: Lys
-   switches the server off and removes the account and the password.
+5. Switch the mailbox on with **Use this mailbox** on its card, or both
+   saved mailboxes at once with the switch beside the server's row. The
+   mailbox's ten tools then appear in Settings → Tools under `MCP · email`,
+   Lys's with `lys_` before their names, each asking before it runs until
+   you choose Just run, unless a Just run choice saved for a tool of the same
+   name of an earlier server named `email` was kept; see
+   [Choices kept by name](/architecture/security/#mcp-servers). Every send
+   from either mailbox asks first, even on Just run, and the approval card
+   names the tool, `send_email` or `lys_send_email`, which tells the mailbox
+   it leaves from. Lys's mailbox is hers: only her agents, Caliginia and
+   Lysiptera, are offered its tools, and only they learn her address when
+   they read their own state. Every agent can use your mailbox's tools.
+6. To stop using an account, press **Remove account** on its card and
+   confirm: Lys switches that mailbox off and removes the account and the
+   password, keeping the other card's.
 
-The account is saved in the `email` group of `settings.json` and the
-password as `emailPassword` in `secrets`, both as plain text readable only by
-your user account; the
+Your account is saved as `account` in the `email` group of `settings.json`
+and its password as `emailPassword` in `secrets`, Lys's as `lysAccount` and
+`lysEmailPassword`, all as plain text readable only by your user account; the
 [configuration reference](/reference/configuration/#email-account) lists the
 rules. A hand edit of either applies the next time the backend applies the
 servers, that is when it starts or when the MCP pane saves; the pane shows a
-hand edit the next time Lys starts. The backend hands the account and the
-password to the email server through its environment each time it starts
-it, and the server connects to the mail servers once per tool call, with TLS
+hand edit the next time Lys starts. The backend hands each account of a
+mailbox that is on, with its password, to the email server through its
+environment each time it starts it, and the server connects to the mail servers once per tool call, with TLS
 or STARTTLS verified against the system's certificate store; a connection
 without TLS is allowed only to `localhost`, `127.0.0.1`, or `[::1]`. See
 [the email server](/architecture/backend/#the-email-server) for what the
-server does with the account, and
+server does with the accounts, the
+[security notes](/architecture/security/#candid-limits) for what a mailbox
+of Lys's own exposes, such as mail anyone can send to her address, and
 [troubleshooting](/operate/troubleshooting/#the-email-account-cannot-be-saved)
 when saving fails.
 
@@ -298,9 +317,10 @@ pane offers the same retry action. Switching an MCP tool's chip or choosing
 Ask me or Just run for a server in the MCP pane saves the `tools` group the
 same way. The MCP pane saves the servers only on Save in its editor or on
 Remove, and each server's switch when it is flipped, replacing only the
-`mcp` group, and then asks the running backend to apply them; the email
-server's card saves the account and `secrets.emailPassword` together on Save,
-after the backend signed in with them, and removes both on Remove account.
+`mcp` group, and then asks the running backend to apply them; each email
+account card saves its account and its password together on Save, after the
+backend signed in with them, and removes both on Remove account, and its Use
+this mailbox switch saves only its mailbox's switch.
 Changing either startup switch in the
 Runtime pane, for the backend or for vmo, autosaves both switches and keeps
 the rest of the `runtime` group as it is on disk; after a failed save, the

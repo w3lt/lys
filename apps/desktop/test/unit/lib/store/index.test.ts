@@ -140,7 +140,7 @@ const EVERY_GROUP_EDITED_DOCUMENT: SettingsDocument = Object.freeze({
   tools: { justRun: ["find_files"], switches: { web_search: true } },
   location: NO_LOCATION_SETTINGS,
   mcp: { ...DISK_SETTINGS_DOCUMENT.mcp, servers: [] },
-  email: { account: null }
+  email: { account: null, lysAccount: null }
 })
 
 /** Inventory listed once LM Studio is connected. */
@@ -391,7 +391,8 @@ describe("useLysStore", () => {
       tavilyApiKey: null,
       ollamaApiKey: null,
       groqApiKey: null,
-      emailPassword: null
+      emailPassword: null,
+      lysEmailPassword: null
     })
     expect(useLysStore.getState().settings.providers).toEqual({
       active: "lmStudio",
@@ -959,8 +960,8 @@ describe("useLysStore", () => {
         store.saveProviderSettings(EDITED_PROVIDERS_SETTINGS),
         store.saveLocation(NO_LOCATION_SETTINGS),
         store.saveMcpServers([]),
-        store.deleteEmailAccount(() =>
-          store.saveBuiltInMcpServerSwitch("email", false)
+        store.deleteEmailAccount("person", () =>
+          store.saveEmailMailboxSwitch("person", false)
         )
       ])
       await waitForMicrotasks()
@@ -1052,13 +1053,13 @@ describe("useLysStore", () => {
 
       const outcome = await useLysStore
         .getState()
-        .saveEmailAccount(STORED_EMAIL_ACCOUNT, STORED_EMAIL_PASSWORD)
+        .saveEmailAccount("person", STORED_EMAIL_ACCOUNT, STORED_EMAIL_PASSWORD)
 
       expect(backend.requests.map((request) => request.url)).toEqual([
         `${FIXTURE_BACKEND_URL}/api/v1/mcp/email/account-check`
       ])
       expect(outcome).toBe("refused")
-      expect(useLysStore.getState().emailAccountCheck).toEqual({
+      expect(useLysStore.getState().emailAccountChecks.person).toEqual({
         status: "checked",
         outcome: refusedEmailCheck
       })

@@ -16,6 +16,10 @@ import {
   type ModelLoadConfiguration
 } from "@lys/share"
 
+import {
+  buildEmailMailboxAccountSettings,
+  type EmailMailbox
+} from "@/lib/models/email-mailbox"
 import type {
   GenerationSettings,
   LoadConfigurationSettings,
@@ -57,8 +61,10 @@ type SettingsDocumentSecrets = {
   readonly ollamaApiKey: string | null
   /** Saved Groq key, or null. */
   readonly groqApiKey: string | null
-  /** Saved password of the email account, or null. */
+  /** Saved password of the person's email account, or null. */
   readonly emailPassword: string | null
+  /** Saved password of Lys's own email account, or null. */
+  readonly lysEmailPassword: string | null
 }
 
 /**
@@ -225,7 +231,8 @@ function buildSecretsSettings(
       "Ollama"
     ),
     groqApiKey: buildApiKey(groqApiKeySchema, secrets.groqApiKey, "Groq"),
-    emailPassword: buildEmailPassword(secrets.emailPassword)
+    emailPassword: buildEmailPassword(secrets.emailPassword),
+    lysEmailPassword: buildEmailPassword(secrets.lysEmailPassword)
   }
 }
 
@@ -606,8 +613,12 @@ export async function saveRuntimeAutoStartSettings(
 }
 
 /**
- * Persists the email account and its password together while preserving
- * everything else already on disk.
+ * Persists one mailbox's email account and its password together while
+ * preserving everything else already on disk, the other mailbox's account
+ * included.
+ * @param mailbox - Whose account it is: the person's, kept in `account`
+ * and `emailPassword`, or Lys's own, kept in `lysAccount` and
+ * `lysEmailPassword`.
  * @param account - Account to save, or null to remove the saved one.
  * @param password - Password of the account, or null to remove the saved
  * one; a secret.
@@ -624,16 +635,17 @@ export async function saveRuntimeAutoStartSettings(
  * group or each other's stale key.
  */
 export async function saveEmailAccountSettings(
+  mailbox: EmailMailbox,
   account: EmailAccount | null,
   password: EmailPassword | null
 ): Promise<void> {
   const persistedSettings = await loadSettings()
-  const secrets: SecretsSettings = {
-    ...persistedSettings.secrets,
-    emailPassword: password
-  }
-  const email: EmailSettings = { account }
-  await saveSettings({ ...persistedSettings, secrets, email })
+  await saveSettings(
+    buildEmailMailboxAccountSettings(persistedSettings, mailbox, {
+      account,
+      password
+    })
+  )
 }
 
 /**

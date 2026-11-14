@@ -5,6 +5,7 @@ import {
   LYSIPTERA_AGENT_CODE,
   type BuiltInAgent
 } from "@lys/share"
+import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 
 /**
  * System prompts of the built-in agents, each non-empty text without
@@ -18,6 +19,45 @@ export type BuiltInAgentPrompts = Readonly<{
   /** System prompt of Armitage, the tool keeper. */
   armitage: string
 }>
+
+/**
+ * Codes of the agents that are Lys herself, Caliginia and Lysiptera, whose
+ * email address is Lys's own.
+ */
+const LYS_AGENT_CODES: ReadonlySet<string> = new Set([
+  CALIGINIA_AGENT_CODE,
+  LYSIPTERA_AGENT_CODE
+])
+
+/**
+ * Answers whether an agent is Lys herself: Caliginia or Lysiptera, whose
+ * email address is that of Lys's own mailbox.
+ *
+ * @param code - Code of the agent.
+ * @returns True for Caliginia's and Lysiptera's codes; false for every other
+ * agent, Armitage included.
+ */
+export function isLysAgentCode(code: string): boolean {
+  return LYS_AGENT_CODES.has(code)
+}
+
+/**
+ * Lists the MCP tools a turn of an agent offers.
+ *
+ * @param agentCode - Code of the agent that answers the turn.
+ * @param tools - MCP tools found for the turn, in offer order.
+ * @returns The tools unchanged for Caliginia and Lysiptera; for any other
+ * agent, a frozen list without the tools only Lys may use, such as those of
+ * her own mailbox, so the agent is never offered them, Armitage never finds
+ * them for it, and nothing it reads names them.
+ */
+export function listAgentMcpTools(
+  agentCode: string,
+  tools: readonly TurnMcpTool[]
+): readonly TurnMcpTool[] {
+  if (isLysAgentCode(agentCode)) return tools
+  return Object.freeze(tools.filter((tool) => !tool.isLysOnly))
+}
 
 /**
  * Builds the agents the backend ships with, in the order clients list them.

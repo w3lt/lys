@@ -40,6 +40,7 @@ import {
   type EmailServerDraft,
   type EmailServerSide
 } from "@/lib/models/email-account-draft"
+import type { EmailMailbox } from "@/lib/models/email-mailbox"
 import {
   isEmailAccountCheckRunning,
   isEmailAccountSaved,
@@ -65,8 +66,12 @@ import { McpDraftProblemSummary } from "./McpDraftProblemSummary"
 
 /** Properties accepted by {@link EmailAccountCard}. */
 type EmailAccountCardProps = {
+  /** The mailbox the card saves: the person's own, or Lys's own. */
+  readonly mailbox: EmailMailbox
   /** Saved account, or null when none is saved. */
   readonly savedAccount: EmailAccount | null
+  /** The other mailbox's saved account, or null; this card may not open it. */
+  readonly otherAccount: EmailAccount | null
   /** Saved password, or null when none is saved; never shown. */
   readonly savedPassword: EmailPassword | null
   /** Latest save or removal, owned by the application store. */
@@ -86,6 +91,12 @@ type EmailAccountCardProps = {
   ) => Promise<EmailAccountSaveOutcome>
   /** Requests that the parent remove the saved account; same completion as a save. */
   readonly onRemoveEmailAccount: () => Promise<EmailAccountRemovalOutcome>
+  /** Whether the email server serves the mailbox. */
+  readonly isMailboxOn: boolean
+  /** Whether a save of the MCP servers runs, which the mailbox's switch waits for. */
+  readonly isMailboxSwitchSaving: boolean
+  /** Proposes serving the mailbox or not, which the parent saves. */
+  readonly onMailboxOnChange: (isOn: boolean) => void
 }
 
 /** Host of one field's input, which the card moves focus to. */
@@ -328,6 +339,18 @@ type EmailAccountFieldsProps = {
   readonly onDiscardEdit?: () => void
 }
 
+/** Properties accepted by {@link EmailMailboxSwitch}. */
+type EmailMailboxSwitchProps = {
+  /** Whether the email server serves the mailbox. */
+  readonly isOn: boolean
+  /** Whether the mailbox's account is saved, without which it cannot be switched on. */
+  readonly isAccountSaved: boolean
+  /** Whether a save of the MCP servers runs. */
+  readonly isSaving: boolean
+  /** Proposes serving the mailbox or not. */
+  readonly onIsOnChange: (isOn: boolean) => void
+}
+
 /** Properties accepted by {@link EmailAccountRemovalQuestion}. */
 type EmailAccountRemovalQuestionProps = {
   /** Whether a check, save, or removal runs, which disables both choices. */
@@ -468,7 +491,9 @@ type EmailAccountEditChange =
 /** Facts the card's edit is read against; all reactive. */
 type EmailAccountEditFacts = Pick<
   EmailAccountCardProps,
+  | "mailbox"
   | "savedAccount"
+  | "otherAccount"
   | "savedPassword"
   | "saveState"
   | "checkState"
@@ -516,6 +541,12 @@ type EmailAccountEditing = EmailAccountEditView & {
   /** Handles a submission of the card's form. */
   readonly handleSubmit: (event: FormEvent<HTMLFormElement>) => void
 }
+
+/** Heading of each mailbox's card. */
+const EMAIL_ACCOUNT_HEADINGS = Object.freeze({
+  person: "Your email account",
+  lys: "Lys's email account"
+} satisfies Readonly<Record<EmailMailbox, string>>)
 
 /** No problem shown, before the first save attempt or for a valid draft. */
 const NO_PROBLEMS: EmailAccountDraftProblems = Object.freeze({})
@@ -1226,6 +1257,49 @@ function EmailAccountFields({
 }
 
 /**
+ * Presents the switch that has the email server serve the mailbox, and,
+ * while the mailbox's account is not saved, that it must be first.
+ *
+ * @remarks The parent owns the switch and saves it; the component owns no
+ * state or effects. The switch can be used while it is on, so the mailbox
+ * can be switched off, or while the account is saved, and not while a save
+ * of the MCP servers runs. Its accessible name is its label; the card's
+ * heading names the mailbox.
+ * @param props - The switch, whether the account is saved, the save, and
+ * the proposal.
+ * @returns The switch row.
+ */
+function EmailMailboxSwitch({
+  isOn,
+  isAccountSaved,
+  isSaving,
+  onIsOnChange
+}: EmailMailboxSwitchProps): ReactElement {
+  /** Note while the account is not saved. */
+  const accountMissingNote = "Save this account first."
+
+  const noteId = useId()
+
+  return (
+    <div className="settings-view__email-switch-row">
+      <div className="settings-view__identity-lines">
+        <span className="settings-view__email-switch-label">
+          Use this mailbox
+        </span>
+        {isAccountSaved ? null : <p id={noteId}>{accountMissingNote}</p>}
+      </div>
+      <Switch
+        aria-describedby={isAccountSaved ? undefined : noteId}
+        aria-label="Use this mailbox"
+        checked={isOn}
+        disabled={isSaving || !(isOn || isAccountSaved)}
+        onCheckedChange={(checked) => onIsOnChange(checked)}
+      />
+    </div>
+  )
+}
+
+/**
  * Asks whether to remove the saved account.
  *
  * @remarks The footer owns both choices; the component owns no state. The
@@ -1243,7 +1317,7 @@ function EmailAccountRemovalQuestion({
 }: EmailAccountRemovalQuestionProps): ReactElement {
   /** Question asked before removing the account. */
   const emailAccountRemovalQuestion =
-    "Remove the email account and its password? The email server is switched off."
+    "Remove the email account and its password? This mailbox is switched off."
 
   const questionId = useId()
 
@@ -1733,13 +1807,11 @@ function buildEmailAccountEditReading(
   edit: EmailAccountEdit,
   facts: EmailAccountEditFacts
 ): EmailAccountEditReading {
-  const { savedAccount, saveState, checkState, isBackendRunning } = facts
-  const draft = edit.editedDraft ?? buildEmailAccountDraft(savedAccount)
-  const draftParse = parseEmailAccountDraft(
-    draft,
-    savedAccount,
-    facts.savedPassword
-  )
+  const { mailbox, savedAccount, saveState, checkState, isBackendRunning } =
+    facts
+  const draft =
+    edit.editedDraft ?? buildEmailAccountDraft(savedAccount, mailbox)
+  const draftParse = parseEmailAccountDraft(draft, facts)
   const hasSubmitted = hasTriedSave(edit.saveTry)
   const isBusy =
     isEmailAccountSaveRunning(saveState) ||
@@ -1748,7 +1820,11 @@ function buildEmailAccountEditReading(
   const message = formatEmailAccountMessage({
     savedAccount,
     draftParse,
-    isDraftDifferent: isEmailAccountDraftDifferent(draft, savedAccount),
+    isDraftDifferent: isEmailAccountDraftDifferent(
+      draft,
+      savedAccount,
+      mailbox
+    ),
     hasSubmitted,
     isEditedSinceSubmit: isEditedSinceTriedSave(edit),
     saveState,
@@ -1903,12 +1979,13 @@ function useEmailAccountEdit(
 }
 
 /**
- * Presents the email account card: its note, the address, names, and
- * password, the IMAP and SMTP servers, the Sent copy switch, the status
- * line, Save, and Remove account.
+ * Presents one mailbox's email account card: its heading, which names the
+ * mailbox, its note, the switch that has the email server serve the
+ * mailbox, the address, names, and password, the IMAP and SMTP servers, the
+ * Sent copy switch, the status line, Save, and Remove account.
  *
- * @remarks The application store owns the saved account and password, the
- * save, and the check. The card owns, through {@link useEmailAccountEdit},
+ * @remarks The application store owns the saved accounts and password, the
+ * mailbox's switch, the save, and the check. The card owns, through {@link useEmailAccountEdit},
  * the person's edit, which starts from the saved account, whether the
  * password is shown, which save was tried last and with which edit, and how
  * many saves the fields' problems rejected; its footer owns whether the
@@ -1918,7 +1995,10 @@ function useEmailAccountEdit(
  * while they all still hold what an empty card holds or the preset that
  * last filled them, which for the saved account is its address's preset,
  * also when the address is typed one character at a time; values the
- * person typed are never replaced. Problems show from the first Save on,
+ * person typed are never replaced. An empty card of Lys's mailbox starts
+ * with the display name `Lys`. An account that opens the other mailbox,
+ * by its address or by signing in alike, is a problem of the address or
+ * the user name. Problems show from the first Save on,
  * each under its input, and a rejected Save moves focus to the only input
  * with a problem or, when several have one, to a summary above the fields
  * that lists them, shown while two or more remain, whose buttons move
@@ -1935,28 +2015,26 @@ function useEmailAccountEdit(
  * discarded and focus moves to the address field, because Remove leaves.
  * The status line is a polite live region. Each field, and each server's
  * Security choice, states its rule beside its label before entry.
- * @param props - Saved account and password, save and check state, backend
- * status, and the requests.
+ * @param props - The mailbox, the saved accounts and password, the save
+ * and check state, the backend's status, the mailbox's switch, and the
+ * requests.
  * @returns The card.
  */
 export default function EmailAccountCard({
-  savedAccount,
-  savedPassword,
-  saveState,
-  checkState,
-  isBackendRunning,
   onSaveEmailAccount,
-  onRemoveEmailAccount
+  onRemoveEmailAccount,
+  isMailboxOn,
+  isMailboxSwitchSaving,
+  onMailboxOnChange,
+  ...facts
 }: EmailAccountCardProps): ReactElement {
   /** Note under the account card's heading. */
   const emailAccountNote =
     "Lys signs in to IMAP and SMTP before saving. Gmail, iCloud, Yahoo, and Fastmail need an app password."
 
   const headingId = useId()
-  const edit = useEmailAccountEdit(
-    { savedAccount, savedPassword, saveState, checkState, isBackendRunning },
-    onSaveEmailAccount
-  )
+  const { mailbox, savedAccount, savedPassword } = facts
+  const edit = useEmailAccountEdit(facts, onSaveEmailAccount)
   const focusHosts = useEmailFieldHosts(edit.rejectedSaveCount, edit.problems)
 
   /**
@@ -1975,9 +2053,15 @@ export default function EmailAccountCard({
       onSubmit={edit.handleSubmit}
     >
       <div className="settings-view__identity-lines">
-        <h3 id={headingId}>Email account</h3>
+        <h3 id={headingId}>{EMAIL_ACCOUNT_HEADINGS[mailbox]}</h3>
         <p>{emailAccountNote}</p>
       </div>
+      <EmailMailboxSwitch
+        isAccountSaved={savedAccount !== null}
+        isOn={isMailboxOn}
+        isSaving={isMailboxSwitchSaving}
+        onIsOnChange={onMailboxOnChange}
+      />
       <EmailAccountFields
         draft={edit.draft}
         fieldRefs={focusHosts.fieldRefs}

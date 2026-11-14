@@ -11,6 +11,7 @@ use serde::Serialize;
 
 use crate::email_id::EmailId;
 use crate::folders::FolderRole;
+use crate::mailbox::Mailbox;
 
 /// Why signing in to one mail server failed; the reasons the protocol's
 /// `emailServerCheckFailureSchema` lists.
@@ -281,8 +282,15 @@ pub enum ToolFailure {
     TimedOut,
     /// The client cancelled the call.
     Cancelled,
-    /// The id is not of the form `uid.uidvalidity.folder`.
-    InvalidId,
+    /// The id is not of the form `uid.uidvalidity.folder`, with `lys.`
+    /// before it in Lys's mailbox; it names the mailbox of the tool it was
+    /// given to.
+    InvalidId(Mailbox),
+    /// The id is valid but names a message of the person's mailbox, and
+    /// was given to one of Lys's tools. The person's tools refuse an id of
+    /// Lys's mailbox as `InvalidId`, so that nothing they answer names her
+    /// mailbox, which only Caliginia and Lysiptera are told of.
+    OtherMailboxId,
     /// The id's folder, UIDVALIDITY, or UID no longer matches.
     StaleId,
     /// No folder has the given name.
@@ -342,7 +350,8 @@ impl ToolFailure {
             | Self::StoppedWhileSaving { .. }
             | Self::TimedOut
             | Self::Cancelled
-            | Self::InvalidId
+            | Self::InvalidId(_)
+            | Self::OtherMailboxId
             | Self::StaleId
             | Self::FolderMissing(_)
             | Self::NoRoleFolder(_)
@@ -394,7 +403,8 @@ impl ToolFailure {
             Self::StoppedWhileSaving { stop, .. } => format!("{}-while-saving", stop.name()),
             Self::TimedOut => "timed-out".to_owned(),
             Self::Cancelled => "cancelled".to_owned(),
-            Self::InvalidId => "invalid-id".to_owned(),
+            Self::InvalidId(_) => "invalid-id".to_owned(),
+            Self::OtherMailboxId => "other-mailbox-id".to_owned(),
             Self::StaleId => "stale-id".to_owned(),
             Self::FolderMissing(_) => "folder-missing".to_owned(),
             Self::NoRoleFolder(role) => format!("no-{}-folder", role.name().to_ascii_lowercase()),
@@ -429,10 +439,6 @@ const UNCONFIRMED_DRAFT_ADVICE: &str = "search that folder before saving it agai
 impl fmt::Display for ToolFailure {
     /// Formats the failure as the sentence the model reads.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        /// The sentence of an id that is not a message id.
-        const INVALID_ID_SENTENCE: &str =
-            "That is not a message id. Use an id from search_emails, such as 12.345.INBOX.";
-
         /// The sentence of an id that no longer names its message.
         const STALE_ID_SENTENCE: &str = "That message id is no longer valid. Search again.";
 
@@ -462,7 +468,11 @@ impl fmt::Display for ToolFailure {
             }
             Self::TimedOut => format!("The call {}.", Stop::TimedOut.format_clause()),
             Self::Cancelled => format!("The call {}.", Stop::Cancelled.format_clause()),
-            Self::InvalidId => INVALID_ID_SENTENCE.to_owned(),
+            Self::InvalidId(mailbox) => format_invalid_id_sentence(*mailbox),
+            Self::OtherMailboxId => {
+                "This id is from the person's mailbox. Use the tools without lys_ for it."
+                    .to_owned()
+            }
             Self::StaleId => STALE_ID_SENTENCE.to_owned(),
             Self::FolderMissing(name) => format_folder_missing_sentence(name),
             Self::NoRoleFolder(role) => format_no_role_folder_sentence(*role),
@@ -485,6 +495,20 @@ impl fmt::Display for ToolFailure {
         };
         formatter.write_str(&sentence)
     }
+}
+
+/// Formats the sentence of a text that is not a message id, with an
+/// example id and the search tool of the mailbox it was given to.
+///
+/// # Arguments
+///
+/// * `mailbox` - The mailbox of the tool the text was given to.
+fn format_invalid_id_sentence(mailbox: Mailbox) -> String {
+    format!(
+        "That is not a message id. Use an id from {}search_emails, such as {}12.345.INBOX.",
+        mailbox.tool_prefix(),
+        mailbox.id_prefix()
+    )
 }
 
 /// Formats the sentence of a failed sign-in.
@@ -802,6 +826,39 @@ mod tests {
         }
     }
 
+    /// Each failure about which mailbox an id belongs to, with the class
+    /// the log gives it and the sentence the model reads.
+    fn build_mailbox_failures() -> [(ToolFailure, &'static str, &'static str); 3] {
+        [
+            (
+                ToolFailure::InvalidId(Mailbox::Person),
+                "invalid-id",
+                "That is not a message id. Use an id from search_emails, such as 12.345.INBOX.",
+            ),
+            (
+                ToolFailure::InvalidId(Mailbox::Lys),
+                "invalid-id",
+                "That is not a message id. Use an id from lys_search_emails, such as lys.12.345.INBOX.",
+            ),
+            (
+                ToolFailure::OtherMailboxId,
+                "other-mailbox-id",
+                "This id is from the person's mailbox. Use the tools without lys_ for it.",
+            ),
+        ]
+    }
+
+    /// Checks that an id that is not one and an id of the person's mailbox
+    /// given to Lys's tools each have their log class and the sentence the
+    /// model reads, which names the tools to use instead.
+    #[test]
+    fn tells_which_mailbox_an_id_belongs_to() {
+        for (failure, class, sentence) in build_mailbox_failures() {
+            assert_eq!(failure.class(), class);
+            assert_eq!(failure.to_string(), sentence);
+        }
+    }
+
     /// Checks that an IMAP refusal's sentence quotes the server's text
     /// while its log class names only the operation, and that a sign-in
     /// failure, a stale id, a missing attachment, and a missing Drafts
@@ -974,6 +1031,7 @@ mod tests {
     /// draft, and the sentence the model reads, which names that draft.
     fn build_replacing_unconfirmed_drafts() -> [(ToolFailure, &'static str, &'static str); 5] {
         let replaced = Some(EmailId {
+            mailbox: Mailbox::Person,
             uid: 1,
             uid_validity: 1003,
             folder: "Drafts".to_owned(),

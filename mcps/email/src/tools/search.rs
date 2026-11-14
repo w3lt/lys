@@ -9,10 +9,11 @@ use super::{
     MAXIMUM_TEXT_ARGUMENT_LENGTH, ToolContext, ToolReport, ToolResult,
     build_imap_failure_conversion, get_folder, load_folders, parse_text_argument,
 };
-use crate::email_id::EmailId;
+use crate::email_id::{EmailId, FolderPlace};
 use crate::failure::ToolFailure;
 use crate::folders::{Folder, FolderRole};
 use crate::imap::{Flags, FolderAccess, ImapSession, SearchWord, Summary, build_search_date};
+use crate::mailbox::Mailbox;
 use crate::message::{Headers, parse_headers};
 
 /// Most hits taken from one folder: the newest ones.
@@ -94,7 +95,12 @@ pub async fn run_search_emails(context: &ToolContext, arguments: SearchArguments
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
     let targets = list_search_folders(&folders, arguments.folder.as_deref())?;
-    let mut found = find_search_hits(&mut session, &targets, &criteria).await?;
+    let query = HitQuery {
+        mailbox: context.mailbox,
+        criteria: &criteria,
+        limit: FOLDER_HIT_LIMIT,
+    };
+    let mut found = find_search_hits(&mut session, &targets, query).await?;
     session.close().await;
     found.hits.sort_by(calculate_hit_order);
     build_search_report(&found, page, targets.len())
@@ -165,7 +171,8 @@ fn list_search_folders(folders: &[Folder], name: Option<&str>) -> Result<Vec<Fol
 ///
 /// * `session` - The signed-in session.
 /// * `targets` - The folders to search.
-/// * `criteria` - The search keys.
+/// * `query` - The search keys, how many hits each folder keeps, and the
+///   mailbox the hits' ids name.
 ///
 /// # Returns
 ///
@@ -176,14 +183,10 @@ fn list_search_folders(folders: &[Folder], name: Option<&str>) -> Result<Vec<Fol
 async fn find_search_hits(
     session: &mut ImapSession,
     targets: &[Folder],
-    criteria: &[SearchWord],
+    query: HitQuery<'_>,
 ) -> Result<SearchHits, ToolFailure> {
     let mut found = SearchHits::default();
     for folder in targets {
-        let query = HitQuery {
-            criteria,
-            limit: FOLDER_HIT_LIMIT,
-        };
         let (hits, cut) = list_folder_hits(session, folder, query).await?;
         found.hits.extend(hits);
         if cut {
@@ -274,10 +277,13 @@ fn format_search_heading(found: &SearchHits, page: usize, pages: usize) -> Strin
     text
 }
 
-/// What a folder is searched for: the search keys, and how many of the
-/// newest hits to keep.
+/// What a folder is searched for: the search keys, how many of the newest
+/// hits to keep, and the mailbox the folder is in, which the hits' ids
+/// name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HitQuery<'a> {
+    /// The mailbox the folder is in.
+    pub mailbox: Mailbox,
     /// The search keys.
     pub criteria: &'a [SearchWord],
     /// Most hits to keep: the newest by UID.
@@ -290,7 +296,7 @@ pub struct HitQuery<'a> {
 ///
 /// * `session` - The signed-in session.
 /// * `folder` - The folder, which must be selectable.
-/// * `query` - The search keys and how many hits to keep.
+/// * `query` - The search keys, how many hits to keep, and the mailbox.
 ///
 /// # Returns
 ///
@@ -303,7 +309,11 @@ pub async fn list_folder_hits(
     folder: &Folder,
     query: HitQuery<'_>,
 ) -> Result<(Vec<Hit>, bool), ToolFailure> {
-    let HitQuery { criteria, limit } = query;
+    let HitQuery {
+        mailbox,
+        criteria,
+        limit,
+    } = query;
     let selected = session
         .open_folder(&folder.raw_name, FolderAccess::Read)
         .await
@@ -318,9 +328,14 @@ pub async fn list_folder_hits(
         .list_summaries(&newest)
         .await
         .map_err(build_imap_failure_conversion("fetch the message summaries"))?;
+    let place = FolderPlace {
+        mailbox,
+        folder: &folder.name,
+        uid_validity: selected.uid_validity,
+    };
     let hits = summaries
         .into_iter()
-        .map(|summary| build_hit(summary, folder, selected.uid_validity))
+        .map(|summary| build_hit(summary, &place))
         .collect();
     Ok((hits, cut))
 }
@@ -330,9 +345,8 @@ pub async fn list_folder_hits(
 /// # Arguments
 ///
 /// * `summary` - The summary the server answered.
-/// * `folder` - The folder it was found in.
-/// * `uid_validity` - The folder's UIDVALIDITY when it was selected.
-fn build_hit(summary: Summary, folder: &Folder, uid_validity: u32) -> Hit {
+/// * `place` - The folder it was found in, as it was selected.
+fn build_hit(summary: Summary, place: &FolderPlace<'_>) -> Hit {
     let headers = parse_headers(&summary.header);
     let timestamp = headers
         .timestamp
@@ -344,11 +358,7 @@ fn build_hit(summary: Summary, folder: &Folder, uid_validity: u32) -> Hit {
         .or(summary.internal_date)
         .unwrap_or_else(|| "unknown".to_owned());
     Hit {
-        id: EmailId {
-            uid: summary.uid,
-            uid_validity,
-            folder: folder.name.clone(),
-        },
+        id: place.build_id(summary.uid),
         flags: summary.flags,
         headers,
         timestamp,
@@ -626,6 +636,7 @@ mod tests {
     fn build_hit(uid: u32, timestamp: i64) -> Hit {
         Hit {
             id: EmailId {
+                mailbox: Mailbox::Person,
                 uid,
                 uid_validity: 7,
                 folder: "INBOX".to_owned(),

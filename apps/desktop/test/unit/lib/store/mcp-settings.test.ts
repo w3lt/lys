@@ -20,6 +20,7 @@ import {
 } from "../../support/settlement"
 import {
   EMAIL_ON_SETTINGS,
+  LYS_MAILBOX_ON_SETTINGS,
   STORED_MCP_SETTINGS,
   STORED_SETTINGS,
   STORED_SETTINGS_DOCUMENT
@@ -72,15 +73,17 @@ const SERVERS_PAST_GROUP_LIMIT = Object.freeze(
 )
 
 /**
- * Creates a store holding the stored settings, with two saved servers.
+ * Creates a store holding settings with two saved servers.
  *
+ * @param settings - Settings the store starts with; the stored settings,
+ * which save the person's account and no account of Lys's, by default.
  * @returns A store owning one MCP settings slice, whose saves run through
  * the application's settings-group saves over the native host.
  */
-function createMcpStore() {
+function createMcpStore(settings: LysSettings = STORED_SETTINGS) {
   const settingsGroupSaves = createSettingsGroupSaves()
   return createStore<McpStore>()((set, get) => ({
-    settings: STORED_SETTINGS,
+    settings,
     ...createMcpSettingsSlice(set, get, {
       saveMcpSettings: settingsGroupSaves.saveMcpSettings
     })
@@ -255,7 +258,7 @@ describe("createMcpSettingsSlice", () => {
 
     expect(store.getState().settings.mcp).toEqual({
       servers: [ADDED_SERVER],
-      builtIn: { email: { enabled: true } }
+      builtIn: { email: { enabled: true, lysEnabled: false } }
     })
     expect(listSettingsWrites(host.commands)).toEqual([
       {
@@ -263,7 +266,7 @@ describe("createMcpSettingsSlice", () => {
           ...STORED_SETTINGS_DOCUMENT,
           mcp: {
             servers: [ADDED_SERVER],
-            builtIn: { email: { enabled: true } }
+            builtIn: { email: { enabled: true, lysEnabled: false } }
           }
         }
       }
@@ -285,7 +288,7 @@ describe("createMcpSettingsSlice", () => {
       expect(whileWriting.settings.mcp).toEqual(STORED_MCP_SETTINGS)
       expect(store.getState().settings.mcp).toEqual({
         servers: STORED_MCP_SETTINGS.servers,
-        builtIn: { email: { enabled: true } }
+        builtIn: { email: { enabled: true, lysEnabled: false } }
       })
       expect(listSettingsWrites(host.commands)).toEqual([
         {
@@ -293,7 +296,7 @@ describe("createMcpSettingsSlice", () => {
             ...STORED_SETTINGS_DOCUMENT,
             mcp: {
               servers: STORED_MCP_SETTINGS.servers,
-              builtIn: { email: { enabled: true } }
+              builtIn: { email: { enabled: true, lysEnabled: false } }
             }
           }
         }
@@ -316,6 +319,40 @@ describe("createMcpSettingsSlice", () => {
       expect(store.getState().settings.mcp).toEqual(STORED_MCP_SETTINGS)
     })
 
+    it.each([
+      {
+        label: "on, with only the person's account saved",
+        settings: STORED_SETTINGS,
+        isOn: true,
+        email: { enabled: true, lysEnabled: false }
+      },
+      {
+        label: "on, with both accounts saved",
+        settings: LYS_MAILBOX_ON_SETTINGS,
+        isOn: true,
+        email: { enabled: true, lysEnabled: true }
+      },
+      {
+        label: "off",
+        settings: LYS_MAILBOX_ON_SETTINGS,
+        isOn: false,
+        email: { enabled: false, lysEnabled: false }
+      }
+    ] as const)(
+      "switches the email server $label, as each mailbox's switch",
+      async ({ settings, isOn, email }) => {
+        startNativeHostFake({
+          load_settings: () => STORED_SETTINGS_DOCUMENT,
+          save_settings: () => null
+        })
+        const store = createMcpStore(settings)
+
+        await store.getState().saveBuiltInMcpServerSwitch("email", isOn)
+
+        expect(store.getState().settings.mcp.builtIn.email).toEqual(email)
+      }
+    )
+
     it("answers busy without writing while a save of the added servers runs", async () => {
       const { host, writes } = startControlledSettingsHost()
       const store = createMcpStore()
@@ -333,6 +370,29 @@ describe("createMcpSettingsSlice", () => {
       expect(store.getState().settings.mcp.builtIn).toEqual(
         STORED_MCP_SETTINGS.builtIn
       )
+    })
+  })
+
+  describe("saveEmailMailboxSwitch", () => {
+    it("saves one mailbox's switch, keeping the other's and the added servers", async () => {
+      const host = startNativeHostFake({
+        load_settings: () => STORED_SETTINGS_DOCUMENT,
+        save_settings: () => null
+      })
+      const store = createMcpStore(LYS_MAILBOX_ON_SETTINGS)
+
+      await expect(
+        store.getState().saveEmailMailboxSwitch("person", true)
+      ).resolves.toBe("saved")
+      const afterPersonOn = store.getState().settings.mcp.builtIn.email
+      await store.getState().saveEmailMailboxSwitch("lys", false)
+
+      expect(afterPersonOn).toEqual({ enabled: true, lysEnabled: true })
+      expect(store.getState().settings.mcp).toEqual({
+        servers: STORED_MCP_SETTINGS.servers,
+        builtIn: { email: { enabled: true, lysEnabled: false } }
+      })
+      expect(listSettingsWrites(host.commands)).toHaveLength(2)
     })
   })
 })

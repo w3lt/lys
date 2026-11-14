@@ -125,10 +125,15 @@ export type SecretsSettings = {
   /** Saved Groq API key, or null when none is saved; a secret. */
   readonly groqApiKey: GroqApiKey | null
   /**
-   * Password of the saved email account, or null when none is saved; a
-   * secret. Saved and removed together with the account.
+   * Password of the person's saved email account, or null when none is
+   * saved; a secret. Saved and removed together with the account.
    */
   readonly emailPassword: EmailPassword | null
+  /**
+   * Password of Lys's own saved email account, or null when none is saved;
+   * a secret. Saved and removed together with that account.
+   */
+  readonly lysEmailPassword: EmailPassword | null
 }
 
 /**
@@ -238,16 +243,18 @@ export type LysSettings = {
    */
   mcp: McpSettings
   /**
-   * The email account the built-in email server works with, as the shared
-   * `email` group schema validates it, or none.
+   * The email accounts the built-in email server works with, the person's
+   * and Lys's own, as the shared `email` group schema validates them, each
+   * or none.
    *
    * @remarks Rust validates the group on load with the same rules, and the
-   * Tauri settings adapter parses it again with the shared schema. The group
-   * is saved, together with the password in the secrets group, only by Save
-   * or Remove account on the MCP pane's email server; the backend reads it
-   * from the settings file each time it starts the email server. The account
-   * is personal data: the renderer never logs it, and sends it only to the
-   * backend's account check and the Tauri settings commands.
+   * Tauri settings adapter parses it again with the shared schema. Each
+   * account is saved, together with its password in the secrets group, only
+   * by Save or Remove account on its card under the MCP pane's email server;
+   * the backend reads the group from the settings file each time it starts
+   * the email server. The accounts are personal data: the renderer never
+   * logs them, and sends them only to the backend's account check and the
+   * Tauri settings commands.
    */
   email: EmailSettings
 }
@@ -281,7 +288,8 @@ const INITIAL_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
   tavilyApiKey: null,
   ollamaApiKey: null,
   groqApiKey: null,
-  emailPassword: null
+  emailPassword: null,
+  lysEmailPassword: null
 })
 
 /**
@@ -318,9 +326,9 @@ const INITIAL_LOCATION_SETTINGS: LocationSettings = Object.freeze({
 /** Added MCP servers of a first-run settings file: none. */
 const NO_ADDED_MCP_SERVERS: McpSettings["servers"] = Object.freeze([])
 
-/** The email server's switch in a first-run settings file: off. */
+/** The email server's mailbox switches in a first-run settings file: off. */
 const INITIAL_EMAIL_SERVER_SWITCH: McpSettings["builtIn"]["email"] =
-  Object.freeze({ enabled: false })
+  Object.freeze({ enabled: false, lysEnabled: false })
 
 /** Switches of the MCP servers Lys ships in a first-run settings file. */
 const INITIAL_BUILT_IN_MCP_SWITCHES: McpSettings["builtIn"] = Object.freeze({
@@ -337,10 +345,13 @@ const INITIAL_MCP_SETTINGS: McpSettings = Object.freeze({
 })
 
 /**
- * Email account shown before Tauri initialization completes: none, as in a
+ * Email accounts shown before Tauri initialization completes: none, as in a
  * first-run settings file.
  */
-const INITIAL_EMAIL_SETTINGS: EmailSettings = Object.freeze({ account: null })
+const INITIAL_EMAIL_SETTINGS: EmailSettings = Object.freeze({
+  account: null,
+  lysAccount: null
+})
 
 /**
  * Renderer-side fallback settings used before Tauri initialization completes.

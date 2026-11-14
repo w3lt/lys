@@ -207,7 +207,7 @@ Command::new("pnpm")
 Both children run in their own process group, with `LYS_HOME` set to the Lys
 home the host resolved, so the backend uses the same directory as the host.
 Both also receive `LYS_EMAIL_SERVER_PATH`, the email MCP server the backend
-starts once the person switches it on and runs for each account check: the
+starts once the person switches a mailbox on and runs for each account check: the
 workspace build `mcps/email/target/debug/email` in the checkout recorded at
 compile time for a development build, and `$LYS_HOME/runtime/email/email`
 for a release build. The host never starts that server itself and does not
@@ -324,7 +324,8 @@ The host creates the following defaults when the settings file is missing:
     "tavilyApiKey": null,
     "ollamaApiKey": null,
     "groqApiKey": null,
-    "emailPassword": null
+    "emailPassword": null,
+    "lysEmailPassword": null
   },
   "providers": {
     "active": "lmStudio",
@@ -343,11 +344,12 @@ The host creates the following defaults when the settings file is missing:
   "mcp": {
     "servers": [],
     "builtIn": {
-      "email": { "enabled": false }
+      "email": { "enabled": false, "lysEnabled": false }
     }
   },
   "email": {
-    "account": null
+    "account": null,
+    "lysAccount": null
   }
 }
 ```
@@ -355,7 +357,7 @@ The host creates the following defaults when the settings file is missing:
 Only the Rust host writes this file. The React UI reaches it through Tauri
 `invoke` calls, and the backend reads it for the Tavily API key of
 `web_search`, the tools on Just run, the MCP servers with their switches, and
-the email account with its password. Every write, including the defaults of a missing file, goes to a
+the email accounts with their passwords. Every write, including the defaults of a missing file, goes to a
 new temporary file beside it, created with mode `0600` on Unix and flushed to
 disk, which is then renamed over the file. The temporary file's name holds the
 process id and a per-process number, so no two saves share one, and creating
@@ -380,10 +382,10 @@ stopped. A missing group takes its defaults.
 
 The `secrets` group holds the Tavily, Ollama, and Groq API keys as plain
 text, validated on load (1 to 256 visible ASCII characters), and
-`emailPassword`, the password of the saved email account, 1 to 1,024
-characters without a control character, spaces kept; an invalid key or
-password makes loading fail. Its `Debug` output never shows a key or the
-password.
+`emailPassword` and `lysEmailPassword`, the passwords of the person's and
+Lys's saved email accounts, each 1 to 1,024 characters without a control
+character, spaces kept; an invalid key or password makes loading fail. Its
+`Debug` output never shows a key or a password.
 
 The `location` group holds the location the person typed, validated on load:
 each part is `null` or 1 to 100 characters with no control character and no
@@ -398,7 +400,8 @@ check; the [configuration reference](/reference/configuration/#mcp-servers)
 lists them. A missing group or a missing `servers` list means no server. Each
 server has a switch, `enabled`, on when the file omits it, and the group's
 `builtIn` object holds the switch of each server Lys ships, today `email`,
-off when the file omits it; a `null` object or switch, a built-in name the
+whose two switches, `enabled` and `lysEnabled`, serve the person's mailbox
+and Lys's own, each off when the file omits it; a `null` object or switch, a built-in name the
 build does not know, or a switch that is not `true` or `false` makes loading
 fail. A
 `null` group, an unknown field, a field of the other transport, more than 16
@@ -414,18 +417,23 @@ switch; and the built-in switches. It never shows an argument, a value, or a
 query. The host only stores the group; the backend starts or reaches the
 servers.
 
-The `email` group holds the one email account the person saved on the MCP
-pane's email server (`src/settings/email.rs`), or `null`, validated on load
-with the rules of `emailSettingsSchema` in `@lys/share`, which the renderer
-and the backend also check; the
-[configuration reference](/reference/configuration/#email-account) lists
-them. A missing group or a missing `account` field means no account. A
-`null` group, an unknown field, or a broken rule makes loading fail, and an
-error about the account names the rule without quoting a value; an error
-about the group itself can quote the value. The account is personal data:
-`Debug` output shows placeholders for the address, the names, and the mail
-servers' hosts. The password is not in this group but in `secrets`, and the
-host only stores both; the backend starts the email server with them.
+The `email` group holds the two email accounts saved on the MCP pane's email
+server (`src/settings/email.rs`), the person's as `account` and Lys's own as
+`lysAccount`, each or `null`, validated on load with the rules of
+`emailSettingsSchema` in `@lys/share`, which the renderer and the backend also
+check; the [configuration reference](/reference/configuration/#email-account)
+lists them. A missing group or a missing field means no account. A `null`
+group, an unknown field, or a broken rule makes loading fail, and an error
+about an account names the rule without quoting a value; an error about the
+group itself can quote the value. The two accounts must not open one
+mailbox: the same address, ignoring case, or the same user name on the same
+IMAP host and port, ignoring the case of the user name and the host, makes
+loading and saving fail with an error that says so without quoting either
+account, because Lys's tools, which the person may put on Just run, would
+then read the person's mailbox. The accounts are personal data:
+`Debug` output shows placeholders for the addresses, the names, and the mail
+servers' hosts. The passwords are not in this group but in `secrets`, and the
+host only stores them; the backend starts the email server with them.
 
 The host only stores the `loadConfiguration` group. A settings file written
 before load configurations existed has no such group; `load_settings` reads it
@@ -439,9 +447,10 @@ configuration edits are saved the same way, and so are each tool's switch and
 its Ask me or Just run choice, the Tavily API key when the person saves or
 removes it in the Secrets pane, the location when the person saves it in
 the Tools pane, the MCP servers when the person saves or removes one in the
-MCP pane, each server's switch when the person flips it there, and the email
-account with its password, in one write of both groups, when the person
-saves or removes it on the email server's card. A change of either startup switch in the Runtime pane saves
+MCP pane, each server's switch and each email mailbox's switch when the
+person flips it there, and an email account with its password, in one write
+of both groups that keeps the other account and its password, when the
+person saves or removes it on its card under the email server. A change of either startup switch in the Runtime pane saves
 `autoStartBackend` and `autoStartVmo` and keeps the rest of the `runtime`
 group as stored; a file without `autoStartVmo` loads it as `true`. The other
 runtime edits in the UI remain session-only; the automatic saves preserve

@@ -11,6 +11,24 @@ const SERVER_NAME = "notes"
 const EMPTY_INPUT_SCHEMA = Object.freeze({ type: "object" })
 
 /**
+ * Annotations the email server Lys ships gives a read, a send, and a
+ * deletion, the same on each mailbox's copy of the tool.
+ */
+const EMAIL_TOOL_ANNOTATIONS = Object.freeze({
+  search_emails: { readOnlyHint: true, openWorldHint: true },
+  send_email: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    openWorldHint: true
+  },
+  delete_draft: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    openWorldHint: true
+  }
+})
+
+/**
  * Builds the catalog of tools added one at a time, as the tool list reader
  * adds them.
  *
@@ -161,6 +179,27 @@ describe("McpToolCatalogBuilder", async () => {
       )
     }
   )
+
+  it("names the sends and deletions of both email mailboxes as asking, each by its own name", () => {
+    const builder = new McpToolCatalogBuilder("email")
+    for (const prefix of ["", "lys_"])
+      for (const [name, annotations] of Object.entries(EMAIL_TOOL_ANNOTATIONS))
+        builder.addTool({ ...buildTool(`${prefix}${name}`), annotations })
+
+    const catalog = builder.build()
+
+    expect(catalog.openWorldWriteToolNames).toEqual(
+      new Set([
+        "mcp__email__send_email",
+        "mcp__email__delete_draft",
+        "mcp__email__lys_send_email",
+        "mcp__email__lys_delete_draft"
+      ])
+    )
+    expect(catalog.destructiveToolNames).toEqual(
+      new Set(["mcp__email__delete_draft", "mcp__email__lys_delete_draft"])
+    )
+  })
 
   it("never names a skipped tool as destructive", () => {
     const catalog = buildCatalog([

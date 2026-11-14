@@ -36,9 +36,10 @@ export const MAXIMUM_MCP_SERVER_NAME_LENGTH = 20
 
 /**
  * Names of the MCP servers Lys ships, in the order Settings lists them:
- * `email`, the server that reads and sends the person's email.
+ * `email`, the server that reads and sends the person's email and Lys's
+ * own.
  *
- * @remarks Each has its own switch in the `mcp` settings group's
+ * @remarks Each has its own switches in the `mcp` settings group's
  * `builtIn` field and is never counted toward
  * {@link MAXIMUM_MCP_SERVER_COUNT}. Adding one is a compatibility change
  * for the settings file and for every consumer that branches on the names.
@@ -513,40 +514,59 @@ function calculateServersBytesWithoutSwitches(
 }
 
 /**
- * Validates the switch of one MCP server Lys ships. The output is frozen;
- * unknown fields are rejected.
+ * Validates the switches of the email server's mailboxes: the person's and
+ * Lys's own. The output is frozen; unknown fields are rejected.
  *
- * @remarks An omitted switch is off: a built-in server runs only once the
- * person switched it on.
+ * @remarks An omitted switch is off: a mailbox is served only once the
+ * person switched it on, and the server runs while either is on. `enabled`
+ * keeps the name of the server's one switch from before Lys had a mailbox,
+ * so a settings file written then keeps its meaning.
  */
-const builtInMcpServerSettingsSchema = z
+const emailMcpServerSettingsSchema = z
   .strictObject({
-    /** Whether Lys starts the server; omitted means off. */
-    enabled: z.boolean().default(false)
+    /** Whether the server serves the person's mailbox; omitted means off. */
+    enabled: z.boolean().default(false),
+    /** Whether the server serves Lys's own mailbox; omitted means off. */
+    lysEnabled: z.boolean().default(false)
   })
   .readonly()
 
-/** The switch of a built-in server the settings leave out, which is off. */
-const NO_BUILT_IN_SERVER_SWITCH: z.input<
-  typeof builtInMcpServerSettingsSchema
-> = Object.freeze({})
+/** The switches of an email server the settings leave out, which are off. */
+const NO_EMAIL_SERVER_SWITCHES: z.input<typeof emailMcpServerSettingsSchema> =
+  Object.freeze({})
 
 /**
  * Validates the switches of the MCP servers Lys ships, one field per name
  * in {@link BUILT_IN_MCP_SERVER_NAMES}. The output is frozen; unknown
  * fields are rejected.
  *
- * @remarks An omitted server is off.
+ * @remarks An omitted server has every switch off.
  */
 const builtInMcpSettingsSchema = z
   .strictObject({
-    /** The email server's switch. */
-    email: builtInMcpServerSettingsSchema.prefault(NO_BUILT_IN_SERVER_SWITCH)
+    /** The email server's mailbox switches. */
+    email: emailMcpServerSettingsSchema.prefault(NO_EMAIL_SERVER_SWITCHES)
   })
   .readonly()
 
 /** Switches of the MCP servers Lys ships. */
 export type BuiltInMcpSettings = z.infer<typeof builtInMcpSettingsSchema>
+
+/**
+ * Answers whether a server Lys ships is switched on: for `email`, whether
+ * either mailbox is.
+ *
+ * @param builtIn - The switches of the servers Lys ships.
+ * @param name - Name of the server.
+ * @returns True when Lys starts the server.
+ */
+export function isBuiltInMcpServerOn(
+  builtIn: BuiltInMcpSettings,
+  name: BuiltInMcpServerName
+): boolean {
+  const switches = builtIn[name]
+  return switches.enabled || switches.lysEnabled
+}
 
 /** The switches of an `mcp` group that has none, which are all off. */
 const NO_BUILT_IN_SWITCHES: z.input<typeof builtInMcpSettingsSchema> =

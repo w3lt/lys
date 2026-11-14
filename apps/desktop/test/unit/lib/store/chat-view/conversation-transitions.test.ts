@@ -107,6 +107,9 @@ function buildChatViewConversation(
 ): ChatViewConversation {
   return Object.freeze({
     ...buildConversationMetadata(FIXTURE_CONVERSATION_ID, null),
+    parentConversationId: null,
+    jobNumber: null,
+    delegatorAgentCode: null,
     messages: Object.freeze([...messages]),
     sources: Object.freeze([...sources]),
     jobs: Object.freeze([...jobs])

@@ -3,6 +3,7 @@ import * as z from "zod"
 import {
   conversationAssistantMessageSchema,
   jobReportSchema,
+  jobSchema,
   type JobReport
 } from "@lys/share"
 import type { DatabaseStatementCompiler } from "../databaseTransactions"
@@ -143,11 +144,11 @@ export function createInterruptedJobReports(
    */
   const streamingJobReplySchema = z.strictObject({
     /** Identity of the job: its conversation. */
-    jobId: jobReportSchema.shape.jobId,
+    jobId: jobSchema.shape.id,
     /** Identity of the reply. */
     replyId: conversationAssistantMessageSchema.shape.id,
     /** The job's title as it is now, which the report carries. */
-    title: jobReportSchema.shape.title
+    title: jobSchema.shape.title
   })
 
   const replies = statements

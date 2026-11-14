@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import * as z from "zod"
 import {
   DELEGATE_WORK_TOOL_NAME,
+  jobReportSchema,
   type ConversationAttachment,
   type ConversationMetadata,
   type ConversationSource,
@@ -630,13 +631,14 @@ export function saveReport(
  * @param row - The row as it is stored.
  * @param jobNumber - Number the job was stored with.
  * @returns The expected report: the row's own values with the number and the
- * agent of its job.
+ * agent of its job, validated by the shared schema.
+ * @throws If the row's values violate the report contract.
  */
 export function buildExpectedReport(
   row: JobReportRowFixture,
   jobNumber: number
 ): JobReport {
-  return {
+  return jobReportSchema.parse({
     id: row.id,
     jobId: row.jobId,
     jobNumber,
@@ -646,7 +648,7 @@ export function buildExpectedReport(
     content: row.content,
     sourceNumbers: row.sourceNumbers,
     createdAt: row.createdAt
-  }
+  })
 }
 
 /**
@@ -1220,6 +1222,17 @@ function registerJobReadCases(
       z.ZodError
     )
   })
+
+  it("rejects a stored job that has jobs of its own", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const job = saveJob(harness, createJobFixture(mainId, 1, "completed"))
+    saveJob(harness, createJobFixture(job.id, 2, "completed"))
+
+    expect(() => harness.recordReader.findConversation(job.id)).toThrow(
+      z.ZodError
+    )
+  })
 }
 
 /**
@@ -1367,6 +1380,33 @@ function registerDeliveredReportReadCases(
       z.ZodError
     )
   })
+
+  it.each([
+    ["a stopped report with text", "stopped", "They eat wool.", []],
+    ["an interrupted report with text", "interrupted", "They eat wool.", []],
+    ["a report citing its sources out of order", "result", "Wool.", [5, 2]],
+    ["a report citing a source twice", "result", "Wool.", [2, 2]]
+  ] as const)(
+    "rejects %s, which the report contract refuses",
+    (_label, kind, content, sourceNumbers) => {
+      const harness = createHarness()
+      const mainId = saveMainConversation(harness, 1)
+      const job = saveJob(harness, createJobFixture(mainId, 1, "completed"))
+      saveReport(harness, job, {
+        sequence: 200,
+        kind,
+        title: "Job 1",
+        content,
+        createdAt: createFixtureTimestamp(1, 5),
+        sourceNumbers,
+        deliveredMessageId: saveFollowUpMessage(harness, mainId, 300)
+      })
+
+      expect(() => harness.recordReader.findConversation(mainId)).toThrow(
+        z.ZodError
+      )
+    }
+  )
 }
 
 /**

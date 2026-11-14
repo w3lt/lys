@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
-import type { ConversationSource, JobReport } from "@lys/share"
+import type { ConversationSource } from "@lys/share"
 import SourceCatalog from "../../../../src/modules/agent/sourceCatalog"
 import { createConversationTurn } from "../../../../src/modules/conversation/createTurn"
 import type {
@@ -738,19 +738,22 @@ describe("createConversationTurn", () => {
     expect(listUserMessageReports(records, mainId).at(-1)).toEqual(delivered)
   })
 
-  it.each(["note", "result", "failed", "stopped", "interrupted"] as const)(
-    "delivers an undelivered %s report",
-    (kind) => {
-      const records = openSqliteConversationRecords()
-      const mainId = saveMainConversation(records, 1)
-      const job = saveJob(records, createJobFixture(mainId, 1, "interrupted"))
-      const row = saveReport(records, job, { ...RESULT_REPORT, kind })
+  it.each([
+    ["note", "Looking"],
+    ["result", "They eat wool."],
+    ["failed", "The page could not be read."],
+    ["stopped", ""],
+    ["interrupted", ""]
+  ] as const)("delivers an undelivered %s report", (kind, content) => {
+    const records = openSqliteConversationRecords()
+    const mainId = saveMainConversation(records, 1)
+    const job = saveJob(records, createJobFixture(mainId, 1, "interrupted"))
+    const row = saveReport(records, job, { ...RESULT_REPORT, kind, content })
 
-      const turn = createPersonTurn(records, mainId, "Any news?")
+    const turn = createPersonTurn(records, mainId, "Any news?")
 
-      expect(turn.userMessage.reports).toEqual([buildExpectedReport(row, 1)])
-    }
-  )
+    expect(turn.userMessage.reports).toEqual([buildExpectedReport(row, 1)])
+  })
 
   it("delivers a report once: the next turn's user message carries none", () => {
     const records = openSqliteConversationRecords()
@@ -816,11 +819,10 @@ describe("createConversationTurn", () => {
 
     const turn = createPersonTurn(records, mainId, "Any news?")
 
-    const delivered: JobReport = {
-      ...buildExpectedReport(row, 1),
-      content: "They eat wool [2].",
-      sourceNumbers: [2]
-    }
+    const delivered = buildExpectedReport(
+      { ...row, content: "They eat wool [2].", sourceNumbers: [2] },
+      1
+    )
     expect(turn.userMessage.reports).toEqual([delivered])
     expect(records.recordReader.findConversation(mainId)?.sources).toEqual([
       MOTHS_PAGE,
@@ -868,11 +870,14 @@ describe("createConversationTurn", () => {
 
     const turn = createPersonTurn(records, mainId, "Any news?")
 
-    const delivered: JobReport = {
-      ...buildExpectedReport(row, 1),
-      content: "Wool [1], silk [3], and wool again [1].",
-      sourceNumbers: [1, 3]
-    }
+    const delivered = buildExpectedReport(
+      {
+        ...row,
+        content: "Wool [1], silk [3], and wool again [1].",
+        sourceNumbers: [1, 3]
+      },
+      1
+    )
     expect(listUserMessageReports(records, mainId).at(-1)).toEqual([delivered])
     expect(turn.userMessage.reports).toEqual([delivered])
   })

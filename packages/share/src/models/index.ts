@@ -51,6 +51,7 @@ export {
 export {
   CITATION_MARKER_PATTERN,
   conversationAssistantMessageSchema,
+  conversationBaseSchema,
   conversationMessageOriginSchema,
   conversationMessageSchema,
   conversationMetadataSchema,

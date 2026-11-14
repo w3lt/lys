@@ -7,7 +7,11 @@ import {
   type ChatBackendToolUnavailableProblem,
   type ChatImageNeedsVisionProblem
 } from "@lys/protocol"
-import type { Conversation, ToolDefinition } from "@lys/share"
+import type {
+  Conversation,
+  ConversationMetadata,
+  ToolDefinition
+} from "@lys/share"
 import type { FastifyInstance } from "fastify"
 import { v7 as uuidv7 } from "uuid"
 import type Agent from "../../agent/agent"
@@ -728,6 +732,30 @@ function buildTurnSettings(
 }
 
 /**
+ * Builds the metadata of a stored conversation: the conversation without its
+ * messages, sources, and jobs, in the same variant.
+ *
+ * @param conversation - Stored conversation snapshot.
+ * @returns Its identity, title, agent, and times, with its parent, job
+ * number, and delegator, which a main conversation has none of.
+ */
+function buildConversationMetadata(
+  conversation: Conversation
+): ConversationMetadata {
+  const { id, title, agentCode, createdAt, updatedAt } = conversation
+  const fields = { id, title, agentCode, createdAt, updatedAt }
+  if (conversation.parentConversationId === null)
+    return {
+      ...fields,
+      parentConversationId: null,
+      jobNumber: null,
+      delegatorAgentCode: null
+    }
+  const { parentConversationId, jobNumber, delegatorAgentCode } = conversation
+  return { ...fields, parentConversationId, jobNumber, delegatorAgentCode }
+}
+
+/**
  * Builds the events that open a turn's stream.
  *
  * @param turn - Stored pair and conversation snapshot.
@@ -739,21 +767,10 @@ function buildTurnSettings(
 function buildTurnStartEvents(turn: ConversationTurn): ChatApiStreamEvent[] {
   const { userMessage, assistantMessage } = turn
   if (turn.isNewConversation) {
-    const stored = turn.conversation
-    const conversation = {
-      id: stored.id,
-      title: stored.title,
-      agentCode: stored.agentCode,
-      parentConversationId: stored.parentConversationId,
-      jobNumber: stored.jobNumber,
-      delegatorAgentCode: stored.delegatorAgentCode,
-      createdAt: stored.createdAt,
-      updatedAt: stored.updatedAt
-    }
     return [
       {
         type: "start-new-conversation-turn",
-        conversation,
+        conversation: buildConversationMetadata(turn.conversation),
         userMessage,
         assistantMessage
       }

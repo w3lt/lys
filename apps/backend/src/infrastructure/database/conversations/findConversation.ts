@@ -7,6 +7,7 @@ import { listConversationJobs } from "../delegation/jobs"
 import {
   conversationMetadataSchema,
   conversationMessageSchema,
+  conversationSchema,
   conversationSourceSchema,
   isAnsweredToolCallStatus,
   replyPartSchema,
@@ -280,7 +281,8 @@ function listConversationSources(
  * @returns Independent conversation data of a main conversation or a job,
  * with the jobs started from it in number order, or undefined when absent.
  * Reading it never touches the attachment files.
- * @throws If SQLite access or persisted validation fails.
+ * @throws If SQLite access or persisted validation fails, a job that has
+ * jobs of its own included.
  */
 export function findConversation(
   statements: DatabaseStatementCompiler,
@@ -304,10 +306,10 @@ export function findConversation(
     WHERE conversation_id = ? AND role IN ('user', 'assistant') ORDER BY created_at, id`
     )
     .all(conversationId)
-  return {
+  return conversationSchema.parse({
     ...metadata,
     messages: rows.map((row) => parseConversationMessage(row, context)),
     sources: listConversationSources(statements, conversationId),
     jobs: listConversationJobs(statements, conversationId)
-  }
+  })
 }

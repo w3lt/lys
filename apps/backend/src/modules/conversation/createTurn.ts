@@ -395,13 +395,16 @@ function listJobSources(
  * delegator's numbers it cites; every other marker is kept. Each cited
  * source whose URL the delegator has no source for is among the added
  * sources, with the job's title for it, numbered on from the delegator's
- * highest number in the order of the job's numbers.
+ * highest number in the order of the job's numbers. A `stopped` or
+ * `interrupted` report has no text, so it cites none and adds none.
  */
 function buildRenumberedJobReport(
   report: JobReport,
   jobSources: readonly ConversationSource[],
   delegatorSources: readonly ConversationSource[]
 ): RenumberedJobReport {
+  if (report.kind === "stopped" || report.kind === "interrupted")
+    return { report: { ...report, sourceNumbers: [] }, addedSources: [] }
   const citedNumbers = new Set(listCitedNumbers(report.content))
   const sourcesByUrl = new Map(
     delegatorSources.map((source) => [source.url, source])

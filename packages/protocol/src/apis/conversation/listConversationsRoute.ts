@@ -1,5 +1,5 @@
 import * as z from "zod"
-import { conversationMetadataSchema } from "@lys/share"
+import { conversationBaseSchema } from "@lys/share"
 import { apiConversationsRoute } from "./routes"
 
 /**
@@ -90,10 +90,10 @@ const conversationPreviewSchema = z
  * Validates one listed conversation without its agent code or transcript.
  *
  * @remarks This read projection derives its identity, title, and timestamps
- * from the persisted conversation metadata contract. `updatedAt` is the
+ * from the fields every persisted conversation has. `updatedAt` is the
  * activity time that orders the list.
  */
-const conversationSummarySchema = conversationMetadataSchema
+const conversationSummarySchema = conversationBaseSchema
   .pick({ id: true, title: true, createdAt: true, updatedAt: true })
   .extend({
     /**

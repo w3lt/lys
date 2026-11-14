@@ -1,3 +1,4 @@
+import { CITATION_MARKER_PATTERN } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   buildRenumberedCitations,
@@ -89,5 +90,13 @@ describe("listCitedNumbers", () => {
     expect(
       listCitedNumbers("None of [0], [01], [1, 2], or [a] cites a page.")
     ).toEqual([])
+  })
+
+  it("still finds every marker after a call on the shared pattern that would move its position throws", () => {
+    expect(() =>
+      CITATION_MARKER_PATTERN.exec("Silk [3] and wool [12].")
+    ).toThrow(TypeError)
+
+    expect(listCitedNumbers("Silk [3] and wool [12].")).toEqual([3, 12])
   })
 })

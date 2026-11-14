@@ -44,6 +44,47 @@ const JOB_PATH = `/api/v1/conversations/${FIXTURE_JOB_ID}`
 const OTHER_CONVERSATION_ID = createFixtureUuidV7(9)
 
 /**
+ * A job's parent, number, and delegator given only in part: each row sets
+ * some of the three and leaves the others null, which neither a main
+ * conversation nor a job allows.
+ */
+const PARTIAL_JOB_FIELDS = [
+  ["a parent alone", { parentConversationId: FIXTURE_CONVERSATION_ID }],
+  ["a job number alone", { jobNumber: 1 }],
+  ["a delegator alone", { delegatorAgentCode: "caliginia" }],
+  [
+    "a parent and a job number without a delegator",
+    { parentConversationId: FIXTURE_CONVERSATION_ID, jobNumber: 1 }
+  ],
+  [
+    "a parent and a delegator without a job number",
+    {
+      parentConversationId: FIXTURE_CONVERSATION_ID,
+      delegatorAgentCode: "caliginia"
+    }
+  ],
+  [
+    "a job number and a delegator without a parent",
+    { jobNumber: 1, delegatorAgentCode: "caliginia" }
+  ]
+] as const
+
+/**
+ * Builds the body of a conversation whose one message delivered a report, as
+ * a backend could send it, without validating the report.
+ *
+ * @param report - The report the message delivered, valid or not.
+ * @returns The untrusted body of {@link FIXTURE_CONVERSATION_ID}.
+ */
+function buildConversationBodyWithReport(report: object): object {
+  const message = buildUserMessage(2, "Any news yet?")
+  return {
+    ...buildConversation(FIXTURE_CONVERSATION_ID, "Trip", []),
+    messages: [{ ...message, reports: [report] }]
+  }
+}
+
+/**
  * Starts a backend that answers the conversation list with one route.
  *
  * @param route - Response to every list request.
@@ -317,6 +358,98 @@ describe("getConversation", () => {
     ).rejects.toThrow()
     expect(backend.requests).toEqual([])
   })
+
+  it.each(PARTIAL_JOB_FIELDS)(
+    "rejects a conversation with %s and keeps the decoding failure as its cause",
+    async (_label, fields) => {
+      startBackendFake({
+        [`GET ${JOB_PATH}`]: () =>
+          buildJsonResponse(200, {
+            ...buildConversation(FIXTURE_JOB_ID, "News", []),
+            ...fields
+          })
+      })
+
+      await expect(
+        getConversation(FIXTURE_JOB_ID, { backendUrl: FIXTURE_BACKEND_URL })
+      ).rejects.toMatchObject({
+        cause: expect.objectContaining({ name: "ZodError" })
+      })
+    }
+  )
+
+  it("rejects a job that has jobs of its own and keeps the decoding failure as its cause", async () => {
+    const jobConversation = buildJobConversation(
+      buildConversation(FIXTURE_JOB_ID, "News", [])
+    )
+    startBackendFake({
+      [`GET ${JOB_PATH}`]: () =>
+        buildJsonResponse(200, {
+          ...jobConversation,
+          jobs: [buildJob({ id: createFixtureUuidV7(70) })]
+        })
+    })
+
+    await expect(
+      getConversation(FIXTURE_JOB_ID, { backendUrl: FIXTURE_BACKEND_URL })
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({ name: "ZodError" })
+    })
+  })
+
+  it.each([
+    ["a note without text", { kind: "note", content: "" }],
+    ["a failure without its sentence", { kind: "failed", content: "" }],
+    ["a stop with text", { kind: "stopped", content: "Done." }],
+    ["an interruption with text", { kind: "interrupted", content: "Done." }],
+    ["its source numbers out of order", { sourceNumbers: [2, 1] }],
+    ["a source number twice", { sourceNumbers: [1, 1] }]
+  ])(
+    "rejects a delivered report with %s and keeps the decoding failure as its cause",
+    async (_label, fields) => {
+      startBackendFake({
+        [`GET ${CONVERSATION_PATH}`]: () =>
+          buildJsonResponse(
+            200,
+            buildConversationBodyWithReport({ ...buildJobReport(), ...fields })
+          )
+      })
+
+      await expect(
+        getConversation(FIXTURE_CONVERSATION_ID, {
+          backendUrl: FIXTURE_BACKEND_URL
+        })
+      ).rejects.toMatchObject({
+        cause: expect.objectContaining({ name: "ZodError" })
+      })
+    }
+  )
+
+  it.each([
+    ["a result without text", { kind: "result", content: "" }],
+    [
+      "a failure with its sentence",
+      { kind: "failed", content: "The feed was down." }
+    ],
+    ["a stop without text", { kind: "stopped" }],
+    ["an interruption without text", { kind: "interrupted" }],
+    ["ascending source numbers", { sourceNumbers: [1, 3] }]
+  ] as const)("reads a delivered report with %s", async (_label, fixture) => {
+    const conversation = buildConversation(FIXTURE_CONVERSATION_ID, "Trip", [
+      buildUserMessageWithReports(buildUserMessage(2, "Any news yet?"), [
+        buildJobReport(fixture)
+      ])
+    ])
+    startBackendFake({
+      [`GET ${CONVERSATION_PATH}`]: () => buildJsonResponse(200, conversation)
+    })
+
+    await expect(
+      getConversation(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
+    ).resolves.toEqual({ status: "found", conversation })
+  })
 })
 
 describe("updateConversationTitle", () => {
@@ -412,6 +545,28 @@ describe("updateConversationTitle", () => {
       )
     ).rejects.toThrow(Error)
   })
+
+  it.each(PARTIAL_JOB_FIELDS)(
+    "rejects metadata with %s and keeps the decoding failure as its cause",
+    async (_label, fields) => {
+      startBackendFake({
+        [`PATCH ${JOB_PATH}`]: () =>
+          buildJsonResponse(200, {
+            ...buildConversationMetadata(FIXTURE_JOB_ID, "News"),
+            ...fields
+          })
+      })
+
+      await expect(
+        updateConversationTitle(
+          { conversationId: FIXTURE_JOB_ID, title: "News" },
+          { backendUrl: FIXTURE_BACKEND_URL }
+        )
+      ).rejects.toMatchObject({
+        cause: expect.objectContaining({ name: "ZodError" })
+      })
+    }
+  )
 })
 
 describe("deleteConversation", () => {

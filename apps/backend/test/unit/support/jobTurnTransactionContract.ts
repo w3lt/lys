@@ -266,25 +266,28 @@ function registerUndeliveredReportListCases(
     ])
   })
 
-  it.each(["note", "result", "failed", "stopped", "interrupted"] as const)(
-    "lists an undelivered %s report",
-    (kind) => {
-      const harness = createHarness()
-      const mainId = saveMainConversation(harness, 1)
-      const job = saveJob(harness, createJobFixture(mainId, 1, "interrupted"))
-      const row = saveReport(harness, job, {
-        sequence: 200,
-        kind,
-        title: "Find what moths eat",
-        content: "Report text",
-        createdAt: createFixtureTimestamp(30)
-      })
+  it.each([
+    ["note", "Report text"],
+    ["result", "Report text"],
+    ["failed", "Report text"],
+    ["stopped", ""],
+    ["interrupted", ""]
+  ] as const)("lists an undelivered %s report", (kind, content) => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const job = saveJob(harness, createJobFixture(mainId, 1, "interrupted"))
+    const row = saveReport(harness, job, {
+      sequence: 200,
+      kind,
+      title: "Find what moths eat",
+      content,
+      createdAt: createFixtureTimestamp(30)
+    })
 
-      expect(listUndeliveredReports(harness, mainId)).toEqual([
-        buildExpectedReport(row, 1)
-      ])
-    }
-  )
+    expect(listUndeliveredReports(harness, mainId)).toEqual([
+      buildExpectedReport(row, 1)
+    ])
+  })
 
   it("lists no delivered report and no report of another conversation's jobs", () => {
     const harness = createHarness()
@@ -353,11 +356,10 @@ function registerReportDeliveryCases(
       content: "They eat wool [3].",
       sourceNumbers: [3, 5]
     }
-    const delivered: JobReport = {
-      ...buildExpectedReport(waiting.row, 1),
-      content: "They eat wool [3].",
-      sourceNumbers: [3, 5]
-    }
+    const delivered = buildExpectedReport(
+      { ...waiting.row, content: "They eat wool [3].", sourceNumbers: [3, 5] },
+      1
+    )
 
     const remaining =
       harness.turnRecordWriter.handleConversationTurnWriteRequest(

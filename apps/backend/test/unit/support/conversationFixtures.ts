@@ -1,13 +1,14 @@
-import type {
-  ConversationAssistantMessage,
-  ConversationAttachment,
-  ConversationMessage,
-  ConversationSource,
-  ConversationUserMessage,
-  JobReport,
-  JobReportKind,
-  ReplyPart,
-  ToolCallReplyPart
+import {
+  jobReportSchema,
+  type ConversationAssistantMessage,
+  type ConversationAttachment,
+  type ConversationMessage,
+  type ConversationSource,
+  type ConversationUserMessage,
+  type JobReport,
+  type JobReportKind,
+  type ReplyPart,
+  type ToolCallReplyPart
 } from "@lys/share"
 import { v7 as uuidv7 } from "uuid"
 import type {
@@ -79,9 +80,10 @@ export type DeliveredReportFixture = Readonly<{
  * delivers it.
  *
  * @param fixture - Identity, job, agent, title, kind, and text of the report.
- * @returns A valid report written at the fixture time that cites no source.
- * Its job's conversation identity follows from the job number, so reports of
- * one job name the same job.
+ * @returns A report written at the fixture time that cites no source,
+ * validated by the shared schema. Its job's conversation identity follows
+ * from the job number, so reports of one job name the same job.
+ * @throws If the fixture's kind does not allow its text.
  */
 export function createDeliveredReport(
   fixture: DeliveredReportFixture
@@ -92,7 +94,7 @@ export function createDeliveredReport(
    */
   const reportJobSequenceBase = 9000
 
-  return {
+  return jobReportSchema.parse({
     id: createFixtureUuidV7(fixture.sequence),
     jobId: createFixtureUuidV7(reportJobSequenceBase + fixture.jobNumber),
     jobNumber: fixture.jobNumber,
@@ -102,7 +104,7 @@ export function createDeliveredReport(
     content: fixture.content,
     sourceNumbers: [],
     createdAt: FIXTURE_TIMESTAMP
-  }
+  })
 }
 
 /**

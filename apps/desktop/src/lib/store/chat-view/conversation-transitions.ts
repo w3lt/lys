@@ -84,7 +84,21 @@ export type ReadonlyConversationMessage =
   CompletedConversationMessage | StreamingConversationAssistantMessage
 
 /**
- * Transitively immutable conversation published by the chat-view store.
+ * Leaves the same fields out of each variant of a union apart. `Omit` of the
+ * union itself would merge the variants into one object whose fields vary
+ * independently.
+ *
+ * @typeParam TVariant - Union of object variants.
+ * @typeParam TField - Fields to leave out of every variant.
+ */
+type OmitFromEachVariant<
+  TVariant,
+  TField extends PropertyKey
+> = TVariant extends unknown ? Omit<TVariant, TField> : never
+
+/**
+ * Transitively immutable conversation published by the chat-view store: a
+ * main conversation or a job, as {@link Conversation} pairs their fields.
  *
  * @remarks Every transition returns a new frozen outer conversation. A
  * metadata-only transition may reuse the existing immutable message, source,
@@ -95,7 +109,7 @@ export type ReadonlyConversationMessage =
  * message, part, source, or job object.
  */
 export type ChatViewConversation = Readonly<
-  Omit<Conversation, "messages"> & {
+  OmitFromEachVariant<Conversation, "messages"> & {
     /** Immutable ordered transcript owned by this conversation. */
     readonly messages: readonly ReadonlyConversationMessage[]
   }
@@ -184,13 +198,16 @@ export function isCompletedConversationMessage(
   return message.role === "user" || message.status !== "streaming"
 }
 
+/** Jobs of a job, which starts none. */
+const NO_JOBS_OF_JOB = Object.freeze<readonly []>([])
+
 /**
  * Combines backend metadata and messages with matching local history.
  *
  * @param options - Metadata, prior state, and the new backend-owned turn.
  * @returns A frozen conversation containing matching history followed by the
  * user and assistant messages received from the backend, and the matching
- * history's sources and jobs.
+ * history's sources and jobs; a job has no jobs.
  * @remarks History, sources, and jobs are preserved only when the metadata
  * identifier matches the prior conversation. A new identifier intentionally
  * starts a fresh transcript without sources or jobs.
@@ -201,7 +218,7 @@ export function startConversationTurn(
   /** Sources of a conversation that has none. */
   const noSources: readonly ConversationSource[] = Object.freeze([])
 
-  /** Jobs of a conversation that has none. */
+  /** Jobs of a main conversation that has none. */
   const noJobs: readonly Job[] = Object.freeze([])
 
   const previousConversation =
@@ -218,12 +235,16 @@ export function startConversationTurn(
     assistantMessage
   ] satisfies readonly ReadonlyConversationMessage[])
 
-  return Object.freeze({
+  const conversation = {
     ...options.conversationMetadata,
     messages,
-    sources: previousConversation?.sources ?? noSources,
-    jobs: previousConversation?.jobs ?? noJobs
-  })
+    sources: previousConversation?.sources ?? noSources
+  }
+  return Object.freeze(
+    conversation.parentConversationId === null
+      ? { ...conversation, jobs: previousConversation?.jobs ?? noJobs }
+      : { ...conversation, jobs: NO_JOBS_OF_JOB }
+  )
 }
 
 /**
@@ -733,23 +754,23 @@ export function createStoredChatViewConversation(
     )
   )
 
-  return Object.freeze({
-    id: conversation.id,
-    title: conversation.title,
-    agentCode: conversation.agentCode,
-    parentConversationId: conversation.parentConversationId,
-    jobNumber: conversation.jobNumber,
-    delegatorAgentCode: conversation.delegatorAgentCode,
+  const storedConversation = {
+    ...conversation,
     messages,
     sources: Object.freeze(
       conversation.sources.map((source) => Object.freeze({ ...source }))
-    ),
-    jobs: Object.freeze(
-      conversation.jobs.map((job) => Object.freeze({ ...job }))
-    ),
-    createdAt: conversation.createdAt,
-    updatedAt: conversation.updatedAt
-  } satisfies ChatViewConversation)
+    )
+  }
+  return Object.freeze(
+    storedConversation.parentConversationId === null
+      ? {
+          ...storedConversation,
+          jobs: Object.freeze(
+            storedConversation.jobs.map((job) => Object.freeze({ ...job }))
+          )
+        }
+      : { ...storedConversation, jobs: NO_JOBS_OF_JOB }
+  )
 }
 
 /**

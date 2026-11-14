@@ -679,9 +679,9 @@ export type JobReportFixture = Readonly<{
   /** What the report says; defaults to `result`. */
   kind?: JobReportKind
   /**
-   * The note, the result's text, or the failure sentence; defaults to
-   * `Done.`. A `stopped` or `interrupted` report carries none, so its case
-   * gives empty content.
+   * The note, the result's text, or the failure sentence; defaults to the
+   * content the kind allows: `Done.` for `note`, `result`, and `failed`, and
+   * empty for `stopped` and `interrupted`, which have no text.
    */
   content?: string
   /**
@@ -698,8 +698,12 @@ export type JobReportFixture = Readonly<{
  * for their defaults.
  * @returns A frozen report written at {@link FIXTURE_TIMESTAMP}, validated by
  * the shared schema.
+ * @throws If the case gives content its kind does not allow.
  */
 export function buildJobReport(fixture: JobReportFixture = {}): JobReport {
+  const kind = fixture.kind ?? "result"
+  const defaultContent =
+    kind === "stopped" || kind === "interrupted" ? "" : "Done."
   return Object.freeze(
     jobReportSchema.parse({
       id: fixture.id ?? FIXTURE_JOB_REPORT_ID,
@@ -707,8 +711,8 @@ export function buildJobReport(fixture: JobReportFixture = {}): JobReport {
       jobNumber: FIXTURE_JOB_NUMBER,
       agentCode: FIXTURE_JOB_AGENT_CODE,
       title: FIXTURE_JOB_TITLE,
-      kind: fixture.kind ?? "result",
-      content: fixture.content ?? "Done.",
+      kind,
+      content: fixture.content ?? defaultContent,
       sourceNumbers: fixture.sourceNumbers ?? [],
       createdAt: FIXTURE_TIMESTAMP
     })
@@ -739,6 +743,7 @@ export function buildConversationWithJobs(
  * {@link buildConversation} builds it under {@link FIXTURE_JOB_ID}.
  * @returns A frozen copy of the conversation with its parent, job number,
  * and delegator, validated by the shared schema.
+ * @throws If the conversation has jobs, which a job never has.
  */
 export function buildJobConversation(conversation: Conversation): Conversation {
   return Object.freeze(

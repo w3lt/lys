@@ -83,10 +83,24 @@ export const jobReportKindSchema = z.enum([
 ])
 
 /**
- * Validates one report a job sent to its delegator, as delivered with a
- * user-role message of the parent conversation.
+ * Answers whether numbers ascend, each greater than the one before it, so
+ * none appears twice.
+ *
+ * @param numbers - Numbers in their given order.
+ * @returns True when each number is greater than the one before it; true
+ * for an empty list.
  */
-export const jobReportSchema = z.strictObject({
+function isAscending(numbers: readonly number[]): boolean {
+  let previousNumber = Number.NEGATIVE_INFINITY
+  for (const number of numbers) {
+    if (number <= previousNumber) return false
+    previousNumber = number
+  }
+  return true
+}
+
+/** Fields every report has, whatever it says. */
+const jobReportBase = {
   /** UUIDv7 identity of the report. */
   id: z.uuidv7(),
   /** The job: its conversation id. */
@@ -100,21 +114,76 @@ export const jobReportSchema = z.strictObject({
    * never changes it.
    */
   title: z.string().min(1),
-  /** What the report says. */
-  kind: jobReportKindSchema,
-  /**
-   * `note`: the note. `result`: the text of the reply's last round, possibly
-   * empty. `failed`: the failure sentence. `stopped`, `interrupted`: empty.
-   */
-  content: z.string(),
   /**
    * Numbers of the parent conversation's sources the content cites,
-   * ascending; empty when none.
+   * ascending, so each once; empty when none.
    */
-  sourceNumbers: z.array(conversationSourceNumberSchema).readonly(),
+  sourceNumbers: z
+    .array(conversationSourceNumberSchema)
+    .refine(
+      isAscending,
+      "A report lists the sources it cites in ascending order, each once."
+    )
+    .readonly(),
   /** Time the report was written. */
   createdAt: timestampSchema
+}
+
+/** Validates a progress note. */
+const noteJobReportSchema = z.strictObject({
+  ...jobReportBase,
+  kind: jobReportKindSchema.extract(["note"]),
+  /** The note; never empty. */
+  content: z.string().min(1)
 })
+
+/** Validates the result that ended a reply. */
+const resultJobReportSchema = z.strictObject({
+  ...jobReportBase,
+  kind: jobReportKindSchema.extract(["result"]),
+  /** Text of the reply's last round, possibly empty. */
+  content: z.string()
+})
+
+/** Validates the failure that ended a reply. */
+const failedJobReportSchema = z.strictObject({
+  ...jobReportBase,
+  kind: jobReportKindSchema.extract(["failed"]),
+  /** The failure sentence; never empty. */
+  content: z.string().min(1)
+})
+
+/** Validates the stop that ended a reply, which has no text. */
+const stoppedJobReportSchema = z.strictObject({
+  ...jobReportBase,
+  kind: jobReportKindSchema.extract(["stopped"]),
+  /** Always empty. */
+  content: z.literal("")
+})
+
+/** Validates the interruption that ended a reply, which has no text. */
+const interruptedJobReportSchema = z.strictObject({
+  ...jobReportBase,
+  kind: jobReportKindSchema.extract(["interrupted"]),
+  /** Always empty. */
+  content: z.literal("")
+})
+
+/**
+ * Validates one report a job sent to its delegator, as delivered with a
+ * user-role message of the parent conversation, in the variant its kind
+ * selects.
+ *
+ * @remarks `note` and `failed` have text, `result` may have none, and
+ * `stopped` and `interrupted` have none.
+ */
+export const jobReportSchema = z.discriminatedUnion("kind", [
+  noteJobReportSchema,
+  resultJobReportSchema,
+  failedJobReportSchema,
+  stoppedJobReportSchema,
+  interruptedJobReportSchema
+])
 
 /**
  * Validates a non-empty user-role message in a persisted conversation: one
@@ -167,10 +236,13 @@ export const conversationSourceSchema = z.strictObject({
  * Finds each `[n]` citation marker in a text; its group is the number of the
  * cited source, written without leading zeros, since a conversation numbers
  * its sources from 1. The backend renumbers the markers of a delivered
- * report with it, and the desktop links the markers a reply shows. Use it
- * with `matchAll`, which copies it, so its `lastIndex` never changes.
+ * report with it, and the desktop links the markers a reply shows.
+ *
+ * @remarks Frozen and shared: a call that would move its `lastIndex`, such
+ * as `exec`, `test`, or `replace`, throws a `TypeError`. Use it with
+ * `matchAll`, which copies it.
  */
-export const CITATION_MARKER_PATTERN = /\[([1-9]\d*)\]/g
+export const CITATION_MARKER_PATTERN = Object.freeze(/\[([1-9]\d*)\]/g)
 
 /** Fields every part of a reply has. */
 const replyPartBase = {
@@ -373,13 +445,16 @@ export const jobSchema = z.strictObject({
 })
 
 /**
- * Validates the persisted conversation record and its ordered message history.
+ * Validates the fields every conversation has, a main conversation or a
+ * job.
  *
- * @remarks A main conversation has no parent, job number, or delegator, and
- * a job has all three. This schema checks each of the three fields alone,
- * not that pairing; whoever builds a conversation keeps it.
+ * @remarks Both variants of a conversation extend it, and read projections
+ * such as the history's summary pick their fields from it. It is not a
+ * conversation contract of its own: it lacks the fields that tell a main
+ * conversation from a job.
  */
-export const conversationSchema = z.strictObject({
+export const conversationBaseSchema = z.strictObject({
+  /** UUIDv7 identity of the conversation. */
   id: z.uuidv7(),
   /** Non-empty title; null until title generation saves one. */
   title: z.string().min(1).nullable(),
@@ -388,43 +463,86 @@ export const conversationSchema = z.strictObject({
    * every turn sends that agent's current system prompt.
    */
   agentCode: agentCodeSchema,
-  /** Conversation this job was started from; null for a main conversation. */
-  parentConversationId: z.uuidv7().nullable(),
+  /** Time the conversation was created. */
+  createdAt: timestampSchema,
+  /** Time of the conversation's latest activity. */
+  updatedAt: timestampSchema
+})
+
+/** Validates the metadata of a main conversation, which no job started. */
+const mainConversationMetadataSchema = conversationBaseSchema.extend({
+  /** A main conversation has no parent. */
+  parentConversationId: z.null(),
+  /** A main conversation has no job number. */
+  jobNumber: z.null(),
+  /** A main conversation has no delegator. */
+  delegatorAgentCode: z.null()
+})
+
+/** Validates the metadata of a job: a conversation started from another. */
+const jobConversationMetadataSchema = conversationBaseSchema.extend({
+  /** Conversation this job was started from. */
+  parentConversationId: z.uuidv7(),
+  /** The job's number in its parent, from 1. */
+  jobNumber: z.int().min(1),
   /**
-   * The job's number in its parent; null exactly when
-   * `parentConversationId` is null.
+   * Code of the parent conversation's agent, which wrote the job's
+   * messages.
    */
-  jobNumber: z.int().min(1).nullable(),
-  /**
-   * Code of the parent conversation's agent, which wrote the job's messages;
-   * null exactly when `parentConversationId` is null.
-   */
-  delegatorAgentCode: agentCodeSchema.nullable(),
+  delegatorAgentCode: agentCodeSchema
+})
+
+/** Transcript fields every conversation has beside its metadata. */
+const conversationTranscriptBase = {
   /** Messages remain in persisted conversation order. */
   messages: z.array(conversationMessageSchema),
   /**
    * Sources the conversation's tool calls read, and those the reports
    * delivered to it cite, in number order.
    */
-  sources: z.array(conversationSourceSchema).readonly(),
-  /**
-   * Jobs started from this conversation, in number order; empty for a job,
-   * because jobs go one level deep.
-   */
-  jobs: z.array(jobSchema).readonly(),
-  createdAt: timestampSchema,
-  updatedAt: timestampSchema
+  sources: z.array(conversationSourceSchema).readonly()
+}
+
+/** Validates a main conversation with its transcript and its jobs. */
+const mainConversationSchema = mainConversationMetadataSchema.extend({
+  ...conversationTranscriptBase,
+  /** Jobs started from this conversation, in number order. */
+  jobs: z.array(jobSchema).readonly()
+})
+
+/** Validates a job with its transcript. */
+const jobConversationSchema = jobConversationMetadataSchema.extend({
+  ...conversationTranscriptBase,
+  /** Always empty: jobs go one level deep, so a job starts none. */
+  jobs: z.tuple([]).readonly()
 })
 
 /**
- * Validates conversation metadata: a conversation without its messages,
- * sources, and jobs.
+ * Validates the persisted conversation record and its ordered message
+ * history: a main conversation or a job.
+ *
+ * @remarks A main conversation has no parent, job number, or delegator, and
+ * has the jobs started from it. A job has all three and no jobs, because
+ * jobs go one level deep. `parentConversationId` selects the variant: null
+ * for a main conversation, and the parent's identity for a job. No mixture
+ * of the two passes.
  */
-export const conversationMetadataSchema = conversationSchema.omit({
-  messages: true,
-  sources: true,
-  jobs: true
-})
+export const conversationSchema = z.union([
+  mainConversationSchema,
+  jobConversationSchema
+])
+
+/**
+ * Validates conversation metadata: a conversation without its messages,
+ * sources, and jobs, as a main conversation or a job.
+ *
+ * @remarks Its variants pair the parent, the job number, and the delegator
+ * as {@link conversationSchema} does.
+ */
+export const conversationMetadataSchema = z.union([
+  mainConversationMetadataSchema,
+  jobConversationMetadataSchema
+])
 
 /** Who wrote a user-role message. */
 export type ConversationMessageOrigin = z.infer<
@@ -516,10 +634,17 @@ export function isAnsweredToolCall(
 /** One numbered web source of a conversation. */
 export type ConversationSource = z.infer<typeof conversationSourceSchema>
 
-/** Persisted conversation record including its ordered message history. */
+/**
+ * Persisted conversation record including its ordered message history: a
+ * main conversation or a job, as `parentConversationId` selects.
+ */
 export type Conversation = z.infer<typeof conversationSchema>
 
-/** Persisted conversation metadata used when message history is not transferred. */
+/**
+ * Persisted conversation metadata used when message history is not
+ * transferred: a main conversation's or a job's, as `parentConversationId`
+ * selects.
+ */
 export type ConversationMetadata = z.infer<typeof conversationMetadataSchema>
 
 /** Assistant message lifecycle state inferred from its authoritative schema. */

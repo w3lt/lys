@@ -446,6 +446,8 @@ export type ChatViewActions = {
    * backend starts itself and the jobs they belong to.
    *
    * @param event - Validated activity event.
+   * @throws If a job update names the shown job as its parent: a job starts
+   * no jobs. The shown conversation stays as it was.
    * @remarks A snapshot, and a reply the backend starts or ends in the
    * presented conversation, read the shown conversation again: at once, or
    * once no conversation opens and no reply of the store's own request is
@@ -820,12 +822,16 @@ function createConversationOpenResource(
  * @returns The same conversation when there are none; otherwise a frozen
  * copy whose jobs, in number order, hold the version of each job that
  * arrived last, and the jobs it did not hold yet.
+ * @throws If there are versions and the conversation is a job, which starts
+ * no jobs.
  */
 function updateConversationJobs(
   conversation: ChatViewConversation,
   jobUpdates: readonly Job[]
 ): ChatViewConversation {
   if (jobUpdates.length === 0) return conversation
+  if (conversation.parentConversationId !== null)
+    throw new Error("The backend reported a job started from a job")
 
   const jobsById = new Map(conversation.jobs.map((job) => [job.id, job]))
   for (const job of jobUpdates) {
@@ -2016,8 +2022,9 @@ export function createChatViewStore(
      * @param result - Stored conversation or absence outcome from the backend.
      * @param jobUpdates - Job versions the activity stream reported while the
      * read was under way, in arrival order; they win over the read's.
-     * @throws If the stored conversation violates a transcript invariant; the
-     * caller still owns the open and records that failure.
+     * @throws If the stored conversation violates a transcript invariant, or
+     * is a job and there are job versions for it; the caller still owns the
+     * open and records that failure.
      */
     function updateViewWithStoredConversation(
       result: GetConversationResult,
@@ -2253,8 +2260,8 @@ export function createChatViewStore(
      * @param result - Stored conversation or absence outcome from the backend.
      * @param jobUpdates - Job versions the activity stream reported while the
      * read was under way, in arrival order; they win over the read's.
-     * @throws If the stored conversation violates a transcript invariant;
-     * nothing changed then.
+     * @throws If the stored conversation violates a transcript invariant, or
+     * is a job and there are job versions for it; nothing changed then.
      * @remarks The draft and the tray stay. A found conversation replaces the
      * shown one and the error stays; a conversation the backend no longer
      * stores stays shown, with the error that it no longer exists.
@@ -2390,6 +2397,8 @@ export function createChatViewStore(
      *
      * @param parentConversationId - Conversation the job was started from.
      * @param job - The whole job as it is now.
+     * @throws If the shown conversation is that parent and a job, which
+     * starts no jobs; it stays as it was.
      * @remarks The shown conversation takes the job at once, and a read of
      * the job's conversation under way keeps it to apply on top of its
      * answer, which may be older.
@@ -2409,6 +2418,7 @@ export function createChatViewStore(
      * Implements {@link ChatViewActions.handleActivityEvent} for this store.
      *
      * @param event - Validated activity event.
+     * @throws The refusal defined by {@link ChatViewActions.handleActivityEvent}.
      */
     function handleActivityEvent(event: ActivityEvent): void {
       switch (event.type) {

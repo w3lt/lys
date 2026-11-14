@@ -1,7 +1,7 @@
 import * as z from "zod"
 import {
   conversationAssistantMessageSchema,
-  conversationMetadataSchema
+  conversationBaseSchema
 } from "@lys/share"
 import type {
   EndedReplyRecord,
@@ -82,7 +82,7 @@ function listStreamingReplies(
   /** Validates the stored address of one streaming reply. */
   const replyAddressSchema = z.strictObject({
     /** Identity of the conversation that holds the reply. */
-    conversationId: conversationMetadataSchema.shape.id,
+    conversationId: conversationBaseSchema.shape.id,
     /** Identity of the reply. */
     assistantMessageId: conversationAssistantMessageSchema.shape.id
   })
@@ -123,9 +123,9 @@ function findEndedReply(
   /** Validates one stored reply as the end of its generation is reported. */
   const endedReplyRecordSchema = z.strictObject({
     /** Identity of the conversation that holds the reply. */
-    conversationId: conversationMetadataSchema.shape.id,
+    conversationId: conversationBaseSchema.shape.id,
     /** Identity of that conversation's parent; null for a main conversation. */
-    parentConversationId: conversationMetadataSchema.shape.parentConversationId,
+    parentConversationId: conversationBaseSchema.shape.id.nullable(),
     /** Stored state of the reply. */
     status: conversationAssistantMessageSchema.shape.status,
     /** Stored finish reason; null unless the reply completed. */

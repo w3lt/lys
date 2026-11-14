@@ -2294,6 +2294,22 @@ describe("handleActivityEvent", () => {
     expect(store.getState()).toBe(before)
   })
 
+  it("refuses a job update that names the shown job as its parent and keeps the job as it was", async () => {
+    startBackendFake(buildStoredConversationRoutes(JOB_CONVERSATION))
+    const { store } = createChatHarness()
+    await store.getState().openConversation(FIXTURE_JOB_ID)
+    const before = store.getState()
+
+    expect(() =>
+      store.getState().handleActivityEvent({
+        type: "job-updated",
+        parentConversationId: FIXTURE_JOB_ID,
+        job: buildJob({ id: createFixtureUuidV7(70) })
+      })
+    ).toThrow("The backend reported a job started from a job")
+    expect(store.getState()).toBe(before)
+  })
+
   it.each<[string, readonly ActivityEvent[]]>([
     ["a read", [WAKE_REPLY_ENDED_EVENT]],
     [

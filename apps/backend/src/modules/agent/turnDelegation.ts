@@ -183,10 +183,27 @@ export type TurnDelegation = Readonly<{
 }>
 
 /**
+ * Picks the same fields from each variant of a union apart. `Pick` of the
+ * union itself would merge the variants into one object whose fields vary
+ * independently.
+ *
+ * @typeParam TVariant - Union of object variants.
+ * @typeParam TField - Fields every variant has.
+ */
+type PickFromEachVariant<
+  TVariant,
+  TField extends keyof TVariant
+> = TVariant extends unknown ? Pick<TVariant, TField> : never
+
+/**
  * Where a conversation stands in delegation: the job it is, when it is one,
  * and the jobs started from it.
+ *
+ * @remarks Keeps the variants of {@link Conversation} apart: a main
+ * conversation has no parent, number, or delegator, and a job has all three
+ * and no jobs.
  */
-export type ConversationDelegation = Pick<
+export type ConversationDelegation = PickFromEachVariant<
   Conversation,
   "parentConversationId" | "jobNumber" | "delegatorAgentCode" | "jobs"
 >
@@ -233,8 +250,8 @@ function findJobTurn(
   conversation: ConversationDelegation,
   findAgentName: (code: string) => string | undefined
 ): JobTurn | undefined {
+  if (conversation.parentConversationId === null) return undefined
   const { jobNumber, delegatorAgentCode } = conversation
-  if (jobNumber === null || delegatorAgentCode === null) return undefined
   const delegatorName = findAgentName(delegatorAgentCode) ?? delegatorAgentCode
   return Object.freeze({ delegatorName, jobNumber })
 }

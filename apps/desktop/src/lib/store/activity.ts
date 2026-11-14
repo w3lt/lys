@@ -21,8 +21,9 @@ type ActivityFollowState = Pick<
  * or once an event arrives after the signal aborted; that event is not
  * handed over.
  * @throws If the stream cannot be opened or read, an event does not match
- * the contract, the tool-call store rejects an event, or the signal aborts
- * while the read waits for the next event.
+ * the contract, the tool-call store rejects an event, the chat view refuses
+ * a job update, or the signal aborts while the read waits for the next
+ * event.
  * @remarks The backend origin is sampled when the read starts. The tool-call
  * store takes each event first, so when the chat view reads the shown
  * conversation again for the event, the tool-call store already knows the
@@ -81,8 +82,9 @@ async function waitForActivityReconnectDelay(
  * @returns A promise that resolves once the signal has aborted and the read
  * or wait under way has ended; it never rejects.
  * @remarks A read ends when the backend closes the stream, when the stream
- * cannot be opened or read, when an event does not match the contract, or
- * when the tool-call store rejects an event. Every read starts with a
+ * cannot be opened or read, when an event does not match the contract, when
+ * the tool-call store rejects an event, or when the chat view refuses a job
+ * update. Every read starts with a
  * snapshot that brings both stores up to date, so each of these ends is
  * followed by the same delay and a new read, without backoff, message, or log
  * entry.

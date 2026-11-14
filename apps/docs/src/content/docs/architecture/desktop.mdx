@@ -19,7 +19,9 @@ presentation state, not durable conversation storage.
 | Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, and error presentation.                                                                                                                                                                                                                                                               |
 | History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                                                                                                                                                                                                                                                                              |
 | Agent state         | `src/lib/store/agents` owns the list of built-in and stored agents, the Agents pane's editor and draft, and the agent create, update, and delete calls.                                                                                                                                                                                                                                                                  |
-| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, the session-only Tool calls switch, and the offer each request makes from them.                                                                                                                                                                                                                                          |
+| Settings view       | `src/views/SettingsView` shows the settings rail and the selected pane, and owns which sections of the Lys and Profile panes are open; see [Settings view](#settings-view).                                                                                                                                                                                                                                              |
+| Local profile       | `src/lib/store/local-profile.ts` holds the values of the Lys and Profile panes that are neither saved nor sent; see [Current limitations](#current-limitations).                                                                                                                                                                                                                                                         |
+| Tool state          | `src/lib/store/tools.ts` owns the list of every tool, the app's and the backend's, that the Tools and MCP panes show, the session-only Tool calls switch, and the offer each request makes from them.                                                                                                                                                                                                                    |
 | Tool calls          | `src/lib/store/tool-calls` follows each running reply, shows the backend's approval prompts, runs the client tools' calls the backend sends, and sends every answer.                                                                                                                                                                                                                                                     |
 | Tool approvals      | `src/lib/store/tool-settings.ts` owns each tool's switch and its Ask me or Just run, saved as the `tools` group of `settings.json`, and their automatic save.                                                                                                                                                                                                                                                            |
 | MCP servers         | `src/lib/store/mcp-servers.ts` owns the backend's states of the MCP servers, their sync and reconnect, and the polling while one connects; the application store's `mcp-settings.ts` slice saves the `mcp` group, the added servers and every switch, and its `email-settings.ts` slice checks, saves, and removes the email accounts the built-in email server works with, the person's and Lys's own, each on its own. |
@@ -30,7 +32,7 @@ presentation state, not durable conversation storage.
 
 ## Chat state split
 
-The desktop currently has seven separate state systems:
+The desktop currently has eight separate state systems:
 
 | Store                    | Owns                                                                                                                                                                                                                                                                                                     |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -40,6 +42,7 @@ The desktop currently has seven separate state systems:
 | Tool Zustand store       | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch                                                                                                                                                                                                            |
 | Tool-call Zustand store  | Every approval prompt and tool call held until the backend takes its answer, and the reply follows that deliver them                                                                                                                                                                                     |
 | MCP server Zustand store | The backend's list of applied MCP servers and their states, and why the latest sync or reconnect failed                                                                                                                                                                                                  |
+| Local profile store      | About Lys with its portrait and when it last changed, About you, the writing preferences, and the notes for Lys, all in memory only                                                                                                                                                                      |
 | Shell Zustand store      | Active top-level view, loaded settings (each tool's saved approval, the saved MCP servers with their switches, and the email accounts included) and the latest save of the servers and of each account, backend process status, startup progress, and each model provider's status, models, and requests |
 
 The transcript shown in the window is built from backend events for the current
@@ -88,7 +91,7 @@ context window the next message would take, while that model is loaded. While th
 [`POST /api/v1/chat/context`](/reference/api/#chat-context-measurement) to
 measure what sending would build: the shown conversation, or the agent a new
 one would start with; the conversation's model, which the backend measures
-on that model's provider; and the tools the Tools pane would
+on that model's provider; and the tools a request would
 offer, reading the tool list first when tool calls are on for a model trained
 for tool use and the list was never read. It measures again when any of
 those, or the shown conversation's stored messages, change; a newer
@@ -270,6 +273,176 @@ follows it from a stored snapshot. The next message sends the opened
 conversation as `{ kind: "existing", id }`, so the backend continues it. Deleting the conversation the
 chat view presents, or learning that it no longer exists, resets the view to a
 new conversation.
+
+## Settings view
+
+The settings view (`src/views/SettingsView/SettingsView.tsx`) shows a rail
+beside the selected pane. The rail (`LeftBar.tsx`) is a navigation landmark
+named "Settings sections": the Lys Settings wordmark, a list with one button
+per pane, each ending in its two-digit ordinal, and a runtime status line at
+its foot. The panes are, in order, Lys `01`, Profile `02`, Runtime `03`, Models
+`04`, Generation `05`, Agents `06`, Tools `07`, MCP `08`, Providers `09`, and
+Secrets `10`. The selected pane's button carries `aria-current="page"`, and
+keyboard users move through the rail with Tab. Under the selected pane's
+button, the rail lists the sections it jumps to: About Lys and Email for the
+Lys pane, and About you, Location, Preferences, and Notes for Lys for the
+Profile pane. A section's button opens that section and moves focus to its
+disclosure button, which scrolls it into view.
+
+Two entries carry a marker (`rail-presentation.ts`). The Lys pane's Email
+says `Not set up` until Lys's account is saved, then shows a dot read as the
+mailbox's state in the Email section's header, in lower case, as `connected`,
+`connecting`, `needs attention`, `not connected`, or `switched off`.
+MCP shows a danger dot, read as `a server needs attention`, while a server in
+the backend's list has failed. A dot's meaning is read as part of its entry's
+name, never given by its color alone. The status line names the first missing
+prerequisite for the model a new conversation uses, the backend and then that
+model's provider, or without a model the first provider that is on, as
+`backend stopped`, `backend not responding`, `backend up · <provider> is off`,
+or `backend up · connecting to <provider>`, and otherwise the model's weights,
+as `backend up · model loaded` or `backend up · no model`; its dot shows
+success only while the model is loaded.
+
+Each pane opens with its name, a note, and Done, which returns to the chat.
+While a pane's body loads, a skeleton stands in under the heading and Done.
+The Lys and Profile panes are made of collapsible sections
+(`SettingsPanelSection.tsx`): a section's title is a disclosure button in a
+level-two heading, and a closed section shows a one-line summary in place of
+its body, which is not rendered. Every section is open when Settings opens;
+the pane's Collapse all closes them all while any is open, and Expand all
+opens them all otherwise. The settings view owns which sections are open
+while it is shown, and leaving Settings forgets it. Most panes end with a
+closing note that says what their settings affect; the Lys and Secrets panes
+have none, and the Profile and Tools panes end with notes of their own whose
+links select other panes.
+
+## Lys settings
+
+The Lys pane (`LysPaneContent.tsx`) holds Lys's own identity and mailbox, in
+two sections. Its note reads "Lys's own name and accounts. Agents use them
+when Lys signs, sends or replies as itself. Your own accounts stay with the
+servers that use them, under MCP."
+
+About Lys, titled "How Lys introduces itself", holds a portrait, which shows
+the first letter of Lys's name until Change portrait picks an image file,
+then Name, Full name (optional), Time zone, Writes in, and Signature. Time
+zone lists every IANA zone the runtime knows with its offset from UTC, as
+`Europe/Paris · UTC+01:00`, and starts at this machine's zone. Closed, the
+section shows the name, full name, time zone, and languages that are not
+empty. Each change is kept at once in the local profile store, and the header
+then says `Saved at HH:MM`. Nothing in this section is written to
+`settings.json` or sent to the backend or a model; see
+[Current limitations](#current-limitations).
+
+Email holds Lys's own mailbox, which the email server serves next to the
+person's. Its header names the mailbox's state beside a dot: `Not set up`
+without a saved account, `Switched off` while Use this mailbox is off, and
+otherwise the state of the built-in `email` server that the pane reads from
+the backend: `Connected`, `Connecting`, `Needs attention` once the server
+failed, or `Not connected` while the backend is not running, the states were
+not read, or the server is off. The rail's Email marker shows the same state.
+Closed, the section shows `No mailbox yet`, or
+the address with the provider the address names, or else the incoming server.
+Without a saved account the section is titled "Set up Lys's mailbox" and
+holds Lys's [account card](#email-account), which stays in place once the
+account is saved, so the card's outcome stays in view. With one, it is titled
+"Lys's mailbox" and shows a summary:
+
+- the address, `Sends as <display name> <address> · signs in as <user name>`,
+  and Edit servers;
+- the two servers, `Incoming · IMAP` and `Outgoing · SMTP`, each with its host
+  and port, its security, and the provider the address names;
+- Password, shown as bullets that never hold it, with Change, named "Change
+  password";
+- Server keeps a copy of sent mail, a switch that saves the account again with
+  its saved password, so Lys first signs in to both servers, as Save on the
+  card does. It is disabled while the backend is not running, while a check,
+  save, or removal runs, and while no password is saved;
+- Used by, which says that the `email` server reads and sends with this
+  mailbox, with Open in MCP, which selects the MCP pane;
+- a polite status line and Remove mailbox. The line says that Lys is signing
+  in or saving, why a save or check failed, "Both servers answered the latest
+  check.", or "A server refused the latest check. Edit servers to see why.",
+  and otherwise "Lys signed in to both servers when this mailbox was saved."
+
+While the summary shows, the header also holds Use this mailbox, the switch
+of Lys's mailbox, `mcp.builtIn.email.lysEnabled`, which is saved and applied
+as the card's own switch is, and is disabled while a save of the `mcp` group
+runs. Edit servers and Change open Lys's account card under Back to the
+mailbox, which takes focus; Back to the mailbox returns to the summary and
+moves focus to Edit servers. Remove mailbox asks "Remove Lys's mailbox and its
+password? The email server stops reading and sending as `<address>`. Your own
+mailbox stays.", with Keep, which takes focus, and Remove. A removal switches
+the mailbox off first and removes the account and its password, as Remove
+account on the card does; the card then replaces the summary under "Lys's
+mailbox was removed.", which takes focus. After Keep, or a removal that was
+not saved, focus returns to Remove mailbox.
+
+## Profile settings
+
+The Profile pane (`ProfilePaneContent.tsx`) holds what Lys knows about the
+person, in five sections:
+
+- What a model learns about you: "Lys works for `<name>`. This is everything it
+  passes on, and when.", with two tiles. With every request shows an estimate
+  in tokens and lists the parts it counts: your name, pronouns when they are
+  set, languages and preferences, and your notes while they are sent and not
+  empty. Only
+  when asked shows the most precise part of the saved location, or `Nothing`,
+  which a model gets when it calls `get_location`, with a link to the Tools
+  pane, where that tool is switched. The rail does not list this section.
+- About you, "How Lys addresses you", badged "Sent with every request": Name,
+  Lys calls you (optional; empty uses the name), Pronouns (optional), and You
+  read.
+- Location, "Where you are, as you say it", badged "Only through
+  get_location", described below.
+- Preferences, "How answers are written for you", badged "Sent with every
+  request": Units (Metric or Imperial), Temperature (°C or °F), Dates
+  (14/11/2026, 11/14/2026, or 2026-11-14), Time (17:05 or 5:05 pm), and Week
+  starts on (Monday or Sunday), each a row of buttons, then "A model will
+  write" with a sample sentence in the chosen forms.
+- Notes for Lys, "What to keep in mind": a Notes field of up to 1,000
+  characters with its count, and a Send with every request switch in the
+  header, which starts on.
+
+The pane ends with "Kept on this machine. A change applies from the next
+request; past conversations keep what they were sent. Lys's own name and
+signature are under Lys.", the last word a link to the Lys pane. Only the
+location is saved and reaches a model. About you, Preferences, and Notes for
+Lys are kept in the local profile store, and the estimate is computed from
+them; no request carries them, though the badges, the estimate, and the
+closing note describe them as sent. See
+[Current limitations](#current-limitations).
+
+The Location section (`LocationCard.tsx`) holds the location `get_location`
+returns. Its introduction says that Lys never detects where the person is and
+that a model gets what is saved here only when it calls `get_location`, and
+only as precisely as the person chooses, followed by the hint "Each field is
+optional and holds up to 100 characters." City, Region, and Country fields,
+each labelled and described by that hint, start with the saved location. Share
+down to, a choice of City, Region, Country, or Nothing, starts at the most
+precise part saved, or at City while none is: the precision is not saved
+itself. Under it, "get_location returns" shows what the tool would return once
+the edit is saved: the parts in quotes, joined by commas; "Nothing:
+get_location fails until a location is saved." while no part would be saved;
+or "Nothing until the marked field is fixed.". Closed, the section shows the
+saved parts with `shared down to city`, `region`, or `country`, or
+`Nothing saved yet`.
+
+Enter or Save location stores the trimmed fields, a blank field and every part
+more precise than the chosen one as `null`, only when they are valid and
+differ from the saved location. Sharing down to Region and saving removes the
+city from the file; emptying every field, or choosing Nothing, and saving
+removes the location. Escape in a field discards the edit, fields and choice
+alike. An
+edit made while a save runs is kept once the save succeeds; the choice is
+disabled while a save runs. A field whose text is too long or holds a control
+character is marked invalid and described by what to change. A polite status
+line says first that a save runs or failed, which keeps the edit; otherwise
+that the edit is invalid or unsaved; otherwise whether a location is saved.
+The application store's location slice owns the save, serialized with the
+other group saves, and changes its location only once the file holds the new
+one, because the tool reads the file.
 
 ## Backend and provider status
 
@@ -721,36 +894,42 @@ stored under its code.
 
 ## Tool settings
 
-The Tools pane lists Lys's tools and the tools of the connected MCP servers.
-Client tools run in the desktop app and work
+The Tools pane lists Lys's own tools; the tools of the MCP servers are listed
+and switched in the [MCP pane](#mcp-servers). Client tools run in the desktop
+app and work
 with files, the clock, and the saved location on the user's machine; the tool store reads them from the
 [`list_tools` command](/architecture/host/#client-tool-list). Backend tools run
 in the backend and reach the web; the store reads them from
 [`GET /api/v1/tools`](/reference/api/#tool-list), which also lists the tools
-of every connected MCP server, after the backend's own. Both lists are read when the pane
+of every connected MCP server, after the backend's own, which the Tools pane
+leaves out. Both lists are read when the pane
 first appears, client tools first; a failed read of either list, or a name both
 lists share, shows the failure above the pane with Retry. Lys's tools are grouped by
-their `group` (`files`, `web`, `time & place`); each MCP server's tools form a
-group of their own, headed `MCP · <server>`, after Lys's groups. Each group
-says how many of its tools are on.
+their `group` (`files`, `web`, `time & place`). Each group says how many of
+its tools are on.
 
-Each row shows the tool's name, what it does with the machine (`reads`,
-`network`, or `depends on server` for an MCP tool), where it runs (`in Lys`
-for a client tool, `in backend` for a backend tool, `on MCP server` for an MCP
-tool), its description, an estimate of the tokens it adds to each
+Each row shows the tool's name, what it does with the machine (`reads` or
+`network`), where it runs (`in Lys` for a client tool, `in backend` for a
+backend tool), its description, an estimate of the tokens it adds to each
 request, and a switch. The estimate measures the function tool a model receives, built
 by `buildToolFunctionFormat` from `@lys/share`, with the composer's text
 estimator, so it varies with the model's tokenizer. Expanding a row, one at a
 time, shows the tool's arguments with their type and whether they are required;
-an enum argument shows `enum · N` and its accepted values. An MCP tool's
-arguments are the properties of its input schema, in the schema's order, each
-with its type when the property names one type and `JSON` otherwise; their
-accepted values are not listed. It also shows where
+an enum argument shows `enum · N` and its accepted values. It also shows where
 the tool runs and whether Lys asks before it runs.
 
 The tool-calls card holds the master switch and a status line. The status line
 names the model a new conversation uses, while it is loaded, and how many
-tools are offered with their summed estimate. When that model's
+of Lys's tools are offered with their summed estimate. Under them, Context
+per request shows the most the descriptions of those tools take in a
+request, none while tool calls are off: with a bar and the share of the
+context, as `~1.2k tok of 33k tokens · 3.6%`, while that model is loaded, and
+as `~1.2k tok per request` otherwise. The context is the length the model is
+loaded with when its provider reports it, else, for LM Studio, the length
+its stored load settings give, and for any other provider the model's
+maximum. Its note says that a request carries a tool's description once
+Armitage finds that tool for it, so the figure is a ceiling, and that tools
+from MCP servers are not counted there. When that model's
 `trainedForToolUse` is false, Lys offers it
 no tools: a card says the model isn't trained for tool calls, and every control
 below it recedes and is disabled. An expanded row closes while the controls are
@@ -760,9 +939,7 @@ Tool calls on or off and each tool's switch apply to the next chat request,
 because they decide only which tools a request offers; switching a tool off
 while a reply runs does not stop that reply's calls. A tool that only reads
 this machine starts on; a tool that sends requests off the machine (`network`)
-starts off. An MCP tool starts on, though what it does depends on its server:
-the person added the server for its tools, and each of its calls still asks
-first unless they choose Just run. Switching a tool saves its choice in the `tools.switches` object
+starts off. Switching a tool saves its choice in the `tools.switches` object
 of `settings.json`, alongside its approval, so it holds after a restart; a
 tool the person never switched has no entry and stays at its default, also
 when a later build adds it. The Tool calls switch lasts for the session
@@ -772,10 +949,8 @@ Every tool, network tools included, offers both approvals and starts on Ask
 me. The note under "Before it runs" says what each does: on Ask me, "Each call
 waits for you with its arguments. Nothing runs until you allow it."; on Just
 run, a tool that only reads this machine "Runs the moment the model asks,
-without showing you the call.", a `network` tool "Sends its request off
-this machine the moment the model asks, without showing you what it sends.",
-and an MCP tool "Runs on its MCP server the moment the model asks, without
-showing you what it sends. What it does depends on the MCP server."
+without showing you the call.", and a `network` tool "Sends its request off
+this machine the moment the model asks, without showing you what it sends."
 Choosing Just run saves the tool's name in the `tools.justRun` list of
 `settings.json`, and choosing Ask me removes it, so the approval holds after a
 restart. The application store owns that list and the switches: a change
@@ -806,13 +981,13 @@ from the pane would replace the file with the settings loaded earlier. The
 person's choice is kept and applies again once the tool can run; group counts
 and the offered totals count only tools that are on and can run.
 
-An MCP tool never shows as unable to run. The backend lists a server's tools
-only while the server is connected, so a server that is connecting, failed,
-or switched off has no rows, and its tools come back once it connects; see
-[MCP servers](#mcp-servers). A switch or approval saved for a tool its server
-no longer lists is kept and has no effect.
+Below the tools, a card headed "Tools from MCP servers live with their
+server" says how many of the servers in the backend's list run and how many
+tools those list, once the list is read, then "Switch them and choose which
+ask first under MCP.", with Open MCP, which selects the MCP pane.
 
-Below the tools and the save status, a "folders tools may use" section lists
+Below the card and the save status, a "Folders tools may use" section, under
+the eyebrow Files, lists
 the folders the person lets tool calls name paths in
 (`ApprovedFoldersCard.tsx`), each with Remove, named for its path, and a
 Folder field with Add folder. With none listed, it says tools may use any
@@ -829,25 +1004,18 @@ backend and the desktop's [file tools](/architecture/host/#file-tools) read
 it from the file at each round of tool calls; see
 [Tool call policy](/architecture/backend/#tool-call-policy).
 
-Below them, a "your location" section holds the location `get_location`
-returns: City, Region, and Country fields, each labelled, described by the
-hint "Each field is optional and holds up to 100 characters.", and filled
-with the saved location. The section stays shown while the tools are read or
-cannot be read, and the tool lock does not apply to it. Enter or Save stores
-the trimmed fields, a blank field as `null`, only when they are valid and
-differ from the saved location; emptying every field and saving removes the
-location, and Escape discards the edit. Fields changed while a save runs
-keep that newer edit once the save succeeds. A field whose text is too long or
-holds a control character is marked invalid and described by what to change.
-A polite status line says first that a save runs or failed, which keeps the
-edit; otherwise that the edit is invalid or unsaved; otherwise whether a
-location is saved. The application store's location slice owns the save,
-serialized with the other group saves, and changes its location only once the
-file holds the new one, because the tool reads the file.
+The pane ends with "Lys's own tools cannot be added or removed here; MCP
+servers add theirs under MCP. Each tool's switch and its Ask me or Just run
+choice are saved. The Tool calls switch resets when Lys restarts. Your
+location for `get_location` is kept in Profile.", where MCP and Profile are
+links to those panes; the location is set in the
+[Profile pane](#profile-settings). The card, the folders, and the note stay
+shown while the tools are read or cannot be read.
 
 ## MCP servers
 
-The MCP pane, sixth in the settings rail and before Providers, lists the MCP
+The MCP pane, eighth in the settings rail, after Tools and before Providers,
+lists the MCP
 servers Lys ships, today the email server, marked `built-in`, then the
 servers saved in the `mcp` group of `settings.json`, in their saved order,
 each with its switch and the state the backend reports for it. The servers
@@ -856,6 +1024,23 @@ edited and switched either way; their states need the backend. The
 [configuration reference](/reference/configuration/#mcp-servers) gives the
 rules a server follows, and the [API reference](/reference/api/#mcp-servers)
 the states and their reasons.
+
+While the editor is closed, three tiles under the status line give an
+overview. Apart from the number of servers listed, each count comes from the
+backend's states or the tool list and is zero until it is read:
+
+- Servers, `N of M running`, M being every server the pane lists, on or off,
+  also while the backend is stopped, with a line beside a dot: how many need
+  attention while one has failed, as `1 needs attention`; how many are
+  connecting, as `2 connecting`; `No server is running`; or
+  `Every server that is on is answering`.
+- Armitage can offer, `N tools`: the tools of the running servers that are
+  not off, with "From servers that are running. A tool set to Off is never
+  offered."
+- Before a tool runs, `N ask you first`, with a bar, while any tool is
+  listed, of how many tools of the running servers ask, run, and are off; the
+  bar is an image named by the three counts, which are also written under
+  it, followed by "An unanswered prompt ends after 5 minutes."
 
 A heading line, `servers`, says how many servers are listed, the built-in ones
 included, and, while the backend runs and its list is read, how many are
@@ -895,7 +1080,8 @@ on can always be switched off. The servers Lys ships start off; an added
 server starts on. The email server's switch sums up its two mailboxes: it is
 on while either mailbox is, switching it off switches both off, and switching
 it on switches on each mailbox whose account is saved; each mailbox's own
-switch is on its [account card](#email-account).
+switch is on its [account card](#email-account), and Lys's also in the header
+of the [Lys pane](#lys-settings)'s Email section.
 
 The details hold four parts:
 
@@ -915,11 +1101,27 @@ taken` while an added server has the built-in server's name; `Not applied`
   after the email server failed for its account (`account-missing` or
   `account-invalid`), which the backend refuses to reconnect; it is named by
   its text and the server and disabled while the backend is not running.
-- The tools, each a chip that switches the tool on or off: a toggle button
-  named by the server's name for the tool, with its description as a tooltip.
-  A switched-off tool is crossed out. The switch is the one the Tools pane
-  shows, saved in the `tools` group. A meta line counts the tools that are on
-  and their token estimate. Without tools, a note says why: the server is
+- The tools, each a row with the server's name for the tool, its description,
+  and a choice of Ask, Run, or Off, a row of buttons named by the tool's
+  name. Off switches the tool off and keeps its approval; Ask or Run
+  switches it on when it is off and saves its approval, Ask me or Just run.
+  Both are saved in the `tools` group, as the Tools pane saves Lys's own
+  tools. An MCP tool starts on, though what it does depends on its server:
+  the person added the server for its tools, and each of its calls still
+  asks first until they choose Run. A switch or approval saved for a tool
+  its server no longer lists is kept and has no effect. The note under the
+  rows says "Ask waits for your yes before each call, Run goes ahead without
+  asking, and Off keeps the tool out of the agents' reach. Every tool that is
+  not off is described to the model with each request." A meta line counts
+  the tools that are on and their token estimate.
+  Above the rows, a search field named `Search the <server> tools`, its
+  placeholder `Search N tools by name or what they do`, keeps the tools whose
+  name, also with its underscores read as spaces, or description holds the
+  text, ignoring letter case and surrounding spaces; its Clear search button
+  shows while it holds text. While no tool matches, a line says
+  `No <server> tool matches “<text>”.` with Clear search. Clearing moves focus
+  to the field. The search lasts while the server's details are shown.
+  Without tools, a note says why: the server is
   switched off, not connected, its tools are being listed, it failed before
   listing them, the tool list could not be read, or it lists none Lys can
   offer. A connected
@@ -935,9 +1137,15 @@ taken` while an added server has the built-in server's name; `Not applied`
   transport, the command, arguments, and the names of the environment
   variables, or the URL with its query hidden, the sign-in (`none` or
   `bearer token`), and the names of the other headers. A built-in server
-  shows its own panel instead, and has no Remove or Edit: the email
-  server's panel holds two [email account cards](#email-account), the
-  person's, then Lys's own.
+  shows its own panel instead, and has no Remove or Edit. The email
+  server's panel holds the person's mailbox: under Mailboxes, a row, Your
+  mailbox, with the saved address, its state, `Connected` or `Switched off`,
+  and Edit, named "Edit your mailbox", which opens the person's
+  [email account card](#email-account) under Back to the mailbox, which
+  takes focus; Back to the mailbox returns to the row and moves focus to
+  Edit. Without a saved account, the panel holds the card itself, which
+  stays once the account is saved. Lys's own mailbox is in the
+  [Lys pane](#lys-settings).
 
 A status line below the list and the editor, named `Tool choices save`, says
 "Saving tool choices…" while a change of a tool's switch or approval is
@@ -1051,18 +1259,21 @@ states, so servers saved while it was starting are applied, and it forgets
 the states when the backend stops. While
 any server is connecting, it reads them again once a second, and it stops
 once none is. When the set of connected servers or their tool counts changes,
-it reads the tool list again, if it was read before, so the Tools pane and the
-next request follow. A read joins one already running, and an answer older
-than one already shown is dropped. The pane reads the states each time it
+it reads the tool list again, if it was read before, so the servers' tools in
+the MCP pane and the next request follow. A read joins one already running,
+and an answer older than one already shown is dropped. The pane reads the states each time it
 appears while the backend runs, and when the backend starts while it is shown,
 and it reads the tool list once when it was never read.
 
 ### Email account
 
-The email server's details end with two account cards, one for each mailbox
-the server can serve: "Your email account", the person's own, and "Lys's
-email account", an account of Lys's own that she reads and sends from as an
-agent of her own. Each is the same form, `EmailAccountCard` with its
+Each mailbox the email server can serve has an account card: "Your email
+account", the person's own, in the email server's details in the MCP pane,
+and "Lys's email account", an account of Lys's own that she reads and sends
+from as an agent of her own, in the Email section of the
+[Lys pane](#lys-settings). Each shows while its mailbox has no saved account,
+and opens from the mailbox's row or summary through Edit, Edit servers, or
+Change. Each is the same form, `EmailAccountCard` with its
 `mailbox`, for one account saved in the `email` group of `settings.json`
 with its password in the `secrets` group, the person's as `account` and
 `emailPassword` and Lys's as `lysAccount` and `lysEmailPassword`
@@ -1235,7 +1446,18 @@ when the provider is turned off.
 ## Secrets
 
 The Secrets pane holds the keys of the services Lys calls on the person's
-behalf; today one card, Tavily, the service `web_search` sends queries to.
+behalf that are not set up anywhere else. It opens with where the other
+secrets are kept: "A server's token is kept with that server under MCP. A
+mailbox's password is kept with its mailbox, in Lys for Lys's and under MCP
+for yours.", where MCP and Lys are links to those panes. A banner, "Kept on
+this machine, in plain text", follows: "In `settings.json` in Lys's home
+folder, readable only by your user account. Lys's backend reads a key when it
+lists tools and when a message offers `web_search`; a reply keeps the key it
+started with."
+
+Below them, the Search service section, under the eyebrow Web search, says
+that "The `web_search` tool sends queries to one service at a time." and
+holds one card, Tavily, the service `web_search` sends queries to.
 The card shows the service's state (`no key`, `in use`, `verified` after an
 accepted check, or `rejected`), an API key field with a show button and a
 link to Tavily's key page, Save, and, once a key is saved, Test and Remove.
@@ -1328,7 +1550,7 @@ does not bring it back:
 A waiting call shows a card above the composer field: the tool, what it does
 with the machine, where it runs, a plain sentence such as "Read
 /Users/me/notes/todo.md. Nothing is changed.", "Read the location you saved in
-Settings → Tools. Nothing is changed.", "Read
+Settings → Profile. Nothing is changed.", "Read
 https://example.com/page.", with the full URL,
 or "Search the web for “latest Node.js release”. Sends the query to Tavily
 (api.tavily.com).", with the full query, and its arguments on request. An
@@ -1378,6 +1600,28 @@ starts.
   Generation settings, load configurations, and the startup switches save
   automatically; a failed save leaves the edits available for the current
   session.
+- Parts of the Lys and Profile panes are interface only
+  ([#379](https://github.com/w3lt/lys/issues/379)). The renderer's local
+  profile store (`src/lib/store/local-profile.ts`) holds Lys's portrait, name,
+  full name, time zone, Writes in, and signature, About you, Preferences, and
+  Notes for Lys with its switch, in memory only: they are never saved to
+  `settings.json`, never sent to the backend or a model, and start over when
+  the window reloads or Lys restarts. No agent or request reads them, though
+  the Lys pane's note says agents use Lys's name and the Profile pane's
+  badges, its "What a model learns about you" estimate, and its closing note
+  describe them as sent with every request. `Saved at HH:MM` in About Lys
+  gives the time of the last change in memory, not of a save. In the Profile
+  pane, only the location is saved and reaches a model.
+- Lys's mailbox offers no test mail to the person
+  ([#382](https://github.com/w3lt/lys/issues/382)); the status line reports
+  only the sign-in done when the mailbox was saved and the latest check.
+- An MCP server's token is replaced only through Edit, in the server's
+  editor, and its output is read only in the backend log
+  ([#380](https://github.com/w3lt/lys/issues/380)).
+- `web_search` uses Tavily only, its key is checked only by Test on the
+  Tavily card after it is saved, and the Secrets pane does not open the folder
+  that holds `settings.json`
+  ([#381](https://github.com/w3lt/lys/issues/381)).
 - The vmo card stops checking once vmo is `running`, so a vmo that crashes
   later still shows `running` until it is stopped or restarted; `read_page`
   is then refused when a turn offers it, and the tool list is read again.

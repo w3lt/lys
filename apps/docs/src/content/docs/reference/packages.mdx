@@ -43,10 +43,12 @@ crate of the email MCP server Lys ships.
   Tauri and checks it through the backend.
 - The MCP settings pane saves the MCP servers through Tauri, asks the backend
   to apply them, and shows each server's state, tools, and skipped tools,
-  with a button that reconnects it; it switches each server on or off, and
-  saves the email accounts the built-in email server works with, the
-  person's and Lys's own, each once the backend signed in with it, and each
-  mailbox's switch.
+  with a button that reconnects it; it switches each server on or off, sets
+  each tool to Ask, Run, or Off, and saves the person's email account for
+  the built-in email server once the backend signed in with it, and its
+  mailbox's switch. The Lys settings pane does the same for Lys's own
+  account and mailbox switch, and the Profile settings pane saves the
+  location `get_location` returns through Tauri.
 
 ### `@lys/backend`
 

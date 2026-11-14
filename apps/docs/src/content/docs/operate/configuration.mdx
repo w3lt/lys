@@ -55,14 +55,15 @@ after a hand edit. See
 [Providers](/reference/configuration/#providers).
 
 The `tools` group lists, in `justRun`, the tools set to Just run in Settings →
-Tools; every other tool asks before each call. The backend reads the list when
-each round of tool calls arrives, so removing a name by hand puts that tool
-back on Ask me from the next round; the Tools pane shows the change the next
-time Lys starts, and a save from the pane before then writes back the names it
-holds. If the backend cannot read the file, every tool call asks.
+Tools, or to Run in Settings → MCP for an MCP server's tool; every other tool
+asks before each call. The backend reads the list when each round of tool
+calls arrives, so removing a name by hand puts that tool back on Ask me from
+the next round; the panes show the change the next time Lys starts, and a
+save from either pane before then writes back the names it holds. If the
+backend cannot read the file, every tool call asks.
 
 The same group lists, in `approvedFolders`, the folders tools may use, which
-you add in Settings → Tools under "folders tools may use". With none listed,
+you add in Settings → Tools under "Folders tools may use". With none listed,
 tool calls may name any path. Once you list one, a call that names a path
 outside every listed folder is denied without asking you, and the desktop's
 file tools refuse a file outside them, wherever a link leads. The backend and
@@ -74,8 +75,10 @@ read, the backend logs a warning, and the file tools fail with
 [Approved folders](/reference/configuration/#approved-folders).
 
 The `location` group holds the city, region, and country you type in Settings
-→ Tools, each optional, which the `get_location` tool gives a model when it
-calls the tool. Lys never detects your location. The tool reads the group
+→ Profile, each optional, which the `get_location` tool gives a model when it
+calls the tool. Lys never detects your location. Share down to saves the
+parts only as precisely as you choose: a part more precise than your choice
+is saved as `null`, and Nothing removes the location. The tool reads the group
 from the file at each call, so a saved change or a hand edit applies to the
 next call; with no part saved, the tool fails.
 
@@ -96,10 +99,12 @@ when it starts and when the MCP pane saves, and `email` with the passwords in
 settings pane writes the values Lys holds over a hand edit of its group made
 while Lys runs: the Generation pane replaces `generation`, the Models pane
 replaces `loadConfiguration.models` and leaves `default` as it is in the file,
-the Secrets pane replaces `secrets`, the Tools pane replaces `tools` and, on
-Save, `location`, the MCP pane replaces `mcp` and, on an email account card,
-that account in `email` and its password, `secrets.emailPassword` or
-`secrets.lysEmailPassword`, and the
+the Secrets pane replaces `secrets`, the Tools pane replaces `tools`, the
+Profile pane replaces `location` on Save location, the MCP pane replaces `mcp`
+and `tools` and, on your email account card, your account in `email` and
+`secrets.emailPassword`, the Lys pane replaces `mcp` on Use this mailbox and,
+on Lys's card or its Server keeps a copy of sent mail switch, her account in
+`email` and `secrets.lysEmailPassword`, and the
 Runtime pane replaces `runtime.autoStartBackend` and `runtime.autoStartVmo`
 and leaves the rest of `runtime` as it is in the file.
 
@@ -213,12 +218,14 @@ time, such as one that holds a lock file or a port, connects again. A server
 that does not exit when Lys closes its input is ended within about four
 seconds, and the row shows `Starting` until then.
 
-Each MCP tool appears in Settings → Tools under `MCP · <server>` and starts
-switched on, but asks before each call until you choose Just run for it. A
-server's details in the MCP pane show the same switches as chips, with what
-the tools that are on cost per request, and set Ask me or Just run for all of
-its tools at once. Every tool that is on is described to the model with each
-request, so switch off the ones you do not need.
+Each MCP tool appears in its server's details in Settings → MCP, with a
+choice of Ask, Run, or Off, and starts on, asking before each call until you
+choose Run for it. A search field above the tools finds one by its name or
+description. The details also say what the tools that are on cost per
+request, and set Ask me or Just run for all of the server's tools at once.
+Every tool that is not off is described to the model with each request, so
+set the ones you do not need to Off. Settings → Tools lists only Lys's own
+tools.
 
 Environment values, the token, header values, URLs, and arguments are saved as
 plain text in `settings.json`, readable only by your user account; the editor
@@ -227,10 +234,11 @@ writes none of them into its log entries, though it logs a server's own error
 output as the server wrote it. A server's name appears in its tools' names,
 which the model reads, so a name should not hold a secret.
 
-The backend reads the `mcp` group when it starts and each time the MCP pane
-saves; a hand edit applies when the backend next starts. The MCP pane shows a
-hand edit the next time Lys starts, and a save from the pane before then
-writes back the servers it holds. The
+The backend reads the `mcp` group when it starts and each time the MCP pane,
+or the switch of Lys's mailbox in the Lys pane, saves; a hand edit applies
+when the backend next starts. The MCP pane shows a hand edit the next time
+Lys starts, and a save from the pane before then writes back the servers it
+holds. The
 [configuration reference](/reference/configuration/#mcp-servers) lists every
 rule a server follows, and the [API reference](/reference/api/#mcp-servers)
 the states and failure reasons.
@@ -238,18 +246,20 @@ the states and failure reasons.
 ### Email account
 
 The email server Lys ships works with up to two email accounts, each saved
-on its own card in Settings → MCP, under the server's details: "Your email
-account", your own mailbox, and "Lys's email account", a mailbox of Lys's own,
-which she reads and sends from as an agent of her own, so that her mail
-leaves under her name and address and you need not give her the password of
+on its own card: "Your email account", your own mailbox, in Settings → MCP,
+under the server's details, and "Lys's email account", in Settings → Lys,
+under Email, a mailbox of Lys's own, which she reads and sends from as an
+agent of her own, so that her mail leaves under her name and address and you need not give her the password of
 yours. One server process serves both. Lys signs in to an account's IMAP and
 SMTP servers before it saves anything, so the backend must be running; the
 card says so otherwise. To add an account:
 
-1. Open Settings → MCP and expand the `email` row, then enter the address on
-   the card of the mailbox, yours or Lys's. Lys's card starts with `Lys` as
-   the display name. The two accounts must be two mailboxes: a card refuses
-   the other card's address, in any letter case, and its user name on the
+1. For yours, open Settings → MCP and expand the `email` row; for Lys's,
+   open Settings → Lys. Enter the address on the mailbox's card, which shows
+   while the mailbox has no account; once one is saved, Edit on Your mailbox,
+   or Edit servers on Lys's mailbox, opens it again. Lys's card starts with
+   `Lys` as the display name. The two accounts must be two mailboxes: a card
+   refuses the other card's address, in any letter case, and its user name on the
    same IMAP server.
    For Gmail, iCloud, Yahoo, and Fastmail, the server fields and the Sent
    copy switch fill themselves from a preset; the note under the address
@@ -268,30 +278,32 @@ card says so otherwise. To add an account:
 4. Press Save. Lys signs in to both servers, up to 20 seconds each, and the
    status line says what each answered; a refused sign-in saves nothing.
    Once both accepted, the account and the password are saved together.
-5. Switch the mailbox on with **Use this mailbox** on its card, or both
-   saved mailboxes at once with the switch beside the server's row. The
-   mailbox's ten tools then appear in Settings → Tools under `MCP · email`,
-   Lys's with `lys_` before their names, each asking before it runs until
-   you choose Just run, unless a Just run choice saved for a tool of the same
-   name of an earlier server named `email` was kept; see
+5. Switch the mailbox on with **Use this mailbox** on its card, or, for
+   Lys's, in the header of the Lys pane's Email section, or both saved
+   mailboxes at once with the switch beside the server's row. The
+   mailbox's ten tools then appear in the email server's details in
+   Settings → MCP, Lys's with `lys_` before their names, each asking before
+   it runs until you choose Run, unless a Just run choice saved for a tool
+   of the same name of an earlier server named `email` was kept; see
    [Choices kept by name](/architecture/security/#mcp-servers). Every send
    from either mailbox asks first, even on Just run, and the approval card
    names the tool, `send_email` or `lys_send_email`, which tells the mailbox
    it leaves from. Lys's mailbox is hers: only her agents, Caliginia and
    Lysiptera, are offered its tools, and only they learn her address when
    they read their own state. Every agent can use your mailbox's tools.
-6. To stop using an account, press **Remove account** on its card and
-   confirm: Lys switches that mailbox off and removes the account and the
-   password, keeping the other card's.
+6. To stop using an account, press **Remove account** on its card, or
+   **Remove mailbox** under Lys's mailbox in Settings → Lys, and confirm:
+   Lys switches that mailbox off and removes the account and the password,
+   keeping the other card's.
 
 Your account is saved as `account` in the `email` group of `settings.json`
 and its password as `emailPassword` in `secrets`, Lys's as `lysAccount` and
 `lysEmailPassword`, all as plain text readable only by your user account; the
 [configuration reference](/reference/configuration/#email-account) lists the
 rules. A hand edit of either applies the next time the backend applies the
-servers, that is when it starts or when the MCP pane saves; the pane shows a
-hand edit the next time Lys starts. The backend hands each account of a
-mailbox that is on, with its password, to the email server through its
+servers, that is when it starts or when Settings saves the servers or a
+mailbox's switch; the panes show a hand edit the next time Lys starts. The
+backend hands each account of a mailbox that is on, with its password, to the email server through its
 environment each time it starts it, and the server connects to the mail servers once per tool call, with TLS
 or STARTTLS verified against the system's certificate store; a connection
 without TLS is allowed only to `localhost`, `127.0.0.1`, or `[::1]`. See
@@ -316,14 +328,19 @@ only the `loadConfiguration` group, and the Models pane offers the same retry
 action. The Secrets pane saves the Tavily API key only on Save or Enter,
 replacing only the `secrets` group. Choosing Ask me or Just run in the Tools
 pane autosaves the same way, replacing only the `tools` group, and the Tools
-pane offers the same retry action. Switching an MCP tool's chip or choosing
-Ask me or Just run for a server in the MCP pane saves the `tools` group the
-same way. The MCP pane saves the servers only on Save in its editor or on
+pane offers the same retry action. Choosing Ask, Run, or Off for an MCP tool,
+or Ask me or Just run for a server, in the MCP pane saves the `tools` group
+the same way. The MCP pane saves the servers only on Save in its editor or on
 Remove, and each server's switch when it is flipped, replacing only the
 `mcp` group, and then asks the running backend to apply them; each email
 account card saves its account and its password together on Save, after the
 backend signed in with them, and removes both on Remove account, and its Use
-this mailbox switch saves only its mailbox's switch.
+this mailbox switch saves only its mailbox's switch. In the Lys pane, the
+Server keeps a copy of sent mail switch saves Lys's account the same way,
+after the same sign-in, Remove mailbox removes it as Remove account does, and
+Use this mailbox saves only her mailbox's switch. The Profile pane saves the
+location only on Save location or Enter, replacing only the `location`
+group.
 Changing either startup switch in the
 Runtime pane, for the backend or for vmo, autosaves both switches and keeps
 the rest of the `runtime` group as it is on disk; after a failed save, the
@@ -331,7 +348,10 @@ pane says that the next launch follows the switches last saved, and changing a
 switch tries the save again.
 
 The other runtime edits, such as the default model, remain session-only. Changing those controls does not persist them, and
-a later automatic save does not save their in-memory values.
+a later automatic save does not save their in-memory values. The Lys pane's
+About Lys and the Profile pane's About you, Preferences, and Notes for Lys
+are not saved at all and reach no model; see the desktop's
+[current limitations](/architecture/desktop/#current-limitations).
 
 ## Fixed runtime addresses
 

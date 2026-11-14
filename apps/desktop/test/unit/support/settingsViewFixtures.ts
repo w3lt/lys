@@ -8,8 +8,8 @@ import {
   type RuntimeArrangement
 } from "./runtimeFixtures"
 
-/** Route key of the model inventory read. */
-export const INVENTORY_ROUTE = "GET /api/v1/llm/list"
+/** Route key of LM Studio's model inventory read. */
+export const INVENTORY_ROUTE = "GET /api/v1/llm/lmStudio/list"
 
 /**
  * Imports of the pane bodies the settings view loads lazily, by pane.

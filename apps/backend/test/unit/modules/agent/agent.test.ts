@@ -84,6 +84,7 @@ import {
 } from "../../../../src/modules/toolApproval/toolCallPolicy"
 import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
 import { createImageAttachment } from "../../support/attachmentFixtures"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 import { parseMcpToolDefinition } from "../../support/mcpToolFixtures"
 import {
   openConversationTestServices,
@@ -164,7 +165,7 @@ const SWITCHED_OFF_SEARCH_TOOLS: UnofferedTools = Object.freeze({
 /** Request values and the tool call policy every case's turn carries. */
 const TURN_REQUEST = Object.freeze({
   userMessage: createUserMessage(100, "Hello"),
-  model: "qwen/qwen3-8b",
+  model: LM_STUDIO_QWEN3_8B,
   generationOptions: { temperature: 0.4, replyCeiling: 128 },
   toolCallPolicy: TOOL_CALL_POLICY
 })
@@ -869,7 +870,7 @@ const OWN_STATE_RESULT = [
   "You are Lys (code lys), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state. Your email address is lys@example.net.",
   `Now: ${NOW}.`,
   "Request slots: 1 of 2 in use.",
-  `1. This reply, in this conversation: started ${NOW} (less than a minute ago) with ${TURN_REQUEST.model}; using tools: read_my_state running.`,
+  `1. This reply, in this conversation: started ${NOW} (less than a minute ago) with qwen/qwen3-8b on LM Studio; using tools: read_my_state running.`,
   "Nothing else is in progress."
 ].join("\n")
 
@@ -1868,7 +1869,7 @@ describe("Agent", () => {
       expect(run.events).toEqual([
         {
           type: "error",
-          message: `The conversation no longer fits the model's context window: the next request to the model needs ${requiredTokens} tokens, including the room kept for the reply, and the model is loaded with ${contextLength}. Start a new conversation, or load the model with a longer context in Settings → Model.`
+          message: `The conversation no longer fits the model's context window: the next request to the model needs ${requiredTokens} tokens, including the room kept for the reply, and the model is loaded with ${contextLength}. Start a new conversation, or load the model with a longer context in Settings → Models.`
         }
       ])
       expect(run.reportedRefusals).toEqual([
@@ -1936,7 +1937,7 @@ describe("Agent", () => {
         {
           type: "error",
           message:
-            "The model is not loaded, so Lys cannot check that the conversation fits it. Load the model in Settings → Model, or in the provider itself when Lys does not load its models, then try again."
+            "The model is not loaded, so Lys cannot check that the conversation fits it. Load the model in Settings → Models, or in the provider itself when Lys does not load its models, then try again."
         }
       ])
       expect(run.reportedRefusals).toEqual([

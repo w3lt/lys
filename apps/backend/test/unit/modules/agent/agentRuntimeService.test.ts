@@ -34,6 +34,7 @@ import {
   createFixtureUuidV7,
   createUserMessage
 } from "../../support/conversationFixtures"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 import { createRoomyReplyContextMeter } from "../../support/replyContextMeterFakes"
 import {
   LEADER_STATE_TOOL_NAMES,
@@ -290,7 +291,7 @@ async function createHelloReply(
     userMessage: createUserMessage(1, "Hello"),
     canSeeImages: false,
     findAttachmentImage: vi.fn(),
-    model: "qwen/qwen3-8b",
+    model: LM_STUDIO_QWEN3_8B,
     generationOptions: { temperature: 0.4 },
     directTools: [],
     clientTools: [],
@@ -544,7 +545,7 @@ describe("AgentRuntimeService", () => {
               requestId: createFixtureUuidV7(21),
               conversationId: titled,
               conversationTitle: { status: "found", title: "Trip to Kyoto" },
-              model: "qwen/qwen3-8b",
+              model: LM_STUDIO_QWEN3_8B,
               startedAt: NOW,
               step: { kind: "preparing", round: 0 }
             },
@@ -658,7 +659,7 @@ describe("AgentRuntimeService", () => {
         searchCallId: SEARCH_CALL_ID,
         tools: TOOL_KEEPER_SEARCH_TOOLS,
         conversationId,
-        model: "qwen/qwen3-8b",
+        model: LM_STUDIO_QWEN3_8B,
         generationOptions,
         abortSignal: new AbortController().signal,
         reportFailure: vi.fn(),
@@ -715,7 +716,7 @@ describe("AgentRuntimeService", () => {
           searchCallId: SEARCH_CALL_ID,
           tools: TOOL_KEEPER_SEARCH_TOOLS,
           conversationId: createFixtureUuidV7(31),
-          model: "qwen/qwen3-8b",
+          model: LM_STUDIO_QWEN3_8B,
           generationOptions,
           abortSignal,
           reportFailure,

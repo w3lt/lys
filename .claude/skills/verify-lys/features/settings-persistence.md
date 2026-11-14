@@ -5,20 +5,24 @@ Settings changed in the Settings view are saved through the host to
 
 ## Sub-features
 
-- The Settings view (gear button in the composer) has panes Runtime, Model,
-  Generation, Agents, Tools, MCP, Providers, and Secrets, reached from the
-  rail `Settings sections`.
+- The Settings view (gear button in the composer) has panes Runtime,
+  Models, Generation, Agents, Tools, MCP, Providers, and Secrets, reached
+  from the rail `Settings sections`.
 - A change in a pane is saved at once through the host's `save_settings`
   command; the host writes the whole document pretty-printed with a trailing
   newline, atomically, readable only by its owner (mode 0600).
 - `load_settings` on start reads the file back; when it is missing the host
-  writes the defaults first.
+  writes the defaults first. A file saved before several providers could be
+  on names one `providers.active` provider; the host reads it as that
+  provider on alone, answers `providers.enabled` without `active`, and the
+  next save writes it that way.
 - Verified switches: Generation → `Reply ceiling` (`generation.replyCeiling`:
   2048 on, 0 off) and Runtime → `Start it when Lys opens`
   (`runtime.autoStartBackend`).
-- Not covered: the temperature slider, model load configuration, provider
-  addresses, secrets, location, tool switches, and MCP servers, which all go
-  through the same save path but are not exercised.
+- Not covered: the temperature slider, model load configuration, turning
+  providers on and off, provider addresses, secrets, location, tool
+  switches, and MCP servers, which all go through the same save path but are
+  not exercised.
 
 ## How to get to it (user POV)
 
@@ -56,15 +60,22 @@ and records that as an extra step.
 
 - The file is written by `scripts/fake-host.mjs`, which mirrors the Rust
   host's writer (`apps/desktop/src-tauri/src/settings.rs`): same key order,
-  pretty JSON, trailing newline, mode 0600, temp file plus rename. The Rust
-  writer itself is covered by its cargo tests and by the opt-in
+  pretty JSON, trailing newline, mode 0600, temp file plus rename. Its
+  `load_settings` and `save_settings` both read the `providers` group as
+  `apps/desktop/src-tauri/src/settings/providers.rs` does: a legacy `active`
+  provider, or LM Studio when there is neither `active` nor `enabled`, becomes
+  the one provider on, and `enabled` is answered and saved in provider order
+  (lmStudio, ollama, ollamaCloud, groq) without `active`. The renderer
+  refuses a document without `enabled`. The Rust writer itself is covered by
+  its cargo tests and by the opt-in
   `host-lifecycle-native` journey, which compares the file the real host
   creates byte for byte with `DEFAULT_SETTINGS_DOCUMENT` in
   `scripts/lib/settingsDocument.mjs`. If a settings group is added in Rust,
   update that constant or the native journey fails.
-- The seeded document is not the default: `providers.active` is `ollama` at
-  the fake's address and `runtime.autoStartVmo` is `false` (the stack has no
-  vmo). Journeys that read defaults must account for both.
+- The seeded document is not the default: `providers.enabled` is
+  `["ollama"]` with Ollama at the fake's address, where the default turns LM
+  Studio on, and `runtime.autoStartVmo` is `false` (the stack has no vmo).
+  Journeys that read defaults must account for both.
 - After the reload the journeys wait for the app shell, not a ready composer.
   Seen once on 2026-11-01: with `autoStartBackend` off and the backend still
   running, the reloaded renderer stayed at `Waiting on the backend…` for 60 s

@@ -8,8 +8,10 @@ import type StoredConversationHistoryEditor from "./modules/conversation/history
 import type StoredConversationHistoryReader from "./modules/conversation/historyReader"
 import type StoredReplyParts from "./modules/conversation/replyParts"
 import type StoredConversationTurns from "./modules/conversation/turns"
-import type LlmRuntimeService from "./modules/llm/llmRuntimeService"
-import type LlmService from "./modules/llm/llmService"
+import type {
+  LlmProviderRecord,
+  LlmProviderServices
+} from "./modules/llm/llmProviderServices"
 import type EmailAccountChecker from "./modules/mcp/builtIn/email/emailAccountCheck"
 import type McpServerProcessGroups from "./modules/mcp/mcpServerProcessGroups"
 import type McpServerRegistry from "./modules/mcp/mcpServerRegistry"
@@ -22,10 +24,12 @@ declare module "fastify" {
   interface FastifyInstance {
     /** Application-scoped service for OpenAI-compatible chat completion streams. */
     chatService: ChatService
-    /** Application-scoped model inventory, lifecycle, and health policy. */
-    llmService: LlmService
-    /** Application-scoped LLM runtime connection and model-operation queue. */
-    llmRuntimeService: LlmRuntimeService
+    /**
+     * Each provider's application-scoped LLM runtime connection and
+     * model-operation queue, and its model inventory, lifecycle, and health
+     * policy.
+     */
+    llmProviderServices: LlmProviderRecord<LlmProviderServices>
     /** Application-scoped persistence of chat turns and their replies' states. */
     conversationTurns: StoredConversationTurns
     /** Application-scoped persistence of reply parts and the sources they read. */

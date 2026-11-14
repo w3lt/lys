@@ -24,9 +24,15 @@ import type { ConversationReader } from "../../../src/modules/conversation/capab
 import type StoredConversationTurns from "../../../src/modules/conversation/turns"
 import ReplyGenerationRegistry from "../../../src/modules/chat/replyGenerationRegistry"
 import {
-  createModelCapabilitiesLookup,
-  type FindModelCapabilities
+  createLlmModelCapabilitiesLookup,
+  type FindLlmModelCapabilities
 } from "../../../src/modules/chat/routes/modelCapabilities"
+import {
+  buildLlmProviderRecord,
+  type LlmProviderRecord,
+  type LlmProviderServices
+} from "../../../src/modules/llm/llmProviderServices"
+import type { LlmProviderAccess } from "../../../src/modules/llm/llmProviderAccess"
 import LlmRuntimeService from "../../../src/modules/llm/llmRuntimeService"
 import LlmService from "../../../src/modules/llm/llmService"
 import McpServerRegistry, {
@@ -43,7 +49,7 @@ import {
   createAcquiredFakeLlmRuntime,
   createFakeLlmRuntime
 } from "./fakeLlmRuntime"
-import { DEFAULT_LM_STUDIO_ACCESS } from "./llmFixtures"
+import { TEST_LLM_PROVIDER_ACCESSES } from "./llmFixtures"
 import { openConversationTestServices } from "./conversationDatabase"
 import type { TestFastify } from "./fastifyTestApp"
 import {
@@ -99,24 +105,26 @@ export type ChatRouteTestApp = TestFastify &
     /** Title generation of `app.chatService`; rejects if it is ever called. */
     generateTitle: MockInstance<ChatService["generateTitle"]>
     /**
-     * Context measurement of `app.llmService`, which every agent's meter and
-     * the title task's loaded check use; by default the model is loaded with
-     * a window larger than any test context, and each text is one token.
+     * Context measurement of LM Studio's LLM service, the provider most cases
+     * name; the same spy as `llmServiceSpies.lmStudio`.
      */
-    findLlmContextMeasurement: MockInstance<
-      LlmService["findLlmContextMeasurement"]
-    >
+    findLlmContextMeasurement: LlmServiceSpies["findLlmContextMeasurement"]
     /**
-     * Downloaded models of `app.llmService`, which {@link findModelCapabilities}
-     * reads for a model's capabilities; lists no model until a case configures
-     * it, so every model sees no image and is offered no attachment reader.
+     * Downloaded models of LM Studio's LLM service; the same spy as
+     * `llmServiceSpies.lmStudio`.
      */
-    listDownloadedLlmModels: MockInstance<LlmService["listDownloadedLlmModels"]>
+    listDownloadedLlmModels: LlmServiceSpies["listDownloadedLlmModels"]
     /**
-     * Capability lookup over {@link listDownloadedLlmModels}, which a case
-     * passes to the chat route; it remembers each listed model for the test.
+     * Spies of each provider's LLM service in
+     * `app.llmProviderServices`.
      */
-    findModelCapabilities: FindModelCapabilities
+    llmServiceSpies: LlmProviderRecord<LlmServiceSpies>
+    /**
+     * Capability lookup over each provider's `listDownloadedLlmModels` spy,
+     * which a case passes to the chat route; it remembers each listed model
+     * for the test, apart for each provider.
+     */
+    findModelCapabilities: FindLlmModelCapabilities
     /**
      * Reader of the saved Just run choices behind `app.toolApprovalService`;
      * rejects until a case configures it.
@@ -156,8 +164,7 @@ type ChatRouteTestServices = Readonly<
     | "conversationHistoryReader"
     | "conversationHistoryEditor"
     | "chatService"
-    | "llmService"
-    | "llmRuntimeService"
+    | "llmProviderServices"
     | "agentService"
     | "agentRuntimeService"
     | "toolApprovalService"
@@ -175,6 +182,7 @@ type ChatRouteTestSpies = Pick<
   | "generateTitle"
   | "findLlmContextMeasurement"
   | "listDownloadedLlmModels"
+  | "llmServiceSpies"
   | "readJustRunToolNames"
   | "readMcpSettings"
 >
@@ -196,15 +204,32 @@ type SpiedChatService = Readonly<{
 }> &
   Pick<ChatRouteTestApp, "completeChatStream" | "generateTitle">
 
+/** Spies that replace one LLM service's measurement and inventory. */
+export type LlmServiceSpies = Readonly<{
+  /**
+   * Context measurement, which every agent's meter and the title task's
+   * loaded check use for a model on the service's provider; by default the
+   * model is loaded with a window larger than any test context, and each
+   * text is one token.
+   */
+  findLlmContextMeasurement: MockInstance<
+    LlmService["findLlmContextMeasurement"]
+  >
+  /**
+   * Downloaded models, which the capability lookup reads for a model's
+   * capabilities on the service's provider; lists no model until a case
+   * configures it, so every model sees no image and is offered no
+   * attachment reader.
+   */
+  listDownloadedLlmModels: MockInstance<LlmService["listDownloadedLlmModels"]>
+}>
+
 /** An LLM service and the spies that replace its measurement and inventory. */
 type SpiedLlmService = Readonly<{
   /** The service; its engine operation queue rejects every operation. */
   llmService: LlmService
 }> &
-  Pick<
-    ChatRouteTestApp,
-    "findLlmContextMeasurement" | "listDownloadedLlmModels"
-  >
+  LlmServiceSpies
 
 /** A real MCP server registry and the spy it reads its settings through. */
 export type TestMcpServerRegistry = Readonly<{
@@ -270,8 +295,9 @@ export type AgentConversationTestServices = Readonly<{
  * conversations from the same database; every agent's model calls
  * go through the `completeChatStream` spy, and every measurement, by their
  * meters and by the title task, through the `findLlmContextMeasurement` spy
- * of the decorated LLM service, and every inventory read through its
- * `listDownloadedLlmModels` spy; its queue rejects anything else. The
+ * of the decorated LLM service of the model's provider, and every inventory
+ * read through its `listDownloadedLlmModels` spy; each queue rejects
+ * anything else. The
  * decorated history reader and editor read and edit the same database, so a
  * case can delete a conversation while a request is in flight. The backend
  * tools are
@@ -280,10 +306,11 @@ export type AgentConversationTestServices = Readonly<{
  * `check_spelling`, whose provider is never ready (`api-key-missing`). The
  * decorated tool approval service reads the saved Just run choices through
  * the `readJustRunToolNames` spy. The decorated attachment file store is
- * real, over a directory created for the test. The decorated LLM runtime
- * service is connected to {@link DEFAULT_LM_STUDIO_ACCESS} over a runtime
- * double that no case reaches, so the capability lookups remember models
- * for that provider. The decorated MCP server registry is real, reads its
+ * real, over a directory created for the test. Each provider's decorated
+ * LLM runtime service is connected, as {@link TEST_LLM_PROVIDER_ACCESSES}
+ * reaches it, over a runtime double that no case reaches, so the capability
+ * lookups remember models for each provider. The decorated MCP server
+ * registry is real, reads its
  * settings through the `readMcpSettings` spy, which reads no server, opens
  * servers with a 10-second limit, and logs nothing; it holds no server until
  * a case applies settings, and it is closed when the test finishes. When the
@@ -315,9 +342,8 @@ export async function createChatRouteTestApp(
   return Object.freeze({
     ...testFastify,
     ...spies,
-    findModelCapabilities: createModelCapabilitiesLookup(
-      () => services.llmService.listDownloadedLlmModels(),
-      () => services.llmRuntimeService.connectedLlmProviderAccess
+    findModelCapabilities: createLlmModelCapabilitiesLookup(
+      services.llmProviderServices
     ),
     attachmentsDirectoryPath,
     generations,
@@ -337,7 +363,7 @@ export async function createChatRouteTestApp(
  * @returns The services, their spies, and read access to their database.
  * @throws If the LLM runtime service cannot connect.
  * @remarks When the test finishes, the MCP server registry closes first,
- * then the LLM runtime service is disposed, and the database closes last.
+ * then the LLM runtime services are disposed, and the database closes last.
  */
 async function createChatRouteTestServices(
   attachmentsDirectoryPath: string,
@@ -348,12 +374,12 @@ async function createChatRouteTestServices(
     .spyOn(conversation.turns, "createConversationTurn")
     .mockImplementation(() => handleUnexpectedCall("createConversationTurn"))
   const chat = createSpiedChatService()
-  const llm = createSpiedLlmService()
-  const llmRuntimeService = await openTestLlmRuntimeService()
+  const llm = buildLlmProviderRecord(() => createSpiedLlmService())
+  const llmProviderServices = await openTestLlmProviderServices(llm)
   const agents = createTestAgentServices(
     conversation,
     chat.chatService,
-    llm.llmService
+    llmProviderServices
   )
   const readJustRunToolNames = vi.fn<ReadJustRunToolNames>(() =>
     Promise.reject(createUnexpectedCallError("readJustRunToolNames"))
@@ -366,8 +392,7 @@ async function createChatRouteTestServices(
       conversationHistoryReader: conversation.history,
       conversationHistoryEditor: conversation.editor,
       chatService: chat.chatService,
-      llmService: llm.llmService,
-      llmRuntimeService,
+      llmProviderServices,
       ...agents,
       toolApprovalService: new ToolApprovalService(readJustRunToolNames),
       attachmentFileStore: new AttachmentFileStore(attachmentsDirectoryPath),
@@ -380,8 +405,9 @@ async function createChatRouteTestServices(
       createConversationTurn,
       completeChatStream: chat.completeChatStream,
       generateTitle: chat.generateTitle,
-      findLlmContextMeasurement: llm.findLlmContextMeasurement,
-      listDownloadedLlmModels: llm.listDownloadedLlmModels,
+      findLlmContextMeasurement: llm.lmStudio.findLlmContextMeasurement,
+      listDownloadedLlmModels: llm.lmStudio.listDownloadedLlmModels,
+      llmServiceSpies: llm,
       readJustRunToolNames,
       readMcpSettings: mcp.readMcpSettings
     }),
@@ -454,18 +480,58 @@ function createSpiedLlmService(): SpiedLlmService {
 }
 
 /**
- * Opens an LLM runtime service connected to {@link DEFAULT_LM_STUDIO_ACCESS}
- * over a runtime double that no case reaches.
+ * Opens each provider's LLM runtime service, connected as
+ * {@link TEST_LLM_PROVIDER_ACCESSES} reaches the provider, beside its spied
+ * LLM service.
  *
+ * @param llm - Each provider's spied LLM service.
+ * @returns Each provider's services; the runtime services are disposed when
+ * the test finishes.
+ * @throws If a runtime service cannot connect, as
+ * {@link LlmRuntimeService.connectLlmRuntime} documents.
+ */
+async function openTestLlmProviderServices(
+  llm: LlmProviderRecord<SpiedLlmService>
+): Promise<LlmProviderRecord<LlmProviderServices>> {
+  const runtimeServices = buildLlmProviderRecord((provider) =>
+    openTestLlmRuntimeService(TEST_LLM_PROVIDER_ACCESSES[provider])
+  )
+  return Object.freeze({
+    lmStudio: Object.freeze({
+      llmService: llm.lmStudio.llmService,
+      llmRuntimeService: await runtimeServices.lmStudio
+    }),
+    ollama: Object.freeze({
+      llmService: llm.ollama.llmService,
+      llmRuntimeService: await runtimeServices.ollama
+    }),
+    ollamaCloud: Object.freeze({
+      llmService: llm.ollamaCloud.llmService,
+      llmRuntimeService: await runtimeServices.ollamaCloud
+    }),
+    groq: Object.freeze({
+      llmService: llm.groq.llmService,
+      llmRuntimeService: await runtimeServices.groq
+    })
+  })
+}
+
+/**
+ * Opens an LLM runtime service connected to one provider over a runtime
+ * double that no case reaches.
+ *
+ * @param access - How the service reaches its provider.
  * @returns The connected service, disposed when the test finishes.
  * @throws If the service cannot connect, as
  * {@link LlmRuntimeService.connectLlmRuntime} documents.
  */
-async function openTestLlmRuntimeService(): Promise<LlmRuntimeService> {
+async function openTestLlmRuntimeService(
+  access: LlmProviderAccess
+): Promise<LlmRuntimeService> {
   const llmRuntimeService = new LlmRuntimeService({
     reportLlmRuntimeAcquisitionFailure: vi.fn(),
     reportLlmRuntimeAvailabilityCheckFailure: vi.fn(),
-    findLlmProviderAccess: () => Promise.resolve(DEFAULT_LM_STUDIO_ACCESS),
+    findLlmProviderAccess: () => Promise.resolve(access),
     acquireLlmRuntime: () =>
       Promise.resolve(createAcquiredFakeLlmRuntime(createFakeLlmRuntime()))
   })
@@ -483,14 +549,14 @@ async function openTestLlmRuntimeService(): Promise<LlmRuntimeService> {
  * @param conversation - The test's database and the history the live
  * agents title their requests' conversations from.
  * @param chatService - Chat stream every agent's model calls go through.
- * @param llmService - Context measurement every agent's meter measures
- * through.
+ * @param llmProviderServices - Each provider's LLM service, whose context
+ * measurement every agent's meter measures a model on that provider through.
  * @returns The two services.
  */
 function createTestAgentServices(
   conversation: AgentConversationTestServices,
   chatService: Pick<ChatService, "completeChatStream">,
-  llmService: Pick<LlmService, "findLlmContextMeasurement">
+  llmProviderServices: LlmProviderRecord<LlmProviderServices>
 ): Pick<ChatRouteTestServices, "agentService" | "agentRuntimeService"> {
   const agentService = new AgentService({
     recordStore: SqliteAgentRecordStore.create(conversation.database),
@@ -502,7 +568,10 @@ function createTestAgentServices(
       chatService.completeChatStream(options)
     ),
     replyContextMeter: new LlmReplyContextMeter((model, texts) =>
-      llmService.findLlmContextMeasurement(model, texts)
+      llmProviderServices[model.provider].llmService.findLlmContextMeasurement(
+        model.modelKey,
+        texts
+      )
     ),
     findConversationTitle: (conversationId) =>
       buildConversationTitleLookup(
@@ -534,8 +603,7 @@ function registerChatRouteTestServices(
   app.decorate("conversationHistoryReader", services.conversationHistoryReader)
   app.decorate("conversationHistoryEditor", services.conversationHistoryEditor)
   app.decorate("chatService", services.chatService)
-  app.decorate("llmService", services.llmService)
-  app.decorate("llmRuntimeService", services.llmRuntimeService)
+  app.decorate("llmProviderServices", services.llmProviderServices)
   app.decorate("agentService", services.agentService)
   app.decorate("agentRuntimeService", services.agentRuntimeService)
   app.decorate("toolApprovalService", services.toolApprovalService)

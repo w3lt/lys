@@ -5,18 +5,17 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   DEFAULT_PROVIDER_ADDRESSES,
-  LLM_PROVIDER_NAMES,
+  findSavedProviderApiKey,
   type AddressedLlmProvider,
   type KeyedLlmProvider
 } from "@/lib/models/llm-provider-target"
 import type { ProviderApiKeyChange } from "@/lib/store/provider-settings"
 import type { ProvidersSettings, SecretsSettings } from "@/lib/store/settings"
-import type { ProviderAddress } from "@lys/share"
+import { LLM_PROVIDER_NAMES, type ProviderAddress } from "@lys/share"
 
 import {
   calculateProviderKeyFieldValue,
   findSavedProviderAddress,
-  findSavedProviderApiKey,
   formatProviderAddressPlaceholder,
   formatProviderKeyPlaceholder,
   parseProviderAddressDraft,
@@ -44,7 +43,7 @@ type ProviderFormProps = {
 type ProviderAddressFormProps = ProviderFormProps & {
   /** Provider whose address the form edits. */
   readonly provider: AddressedLlmProvider
-  /** Saved provider choice and addresses. */
+  /** Saved providers group: the providers that are on and the addresses. */
   readonly providers: ProvidersSettings
   /** Whether the backend is connecting, which blocks Test. */
   readonly isConnecting: boolean

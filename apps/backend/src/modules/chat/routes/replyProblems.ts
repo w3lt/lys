@@ -13,6 +13,7 @@ import {
   type ChatReplyNotGeneratingProblem,
   type ChatToolCallNotPendingProblem
 } from "@lys/protocol"
+import { LLM_PROVIDER_NAMES, type LlmModelReference } from "@lys/share"
 
 /**
  * Creates the caller-safe missing-reply response.
@@ -145,13 +146,15 @@ export function createChatAttachmentUnsupportedProblem(
  * cannot see images.
  *
  * @param fileName - Validated name of the first image of the request.
- * @param model - Model the request named.
+ * @param model - Model the request named, and its provider.
  * @param instance - Request path identifying this occurrence.
- * @returns The strict problem accepted by chat consumers.
+ * @returns The strict problem accepted by chat consumers. The detail names
+ * the model with its provider, since the same key on two providers names two
+ * models; the `model` member holds the key alone.
  */
 export function createChatImageNeedsVisionProblem(
   fileName: string,
-  model: string,
+  model: LlmModelReference,
   instance: string
 ): ChatImageNeedsVisionProblem {
   const { shape } = chatImageNeedsVisionProblemSchema.unwrap()
@@ -159,9 +162,9 @@ export function createChatImageNeedsVisionProblem(
     type: shape.type.value,
     title: shape.title.value,
     status: shape.status.value,
-    detail: `The image ${fileName} needs a model with vision, and ${model} cannot see images.`,
+    detail: `The image ${fileName} needs a model with vision, and ${model.modelKey} on ${LLM_PROVIDER_NAMES[model.provider]} cannot see images.`,
     instance,
     fileName,
-    model
+    model: model.modelKey
   }
 }

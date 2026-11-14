@@ -23,6 +23,7 @@ import {
   createToolCallPart,
   createTurnUserMessage
 } from "../../support/conversationFixtures"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 
 /** Wall-clock time observed by every case until it advances the clock. */
 const NOW = "2026-03-04T05:06:07.890Z"
@@ -71,6 +72,7 @@ function saveConversationWithReply(
     id: createFixtureUuidV7(11),
     conversationId: CONVERSATION_ID,
     model: "qwen/qwen3-8b",
+    provider: "lmStudio",
     parts,
     finishReason: null,
     ...reply,
@@ -193,7 +195,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         conversation: createNewConversationTarget("lys"),
         userMessage: createTurnUserMessage("Hello"),
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
 
       // Activity time is maintained by the schema's SQLite-clock trigger,
@@ -216,7 +218,7 @@ describe("StoredConversationTurns", () => {
         turns.createConversationTurn({
           conversation: createNewConversationTarget("lys"),
           userMessage: createTurnUserMessage(""),
-          model: "qwen/qwen3-8b"
+          model: LM_STUDIO_QWEN3_8B
         })
       ).toThrow(z.ZodError)
 
@@ -232,14 +234,14 @@ describe("StoredConversationTurns", () => {
         turns.createConversationTurn({
           conversation: { kind: "existing", id: createFixtureUuidV7(1) },
           userMessage: createTurnUserMessage("Hello"),
-          model: "qwen/qwen3-8b"
+          model: LM_STUDIO_QWEN3_8B
         })
       ).toThrow(ConversationNotFoundError)
 
       const turn = turns.createConversationTurn({
         conversation: createNewConversationTarget("lys"),
         userMessage: createTurnUserMessage("Hello"),
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
       expect(
         history.listConversations(parseConversationListOptions()).conversations
@@ -253,7 +255,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         conversation: createNewConversationTarget("lys"),
         userMessage: createTurnUserMessage("Hello"),
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
 
       vi.setSystemTime(new Date(LATER))
@@ -281,7 +283,7 @@ describe("StoredConversationTurns", () => {
         const turn = turns.createConversationTurn({
           conversation: createNewConversationTarget("lys"),
           userMessage: createTurnUserMessage("Hello"),
-          model: "qwen/qwen3-8b"
+          model: LM_STUDIO_QWEN3_8B
         })
         vi.setSystemTime(new Date(LATER))
 
@@ -303,7 +305,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         conversation: createNewConversationTarget("lys"),
         userMessage: createTurnUserMessage("Hello"),
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
       const call = replyParts.createReplyPart(turn.assistantMessage.id, {
         kind: "tool-call",
@@ -337,7 +339,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         conversation: createNewConversationTarget("lys"),
         userMessage: createTurnUserMessage("Hello"),
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
       turns.updateAssistantMessageState(turn.assistantMessage.id, {
         status: "completed",
@@ -372,7 +374,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         conversation: createNewConversationTarget("lys"),
         userMessage: createTurnUserMessage("Hello"),
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
 
       expect(
@@ -392,7 +394,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         conversation: createNewConversationTarget("lys"),
         userMessage: createTurnUserMessage("Hello"),
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
       editor.updateConversationTitle(turn.conversation.id, "Renamed")
 
@@ -418,7 +420,7 @@ describe("StoredConversationTurns", () => {
       const turn = turns.createConversationTurn({
         conversation: createNewConversationTarget("lys"),
         userMessage: createTurnUserMessage("Hello"),
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
 
       expect(() =>
@@ -437,7 +439,7 @@ describe("StoredConversationTurns", () => {
     const turn = turns.createConversationTurn({
       conversation: createNewConversationTarget("lys"),
       userMessage: createTurnUserMessage("Hello"),
-      model: "qwen/qwen3-8b"
+      model: LM_STUDIO_QWEN3_8B
     })
     expect(
       turns.updateAssistantMessageState(turn.assistantMessage.id, {
@@ -454,7 +456,7 @@ describe("StoredConversationTurns", () => {
       turns.createConversationTurn({
         conversation: createNewConversationTarget("lys"),
         userMessage: createTurnUserMessage("Hello"),
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
     ).toThrow("Database is closed")
     expect(() =>

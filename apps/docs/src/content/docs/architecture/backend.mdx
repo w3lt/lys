@@ -16,27 +16,27 @@ Each module in `src/modules/` keeps its HTTP routes in `routes/` and its
 services, contracts, and domain logic at the module root. `src/di/` only wires
 the services together.
 
-| Layer                 | Implementation                    | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| --------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes, and logs through the logger the entry point passes, as Fastify's logger.                                                                                                                                                                                                                                                                                                                             |
-| Logging               | `src/log.ts`                      | Creates the logger (level `info`, level names, UTC ISO-8601 times); `BackendLogDestination` writes each line to standard output and the day's file in `$LYS_HOME/logs/`; logs uncaught failures at `fatal` and Node's warnings at `warn`; keeps the backend running when an output fails.                                                                                                                                                                             |
-| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path and the attachments directory under `LYS_HOME`, the path of the email server Lys ships, from `LYS_EMAIL_SERVER_PATH` or `runtime/email/email` under `LYS_HOME`, the system and title prompts, and title limits; loads the logs directory under `LYS_HOME` on its own, before the rest.                                                                                                                           |
-| Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services, the agent service over SQLite records and the agent runtime service over it, LLM services without contacting the model provider, the built-in tools, the tool approval service, the MCP server registry, whose only built-in server is the email server Lys ships, and the email account checker, which runs the same email server, without reading the settings or starting anything. |
-| Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                                                                                                                                                                                     |
-| Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, marks a deleted agent deleted, and searches every agent; contains no SQL.                                                                                                                                             |
-| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat, a context measurement, or a tool search has loaded, each with its own request slots, finds the one that answers a chat, tells agents about themselves and each other as their roles allow, and has Armitage, the tool keeper, find the tools a routed turn needs; see [live agents](#live-agents) and [tool routing](#tool-routing).                                                                                           |
-| Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.                                                                                                                                                                                                                                                     |
-| Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                                                                                                                                                                                                                                                                    |
-| Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                                                                                                                                                                                |
-| Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                                                                                                                                                                               |
-| LLM routes            | `src/modules/llm/routes`          | Lists the provider's models, checks loaded-model health, loads or unloads a model, and reports or refreshes the provider connection.                                                                                                                                                                                                                                                                                                                                  |
-| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page through vmo, which loads it in a micro VM; `web_search` (`web/`) searches the web through Tavily.                                                                                                                                                                                                                                                               |
-| Attachments           | `src/modules/attachment`          | Decodes a chat request's attachments and reads what each is from its bytes, keeps the files under the attachments directory by conversation and message, and runs `read_attachment`, the reader the backend adds to a turn itself; its calls run without approval.                                                                                                                                                                                                    |
-| Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs: the built-in tools, then the tools of the connected MCP servers.                                                                                                                                                                                                                                                                                                                                                                    |
-| MCP servers           | `src/modules/mcp`                 | Connects to the MCP servers the `mcp` settings group names and switches on, and to the email server Lys ships once it is switched on, over stdio or Streamable HTTP, lists their tools, and runs each allowed call of one on its server; see [MCP servers](#mcp-servers).                                                                                                                                                                                             |
-| MCP routes            | `src/modules/mcp/routes`          | Lists the applied servers and their states, applies the `mcp` group again, reconnects one server, and checks an email account by signing in to its mail servers through the email server Lys ships.                                                                                                                                                                                                                                                                   |
-| Tool approval service | `src/modules/toolApproval`        | Reads the Just run choices saved in `settings.json` once per round of tool calls and decides, for client, backend, and MCP tools alike, which calls the person must allow first; every call asks when the file cannot be read.                                                                                                                                                                                                                                        |
-| Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Layer                 | Implementation                    | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes, and logs through the logger the entry point passes, as Fastify's logger.                                                                                                                                                                                                                                                                                                                                                                      |
+| Logging               | `src/log.ts`                      | Creates the logger (level `info`, level names, UTC ISO-8601 times); `BackendLogDestination` writes each line to standard output and the day's file in `$LYS_HOME/logs/`; logs uncaught failures at `fatal` and Node's warnings at `warn`; keeps the backend running when an output fails.                                                                                                                                                                                                                      |
+| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path and the attachments directory under `LYS_HOME`, the path of the email server Lys ships, from `LYS_EMAIL_SERVER_PATH` or `runtime/email/email` under `LYS_HOME`, the system and title prompts, and title limits; loads the logs directory under `LYS_HOME` on its own, before the rest.                                                                                                                                                                    |
+| Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services, the agent service over SQLite records and the agent runtime service over it, an LLM runtime service and an LLM service for each provider without contacting any provider, the built-in tools, the tool approval service, the MCP server registry, whose only built-in server is the email server Lys ships, and the email account checker, which runs the same email server, without reading the settings or starting anything. |
+| Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                                                                                                                                                                                                                              |
+| Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, marks a deleted agent deleted, and searches every agent; contains no SQL.                                                                                                                                                                                      |
+| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat, a context measurement, or a tool search has loaded, each with its own request slots, finds the one that answers a chat, tells agents about themselves and each other as their roles allow, and has Armitage, the tool keeper, find the tools a routed turn needs; see [live agents](#live-agents) and [tool routing](#tool-routing).                                                                                                                                    |
+| Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.                                                                                                                                                                                                                                                                                              |
+| Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                                                                                                                                                                                                                        |
+| LLM routes            | `src/modules/llm/routes`          | For the provider the path names, lists its models, checks loaded-model health, loads or unloads a model, and reports or refreshes its connection; a path that names no provider Lys knows answers `400`.                                                                                                                                                                                                                                                                                                       |
+| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page through vmo, which loads it in a micro VM; `web_search` (`web/`) searches the web through Tavily.                                                                                                                                                                                                                                                                                                        |
+| Attachments           | `src/modules/attachment`          | Decodes a chat request's attachments and reads what each is from its bytes, keeps the files under the attachments directory by conversation and message, and runs `read_attachment`, the reader the backend adds to a turn itself; its calls run without approval.                                                                                                                                                                                                                                             |
+| Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs: the built-in tools, then the tools of the connected MCP servers.                                                                                                                                                                                                                                                                                                                                                                                                             |
+| MCP servers           | `src/modules/mcp`                 | Connects to the MCP servers the `mcp` settings group names and switches on, and to the email server Lys ships once it is switched on, over stdio or Streamable HTTP, lists their tools, and runs each allowed call of one on its server; see [MCP servers](#mcp-servers).                                                                                                                                                                                                                                      |
+| MCP routes            | `src/modules/mcp/routes`          | Lists the applied servers and their states, applies the `mcp` group again, reconnects one server, and checks an email account by signing in to its mail servers through the email server Lys ships.                                                                                                                                                                                                                                                                                                            |
+| Tool approval service | `src/modules/toolApproval`        | Reads the Just run choices saved in `settings.json` once per round of tool calls and decides, for client, backend, and MCP tools alike, which calls the person must allow first; every call asks when the file cannot be read.                                                                                                                                                                                                                                                                                 |
+| Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ## Chat request flow
 
@@ -61,16 +61,22 @@ the services together.
    stored, and answers `409` with the conversation agent missing problem when
    no agent has that code any more, as after the agent was deleted. In each
    of those cases nothing is stored.
-   The route then reads whether the model sees images and is trained for
-   tool use through the capability lookup the chat and chat-context routes
-   share (`createModelCapabilitiesLookup`), which lists the connected
-   provider's inventory until it has seen the model and then remembers what
-   the model can do while the backend stays connected to that provider,
-   because a model's capabilities come from its files; it forgets all of it
-   when another provider connects. A model the inventory does not list is not remembered,
+   The request names its model by provider and key
+   (`model: { provider, modelKey }`), and the whole turn goes to that
+   provider. The route reads whether the model sees images and is trained
+   for tool use through the capability lookup the chat and chat-context
+   routes share (`createLlmModelCapabilitiesLookup`), which keeps one
+   lookup per provider: it lists that provider's inventory until it has
+   seen the model and then remembers what the model can do while the
+   backend stays connected to that provider at the same address and with
+   the same key, because a model's capabilities come from its files; it
+   forgets that provider's models when the provider is no longer connected
+   or connects at another address or with another key. A model the
+   inventory does not list is not remembered,
    and its turn sees no image and is offered none of the tools the backend
-   adds. While the lookup lists, a full model-operation queue or a missing
-   runtime answers its `503` problem, and an image attached for a model
+   adds. While the lookup lists, a full model-operation queue of the
+   provider or a provider that is not connected answers its `503` problem,
+   and an image attached for a model
    without vision, or for one the inventory does not list, answers `409`
    with the image-needs-vision problem, nothing stored either way. The
    route makes the identities of a new conversation and of the user message
@@ -79,7 +85,8 @@ the services together.
    the route looks the agent up again and `StoredConversationTurns` creates
    the conversation with that agent or loads the existing one, interrupts a
    reply still streaming in it, and stores the user message with its numbered
-   attachments and the empty streaming assistant message, all in one write
+   attachments and the empty streaming assistant message, which holds the
+   model's key and its provider, all in one write
    transaction of the SQLite turn records. That lookup and the write run in
    one synchronous step, so the agent that answers is the conversation's
    agent when the turn is stored; a conversation or agent deleted while the
@@ -92,7 +99,8 @@ the services together.
 5. The agent found when the turn is stored answers with the system prompt it
    has then: a built-in agent's shipped prompt, or a stored agent's current
    one. The agent's `createReply` opens an OpenAI-compatible streaming
-   completion against the connected provider through `OpenAiReplyModel`,
+   completion against the provider of the turn's model through
+   `OpenAiReplyModel`,
    offers the turn's tools (the attachment reader first when the conversation
    holds a text file and the model is trained for tool use, then client tools,
    then built-in tools, then MCP tools, then, when the model is trained for
@@ -122,11 +130,12 @@ the services together.
 ### Context window check
 
 Before each round, the agent measures the round's context and offered tools
-against the model the turn names. `LlmReplyContextMeter` gives `LlmService`
-the text the model reads for each message (its content, and the name and
-argument text of each tool call it carries) and each offered tool's JSON;
-`LlmService` counts them with the loaded model's tokenizer through the model
-operation queue and reports the context length the model is loaded with. The
+against the model the turn names. `LlmReplyContextMeter` gives the
+`LlmService` of the model's provider the text the model reads for each
+message (its content, and the name and argument text of each tool call it
+carries) and each offered tool's JSON; `LlmService` counts them with the
+loaded model's tokenizer through that provider's model operation queue and
+reports the context length the model is loaded with. The
 meter adds a fixed allowance for the chat template's markup: 8 tokens per
 message, 16 per tool call of an earlier round, and 160 once when tools are
 offered. Each image a user message sends, which the tokenizer cannot count,
@@ -142,8 +151,9 @@ one) together stay within that context length. Otherwise the round is not
 sent: the reply is stored `failed`, keeping the parts earlier rounds stored,
 and its `error` event names the tokens needed and the context length. A model
 that is not loaded is never loaded for the round; the reply fails with an
-`error` that asks to load it. A measurement that fails, because no provider
-is connected or the queue is full, also fails the reply, with the general
+`error` that asks to load it. A measurement that fails, because the model's
+provider is not connected or its queue is full, also fails the reply, with
+the general
 sentence. Without this check, LM Studio's context overflow setting could keep
 the start of the conversation, drop its middle, and let the model answer an
 earlier message. With the reply ceiling off, nothing is held back for the
@@ -267,13 +277,14 @@ for a turn whose conversation has no stored title, unless an earlier turn of
 that conversation is still generating one, and uses that turn's user message.
 A conversation that remains untitled after an earlier task failed or was
 cancelled gets another try on its next turn after that task ended. It uses a
-separate chat completion request with a JSON-schema response format that limits
+separate chat completion request to the turn's model, on that model's
+provider, with a JSON-schema response format that limits
 the title to `generatedTitleMaxLength` Unicode code points (100 by default),
 then validates the reply; JSON wrapped in one Markdown code fence is accepted.
 Only a reply that cannot be used as a title leads to another attempt, up to
 `titleGenerationMaxAttempts` attempts per turn (three by default). Before each
-attempt, the task asks the model-operation queue whether the model is loaded,
-without loading it. When it is not, the turn requests no title, logs
+attempt, the task asks the model-operation queue of the model's provider
+whether the model is loaded, without loading it. When it is not, the turn requests no title, logs
 `model-not-loaded` at debug level, and the next turn tries again, so a title
 request does not make the provider load the model with its own settings. An HTTP,
 connection, or cancellation failure ends title generation for the turn, after
@@ -359,13 +370,17 @@ the reply's stored parts, so later turns resend them like every other tool
 result.
 
 Whether the model sees images and is trained for tool use is read from the
-connected provider's inventory (`src/modules/chat/routes/modelCapabilities.ts`) for
-every turn and every context measurement, as it decides the images the model
-sees and the tools the backend offers it. A listed model's capabilities are
-remembered while the backend stays connected to that provider, and forgotten
-when another one connects, so only requests made before a listing
-had the model wait for the model-operation queue; a failed listing and a
-model it does not list are not remembered. The read lists the downloaded
+inventory of the model's provider
+(`src/modules/chat/routes/modelCapabilities.ts`) for every turn and every
+context measurement, as it decides the images the model sees and the tools
+the backend offers it. Each provider's models are listed and remembered
+apart, so the same key on two providers is two models. A listed model's
+capabilities are remembered while the backend stays connected to its
+provider at the same address and with the same key, and forgotten when that
+provider is no longer connected or connects at another address or with
+another key, so only requests made before a listing had the model wait for
+that provider's model-operation queue; a failed listing and a model it does
+not list are not remembered. The read lists the downloaded
 models only (`LlmService.listDownloadedLlmModels()`), without the loaded
 state and context lengths the model list adds. A model the inventory does
 not list has neither capability: an image attached for it is refused, and no
@@ -893,8 +908,9 @@ follows its role (see [roles](#roles)):
 A state names each request's conversation by its title, read when the tool
 runs (`This reply, in this conversation` for the calling reply, otherwise
 `In "<title>"`, `In an untitled conversation`, or
-`In a conversation that was deleted`), the model, when it
-started and how long ago, and its step: waiting for a free request slot,
+`In a conversation that was deleted`), the model and its provider
+(`with <key> on <provider name>`, such as `with gpt-oss-20b on LM Studio`),
+when it started and how long ago, and its step: waiting for a free request slot,
 with its place in line, getting ready to answer, reading tool results,
 thinking, writing the reply, or using tools, with each call of the round and
 its status, `running in the app` for a client tool. A state also gives the
@@ -924,8 +940,8 @@ listed in its state. Nothing of it is stored: a restart starts with no live
 agent and no request.
 
 While a reply runs, its agent follows the request in `AgentActivity`
-(`src/modules/agent/agentActivity.ts`): the conversation, the model, the
-start time, and the step of its current round, from the parts the reply
+(`src/modules/agent/agentActivity.ts`): the conversation, the model and its
+provider, the start time, and the step of its current round, from the parts the reply
 stores. A request is added when `createReply` starts, unless it is refused
 because the agent's slots and line are full (see
 [request slots](#request-slots)), and removed when it ends, whether the reply
@@ -1024,7 +1040,8 @@ request's logger.
 [live agent](#live-agents), as one of its requests on the asking
 conversation, so it takes one of Armitage's request slots and a leader's
 `read_agent_state` lists it while it runs. Armitage answers with its own
-system prompt, the asking turn's model and generation controls, a user
+system prompt, the asking turn's model, on that model's provider, and its
+generation controls, a user
 message holding the task, no history or images, and two tools of its own,
 which run at once without approval:
 
@@ -1559,8 +1576,8 @@ rest: listings, counts, `GET`, and changes skip it, but its code stays taken,
 a lookup or search still finds it, and a code derived from a name skips it.
 The composition root creates the service after the conversation services,
 over the agent records, and the agent runtime service over it, the chat
-service, the LLM service, and the history reader, which gives the titles of
-the requests' conversations.
+service, the providers' LLM services, and the history reader, which gives
+the titles of the requests' conversations.
 
 `Agent` (`src/modules/agent/agent.ts`) answers turns with its own system prompt
 through a `ReplyModel`. `AgentRuntimeService.loadChatAgent` returns the
@@ -1571,8 +1588,8 @@ over `ChatService`'s streaming completion, using only choice 0 and refusing
 finish reasons other than `stop` and `length`. The chat route passes the agent
 the turn's history, its reply writes, its event sender, its Stop signal, and
 four reporters that log with the request's logger: a cancelled reply and a
-round that was not sent, because it did not fit or its model was not loaded,
-at debug level; a reply refused because its agent's request slots and line
+round that was not sent, because it did not fit or its model was not loaded
+(`The model "<key>" is not loaded on <provider name>`), at debug level; a reply refused because its agent's request slots and line
 were full, and a tool search Armitage could not finish, at warning level;
 and any other failed reply at error level. A new
 conversation must name a built-in or stored agent other than Armitage, or
@@ -1597,7 +1614,8 @@ lets a record store the answer `expired`, version 15 lets it store the
 denials `outside-approved-folders` and `settings-unreadable`, version 16 adds
 the records of tool searches' own calls, version 17 lets both kinds of
 record store the policy's rule set identity and its usage, budget,
-open-world, and paid-tool reasons, and
+open-world, and paid-tool reasons, version 18 stores the provider of each
+reply's model, `null` on replies stored before it, and
 turn persistence's startup recovers streaming assistants and their open tool
 calls without reordering history.
 Two triggers keep `conversations.updated_at` in sync with message and part
@@ -1607,14 +1625,14 @@ inserts and `content` updates.
 
 Chat generation and model management use separate integration boundaries:
 
-| Service             | Backend dependency        | Current use                                                                                                                  |
-| ------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `ChatService`       | `openai` SDK              | Streams chat completions and generates titles through the connected provider's OpenAI-compatible HTTP interface.             |
-| `LlmService`        | `LlmEngineOperationQueue` | Runs inventory, health, load, stop-by-key, and context measurement through the serialized queue.                             |
-| `LlmRuntimeService` | `LlmRuntime`              | Owns the runtime of the saved provider, its connection status, and the serialized model-operation queue; connects on demand. |
-| `LmStudioRuntime`   | `@lmstudio/sdk`           | Verifies engine availability, lists, loads, stops, and measures models, and owns SDK client cleanup.                         |
-| `OllamaRuntime`     | `fetch`                   | Lists, describes, and measures Ollama's chat models over its native API, on a local server or in Ollama Cloud.               |
-| `GroqRuntime`       | `fetch`                   | Lists and measures Groq's models over its OpenAI-compatible API.                                                             |
+| Service             | Backend dependency        | Current use                                                                                                                                                          |
+| ------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ChatService`       | `openai` SDK              | Streams chat completions and generates titles through the OpenAI-compatible HTTP interface of the provider each request's model is on, with one client per provider. |
+| `LlmService`        | `LlmEngineOperationQueue` | One per provider: runs that provider's inventory, health, load, stop-by-key, and context measurement through its serialized queue.                                   |
+| `LlmRuntimeService` | `LlmRuntime`              | One per provider: owns that provider's runtime, its connection status, and its serialized model-operation queue; connects on demand.                                 |
+| `LmStudioRuntime`   | `@lmstudio/sdk`           | Verifies engine availability, lists, loads, stops, and measures models, and owns SDK client cleanup.                                                                 |
+| `OllamaRuntime`     | `fetch`                   | Lists, describes, and measures Ollama's chat models over its native API, on a local server or in Ollama Cloud.                                                       |
+| `GroqRuntime`       | `fetch`                   | Lists and measures Groq's models over its OpenAI-compatible API.                                                                                                     |
 
 The [provider integration](/architecture/providers/) describes each provider.
 
@@ -1632,41 +1650,51 @@ the models. `LlmService` refuses a load or an unload for a provider that loads
 its own models without a runtime call, and the list response carries the
 report as `modelLoading`.
 
-Fastify exposes the application-scoped `llmService` and `llmRuntimeService`.
-Model routes use provider-neutral capabilities of `LlmService`; the runtime
+Fastify exposes `llmProviderServices`, a frozen record that holds, for each
+of the four providers, its application-scoped `llmRuntimeService` and the
+`llmService` over it (`src/modules/llm/llmProviderServices.ts`). Each LLM
+route validates its `:provider` path segment first, and a provider Lys does
+not know answers `400` before the handler runs. Model routes then use
+provider-neutral capabilities of that provider's `LlmService`; the runtime
 status and connect routes use `LlmRuntimeConnectionObserver` and
-`LlmRuntimeConnector`, implemented by `LlmRuntimeService`. The ownership path
-is `routes -> LlmService -> LlmRuntimeService queue -> LlmRuntime ->
-LmStudioRuntime | OllamaRuntime | GroqRuntime`. The composition root creates
-the database, then `LlmRuntimeService` without contacting the provider, then
-`ChatService`, which reads the connected provider from it; cleanup runs in
-the reverse order. After the HTTP listener opens, an `onListen` hook makes
-one connection attempt; later attempts happen only through
-`POST /api/v1/llm/runtime/connect`. Each attempt reads the saved provider
-from `settings.json` again, and a held runtime for another provider, address,
-or key is released before a new one is acquired. The runtime service drains
-accepted operations before releasing its runtime; releasing LM Studio's
-closes the SDK client without unloading models or stopping LM Studio.
+`LlmRuntimeConnector`, implemented by its `LlmRuntimeService`. The ownership
+path is `routes -> the provider's LlmService -> its LlmRuntimeService queue
+-> LlmRuntime -> LmStudioRuntime | OllamaRuntime | GroqRuntime`. The
+composition root creates the database, then the four `LlmRuntimeService`s in
+provider order without contacting any provider, each with its `LlmService`,
+then `ChatService`, which reads each provider's connection from its runtime
+service; cleanup runs in the reverse order. After the HTTP listener opens,
+an `onListen` hook starts one connection attempt of every provider at once;
+a provider that is off becomes `off` without being contacted, and an attempt
+that fails is logged with its `provider` and never stops another's. Later
+attempts happen only through `POST /api/v1/llm/:provider/runtime/connect`.
+Each attempt reads from `settings.json` again whether its provider is on,
+its address, and its key, and a held runtime for another address or key is
+released before a new one is acquired. Each runtime service drains accepted
+operations before releasing its runtime; releasing LM Studio's closes the
+SDK client without unloading models or stopping LM Studio.
 
 Each SDK client logs through `PinoLmStudioSdkLogger`, which the composition
 root creates over the application's logger, so the SDK's messages, such as
 why it could not connect, are lines of the backend's log; see
 [process logging](/operate/logging/#process-logging).
 
-The connection status is `connecting` until the first attempt settles,
-`connected` while a runtime is held, and `unreachable` after a failed attempt
-or after a held runtime stops answering. Model operations are refused with
+Each provider has its own connection status: `connecting` until its first
+attempt settles, `connected` while a runtime is held, `unreachable` after a
+failed attempt or after a held runtime stops answering, and `off` after an
+attempt found the provider turned off, which holds no runtime and reports no
+failure. Model operations are refused with
 `503` `urn:lys:problem:llm:runtime-unavailable` unless the status is
 `connected`. When a runtime call fails during a model operation, the service
 probes the runtime before the queue moves on and releases it if the provider
 no longer answers. Refresh keeps a runtime that still answers and otherwise
-acquires a new one. Refreshes share a queued attempt. A refresh made while an
-attempt runs reads the saved provider and shares that attempt when it read the
-same provider, so a provider that does not answer is not tried twice;
-otherwise the refresh queues one of its own, so a provider picked while an
-attempt runs is the one connected. The queue and its `ready`, `closing`, and
-`closed` lifecycle belong to `LlmRuntimeOperationQueue`, which
-`LlmRuntimeService` owns.
+acquires a new one. Refreshes of one provider share a queued attempt. A
+refresh made while an attempt runs reads the provider's settings and shares
+that attempt when both reads found it on with the same address or key, so a
+provider that does not answer is not tried twice; otherwise the refresh
+queues one of its own, so settings saved while an attempt runs are the ones
+connected. The queue and its `ready`, `closing`, and `closed` lifecycle
+belong to `LlmRuntimeOperationQueue`, which each `LlmRuntimeService` owns.
 
 `LmStudioRuntime.create()` still waits for LM Studio to answer its version
 query, so a held runtime was always available when acquired. The installed SDK
@@ -1676,8 +1704,8 @@ shutdown pending. A refused loopback port fails immediately. SDK messages
 queued during an outage can be sent after a reconnect; see
 [issue #81](https://github.com/w3lt/lys/issues/81).
 
-`GET /api/v1/llm/:modelId/health` uses the same service queue and makes one fresh
-loaded-inventory query. It reports `ready` when the validated snapshot contains
+`GET /api/v1/llm/:provider/:modelId/health` uses the same service queue of
+the provider the path names and makes one fresh loaded-inventory query. It reports `ready` when the validated snapshot contains
 the requested canonical key. An absent key reports `model-not-loaded`; a query
 that cannot establish loaded state reports `runtime-unavailable`. The check
 does not generate text or change which models are loaded, and does not involve
@@ -1691,14 +1719,16 @@ See the [health response contract](/reference/api/#model-health-responses).
 | Chat SSE connection closes                                                                                                                                             | Only that follower ends; the reply and its title keep generating and are stored.                                                                                                                                                                                   |
 | Reply-stop request                                                                                                                                                     | The reply's upstream request is aborted, the reply is stored interrupted, and followers receive `interrupted`; the title task continues.                                                                                                                           |
 | Model operation or health-check client disconnects                                                                                                                     | Accepted work continues until success or failure; user cancellation is unavailable.                                                                                                                                                                                |
-| LLM runtime queue already has nine accepted operations (including connection attempts)                                                                                 | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance.                                                                                                                                                 |
-| The provider is not connected                                                                                                                                          | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.                                                                                                                                            |
+| A provider's LLM runtime queue already has nine accepted operations (including connection attempts)                                                                    | New inventory/health/load/unload requests for that provider receive `503` with `urn:lys:problem:llm:service-busy` before acceptance; other providers are not affected.                                                                                             |
+| An LLM route's path names a provider Lys does not know                                                                                                                 | `400` before the handler runs; no provider is asked.                                                                                                                                                                                                               |
+| The provider a request names is not connected, because it is off or cannot be reached                                                                                  | List, load, unload, and health requests for it receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.                                                                                                                                     |
 | A runtime call fails and the provider stopped answering                                                                                                                | The runtime is released, the status becomes `unreachable`, and a rejected request receives the runtime-unavailable `503`.                                                                                                                                          |
-| The saved provider needs a key and none is saved, or `settings.json` cannot be read                                                                                    | The connection attempt fails without contacting a provider, the status becomes `unreachable`, and the backend logs why without a key.                                                                                                                              |
+| A provider is off when a connection attempt reads the settings                                                                                                         | The attempt contacts nothing, releases a held runtime, and the status becomes `off`; nothing is logged.                                                                                                                                                            |
+| A provider that is on needs a key and none is saved, or `settings.json` cannot be read                                                                                 | The connection attempt fails without contacting the provider, the status becomes `unreachable`, and the backend logs why with the `provider`, without a key.                                                                                                       |
 | Load or unload is asked of a provider that loads its own models (Ollama, Groq)                                                                                         | `409` with `urn:lys:problem:llm:provider-loads-models` before any runtime call. The desktop offers neither when the list says so.                                                                                                                                  |
 | A request resolves after a failed runtime call; the probe or release then fails                                                                                        | The response keeps its result; the backend logs the probe or release failure at `error`.                                                                                                                                                                           |
 | A reply round does not fit the loaded model, or its model is not loaded                                                                                                | The round is not sent; the reply is stored failed and followers receive an `error` that says why.                                                                                                                                                                  |
-| A reply round cannot be measured (provider not connected, queue full)                                                                                                  | The round is not sent; the reply is stored failed and followers receive the general `error`.                                                                                                                                                                       |
+| A reply round cannot be measured (the model's provider not connected, its queue full)                                                                                  | The round is not sent; the reply is stored failed and followers receive the general `error`.                                                                                                                                                                       |
 | Model stream ends without a finish reason                                                                                                                              | The route treats it as an error and may emit `error`.                                                                                                                                                                                                              |
 | Assistant row was deleted or already finalized                                                                                                                         | Late writes return false without recreating data.                                                                                                                                                                                                                  |
 | Assistant terminal state cannot be persisted                                                                                                                           | The task aggregates the original and storage failures, plus a failed fallback's, and rejects; the generation logs it. No final event.                                                                                                                              |
@@ -1709,7 +1739,7 @@ See the [health response contract](/reference/api/#model-health-responses).
 | A follower falls 4,096 events behind                                                                                                                                   | That follower closes without a final event while generation continues; following the reply again returns its stored state.                                                                                                                                         |
 | A chat request's attachment is neither UTF-8 text nor a PNG, JPEG, or WebP image                                                                                       | The route answers `400` with `urn:lys:problem:chat:attachment-unsupported`; nothing is stored or written.                                                                                                                                                          |
 | An image is attached for a model without vision, or for one the inventory does not list                                                                                | The route answers `409` with `urn:lys:problem:chat:image-needs-vision`; nothing is stored or written.                                                                                                                                                              |
-| The provider is not connected, or the queue is full, while a chat or context request reads a model's capabilities for the first time                                   | The route answers the runtime-unavailable or service-busy `503` problem; nothing is stored or written.                                                                                                                                                             |
+| The model's provider is not connected, or its queue is full, while a chat or context request reads the model's capabilities for the first time                         | The route answers the runtime-unavailable or service-busy `503` problem; nothing is stored or written.                                                                                                                                                             |
 | An attachment file cannot be written                                                                                                                                   | The message's folder and the files written into it are deleted, and the route rethrows; nothing is stored.                                                                                                                                                         |
 | A turn cannot be stored after its attachment files were written                                                                                                        | The message's folder is deleted again and the route answers `500`; a folder that cannot be deleted fails the request with both failures.                                                                                                                           |
 | A stored attachment's file is missing from disk                                                                                                                        | An image becomes a placeholder sentence in its message; a read of a text file fails with a result the model reads. The turn goes on.                                                                                                                               |
@@ -1753,7 +1783,7 @@ for the separate inference and model-management lifetimes.
 ## Coming soon
 
 - Recovery and export tooling around the SQLite store
-- Multiple provider backends or pluggable adapters
+- Pluggable provider adapters
 - Backend-backed generation settings beyond the current chat request body
 
 ## Related pages

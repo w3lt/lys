@@ -125,7 +125,7 @@ export type ChatContextMeasurementResult =
       readonly measurement: ChatContextApiResponse
     }
   | {
-      /** LM Studio has no loaded instance of the model; nothing was measured. */
+      /** The model's provider has no loaded instance of it; nothing was measured. */
       readonly status: "model-not-loaded"
     }
 
@@ -320,9 +320,9 @@ export async function stopChatReply(
  * @param connection - Backend origin and the signal that abandons the
  * measurement.
  * @returns `measured` with the validated measurement, or `model-not-loaded`
- * when LM Studio has no loaded instance of the model.
+ * when the model's provider has no loaded instance of it.
  * @throws The abort reason when the signal aborts; the backend's own sentence
- * when its model operations are busy or LM Studio cannot be reached; and a
+ * when its model operations are busy or the provider cannot be reached; and a
  * caller-safe sentence when the backend cannot be reached, answers with any
  * other status, or sends a measurement that does not match the contract.
  */

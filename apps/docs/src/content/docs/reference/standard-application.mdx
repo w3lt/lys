@@ -377,12 +377,29 @@ which this build writes on every save, so the file fails to load in it, every
 setting with it, until both are removed by hand; it ignores
 `lysEmailPassword` and drops it on its next save.
 
+On 2026-11-14 the maintainer extended it again, for
+[PR #377](https://github.com/w3lt/lys/pull/377) and
+[issue #360](https://github.com/w3lt/lys/issues/360), in the same scope and
+with the same alternatives and removal condition, to the `enabled` list of the
+`providers` group, the providers that are on. It is the one place where a
+missing field tells the file's format: a `providers` group without `enabled`
+was written before that pull request, and its single `active` provider, or LM
+Studio when `active` is missing, is read as the one provider that is on. When
+`enabled` is present it wins, even when empty, and `active` is ignored but must
+still name a provider. A save writes `enabled` and drops `active`; the file is
+not rewritten on load. The Tauri host and the backend read the group the same
+way. The added risk: a build from before `enabled` refuses an unknown field in
+the `providers` group, and this build writes `enabled` on every save, so the
+file fails to load in it, every setting with it, until `enabled` is replaced
+by `active` by hand.
+
 - **Scope:** only `$LYS_HOME/settings.json`, which the
   [native settings module](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/settings.rs)
   reads and writes, and whose `secrets` group the backend reads for the
   Tavily API key and the email account's password, its `mcp` group for the
-  MCP servers and their switches, and its `email` group for the email
-  account. A missing group,
+  MCP servers and their switches, its `email` group for the email
+  account, and its `providers` group for the providers that are on. A missing
+  group,
   such as `loadConfiguration` in a file written before PR #143, is read as
   that group's defaults like any other missing optional field; no format is
   inferred from it, and the file is not rewritten on load. Every other
@@ -409,7 +426,8 @@ setting with it, until both are removed by hand; it ignores
   they are removed by hand; a build from before the email server drops the
   `email` group and `emailPassword`, and the saved account with them. Nothing
   stops an older build from rewriting a newer file. The current build rejects
-  an unknown field inside `loadConfiguration`, `tools`, `location`, `mcp`, a
+  an unknown field inside `loadConfiguration`, `tools`, `location`,
+  `providers`, `mcp`, a
   server object and `builtIn` included, and `email`, so a newer file that
   adds a field to one of these groups fails to load in this build, every
   setting with it. It ignores an unknown group and

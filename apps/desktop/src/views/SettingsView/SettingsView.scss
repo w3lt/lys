@@ -467,113 +467,6 @@
   color: var(--app-text-muted);
 }
 
-/* Model list */
-
-.settings-view__model-list {
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.settings-view__model-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding-right: 10px;
-  border-bottom: 1px solid var(--app-border-subtle);
-  transition: background-color var(--duration-standard) var(--ease-standard);
-}
-
-.settings-view__model-row[data-selected] {
-  background: var(--app-surface-selected);
-}
-
-/*
- * The row itself is the control that sets the default, so the whole line is one
- * button and the lifecycle actions sit outside it — a button inside a button is
- * neither operable nor announceable.
- */
-.settings-view__model-choice {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  align-items: center;
-  gap: 12px;
-  padding: 13px 10px;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.settings-view__model-choice:hover {
-  background: var(--app-surface-hover);
-}
-
-.settings-view__model-choice:focus-visible {
-  outline: 2px solid var(--app-focus);
-  outline-offset: -2px;
-}
-
-.settings-view__model-lines {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.settings-view__model-name {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 9px;
-  overflow: hidden;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--app-text-strong);
-}
-
-.settings-view__model-default {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--lys-violet);
-}
-
-.settings-view__model-detail {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: var(--app-text-faint);
-}
-
-.settings-view__model-tag {
-  width: 92px;
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-align: right;
-  text-transform: uppercase;
-  color: var(--app-text-muted);
-}
-
-.settings-view__model-actions {
-  display: flex;
-  flex: none;
-  gap: 8px;
-}
-
-.settings-view__model-act {
-  width: 74px;
-}
-
 /* Agents */
 
 .settings-view__agent-tools {
@@ -911,8 +804,7 @@
   color: var(--app-text);
 }
 
-.settings-view__tool-segment,
-.settings-view__load-segment {
+.settings-view__tool-segment {
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.06em;
@@ -2385,98 +2277,826 @@ legend.settings-view__mcp-field-label {
   }
 }
 
-/* Load configuration */
+/*
+ * Models pane. The list and the selected model's details sit side by side,
+ * so this pane is wider than the others and wraps them under each other
+ * when the window is narrow.
+ */
 
-/* The edited model's key is an identifier, so it keeps its own case. */
-.settings-view__section-heading .settings-view__load-target {
-  min-width: 0;
-  overflow: hidden;
-  font-weight: 400;
-  letter-spacing: 0.04em;
-  text-overflow: ellipsis;
-  text-transform: none;
-  white-space: nowrap;
-  color: var(--app-text-muted);
+.settings-view__pane:has(.settings-view__models) {
+  max-width: 1040px;
 }
 
-.settings-view__load-title {
+.settings-view__models {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
 }
 
-/* The value the model runs with, where the stored one now differs. */
-.settings-view__load-changed {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
-  color: var(--app-status-pending);
-}
-
-.settings-view__load-control {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.settings-view__load-control [data-slot="slider"] {
-  width: 148px;
-}
-
-.settings-view__load-box[data-slot="input"] {
-  width: 84px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  text-align: right;
-}
-
-.settings-view__load-max {
-  min-width: 56px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  color: var(--app-text-muted);
-}
-
-.settings-view__load-stepper {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.settings-view__load-stepper output {
-  min-width: 36px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  text-align: center;
-  color: var(--app-text);
-}
-
-.settings-view__load-reload {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.settings-view__load-reload p {
+.settings-view__models-eyebrow,
+.settings-view__models-list-heading h3,
+.settings-view__models-list-heading span,
+.settings-view__models-group,
+.settings-view__models-facts dt {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 11px;
-  line-height: 1.45;
-  letter-spacing: 0.04em;
-  color: var(--app-status-pending);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
 }
 
-/* Without a note the region holds no text and takes no room. */
-.settings-view__load-reload p:not(:empty) {
-  padding-top: 15px;
+.settings-view__models-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  text-wrap: pretty;
+  color: var(--app-text-muted);
 }
 
-.settings-view__load-reload [data-slot="button"] {
+.settings-view__models-mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--app-text-muted);
+}
+
+.settings-view__models-icon {
+  width: 16px;
+  height: 16px;
   flex: none;
-  margin-top: 15px;
+  color: var(--app-text-muted);
+}
+
+/* The session's default sits above the provider card, at its right edge. */
+.settings-view__models-default {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+}
+
+.settings-view__models-default-key {
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-decoration: underline;
+  text-decoration-color: var(--app-border-strong);
+  text-underline-offset: 3px;
+  color: var(--app-text-strong);
+  cursor: pointer;
+}
+
+.settings-view__models-default-key:hover {
+  text-decoration-color: currentcolor;
+}
+
+.settings-view__models-default-key:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+/* While its provider is off, the default's key is plain text. */
+.settings-view__models-default-key--text {
+  text-decoration: none;
+  cursor: default;
+}
+
+.settings-view__models-provider,
+.settings-view__models-list,
+.settings-view__models-details,
+.settings-view__models-notice,
+.settings-view__models-unselected {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-surface);
+  background: var(--app-surface-panel);
+}
+
+/* Provider card */
+
+.settings-view__models-provider {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 32px;
+  padding: 16px 20px;
+}
+
+.settings-view__models-provider-main {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 420px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-view__models-provider-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.settings-view__models-picker {
+  display: flex;
+  min-width: 0;
+  height: 40px;
+  flex: 0 1 280px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-control);
+  background: var(--app-surface-field);
+  font-size: 14px;
+  text-align: left;
+  color: var(--app-text);
+  cursor: pointer;
+}
+
+.settings-view__models-picker:hover {
+  background: var(--app-surface-hover);
+}
+
+.settings-view__models-picker:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--app-focus);
+}
+
+.settings-view__models-picker-name {
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--app-text-strong);
+}
+
+.settings-view__models-picker-where {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--app-text-muted);
+}
+
+.settings-view__models-provider-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.settings-view__models-provider-status > span:nth-child(2) {
+  font-weight: 500;
+  color: var(--app-text-strong);
+}
+
+.settings-view__models-refresh {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-view__models-menu {
+  width: 380px;
+  max-width: calc(100vw - 48px);
+}
+
+.settings-view__models-choice {
+  align-items: flex-start;
+  gap: 10px;
+  padding-block: 8px;
+}
+
+.settings-view__models-choice .settings-view__models-icon {
+  margin-top: 2px;
+}
+
+.settings-view__models-choice-lines {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-view__models-choice-name {
+  font-weight: 500;
+}
+
+.settings-view__models-choice-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.settings-view__models-choice .settings-view__models-mono {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Notice in place of the list and details */
+
+.settings-view__models-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 28px 24px;
+}
+
+.settings-view__models-notice-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--app-text-strong);
+}
+
+/* List */
+
+.settings-view__models-browser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 16px;
+}
+
+.settings-view__models-list {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 340px;
+  flex-direction: column;
+}
+
+.settings-view__models-list-top {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 12px 8px;
+  border-bottom: 1px solid var(--app-border-subtle);
+}
+
+.settings-view__models-filter {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.settings-view__models-filter > svg {
+  position: absolute;
+  left: 10px;
+  width: 16px;
+  height: 16px;
+  color: var(--app-text-muted);
+  pointer-events: none;
+}
+
+.settings-view__models-filter [data-slot="input"] {
+  padding-left: 34px;
+}
+
+.settings-view__models-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.settings-view__models-scroll {
+  max-height: 520px;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.settings-view__models-scroll ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.settings-view__models-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 6px;
+}
+
+.settings-view__models-row {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  font-size: 14px;
+  text-align: left;
+  color: var(--app-text);
+  cursor: pointer;
+}
+
+.settings-view__models-row:hover {
+  background: var(--app-surface-hover);
+}
+
+.settings-view__models-row:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--app-focus);
+}
+
+/* The selected row carries the rail's violet edge and tint. */
+.settings-view__models-row[aria-current="true"] {
+  background: var(--app-surface-navigation-active);
+  box-shadow: inset 2px 0 0 var(--lys-violet);
+}
+
+/* A focused selected row keeps its violet edge inside the focus ring. */
+.settings-view__models-row[aria-current="true"]:focus-visible {
+  box-shadow:
+    inset 0 0 0 2px var(--app-focus),
+    inset 4px 0 0 var(--lys-violet);
+}
+
+.settings-view__models-key {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--app-text-strong);
+}
+
+.settings-view__models-key > span {
+  color: var(--app-text-muted);
+}
+
+.settings-view__models-chip {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-capsule);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--app-text);
+}
+
+.settings-view__models-loading {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--app-text-muted);
+}
+
+.settings-view__models-column {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--app-text-muted);
+}
+
+.settings-view__models-no-match {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 16px;
+  text-align: center;
+}
+
+.settings-view__models-no-match p {
+  margin: 0;
+}
+
+/* Selected model */
+
+.settings-view__models-details {
+  display: flex;
+  min-width: 0;
+  flex: 999 1 520px;
+  flex-direction: column;
+}
+
+.settings-view__models-unselected {
+  display: flex;
+  min-width: 0;
+  flex: 999 1 520px;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.settings-view__models-details-top {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px;
+}
+
+.settings-view__models-details-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-view__models-details-heading > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-view__models-details-heading h3 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  color: var(--app-text-strong);
+}
+
+.settings-view__models-details-heading h3 > span {
+  color: var(--app-text-muted);
+}
+
+.settings-view__models-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--app-surface-content);
+}
+
+.settings-view__models-status-lines {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-view__models-status-word {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.settings-view__models-status-word > span:nth-child(2) {
+  font-weight: 500;
+  color: var(--app-text-strong);
+}
+
+.settings-view__models-status-word > span:nth-child(3) {
+  color: var(--app-text-muted);
+}
+
+/* The load bar runs the width of the status box, under its words. */
+.settings-view__progress.settings-view__models-progress {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.settings-view__models-facts {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.settings-view__models-facts > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-view__models-facts dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  color: var(--app-text-strong);
+}
+
+/* Load settings */
+
+.settings-view__models-load {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px 0 24px;
+  margin: 0 24px;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.settings-view__models-load-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-view__models-load-heading h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--app-text-strong);
+}
+
+.settings-view__models-load-heading p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.settings-view__models-context {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-view__models-context-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 500;
+  color: var(--app-text-strong);
+}
+
+.settings-view__models-context-heading .settings-view__models-mono {
+  font-size: 13px;
+  font-weight: 400;
+}
+
+/* Inset by half a thumb, so each label sits under the stop it names. */
+.settings-view__models-context-track {
+  padding: 4px 8px 0;
+}
+
+.settings-view__models-ticks {
+  position: relative;
+  height: 16px;
+  padding: 0;
+  margin: 8px 0 0;
+  list-style: none;
+}
+
+.settings-view__models-ticks li {
+  position: absolute;
+  top: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  color: var(--app-text-muted);
+  translate: -50% 0;
+}
+
+.settings-view__models-settings {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-view__models-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.settings-view__models-setting:last-child {
+  border-bottom: 1px solid var(--app-border-subtle);
+}
+
+.settings-view__models-setting-lines {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-view__models-setting-lines > span {
+  font-weight: 500;
+  color: var(--app-text-strong);
+}
+
+.settings-view__models-setting-lines p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+/* The note states the problem in words; the colour only repeats it. */
+.settings-view__models-setting-lines p[data-error] {
+  color: var(--app-text-danger);
+}
+
+.settings-view__models-setting-control {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.settings-view__models-number[data-slot="input"] {
+  width: 96px;
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+/*
+ * The stepper is a fieldset that groups its buttons under the row's label, so
+ * the browser's fieldset margin and min-content width are reset; its own
+ * padding and border replace the browser's.
+ */
+.settings-view__models-stepper {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 2px;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-control);
+}
+
+.settings-view__models-stepper output {
+  min-width: 36px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--app-text-strong);
+}
+
+.settings-view__models-idle {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-view__models-idle label {
+  font-weight: 500;
+  color: var(--app-text-strong);
+}
+
+.settings-view__models-idle select {
+  max-width: 280px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-control);
+  background: var(--app-surface-field);
+  font: inherit;
+  color: var(--app-text);
+}
+
+.settings-view__models-idle select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.settings-view__models-fixed {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--app-surface-content);
+  font-weight: 500;
+  color: var(--app-text-strong);
+}
+
+.settings-view__models-change {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  border-radius: 2px;
+  font-size: 13px;
+  color: var(--app-text);
+}
+
+/* Undo and Reload hand focus to this region, so it shows a focus ring. */
+.settings-view__models-change:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * The live regions stay rendered while empty, so their first words are
+ * announced; an empty one gives back the gap it would add.
+ */
+.settings-view__models-change:empty,
+.settings-view__models-save:has(> p:empty) {
+  margin-top: -18px;
+}
+
+.settings-view__models-save {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* Footer */
+
+.settings-view__models-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 24px;
+  margin-top: auto;
+  border-top: 1px solid var(--app-border-subtle);
+  border-radius: 0 0 var(--radius-surface) var(--radius-surface);
+  background: var(--app-surface-content);
+}
+
+.settings-view__models-footer .settings-view__models-note {
+  flex: 1 1 240px;
+}
+
+.settings-view__models-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 2px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--app-text-strong);
+}
+
+/* The mark takes focus from the Set as default button it replaces. */
+.settings-view__models-current:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+.settings-view__models-current svg {
+  width: 16px;
+  height: 16px;
+  color: var(--app-status-success);
+}
+
+.settings-view__models-alert {
+  margin: 0;
+  font-size: 12px;
+  color: var(--app-text-danger);
+}
+
+.settings-view__models-alert:empty {
+  margin-top: -16px;
 }
 
 /* Segmented and slider controls */
@@ -3000,49 +3620,6 @@ legend.settings-view__mcp-field-label {
   align-items: center;
   gap: 14px;
   padding: 16px 18px;
-  cursor: pointer;
-
-  &:has(.settings-view__provider-radio:disabled) {
-    cursor: default;
-  }
-
-  &:has(.settings-view__provider-radio:focus-visible) {
-    border-radius: 10px;
-    outline: 2px solid var(--app-focus);
-    outline-offset: -2px;
-  }
-}
-
-.settings-view__provider-radio {
-  display: grid;
-  width: 16px;
-  height: 16px;
-  flex: none;
-  margin: 0;
-  border: 1px solid var(--app-border-strong);
-  border-radius: 50%;
-  appearance: none;
-  place-content: center;
-
-  &::before {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: transparent;
-    content: "";
-  }
-
-  &:checked {
-    border-color: var(--app-border-interactive);
-  }
-
-  &:checked::before {
-    background: var(--app-status-success);
-  }
-
-  &:focus-visible {
-    outline: none;
-  }
 }
 
 .settings-view__provider-logo {
@@ -3098,27 +3675,8 @@ legend.settings-view__mcp-field-label {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 14px 18px 18px 98px;
+  padding: 14px 18px 18px 68px;
   border-top: 1px solid var(--app-border-subtle);
-}
-
-.settings-view__provider-mode-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--app-border-subtle);
-}
-
-.settings-view__provider-modes {
-  display: flex;
-  min-inline-size: 0;
-  flex: none;
-  gap: 6px;
-  padding: 0;
-  border: 0;
-  margin: 0;
 }
 
 .settings-view__provider-hint {
@@ -3132,4 +3690,28 @@ legend.settings-view__mcp-field-label {
   color: var(--app-text-faint);
   font-family: var(--font-mono);
   font-size: 12px;
+}
+
+/* A card's save line stays in the card, on or off, so a save is announced; empty, it takes no room. */
+.settings-view__provider-save {
+  padding: 0 18px 16px 68px;
+
+  &:empty {
+    padding: 0;
+  }
+}
+
+/* Runtime: one row per turned-on provider under the connections heading. */
+
+.settings-view__provider-status-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.settings-view__provider-status-row {
+  padding: 12px 18px;
+  border-top: 1px solid var(--app-border-subtle);
 }

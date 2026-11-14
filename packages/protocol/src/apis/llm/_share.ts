@@ -1,3 +1,4 @@
+import { llmProviderSchema, type LlmProvider } from "@lys/share"
 import * as z from "zod"
 
 /** Model file formats a provider can report for a model it runs locally. */
@@ -104,3 +105,37 @@ export const llmInfoSchema = z
 
 /** Model inventory metadata inferred from the authoritative runtime schema. */
 export type LlmInfo = z.infer<typeof llmInfoSchema>
+
+/**
+ * Validates the provider an LLM route's path names.
+ *
+ * @remarks Every LLM route is for one provider, named by the `:provider`
+ * path segment. An unknown provider is refused before any handler runs.
+ */
+export const llmProviderApiParamsSchema = z
+  .strictObject({
+    /** Provider the request is for. */
+    provider: llmProviderSchema
+  })
+  .readonly()
+
+/** Path parameters naming the provider an LLM route is for. */
+export type LlmProviderApiParams = z.infer<typeof llmProviderApiParamsSchema>
+
+/**
+ * Builds the path of an LLM route for one provider.
+ *
+ * @param path - Route path with its `:provider` segment, such as
+ * `apiLlmListModelsRoute`.
+ * @param provider - Provider the request is for.
+ * @returns The path with the provider in place of `:provider`; any other
+ * parameter, such as `:modelId`, is left for the caller.
+ * @remarks Every LLM route path has a `:provider` segment right after
+ * `/llm/`, naming the provider the request is for, which this fills in.
+ */
+export function buildLlmProviderApiPath(
+  path: string,
+  provider: LlmProvider
+): string {
+  return path.replace(":provider", provider)
+}

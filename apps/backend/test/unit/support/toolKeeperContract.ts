@@ -12,6 +12,7 @@ import {
   SEARCH_CALL_ID,
   TOOL_CALL_POLICY
 } from "./toolFixtures"
+import { LM_STUDIO_QWEN3_8B } from "./llmFixtures"
 
 /** How every search of a keeper under test ends. */
 export type ToolKeeperScript = "finds-task-tools" | "finds-nothing" | "fails"
@@ -75,7 +76,7 @@ function buildSearch(options: SearchOptions = {}) {
     searchCallId: SEARCH_CALL_ID,
     tools: options.tools ?? TOOL_KEEPER_SEARCH_TOOLS,
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
-    model: "qwen/qwen3-8b",
+    model: LM_STUDIO_QWEN3_8B,
     generationOptions,
     abortSignal: options.abortSignal ?? new AbortController().signal,
     reportFailure,

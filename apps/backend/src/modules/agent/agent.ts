@@ -9,6 +9,7 @@ import type {
   ConversationSource,
   ConversationUserMessage,
   EmailAddress,
+  LlmModelReference,
   ReplyPart,
   ToolCallReplyPart,
   ToolDefinition
@@ -169,8 +170,11 @@ export type AgentTurn = Readonly<{
    * images.
    */
   findAttachmentImage: FindAttachmentImage
-  /** Model selected by the request. */
-  model: string
+  /**
+   * Model selected by the request; every round and tool search of the turn
+   * goes to its provider.
+   */
+  model: LlmModelReference
   /**
    * Whether the model is trained for tool use: true offers the agent's state
    * tools after the turn's other tools, also while tool calls are off, and
@@ -342,8 +346,8 @@ const EMPTY_USER_MESSAGE = Object.freeze({
 export type AgentContextInput = Readonly<{
   /** Stored transcript, in conversation order; empty for a new conversation. */
   history: readonly ConversationMessage[]
-  /** Identifier of the model the message would be sent to. */
-  model: string
+  /** Model the message would be sent to, and its provider. */
+  model: LlmModelReference
   /** Whether that model sees images, as {@link AgentTurn.canSeeImages}. */
   canSeeImages: boolean
   /**
@@ -1100,10 +1104,10 @@ function handleReplyFailure(turn: AgentTurn, error: unknown): void {
  */
 function formatReplyFailureMessage(failure: unknown): string {
   if (failure instanceof ReplyContextOverflowError) {
-    return `The conversation no longer fits the model's context window: the next request to the model needs ${formatTokenCount(failure.requiredTokens)} tokens, including the room kept for the reply, and the model is loaded with ${formatTokenCount(failure.contextLength)}. Start a new conversation, or load the model with a longer context in Settings → Model.`
+    return `The conversation no longer fits the model's context window: the next request to the model needs ${formatTokenCount(failure.requiredTokens)} tokens, including the room kept for the reply, and the model is loaded with ${formatTokenCount(failure.contextLength)}. Start a new conversation, or load the model with a longer context in Settings → Models.`
   }
   if (failure instanceof ReplyModelNotLoadedError) {
-    return "The model is not loaded, so Lys cannot check that the conversation fits it. Load the model in Settings → Model, or in the provider itself when Lys does not load its models, then try again."
+    return "The model is not loaded, so Lys cannot check that the conversation fits it. Load the model in Settings → Models, or in the provider itself when Lys does not load its models, then try again."
   }
   if (failure instanceof AgentRequestLimitError) {
     return formatRequestLimitMessage(failure.limits)

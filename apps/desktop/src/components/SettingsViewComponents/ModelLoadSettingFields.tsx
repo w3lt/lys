@@ -2,7 +2,6 @@ import {
   useId,
   useState,
   type ChangeEvent,
-  type KeyboardEvent,
   type ReactElement,
   type ReactNode
 } from "react"
@@ -10,379 +9,142 @@ import {
   MAXIMUM_MODEL_LOAD_SETTING_VALUE,
   type ModelLoadConfiguration
 } from "@lys/share"
+import { Minus, Plus } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  calculateContextLength,
-  calculateContextLengthStopIndex,
-  EVAL_BATCH_SIZE_CHOICES,
-  formatTokenCount,
-  isUsableContextLimit,
-  listContextLengthStops
-} from "@/lib/models/model-load-configuration"
 import type { CompleteModelLoadConfiguration } from "@/lib/store/settings"
 
+import ModelContextLengthField from "./ModelContextLengthField"
 import {
-  findLoadedSettingValue,
-  formatContextLengthNote,
-  type ModelReloadPrompt
+  MAXIMUM_EVAL_BATCH_SIZE,
+  MEASURED_CONTEXT_NOTE,
+  parseEvalBatchSize
 } from "./model-load-presentation"
 
-/**
- * Most digits a typed context length keeps: the digit count of the largest
- * value a load setting accepts.
- */
-const MAXIMUM_TYPED_CONTEXT_LENGTH_DIGITS = String(
-  MAXIMUM_MODEL_LOAD_SETTING_VALUE
-).length
+/** Note under the evaluation batch size while the typed size is accepted. */
+const EVAL_BATCH_SIZE_NOTE =
+  "Prompt tokens read at once. Larger is faster and uses more memory."
+
+/** Note under the evaluation batch size while the typed size is not accepted. */
+const EVAL_BATCH_SIZE_ERROR = `Enter a whole number from 1 to ${MAXIMUM_EVAL_BATCH_SIZE.toLocaleString("en-US")}.`
 
 /** Properties accepted by {@link LoadSettingRow}. */
 type LoadSettingRowProps = {
-  /** Identifier given to the title, so the control can be labelled by it. */
-  readonly titleId: string
+  /** Identifier given to the label, so the control can be named by it. */
+  readonly labelId: string
   /** Name of the load setting. */
-  readonly title: string
+  readonly label: string
   /** Identifier given to the note, so the control can be described by it. */
   readonly noteId: string
-  /** What the setting does. */
+  /** What the setting does, or what is wrong with the typed value. */
   readonly note: string
-  /**
-   * Value the model was loaded with, when it is known and differs from the
-   * stored one; null otherwise.
-   */
-  readonly loadedValue: string | null
-  /** The setting's control, rendered after the title and note. */
+  /** Whether the note reports a value that is not accepted. */
+  readonly isNoteError: boolean
+  /** The setting's control, placed after the label and note. */
   readonly children: ReactNode
 }
 
 /**
- * Presents one load setting: its title, note, and control.
+ * Presents one load setting: its label, note, and control.
  *
- * @remarks Owns no state. The title is a level-three heading under the
- * section heading. A loaded value is shown beside the title as text, so the
- * difference does not depend on colour alone.
- * @param props - Title, note, loaded value, and the control to place.
+ * @remarks Owns no state. A note reporting an error is marked by its data
+ * attribute and states the problem in words, so it does not rely on colour.
+ * @param props - Label, note, and the control to place.
  * @returns The setting's row.
  */
 function LoadSettingRow({
-  titleId,
-  title,
+  labelId,
+  label,
   noteId,
   note,
-  loadedValue,
+  isNoteError,
   children
 }: LoadSettingRowProps): ReactElement {
   return (
-    <div className="settings-view__row">
-      <div className="settings-view__identity-lines">
-        <div className="settings-view__load-title">
-          <h3 id={titleId}>{title}</h3>
-          {loadedValue === null ? null : (
-            <span className="settings-view__load-changed">
-              loaded · {loadedValue}
-            </span>
-          )}
-        </div>
-        <p id={noteId}>{note}</p>
+    <div className="settings-view__models-setting">
+      <div className="settings-view__models-setting-lines">
+        <span id={labelId}>{label}</span>
+        <p data-error={isNoteError ? "" : undefined} id={noteId}>
+          {note}
+        </p>
       </div>
       {children}
     </div>
   )
 }
 
-/** Properties accepted by {@link ContextLengthSlider}. */
-type ContextLengthSliderProps = {
-  /** Current context length, in tokens. */
-  readonly contextLength: number
-  /** Ascending context lengths the slider stops at; at least two. */
-  readonly stops: readonly number[]
-  /** Identifier of the element that names the slider. */
-  readonly titleId: string
-  /** Identifier of the element that describes the slider. */
-  readonly noteId: string
-  /**
-   * Proposes a context length. Called once for each stop the thumb reaches.
-   *
-   * @param contextLength - Proposed context length, in tokens.
-   */
-  readonly onContextLengthChange: (contextLength: number) => void
-}
-
-/**
- * Presents the context length as a position among the model's stops.
- *
- * @remarks The parent owns the context length. A length between two stops is
- * shown at the lower one. The value text announces the length in tokens
- * rather than the position.
- * @param props - Current length, stops, labelling identifiers, and proposal.
- * @returns A keyboard-operable slider.
- */
-function ContextLengthSlider({
-  contextLength,
-  stops,
-  titleId,
-  noteId,
-  onContextLengthChange
-}: ContextLengthSliderProps): ReactElement {
-  /**
-   * Proposes the stop the slider moved to.
-   *
-   * @param emission - Position or positions the slider reports.
-   */
-  function handleStopChange(emission: number | readonly number[]): void {
-    const stopIndex = typeof emission === "number" ? emission : emission[0]
-    const stop = stopIndex === undefined ? undefined : stops.at(stopIndex)
-    if (stop !== undefined) onContextLengthChange(stop)
-  }
-
-  return (
-    <Slider
-      aria-describedby={noteId}
-      aria-labelledby={titleId}
-      aria-valuetext={`${contextLength.toLocaleString()} tokens`}
-      max={stops.length - 1}
-      min={0}
-      onValueChange={handleStopChange}
-      step={1}
-      thumbAlignment="center"
-      value={[calculateContextLengthStopIndex(stops, contextLength)]}
-    />
-  )
-}
-
-/** Properties accepted by {@link ContextLengthBox}. */
-type ContextLengthBoxProps = {
-  /** Current context length, in tokens. */
-  readonly contextLength: number
-  /** Maximum context length the runtime reports for the model. */
-  readonly maxContextLength: number
-  /** Identifier of the element that describes the box. */
-  readonly noteId: string
-  /**
-   * Proposes a context length. Called once when a typed value that differs
-   * from the current one is committed.
-   *
-   * @param contextLength - Proposed context length, in tokens, within the
-   * accepted range.
-   */
-  readonly onContextLengthChange: (contextLength: number) => void
-}
-
-/**
- * Edits the context length as an exact number of tokens.
- *
- * @remarks Owns the text being typed; the parent owns the context length.
- * Only digits are kept. Enter or leaving the box commits the typed value,
- * kept within the accepted range; Escape drops it. An empty or zero value is
- * dropped. While nothing is being typed the box shows the parent's value.
- * @param props - Current length, the model's maximum, and the proposal.
- * @returns A labelled text box.
- */
-function ContextLengthBox({
-  contextLength,
-  maxContextLength,
-  noteId,
-  onContextLengthChange
-}: ContextLengthBoxProps): ReactElement {
-  const [typedText, setTypedText] = useState<string | null>(null)
-
-  /**
-   * Keeps the digits of the typed text.
-   *
-   * @param event - Native change event of the box.
-   */
-  function handleContextLengthInput(
-    event: ChangeEvent<HTMLInputElement>
-  ): void {
-    const digits = event.target.value.replace(/\D/g, "")
-    setTypedText(digits.slice(0, MAXIMUM_TYPED_CONTEXT_LENGTH_DIGITS))
-  }
-
-  /** Ends the edit and proposes the typed value when it is a new length. */
-  function handleContextLengthCommit(): void {
-    if (typedText === null) return
-    setTypedText(null)
-    const typedTokens = Number.parseInt(typedText, 10)
-    if (Number.isNaN(typedTokens) || typedTokens < 1) return
-    const committed = calculateContextLength(typedTokens, maxContextLength)
-    if (committed !== contextLength) onContextLengthChange(committed)
-  }
-
-  /**
-   * Commits on Enter and drops the typed text on Escape.
-   *
-   * @param event - Native key event of the box.
-   */
-  function handleContextLengthKeyDown(
-    event: KeyboardEvent<HTMLInputElement>
-  ): void {
-    if (event.key === "Enter") handleContextLengthCommit()
-    if (event.key === "Escape") setTypedText(null)
-  }
-
-  return (
-    <Input
-      aria-describedby={noteId}
-      aria-label="Context length in tokens"
-      className="settings-view__load-box"
-      inputMode="numeric"
-      onBlur={handleContextLengthCommit}
-      onChange={handleContextLengthInput}
-      onKeyDown={handleContextLengthKeyDown}
-      spellCheck={false}
-      value={typedText ?? String(contextLength)}
-    />
-  )
-}
-
-/** Properties accepted by {@link ContextLengthField}. */
-type ContextLengthFieldProps = {
-  /** Key of the model being edited, named in the note. */
-  readonly modelKey: string
-  /** Current context length, in tokens. */
-  readonly contextLength: number
-  /** Maximum context length the runtime reports for the model. */
-  readonly maxContextLength: number
-  /** Loaded context length when it is known and differs; null otherwise. */
-  readonly loadedValue: string | null
-  /**
-   * Proposes a context length.
-   *
-   * @param contextLength - Proposed context length, in tokens.
-   */
-  readonly onContextLengthChange: (contextLength: number) => void
-}
-
-/**
- * Presents the context length row: a slider over the model's stops, a box
- * for an exact value, and the model's maximum.
- *
- * @remarks The parent owns the context length. The slider is left out when
- * the model's maximum gives fewer than two stops, and the maximum is left out
- * when the runtime reports none that is usable.
- * @param props - Model key, current and maximum length, loaded value, and
- * proposal.
- * @returns The context length row.
- */
-function ContextLengthField({
-  modelKey,
-  contextLength,
-  maxContextLength,
-  loadedValue,
-  onContextLengthChange
-}: ContextLengthFieldProps): ReactElement {
-  const titleId = useId()
-  const noteId = useId()
-  const stops = listContextLengthStops(maxContextLength)
-  const maximumText = isUsableContextLimit(maxContextLength)
-    ? formatTokenCount(maxContextLength)
-    : null
-  return (
-    <LoadSettingRow
-      loadedValue={loadedValue}
-      note={formatContextLengthNote(modelKey, maximumText)}
-      noteId={noteId}
-      title="Context length"
-      titleId={titleId}
-    >
-      <div className="settings-view__load-control">
-        {stops.length < 2 ? null : (
-          <ContextLengthSlider
-            contextLength={contextLength}
-            noteId={noteId}
-            onContextLengthChange={onContextLengthChange}
-            stops={stops}
-            titleId={titleId}
-          />
-        )}
-        <ContextLengthBox
-          contextLength={contextLength}
-          maxContextLength={maxContextLength}
-          noteId={noteId}
-          onContextLengthChange={onContextLengthChange}
-        />
-        {maximumText === null ? null : (
-          <span className="settings-view__load-max">max {maximumText}</span>
-        )}
-      </div>
-    </LoadSettingRow>
-  )
-}
-
 /** Properties accepted by {@link EvalBatchSizeField}. */
 type EvalBatchSizeFieldProps = {
-  /** Current eval batch size, in tokens. */
+  /** Current evaluation batch size, in tokens. */
   readonly evalBatchSize: number
-  /** Loaded batch size when it is known and differs; null otherwise. */
-  readonly loadedValue: string | null
   /**
-   * Proposes an eval batch size. Called once when a choice is pressed.
+   * Proposes an evaluation batch size, called once for each accepted
+   * change of the typed text.
    *
-   * @param evalBatchSize - One of the offered batch sizes, in tokens.
+   * @param evalBatchSize - Proposed size, a whole number from 1 to
+   * {@link MAXIMUM_EVAL_BATCH_SIZE}.
    */
   readonly onEvalBatchSizeChange: (evalBatchSize: number) => void
 }
 
 /**
- * Presents the eval batch size row as a choice among the offered sizes.
+ * Edits the evaluation batch size as a number of tokens.
  *
- * @remarks The parent owns the batch size. A size outside the offered
- * choices presses none of them and is shown as custom text beside them.
- * @param props - Current batch size, loaded value, and proposal.
- * @returns The eval batch size row.
+ * @remarks Owns the text while it is not an accepted size; the parent owns
+ * the size. Each change to an accepted size is proposed at once and the box
+ * shows the parent's size again. Text that is not a whole number from 1 to
+ * {@link MAXIMUM_EVAL_BATCH_SIZE} stays in the box, is not proposed, marks
+ * the box invalid, and replaces the note with what to enter, which the box
+ * is described by.
+ * @param props - Current size and the proposal.
+ * @returns The evaluation batch size row.
  */
 function EvalBatchSizeField({
   evalBatchSize,
-  loadedValue,
   onEvalBatchSizeChange
 }: EvalBatchSizeFieldProps): ReactElement {
-  const titleId = useId()
+  const labelId = useId()
   const noteId = useId()
+  const [rejectedText, setRejectedText] = useState<string | null>(null)
 
   /**
-   * Proposes the batch size the toggle group selected.
+   * Proposes the typed size when it is accepted, else keeps the text.
    *
-   * @param groupValue - Pressed item values the toggle group reports.
+   * @param event - Native change event of the box.
    */
-  function handleBatchSizeValueChange(groupValue: string[]): void {
-    const [choice] = groupValue
-    if (choice !== undefined) onEvalBatchSizeChange(Number(choice))
+  function handleBatchSizeInput(event: ChangeEvent<HTMLInputElement>): void {
+    const size = parseEvalBatchSize(event.target.value)
+    setRejectedText(size === null ? event.target.value : null)
+    if (size !== null) onEvalBatchSizeChange(size)
   }
 
   return (
     <LoadSettingRow
-      loadedValue={loadedValue}
-      note="Prompt tokens read per pass. Bigger reads long prompts faster, and holds more memory doing it."
+      isNoteError={rejectedText !== null}
+      label="Evaluation batch size"
+      labelId={labelId}
+      note={
+        rejectedText === null ? EVAL_BATCH_SIZE_NOTE : EVAL_BATCH_SIZE_ERROR
+      }
       noteId={noteId}
-      title="Eval batch size"
-      titleId={titleId}
     >
-      <div className="settings-view__load-control">
-        {EVAL_BATCH_SIZE_CHOICES.includes(evalBatchSize) ? null : (
-          <span className="settings-view__meta">custom · {evalBatchSize}</span>
-        )}
-        <ToggleGroup
+      <div className="settings-view__models-setting-control">
+        <Input
           aria-describedby={noteId}
-          aria-labelledby={titleId}
-          onValueChange={handleBatchSizeValueChange}
-          size="sm"
-          value={[String(evalBatchSize)]}
-          variant="outline"
-        >
-          {EVAL_BATCH_SIZE_CHOICES.map((choice) => (
-            <ToggleGroupItem
-              className="settings-view__load-segment"
-              key={choice}
-              value={String(choice)}
-            >
-              {choice}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+          aria-invalid={rejectedText !== null}
+          aria-labelledby={labelId}
+          className="settings-view__models-number"
+          inputMode="numeric"
+          max={MAXIMUM_EVAL_BATCH_SIZE}
+          min={1}
+          onChange={handleBatchSizeInput}
+          step={1}
+          type="number"
+          value={rejectedText ?? String(evalBatchSize)}
+        />
+        <span>tokens</span>
       </div>
     </LoadSettingRow>
   )
@@ -391,15 +153,13 @@ function EvalBatchSizeField({
 /** Properties accepted by {@link LoadSwitchField}. */
 type LoadSwitchFieldProps = {
   /** Name of the load setting. */
-  readonly title: string
-  /** What the setting does in its current state. */
+  readonly label: string
+  /** What the setting does. */
   readonly note: string
   /** Whether the setting is on. */
   readonly isEnabled: boolean
-  /** Loaded state when it is known and differs; null otherwise. */
-  readonly loadedValue: string | null
   /**
-   * Proposes the other state. Called once when the switch is operated.
+   * Proposes the other state, called once when the switch is operated.
    *
    * @param isEnabled - Proposed state.
    */
@@ -410,36 +170,34 @@ type LoadSwitchFieldProps = {
  * Presents an on/off load setting row.
  *
  * @remarks The parent owns the state. The switch announces its own state;
- * the visible on/off text is for the eye and hidden from assistive
+ * the visible On/Off word is for the eye and hidden from assistive
  * technology.
- * @param props - Title, note, current state, loaded value, and proposal.
+ * @param props - Label, note, current state, and the proposal.
  * @returns The setting's row.
  */
 function LoadSwitchField({
-  title,
+  label,
   note,
   isEnabled,
-  loadedValue,
   onIsEnabledChange
 }: LoadSwitchFieldProps): ReactElement {
-  const titleId = useId()
+  const labelId = useId()
   const noteId = useId()
   return (
     <LoadSettingRow
-      loadedValue={loadedValue}
+      isNoteError={false}
+      label={label}
+      labelId={labelId}
       note={note}
       noteId={noteId}
-      title={title}
-      titleId={titleId}
     >
-      <div className="settings-view__toggle-state">
-        <span aria-hidden="true">{isEnabled ? "on" : "off"}</span>
+      <div className="settings-view__models-setting-control">
+        <span aria-hidden="true">{isEnabled ? "On" : "Off"}</span>
         <Switch
           aria-describedby={noteId}
-          aria-labelledby={titleId}
+          aria-labelledby={labelId}
           checked={isEnabled}
           onCheckedChange={onIsEnabledChange}
-          size="lg"
         />
       </div>
     </LoadSettingRow>
@@ -457,10 +215,8 @@ type ExpertCountFieldProps = {
    * count instead.
    */
   readonly isAutomaticCountAvailable: boolean
-  /** Loaded expert count when it is known and differs; null otherwise. */
-  readonly loadedValue: string | null
   /**
-   * Proposes an expert count. Called once for each step.
+   * Proposes an expert count, called once for each step.
    *
    * @param expertCount - Proposed count of at least one.
    */
@@ -472,23 +228,23 @@ type ExpertCountFieldProps = {
 /**
  * Presents the active experts row as a stepper.
  *
- * @remarks The parent owns the count. An unset count reads `auto`; stepping
+ * @remarks The parent owns the count. An unset count reads Auto; stepping
  * up from it proposes one expert, and stepping down from one expert asks for
  * the count to be removed when that leaves it to the model. The step-down
  * button is disabled when no lower state exists, and the step-up button at
- * the largest accepted count.
- * @param props - Current count, whether auto is reachable, loaded value, and
- * the two actions.
+ * the largest accepted count. The count is a live region named by the
+ * label, so a step is announced.
+ * @param props - Current count, whether Auto is reachable, and the two
+ * actions.
  * @returns The active experts row.
  */
 function ExpertCountField({
   expertCount,
   isAutomaticCountAvailable,
-  loadedValue,
   onExpertCountChange,
   onRemoveExpertCount
 }: ExpertCountFieldProps): ReactElement {
-  const titleId = useId()
+  const labelId = useId()
   const noteId = useId()
   const isLowestCount = expertCount === 1 && !isAutomaticCountAvailable
 
@@ -504,13 +260,16 @@ function ExpertCountField({
 
   return (
     <LoadSettingRow
-      loadedValue={loadedValue}
-      note="Experts each token is routed through. Only mixture-of-experts models use this; auto leaves the count to the model."
+      isNoteError={false}
+      label="Active experts"
+      labelId={labelId}
+      note="Experts the model uses for each token. Fewer is faster; Auto leaves the count to the model."
       noteId={noteId}
-      title="Active experts"
-      titleId={titleId}
     >
-      <div className="settings-view__load-stepper">
+      <fieldset
+        aria-labelledby={labelId}
+        className="settings-view__models-stepper"
+      >
         <Button
           aria-describedby={noteId}
           aria-label="Fewer experts"
@@ -518,11 +277,13 @@ function ExpertCountField({
           onClick={handleFewerExpertsClick}
           size="icon-sm"
           type="button"
-          variant="outline"
+          variant="ghost"
         >
-          −
+          <Minus aria-hidden="true" />
         </Button>
-        <output aria-labelledby={titleId}>{expertCount ?? "auto"}</output>
+        <output aria-labelledby={labelId} aria-live="polite">
+          {expertCount ?? "Auto"}
+        </output>
         <Button
           aria-describedby={noteId}
           aria-label="More experts"
@@ -530,11 +291,11 @@ function ExpertCountField({
           onClick={() => onExpertCountChange((expertCount ?? 0) + 1)}
           size="icon-sm"
           type="button"
-          variant="outline"
+          variant="ghost"
         >
-          +
+          <Plus aria-hidden="true" />
         </Button>
-      </div>
+      </fieldset>
     </LoadSettingRow>
   )
 }
@@ -543,16 +304,14 @@ function ExpertCountField({
 export type ModelLoadSettingFieldsProps = {
   /** Key of the model being edited. */
   readonly modelKey: string
-  /** Maximum context length the runtime reports for the model. */
+  /** Maximum context length the provider reports for the model. */
   readonly maxContextLength: number
   /** Configuration the model would be loaded with now. */
   readonly configuration: CompleteModelLoadConfiguration
   /** Whether removing the model's own expert count leaves it to the model. */
   readonly isAutomaticExpertCountAvailable: boolean
-  /** Current reload prompt, whose differences mark the changed rows; null for none. */
-  readonly reloadPrompt: ModelReloadPrompt | null
   /**
-   * Requests that settings be assigned to a model. Called once per edit.
+   * Requests that settings be assigned to a model, called once per edit.
    *
    * @param modelKey - Key of the model being edited.
    * @param settings - Settings to assign; the others keep their values.
@@ -570,85 +329,65 @@ export type ModelLoadSettingFieldsProps = {
 }
 
 /**
- * Presents the five load settings of one model, in the pane's order.
+ * Edits the five load settings LM Studio applies when it loads one model.
  *
- * @remarks The parent owns the configuration and applies every proposal; the
- * rows render the supplied values until it supplies new ones. Each row whose
- * loaded value is known and differs shows that value.
- * @param props - Model facts, current configuration, reload prompt, and the
- * two actions.
- * @returns The context length, eval batch size, flash attention, KV cache,
- * and active experts rows.
+ * @remarks The parent owns the configuration and
+ * applies every proposal; the rows render the supplied values until it
+ * supplies new ones.
+ * @param props - Model facts, current configuration, and the two actions.
+ * @returns The context length, then the evaluation batch size, flash
+ * attention, KV cache, and active experts rows.
  */
 export default function ModelLoadSettingFields({
   modelKey,
   maxContextLength,
   configuration,
   isAutomaticExpertCountAvailable,
-  reloadPrompt,
   onAssignModelLoadSettings,
   onRemoveModelExpertCount
 }: ModelLoadSettingFieldsProps): ReactElement {
   return (
     <>
-      <ContextLengthField
+      <ModelContextLengthField
         contextLength={configuration.contextLength}
-        loadedValue={findLoadedSettingValue(reloadPrompt, "contextLength")}
         maxContextLength={maxContextLength}
-        modelKey={modelKey}
+        note={MEASURED_CONTEXT_NOTE}
         onContextLengthChange={(contextLength) =>
           onAssignModelLoadSettings(modelKey, { contextLength })
         }
       />
-      <EvalBatchSizeField
-        evalBatchSize={configuration.evalBatchSize}
-        loadedValue={findLoadedSettingValue(reloadPrompt, "evalBatchSize")}
-        onEvalBatchSizeChange={(evalBatchSize) =>
-          onAssignModelLoadSettings(modelKey, { evalBatchSize })
-        }
-      />
-      <LoadSwitchField
-        isEnabled={configuration.flashAttention}
-        loadedValue={findLoadedSettingValue(reloadPrompt, "flashAttention")}
-        note="Leaner attention math. Usually less memory and faster replies."
-        onIsEnabledChange={(flashAttention) =>
-          onAssignModelLoadSettings(modelKey, { flashAttention })
-        }
-        title="Flash attention"
-      />
-      <LoadSwitchField
-        isEnabled={configuration.offloadKVCacheToGpu}
-        loadedValue={findLoadedSettingValue(
-          reloadPrompt,
-          "offloadKVCacheToGpu"
-        )}
-        note={formatKvCacheNote(configuration.offloadKVCacheToGpu)}
-        onIsEnabledChange={(offloadKVCacheToGpu) =>
-          onAssignModelLoadSettings(modelKey, { offloadKVCacheToGpu })
-        }
-        title="KV cache on GPU"
-      />
-      <ExpertCountField
-        expertCount={configuration.numExperts ?? null}
-        isAutomaticCountAvailable={isAutomaticExpertCountAvailable}
-        loadedValue={findLoadedSettingValue(reloadPrompt, "numExperts")}
-        onExpertCountChange={(numExperts) =>
-          onAssignModelLoadSettings(modelKey, { numExperts })
-        }
-        onRemoveExpertCount={() => onRemoveModelExpertCount(modelKey)}
-      />
+      <div className="settings-view__models-settings">
+        <EvalBatchSizeField
+          evalBatchSize={configuration.evalBatchSize}
+          onEvalBatchSizeChange={(evalBatchSize) =>
+            onAssignModelLoadSettings(modelKey, { evalBatchSize })
+          }
+        />
+        <LoadSwitchField
+          isEnabled={configuration.flashAttention}
+          label="Flash attention"
+          note="Faster attention that uses less memory, on models that support it."
+          onIsEnabledChange={(flashAttention) =>
+            onAssignModelLoadSettings(modelKey, { flashAttention })
+          }
+        />
+        <LoadSwitchField
+          isEnabled={configuration.offloadKVCacheToGpu}
+          label="KV cache on GPU"
+          note="Keeps the context cache in GPU memory. Faster, but it uses VRAM."
+          onIsEnabledChange={(offloadKVCacheToGpu) =>
+            onAssignModelLoadSettings(modelKey, { offloadKVCacheToGpu })
+          }
+        />
+        <ExpertCountField
+          expertCount={configuration.numExperts ?? null}
+          isAutomaticCountAvailable={isAutomaticExpertCountAvailable}
+          onExpertCountChange={(numExperts) =>
+            onAssignModelLoadSettings(modelKey, { numExperts })
+          }
+          onRemoveExpertCount={() => onRemoveModelExpertCount(modelKey)}
+        />
+      </div>
     </>
   )
-}
-
-/**
- * Formats the note of the KV cache row for its current state.
- *
- * @param isKvCacheOnGpu - Whether the KV cache is kept in GPU memory.
- * @returns What the current placement costs and what the other would change.
- */
-function formatKvCacheNote(isKvCacheOnGpu: boolean): string {
-  return isKvCacheOnGpu
-    ? "The attention cache sits in GPU memory. Off moves it to RAM: frees GPU memory, slows every token."
-    : "In RAM. GPU memory goes to the weights instead, and every token is a little slower."
 }

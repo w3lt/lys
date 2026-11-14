@@ -22,8 +22,8 @@ export const DEFAULT_OLLAMA_ADDRESS: ProviderAddress =
   providerAddressSchema.parse(`${OLLAMA_HOST}:${OLLAMA_PORT}`)
 
 /**
- * How the backend reaches the provider every request goes to, resolved from
- * the person's saved settings.
+ * How the backend reaches one provider that is on, resolved from the
+ * person's saved settings for that provider.
  *
  * @remarks Each variant holds exactly what reaching its provider needs: a
  * server address for a provider the person runs, an API key for a hosted

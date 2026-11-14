@@ -1,14 +1,17 @@
 # Chat streaming
 
-Sending a message in the composer makes the backend ask the active provider
-for a reply and stream it back as server-sent events; the renderer shows the
-text as it arrives, then the finished reply, and the conversation gets a
-generated title.
+Sending a message in the composer makes the backend ask the provider of the
+conversation's model for a reply and stream it back as server-sent events;
+the renderer shows the text as it arrives, then the finished reply, and the
+conversation gets a generated title.
 
 ## Sub-features
 
 - Sending a message starts a new conversation with the composer's agent
   (default `caliginia`) and stores the user message before generation starts.
+- The composer names the conversation's model by its key and provider
+  (`lys-verify:latest · Ollama`), and the chat request carries both as
+  `model: {provider, modelKey}`.
 - The reply streams: the backend sends a `reply-part` event that opens the
   text part with its first fragment, then one `reply-part-delta` event per
   fragment, each stored before it is sent, then `done` with the finish reason.
@@ -18,7 +21,9 @@ generated title.
   `title` event; the conversation shows it in Past conversations.
 - The reply and title are stored in SQLite (`conversations`,
   `conversation_messages`) and can be read back through
-  `GET /api/v1/conversations/:id`.
+  `GET /api/v1/conversations/:id`. The assistant message stores its model's
+  key and provider (`model` and `provider`), since the same key on two
+  providers names two models.
 - Not covered here: the Stop button, reasoning parts, tool calls, attachments,
   continuing an existing conversation, and `length` finishes.
 
@@ -39,17 +44,23 @@ node .claude/skills/verify-lys/scripts/verify-lys.mjs run --journey chat-stream-
 
 `chat-stream-api` (`scripts/journeys/chatStreamApi.mjs`) posts
 `{conversation: {kind: "new", agentCode: "caliginia"}, message, model:
-"lys-verify:latest", generationOptions: {temperature: 0.7, replyCeiling:
-2048}}` to `POST /api/v1/chat`, records every event with its arrival time
-(`evidence/chat-stream-api/01-events.json`, `01-timeline.json`), and checks:
+{provider: "ollama", modelKey: "lys-verify:latest"}, generationOptions:
+{temperature: 0.7, replyCeiling: 2048}}` to `POST /api/v1/chat`, records
+every event with its arrival time (`evidence/chat-stream-api/01-events.json`,
+`01-timeline.json`), and checks:
 first event `start-new-conversation-turn`; a `reply-part` of kind `text`; at
 least 10 `reply-part-delta` events for that part spread over at least 1000 ms
 (the fake provider sends 37 words 120 ms apart, so a whole-block reply cannot
 pass); part content plus deltas equal the provider's reply; `done` with
 `stop`; `title` equal to `Verification streaming chat`. It then reads
 `GET /api/v1/conversations/:id` until the assistant message has
-`finishReason: "stop"` and checks the text part and title, reads the SQLite
-rows read-only (`03-sqlite-rows.json`), and checks the provider's request log
+`finishReason: "stop"` and checks the text part, the title, and that the
+assistant message has `model: "lys-verify:latest"` and `provider: "ollama"`
+(`02-conversation.json`). It reads the SQLite rows read-only
+(`03-sqlite-rows.json`) and checks that the reply text row's `reply_id` is
+the turn's assistant message and that this message's row stores `model`
+`lys-verify:latest` and `provider` `ollama`, which proves the provider is
+stored with the reply. Last, it checks the provider's request log
 for exactly one streamed completion carrying the user message and one
 non-streamed completion with a response format (the title).
 
@@ -76,6 +87,10 @@ Expected end state: both journeys `passed`; the run's
   title, and 120 ms word interval are constants in
   `scripts/lib/verificationProvider.mjs`. Change them there and the journeys
   follow.
+- The provider is on the assistant message's row, not on the reply text:
+  the text sits in a row of role `text` whose `reply_id` names the assistant
+  row. SQLite allows `provider` only on assistant rows, and replies stored
+  before Lys recorded providers hold `NULL`.
 - The first fragment is not a delta: it rides in the `reply-part` event that
   opens the text part. Reconstruct text as `part.content` plus the deltas, or
   the first word is missing.

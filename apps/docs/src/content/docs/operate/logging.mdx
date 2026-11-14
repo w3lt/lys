@@ -29,14 +29,16 @@ health request.
 
 ## Model health observation
 
-`GET /api/v1/llm/:modelId/health` observes whether a canonical model key is
-currently loaded. Encode the key as one path parameter. An accepted query
-returns `200` with `modelId`, `latencyMs`, and either:
+`GET /api/v1/llm/:provider/:modelId/health` observes whether a canonical
+model key is currently loaded on the provider the path names. Encode the key
+as one path parameter. An accepted query returns `200` with `modelId`,
+`latencyMs`, and either:
 
 - `status: "ready"`
 - `status: "not-ready"` with reason `model-not-loaded` or `runtime-unavailable`
 
-Queue admission rejection returns `503` Problem Details. Responses use
+Queue admission rejection by that provider's queue returns `503` Problem
+Details. Responses use
 `Cache-Control: no-store`. Loaded state is a fresh inventory observation and
 does not prove that a later inference request will succeed.
 
@@ -136,9 +138,14 @@ an app started from a terminal shows.
   Studio, is logged at the level the SDK gave it, with the text the SDK would
   have printed in `msg`, its `[LMStudioClient]…` prefix first, an error with
   its stack, and no terminal colors. Its `debug` messages are left out like
-  the backend's own. When the model provider cannot be reached, the backend
-  also logs its own `Model provider runtime acquisition failed` line, for
-  every provider. Its error names neither the provider's answer nor a key.
+  the backend's own. When a provider that is on cannot be reached, or how to
+  reach it cannot be read, the backend also logs its own `Model provider
+runtime acquisition failed` line at level `warn`, with the provider in
+  `provider`, for every provider. Its error names neither the provider's
+  answer nor a key. A provider that is off is never tried, so it logs no such
+  line. A connection attempt that fails outright, such as one refused because
+  the backend is closing, is logged at level `error` as `Model provider
+runtime connection attempt failed`, with its `provider`.
 - Some output never reaches the files, only the backend's standard error:
   a failure before the backend has created its logger, which only `LYS_HOME`
   not set or not an absolute path causes; Node's messages before the

@@ -1,7 +1,7 @@
 /**
  * Journey: a chat turn over the API streams the reply as timed events, the
- * backend stores it, and the provider saw one streamed reply request and
- * one title request.
+ * backend stores it with its model's provider, and the provider saw one
+ * streamed reply request and one title request.
  */
 
 import { readFileSync } from "node:fs"
@@ -11,6 +11,8 @@ import { rejectUnless } from "../lib/journey.mjs"
 import { readConversationRows } from "../lib/sqliteEvidence.mjs"
 import {
   VERIFICATION_MODEL_NAME,
+  VERIFICATION_MODEL_REFERENCE,
+  VERIFICATION_PROVIDER,
   VERIFICATION_REPLY_TEXT,
   VERIFICATION_TITLE,
   formatComparableText
@@ -30,7 +32,8 @@ const MINIMUM_SPREAD_MS = 1000
  * Builds the chat request body for a new conversation with the default
  * agent.
  *
- * @param {string} model - Model key from the backend's list.
+ * @param {{provider: string, modelKey: string}} model - The model's
+ * provider and the key that provider lists it under.
  * @returns {object} The request body.
  */
 export function buildChatRequestBody(model) {
@@ -46,7 +49,8 @@ export function buildChatRequestBody(model) {
  * Reads every event of one chat turn.
  *
  * @param {string} backendUrl - The backend origin.
- * @param {string} model - Model key.
+ * @param {{provider: string, modelKey: string}} model - The model's
+ * provider and key.
  * @returns {Promise<import("../lib/httpProbe.mjs").TimedServerSentEvent[]>}
  * The events in arrival order, each with its arrival time.
  */
@@ -140,6 +144,21 @@ function parseChatTurn(events) {
 }
 
 /**
+ * Reports whether a stored reply names the model the journey sent its turn
+ * to: the verification model's key on the verification provider.
+ *
+ * @param {{model?: unknown, provider?: unknown} | undefined} reply - The
+ * conversation route's assistant message or its SQLite row.
+ * @returns {boolean} `true` when both the model key and the provider match.
+ */
+function isVerificationModelReply(reply) {
+  return (
+    reply?.model === VERIFICATION_MODEL_NAME &&
+    reply.provider === VERIFICATION_PROVIDER
+  )
+}
+
+/**
  * Reads the provider's request log entries written after a time.
  *
  * @param {string} logPath - The NDJSON request log.
@@ -156,101 +175,187 @@ function listProviderChatRequests(logPath, sinceIso) {
     )
 }
 
+/**
+ * Sends a new conversation's chat turn to the verification model and checks
+ * how its reply streamed: the step "POST /api/v1/chat streams a new
+ * conversation's reply".
+ *
+ * @param {string} backendUrl - The backend origin.
+ * @param {import("../lib/journey.mjs").EvidenceRecorder} evidence - The
+ * step's recorder; the turn's events are saved as `events.json` and the facts
+ * {@link parseChatTurn} finds in them as `timeline.json`.
+ * @returns {Promise<Record<string, unknown>>} The turn's facts, the step's
+ * detail, which the later steps read.
+ * @throws If the chat request fails or its stream cannot be read.
+ * @throws {import("../lib/journey.mjs").JourneyFailure} If the turn did not
+ * stream, complete, or get its title.
+ */
+async function sendVerificationChatTurn(backendUrl, evidence) {
+  const events = await readChatTurnEvents(
+    backendUrl,
+    VERIFICATION_MODEL_REFERENCE
+  )
+  evidence.saveJson("events.json", events)
+  const facts = parseChatTurn(events)
+  evidence.saveJson("timeline.json", facts)
+  return facts
+}
+
+/**
+ * Waits until the conversation route returns a conversation with its reply
+ * finished, then checks the stored title, reply text, and reply model: the
+ * step "GET /api/v1/conversations/:id returns the stored reply, its
+ * provider, and the title".
+ *
+ * @param {string} backendUrl - The backend origin.
+ * @param {string} conversationId - The conversation the journey's turn
+ * started.
+ * @param {import("../lib/journey.mjs").EvidenceRecorder} evidence - The
+ * step's recorder; the conversation is saved as `conversation.json`.
+ * @returns {Promise<Record<string, unknown>>} The stored title, the reply's
+ * provider, and the number of messages, the step's detail.
+ * @throws {import("../lib/waiting.mjs").WaitTimeoutError} If the route
+ * does not return the reply finished within 10 seconds.
+ * @throws {import("../lib/journey.mjs").JourneyFailure} If the stored title,
+ * the reply text, or the reply's model and provider are not the turn's.
+ */
+async function getStoredConversationReply(
+  backendUrl,
+  conversationId,
+  evidence
+) {
+  const url = `${backendUrl}/api/v1/conversations/${conversationId}`
+  const conversation = await waitForCondition({
+    description: "the stored assistant message to be finished",
+    timeoutMs: 10_000,
+    check: async () => {
+      const exchange = await sendJsonRequest(url)
+      const assistant = exchange.body?.messages?.find(
+        (message) => message.role === "assistant"
+      )
+      return assistant?.finishReason === "stop" ? exchange.body : false
+    }
+  })
+  evidence.saveJson("conversation.json", conversation)
+  const assistant = conversation.messages.find(
+    (message) => message.role === "assistant"
+  )
+  const textPart = assistant.parts.find((part) => part.kind === "text")
+  rejectUnless(
+    conversation.title === VERIFICATION_TITLE,
+    "The stored title must be the generated one.",
+    conversation.title
+  )
+  rejectUnless(
+    textPart !== undefined &&
+      formatComparableText(textPart.content) ===
+        formatComparableText(VERIFICATION_REPLY_TEXT),
+    "The stored text part must hold the whole reply.",
+    assistant.parts
+  )
+  rejectUnless(
+    isVerificationModelReply(assistant),
+    `The stored reply must name ${VERIFICATION_MODEL_NAME} on ${VERIFICATION_PROVIDER} as its model.`,
+    { model: assistant.model, provider: assistant.provider }
+  )
+  return {
+    title: conversation.title,
+    provider: assistant.provider,
+    messageCount: conversation.messages.length
+  }
+}
+
+/**
+ * Reads the SQLite rows of the journey's conversation and checks that they
+ * hold its title, the reply text under the turn's assistant message, and the
+ * reply's model and provider: the step "the SQLite rows hold the
+ * conversation, its title, the reply text, and the reply's provider".
+ *
+ * @param {string} lysHome - The run's Lys home, which holds `lys_db.sqlite`.
+ * @param {{conversationId: string, assistantMessageId: string}} turn - The
+ * conversation and the assistant message the journey's turn created.
+ * @param {import("../lib/journey.mjs").EvidenceRecorder} evidence - The
+ * step's recorder; the rows are saved as `sqlite-rows.json`.
+ * @returns {Promise<Record<string, unknown>>} The conversation row, the
+ * reply text row's role, the reply's provider, and the number of message
+ * rows, the step's detail.
+ * @throws If the database cannot be opened or its tables are missing.
+ * @throws {import("../lib/journey.mjs").JourneyFailure} If a row is missing,
+ * or the rows do not hold the turn's title, reply text, model, or provider.
+ */
+async function getStoredReplyRows(lysHome, turn, evidence) {
+  const rows = readConversationRows(
+    join(lysHome, "lys_db.sqlite"),
+    turn.conversationId
+  )
+  evidence.saveJson("sqlite-rows.json", rows)
+  rejectUnless(
+    rows.conversation !== undefined,
+    "The conversations table must hold the conversation.",
+    rows
+  )
+  rejectUnless(
+    rows.conversation.title === VERIFICATION_TITLE,
+    "The stored title row must be the generated title.",
+    rows.conversation
+  )
+  const replyRow = rows.messages.find(
+    (row) =>
+      typeof row.content === "string" &&
+      formatComparableText(row.content) ===
+        formatComparableText(VERIFICATION_REPLY_TEXT)
+  )
+  rejectUnless(
+    replyRow !== undefined,
+    "A message row must hold the whole reply text.",
+    rows.messages
+  )
+  rejectUnless(
+    replyRow.reply_id === turn.assistantMessageId,
+    "The reply text row must belong to the turn's assistant message.",
+    { replyRow, assistantMessageId: turn.assistantMessageId }
+  )
+  const assistantRow = rows.messages.find(
+    (row) => row.id === turn.assistantMessageId
+  )
+  rejectUnless(
+    isVerificationModelReply(assistantRow),
+    `The assistant message row must store ${VERIFICATION_MODEL_NAME} as its model and ${VERIFICATION_PROVIDER} as its provider.`,
+    assistantRow ?? rows.messages
+  )
+  return {
+    conversationRow: rows.conversation,
+    replyRole: replyRow.role,
+    replyProvider: assistantRow.provider,
+    rowCount: rows.messages.length
+  }
+}
+
 export default Object.freeze({
   id: "chat-stream-api",
   feature: "chat-streaming",
   title:
-    "POST /api/v1/chat streams the reply as a reply-part event followed by timed reply-part-delta events, ending in done and a title; the conversation route and the SQLite rows hold the same reply; the provider saw one streamed reply request and one title request",
+    "POST /api/v1/chat streams the reply as a reply-part event followed by timed reply-part-delta events, ending in done and a title; the conversation route and the SQLite rows hold the same reply with its model's provider; the provider saw one streamed reply request and one title request",
   needsRenderer: false,
   needsNative: false,
   async run(steps, context) {
     const startedAt = new Date().toISOString()
     const turn = await steps.step(
       "POST /api/v1/chat streams a new conversation's reply",
-      async (evidence) => {
-        const events = await readChatTurnEvents(
+      (evidence) => sendVerificationChatTurn(context.backendUrl, evidence)
+    )
+    await steps.step(
+      "GET /api/v1/conversations/:id returns the stored reply, its provider, and the title",
+      (evidence) =>
+        getStoredConversationReply(
           context.backendUrl,
-          VERIFICATION_MODEL_NAME
+          turn.conversationId,
+          evidence
         )
-        evidence.saveJson("events.json", events)
-        const facts = parseChatTurn(events)
-        evidence.saveJson("timeline.json", facts)
-        return facts
-      }
     )
     await steps.step(
-      "GET /api/v1/conversations/:id returns the stored reply and title",
-      async (evidence) => {
-        const url = `${context.backendUrl}/api/v1/conversations/${turn.conversationId}`
-        const conversation = await waitForCondition({
-          description: "the stored assistant message to be finished",
-          timeoutMs: 10_000,
-          check: async () => {
-            const exchange = await sendJsonRequest(url)
-            const assistant = exchange.body?.messages?.find(
-              (message) => message.role === "assistant"
-            )
-            return assistant?.finishReason === "stop" ? exchange.body : false
-          }
-        })
-        evidence.saveJson("conversation.json", conversation)
-        const assistant = conversation.messages.find(
-          (message) => message.role === "assistant"
-        )
-        const textPart = assistant.parts.find((part) => part.kind === "text")
-        rejectUnless(
-          conversation.title === VERIFICATION_TITLE,
-          "The stored title must be the generated one.",
-          conversation.title
-        )
-        rejectUnless(
-          textPart !== undefined &&
-            formatComparableText(textPart.content) ===
-              formatComparableText(VERIFICATION_REPLY_TEXT),
-          "The stored text part must hold the whole reply.",
-          assistant.parts
-        )
-        return {
-          title: conversation.title,
-          messageCount: conversation.messages.length
-        }
-      }
-    )
-    await steps.step(
-      "the SQLite rows hold the conversation, its title, and the reply text",
-      async (evidence) => {
-        const rows = readConversationRows(
-          join(context.paths.lysHome, "lys_db.sqlite"),
-          turn.conversationId
-        )
-        evidence.saveJson("sqlite-rows.json", rows)
-        rejectUnless(
-          rows.conversation !== undefined,
-          "The conversations table must hold the conversation.",
-          rows
-        )
-        rejectUnless(
-          rows.conversation.title === VERIFICATION_TITLE,
-          "The stored title row must be the generated title.",
-          rows.conversation
-        )
-        const replyRow = rows.messages.find(
-          (row) =>
-            typeof row.content === "string" &&
-            formatComparableText(row.content) ===
-              formatComparableText(VERIFICATION_REPLY_TEXT)
-        )
-        rejectUnless(
-          replyRow !== undefined,
-          "A message row must hold the whole reply text.",
-          rows.messages
-        )
-        return {
-          conversationRow: rows.conversation,
-          replyRole: replyRow.role,
-          rowCount: rows.messages.length
-        }
-      }
+      "the SQLite rows hold the conversation, its title, the reply text, and the reply's provider",
+      (evidence) => getStoredReplyRows(context.paths.lysHome, turn, evidence)
     )
     await steps.step(
       "the provider saw one streamed reply request and one title request",

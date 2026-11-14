@@ -1,8 +1,12 @@
 import {
+  buildLlmProviderApiPath,
   createLlmServiceBusyProblem,
   llmInfoSchema,
-  llmRuntimeUnavailableProblemSchema
+  llmListModelsApi,
+  llmRuntimeUnavailableProblemSchema,
+  type LlmListModelsApiResponse
 } from "@lys/protocol"
+import { LLM_PROVIDERS } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
@@ -10,8 +14,11 @@ import updateFastifyWithLlmListModelsRoute from "../../../../../src/modules/llm/
 import { createDownloadedLlmModel } from "../../../support/llmFixtures"
 import { createLlmRouteTestApp } from "../../../support/llmRouteTestApp"
 
-/** Published path of the inventory route. */
-const LIST_MODELS_PATH = "/api/v1/llm/list"
+/** Published path of LM Studio's inventory route. */
+const LIST_MODELS_PATH = buildLlmProviderApiPath(
+  llmListModelsApi.path,
+  "lmStudio"
+)
 
 /** Valid inventory snapshot of one loaded model with its context length. */
 const LOADED_MODEL = llmInfoSchema.parse({
@@ -42,6 +49,50 @@ describe("updateFastifyWithLlmListModelsRoute", () => {
       expect(listLlmModels).toHaveBeenCalledOnce()
     }
   )
+
+  it.each(LLM_PROVIDERS)(
+    "lists the models of %s, the provider the path names, and asks no other provider",
+    async (provider) => {
+      const testApp = createLlmRouteTestApp()
+      const emptyInventory: LlmListModelsApiResponse = Object.freeze({
+        llms: Object.freeze([]),
+        modelLoading: "lys"
+      })
+      const listings = LLM_PROVIDERS.map((listed) =>
+        vi
+          .spyOn(
+            testApp.llmProviderServices[listed].llmService,
+            "listLlmModels"
+          )
+          .mockResolvedValue(emptyInventory)
+      )
+      await updateFastifyWithLlmListModelsRoute(testApp.app)
+
+      const response = await testApp.app.inject({
+        method: "GET",
+        url: buildLlmProviderApiPath(llmListModelsApi.path, provider)
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(listings.map((listing) => listing.mock.calls.length)).toEqual(
+        LLM_PROVIDERS.map((listed) => (listed === provider ? 1 : 0))
+      )
+    }
+  )
+
+  it("refuses a path that names no provider Lys can reach before any provider is asked", async () => {
+    const testApp = createLlmRouteTestApp()
+    const listLlmModels = vi.spyOn(testApp.service, "listLlmModels")
+    await updateFastifyWithLlmListModelsRoute(testApp.app)
+
+    const response = await testApp.app.inject({
+      method: "GET",
+      url: llmListModelsApi.path.replace(":provider", "lmstudio")
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(listLlmModels).not.toHaveBeenCalled()
+  })
 
   it("responds with the service-busy problem when admission is refused", async () => {
     const testApp = createLlmRouteTestApp()
@@ -96,5 +147,31 @@ describe("updateFastifyWithLlmListModelsRoute", () => {
     expect(
       llmRuntimeUnavailableProblemSchema.safeParse(response.json()).success
     ).toBe(true)
+  })
+
+  it("logs the provider the path names when that provider stops answering during the listing", async () => {
+    const testApp = createLlmRouteTestApp()
+    vi.spyOn(
+      testApp.llmProviderServices.groq.llmService,
+      "listLlmModels"
+    ).mockRejectedValue(
+      createLlmRuntimeUnavailableError([new Error("socket closed")])
+    )
+    await updateFastifyWithLlmListModelsRoute(testApp.app)
+
+    const response = await testApp.app.inject({
+      method: "GET",
+      url: buildLlmProviderApiPath(llmListModelsApi.path, "groq")
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(testApp.log.records.filter(({ level }) => level === "warn")).toEqual(
+      [
+        expect.objectContaining({
+          provider: "groq",
+          msg: "The model provider stopped answering during a model operation"
+        })
+      ]
+    )
   })
 })

@@ -1,17 +1,23 @@
-//! The model provider choice, stored under the `providers` settings group.
+//! The model providers that are on, stored under the `providers` settings
+//! group.
 //!
-//! The person picks the provider every request goes to, and where LM Studio
-//! and a local Ollama server run, in Settings → Providers. A missing group, a
-//! missing field, and a settings file written before the group existed all
-//! mean LM Studio at its default address, which is what Lys used before
-//! providers could be chosen. An address of `null` means the provider's
+//! The person turns providers on, and sets where LM Studio and a local Ollama
+//! server run, in Settings → Providers. Every provider that is on answers
+//! requests for its own models. A missing group and a settings file written
+//! before the group existed mean LM Studio on at its default address, which
+//! is what Lys used before providers could be chosen. A group written before
+//! several providers could be on names one `active` provider instead of the
+//! `enabled` list; that provider is the one on, and the next save writes the
+//! `enabled` list without `active`. An address of `null` means the provider's
 //! default address, which only `@lys/protocol` declares, so this module never
 //! holds a copy of it. API keys are not here: they live in the `secrets`
 //! group. The backend reads this group from the saved file; this module only
 //! stores it.
 
+use std::collections::BTreeSet;
+
 use serde::de::Error;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use super::host_name::is_host_name;
 use super::json::parse_json_object;
@@ -79,12 +85,19 @@ impl<'de> Deserialize<'de> for ProviderAddress {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-/// Model provider every request goes to. The values match
-/// `llmProviderSchema` in `@lys/share`.
+/// Model provider Lys can reach. The values match `llmProviderSchema` in
+/// `@lys/share`.
+///
+/// The declaration order is provider order, the order `@lys/share` lists
+/// providers in: providers compare in that order, so a set of them is saved
+/// in it. Reordering the variants changes the saved text of the `enabled`
+/// list.
 pub enum LlmProvider {
-    /// LM Studio, at its saved or default address.
+    /// LM Studio, at its saved or default address. It is the default: the
+    /// provider on when the `providers` group is missing or has neither an
+    /// `enabled` list nor an `active` provider.
     #[default]
     LmStudio,
     /// A local Ollama server, at its saved or default address.
@@ -113,16 +126,70 @@ pub struct OllamaProviderSettings {
     address: Option<ProviderAddress>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
-/// Provider choice and server addresses persisted under the `providers` JSON
-/// object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+/// Providers that are on and server addresses persisted under the
+/// `providers` JSON object.
 ///
-/// A missing field takes its default: LM Studio active and both addresses
-/// `null`. The group may not be `null`, unknown fields are rejected, and each
-/// server is read from a JSON object only, as `@lys/share` reads it.
+/// The group, and each server in it, is read from a JSON object only, as
+/// `@lys/share` reads it; the group may not be `null`, and unknown fields are
+/// rejected. A missing group reads as an empty one: LM Studio on and both
+/// addresses `null`. The `enabled` list may be empty, when no provider is on;
+/// it may not be `null` or name a provider twice. Providers are saved in
+/// provider order whatever order they were read in, so that saving unchanged
+/// choices rewrites the same text.
+///
+/// A group without `enabled` was written before several providers could be
+/// on: its `active` provider, or LM Studio when it names none, is the one on.
+/// When `enabled` is present, `active` is ignored, though it must still name
+/// a provider. `active` is read only: a save writes `enabled` without it, so a
+/// build from before several providers could be on refuses the saved group.
 pub struct ProvidersSettings {
-    /// Provider every request goes to.
+    /// Providers that are on, in the `enabled` array.
+    enabled: BTreeSet<LlmProvider>,
+    /// LM Studio's server.
+    lm_studio: LmStudioProviderSettings,
+    /// The local Ollama server.
+    ollama: OllamaProviderSettings,
+}
+
+/// Holds what a missing `providers` group means: the settings of an empty
+/// group.
+impl Default for ProvidersSettings {
+    /// Reads an empty group, which turns LM Studio on at its default address.
+    fn default() -> Self {
+        Self::from(StoredProvidersSettings::default())
+    }
+}
+
+/// Deserializes the group and decides which providers are on.
+impl<'de> Deserialize<'de> for ProvidersSettings {
+    /// Reads the `providers` object and rejects a group that breaks a rule.
+    ///
+    /// # Errors
+    ///
+    /// Returns the deserializer's error when the input is not an object with
+    /// only `enabled`, `active`, `lmStudio`, and `ollama` fields, a field
+    /// breaks its rule, or `enabled` names a provider twice.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let stored: StoredProvidersSettings = parse_json_object(deserializer)?;
+
+        Ok(Self::from(stored))
+    }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+/// The `providers` JSON object before the providers that are on are decided.
+struct StoredProvidersSettings {
+    /// Providers that are on, each once; `None` when the group has no
+    /// `enabled` list.
+    #[serde(deserialize_with = "parse_enabled_providers")]
+    enabled: Option<BTreeSet<LlmProvider>>,
+    /// The one provider on in a group without `enabled`.
     active: LlmProvider,
     /// LM Studio's server.
     #[serde(deserialize_with = "parse_json_object")]
@@ -130,6 +197,48 @@ pub struct ProvidersSettings {
     /// The local Ollama server.
     #[serde(deserialize_with = "parse_json_object")]
     ollama: OllamaProviderSettings,
+}
+
+impl From<StoredProvidersSettings> for ProvidersSettings {
+    /// Takes the `enabled` list when the group has one, and otherwise turns
+    /// the `active` provider on alone; the servers are taken as stored.
+    fn from(stored: StoredProvidersSettings) -> Self {
+        let enabled = stored
+            .enabled
+            .unwrap_or_else(|| BTreeSet::from([stored.active]));
+
+        Self {
+            enabled,
+            lm_studio: stored.lm_studio,
+            ollama: stored.ollama,
+        }
+    }
+}
+
+/// Reads the `enabled` array into the set of providers that are on.
+///
+/// The array is checked before it becomes a set, which would otherwise keep
+/// one copy of a provider listed twice without a trace.
+///
+/// # Errors
+///
+/// Returns the deserializer's error when the input is not an array of
+/// provider names, or names a provider twice.
+fn parse_enabled_providers<'de, D>(
+    deserializer: D,
+) -> Result<Option<BTreeSet<LlmProvider>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let listed = Vec::<LlmProvider>::deserialize(deserializer)?;
+    let enabled: BTreeSet<LlmProvider> = listed.iter().copied().collect();
+    if enabled.len() != listed.len() {
+        return Err(D::Error::custom(
+            "the enabled providers must name each provider once",
+        ));
+    }
+
+    Ok(Some(enabled))
 }
 
 #[cfg(test)]
@@ -181,15 +290,23 @@ mod tests {
         }
     }
 
+    /// Reads `stored` as the `providers` group and returns the JSON form a
+    /// save writes for it.
+    fn get_saved_providers_json(stored: Value) -> Value {
+        let settings = parse_providers_settings(stored).expect("a usable group");
+
+        serde_json::to_value(&settings).expect("settings that serialize")
+    }
+
     #[test]
-    fn a_missing_group_or_field_means_lm_studio_at_its_default_address() {
+    fn a_missing_group_or_field_means_lm_studio_on_at_its_default_address() {
         let empty = parse_providers_settings(json!({})).expect("an empty group");
 
         assert_eq!(empty, ProvidersSettings::default());
         assert_eq!(
             serde_json::to_value(&empty).expect("settings that serialize"),
             json!({
-                "active": "lmStudio",
+                "enabled": ["lmStudio"],
                 "lmStudio": { "address": null },
                 "ollama": { "address": null }
             })
@@ -197,7 +314,39 @@ mod tests {
     }
 
     #[test]
-    fn round_trips_each_saved_choice_and_the_addresses() {
+    fn round_trips_the_enabled_providers_and_the_addresses() {
+        for enabled in [
+            json!([]),
+            json!(["lmStudio"]),
+            json!(["ollama"]),
+            json!(["ollamaCloud"]),
+            json!(["groq"]),
+            json!(["lmStudio", "ollama", "ollamaCloud", "groq"]),
+        ] {
+            let stored = json!({
+                "enabled": enabled,
+                "lmStudio": { "address": "studio-box.local:1234" },
+                "ollama": { "address": "127.0.0.1:11500" }
+            });
+
+            assert_eq!(get_saved_providers_json(stored.clone()), stored);
+        }
+    }
+
+    #[test]
+    fn saves_the_enabled_providers_in_provider_order() {
+        let saved = get_saved_providers_json(
+            json!({ "enabled": ["groq", "ollamaCloud", "ollama", "lmStudio"] }),
+        );
+
+        assert_eq!(
+            saved["enabled"],
+            json!(["lmStudio", "ollama", "ollamaCloud", "groq"])
+        );
+    }
+
+    #[test]
+    fn a_group_without_enabled_turns_its_active_provider_on_and_saves_without_it() {
         for active in ["lmStudio", "ollama", "ollamaCloud", "groq"] {
             let stored = json!({
                 "active": active,
@@ -205,20 +354,55 @@ mod tests {
                 "ollama": { "address": "127.0.0.1:11500" }
             });
 
-            let settings = parse_providers_settings(stored.clone()).expect("a saved group");
-
             assert_eq!(
-                serde_json::to_value(&settings).expect("settings that serialize"),
-                stored
+                get_saved_providers_json(stored),
+                json!({
+                    "enabled": [active],
+                    "lmStudio": { "address": "studio-box.local:1234" },
+                    "ollama": { "address": "127.0.0.1:11500" }
+                })
             );
         }
+    }
+
+    #[test]
+    fn the_enabled_providers_win_over_the_active_provider_even_when_empty() {
+        for enabled in [json!(["ollama"]), json!([])] {
+            let stored = json!({ "enabled": enabled, "active": "groq" });
+
+            assert_eq!(
+                get_saved_providers_json(stored),
+                json!({
+                    "enabled": enabled,
+                    "lmStudio": { "address": null },
+                    "ollama": { "address": null }
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_a_provider_listed_twice() {
+        let failure = parse_providers_settings(json!({ "enabled": ["groq", "lmStudio", "groq"] }))
+            .expect_err("a provider listed twice");
+
+        assert!(
+            failure.to_string().contains("name each provider once"),
+            "{failure}"
+        );
     }
 
     #[test]
     fn rejects_unknown_providers_fields_and_invalid_addresses() {
         for stored in [
             json!(null),
+            json!([["lmStudio"], "lmStudio", { "address": null }, { "address": null }]),
+            json!({ "enabled": ["openai"] }),
+            json!({ "enabled": null }),
+            json!({ "enabled": "groq" }),
+            json!({ "enabled": ["groq"], "active": "openai" }),
             json!({ "active": "openai" }),
+            json!({ "active": null }),
             json!({ "ollama": { "mode": "cloud" } }),
             json!({ "lmStudio": { "address": "http://127.0.0.1:1234" } }),
             json!({ "groq": {} }),

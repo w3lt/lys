@@ -1,3 +1,4 @@
+import { llmModelReferenceSchema } from "@lys/share"
 import * as z from "zod"
 import { agentNotFoundProblemSchema } from "../../http/errors/agent"
 import {
@@ -36,8 +37,8 @@ export const chatContextApiRequestBodySchema = z
   .strictObject({
     /** Conversation the next message would start or continue. */
     conversation: chatConversationTargetSchema,
-    /** Non-empty identifier of the model the message would be sent to. */
-    model: z.string().min(1),
+    /** Model the message would be sent to, with its provider. */
+    model: llmModelReferenceSchema,
     /** Tools the message would offer; absence means none. */
     tools: chatToolOfferSchema.optional(),
     /**

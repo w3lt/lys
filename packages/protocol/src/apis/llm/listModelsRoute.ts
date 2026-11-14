@@ -7,11 +7,15 @@ import {
   llmRuntimeUnavailableProblemSchema,
   type LlmRuntimeUnavailableProblem
 } from "../../http/errors/llm"
-import { llmInfoSchema } from "./_share"
+import {
+  llmInfoSchema,
+  llmProviderApiParamsSchema,
+  type LlmProviderApiParams
+} from "./_share"
 import { apiLlmListModelsRoute } from "./routes"
 
 /**
- * Validates who loads the models of the connected provider.
+ * Validates who loads the models of a provider.
  *
  * @remarks `lys`: a model answers only once loaded, and the person loads and
  * unloads models through the load and unload endpoints. `provider`: the
@@ -24,10 +28,10 @@ import { apiLlmListModelsRoute } from "./routes"
  */
 export const llmModelLoadingSchema = z.enum(["lys", "provider"])
 
-/** Who loads the models of the connected provider. */
+/** Who loads the models of a provider. */
 export type LlmModelLoading = z.infer<typeof llmModelLoadingSchema>
 
-/** Validates the complete downloaded-model inventory response. */
+/** Validates one provider's complete model inventory response. */
 export const llmListModelsApiResponseSchema = z
   .strictObject({
     /** Downloaded language models annotated with their current loaded state. */
@@ -50,18 +54,20 @@ const llmListModelsApiResponseSchemas = Object.freeze({
 })
 
 /**
- * Describes the GET endpoint that lists downloaded language models.
+ * Describes the GET endpoint that lists one provider's language models.
  *
  * @remarks This shared descriptor is imported by the backend route consumer;
  * changing its method, path, or response schema changes the transmitted
  * compatibility contract and requires coordinated consumers. Service-busy
  * responses mean the inventory operation was refused before queue acceptance.
- * Runtime-unavailable responses mean the backend has no connected LLM runtime;
- * no inventory query ran, or the runtime stopped answering during it.
+ * Runtime-unavailable responses mean the backend has no connected runtime for
+ * the provider, which is the case while it is off; no inventory query ran, or
+ * the runtime stopped answering during it.
  */
 export const llmListModelsApi = Object.freeze({
   method: "GET",
   path: apiLlmListModelsRoute,
+  params: llmProviderApiParamsSchema,
   responses: llmListModelsApiResponseSchemas
 })
 
@@ -78,8 +84,10 @@ export type LlmListModelsApiReply = {
   readonly 503: LlmServiceBusyProblem | LlmRuntimeUnavailableProblem
 }
 
-/** Fastify route type for the model-list response. */
+/** Fastify route type for the model-list request and response. */
 export type LlmListModelsApiRoute = {
+  /** Validated provider the inventory is read from. */
+  readonly Params: LlmProviderApiParams
   /** Status-specific inventory and service-unavailable payloads. */
   readonly Reply: LlmListModelsApiReply
 }

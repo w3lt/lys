@@ -2,8 +2,10 @@ import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import type { BackendServerStatus } from "@/lib/store"
-import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
-import type { ModelInventoryState } from "@/lib/store/model-runtime"
+import type {
+  LlmProviderStatus,
+  ModelInventoryState
+} from "@/lib/store/model-runtime"
 import { buildJsonResponse, startBackendFake } from "../../support/backendFake"
 import { buildLlmInfo } from "../../support/modelFixtures"
 import {
@@ -20,7 +22,7 @@ import { waitForRenderedWork } from "../../support/rendering"
 /** Rail entries as their tabs are named, in order. */
 const RAIL_TABS = [
   "Runtime01",
-  "Model02",
+  "Models02",
   "Generation03",
   "Agents04",
   "Tools05",
@@ -28,6 +30,18 @@ const RAIL_TABS = [
   "Providers07",
   "Secrets08"
 ]
+
+/** A runtime the rail summarizes, and the summary at the rail's foot. */
+type RailStatusCase = {
+  /** Backend lifecycle state. */
+  readonly backendStatus: BackendServerStatus
+  /** Latest LM Studio status the backend reported. */
+  readonly lmStudioStatus: LlmProviderStatus
+  /** Latest LM Studio inventory observation. */
+  readonly modelInventory: ModelInventoryState
+  /** Text the rail ends with. */
+  readonly summary: string
+}
 
 /**
  * Gets one rail tab.
@@ -94,11 +108,11 @@ describe("SettingsView", () => {
     const user = userEvent.setup()
     render(<SettingsView onDone={vi.fn()} />)
 
-    await user.click(getRailTab("Model", "02"))
+    await user.click(getRailTab("Models", "02"))
 
     expect(useLysStore.getState().settingsPane).toBe("model")
     expect(
-      screen.getByRole("heading", { level: 1, name: "Model" })
+      screen.getByRole("heading", { level: 1, name: "Models" })
     ).toBeInTheDocument()
     await waitForRenderedWork()
   })
@@ -133,86 +147,116 @@ describe("SettingsView", () => {
     await waitForRenderedWork()
   })
 
-  it.each<
-    [string, BackendServerStatus, LmStudioStatus, ModelInventoryState, string]
-  >([
+  it.each<[string, RailStatusCase]>([
     [
       "a stopped backend",
-      "stopped",
-      "unknown",
-      { status: "unavailable" },
-      "backend stopped"
+      {
+        backendStatus: "stopped",
+        lmStudioStatus: "unknown",
+        modelInventory: { status: "unavailable" },
+        summary: "backend stopped"
+      }
     ],
     [
       "a starting backend",
-      "starting",
-      "unknown",
-      { status: "unavailable" },
-      "backend starting"
+      {
+        backendStatus: "starting",
+        lmStudioStatus: "unknown",
+        modelInventory: { status: "unavailable" },
+        summary: "backend starting"
+      }
     ],
     [
       "a stopping backend",
-      "stopping",
-      "connected",
-      { status: "unavailable" },
-      "backend stopping"
+      {
+        backendStatus: "stopping",
+        lmStudioStatus: "connected",
+        modelInventory: { status: "unavailable" },
+        summary: "backend stopping"
+      }
     ],
     [
       "an unresponsive backend",
-      "unresponsive",
-      "unknown",
-      { status: "unavailable" },
-      "backend not responding"
+      {
+        backendStatus: "unresponsive",
+        lmStudioStatus: "unknown",
+        modelInventory: { status: "unavailable" },
+        summary: "backend not responding"
+      }
     ],
     [
-      "LM Studio in an unknown state",
-      "running",
-      "unknown",
-      { status: "unavailable" },
-      "backend up · LM Studio status unknown"
+      "LM Studio in an unknown state, as about to be connected",
+      {
+        backendStatus: "running",
+        lmStudioStatus: "unknown",
+        modelInventory: { status: "unavailable" },
+        summary: "backend up · connecting to LM Studio"
+      }
+    ],
+    [
+      "LM Studio turned off on the backend",
+      {
+        backendStatus: "running",
+        lmStudioStatus: "off",
+        modelInventory: { status: "unavailable" },
+        summary: "backend up · LM Studio is off"
+      }
     ],
     [
       "LM Studio connecting",
-      "running",
-      "connecting",
-      { status: "unavailable" },
-      "backend up · connecting to LM Studio"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "connecting",
+        modelInventory: { status: "unavailable" },
+        summary: "backend up · connecting to LM Studio"
+      }
     ],
     [
       "LM Studio unreachable",
-      "running",
-      "unreachable",
-      { status: "unavailable" },
-      "backend up · LM Studio not reachable"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "unreachable",
+        modelInventory: { status: "unavailable" },
+        summary: "backend up · LM Studio not reachable"
+      }
     ],
     [
       "loaded weights",
-      "running",
-      "connected",
-      READY_RUNTIME.modelInventory,
-      "backend up · model loaded"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "connected",
+        modelInventory: READY_RUNTIME.modelInventory,
+        summary: "backend up · model loaded"
+      }
     ],
     [
       "no loaded weights",
-      "running",
-      "connected",
       {
-        status: "ready",
-        modelLoading: "lys",
-        models: [buildLlmInfo("qwen3-8b")]
-      },
-      "backend up · no model"
+        backendStatus: "running",
+        lmStudioStatus: "connected",
+        modelInventory: {
+          status: "ready",
+          modelLoading: "lys",
+          models: [buildLlmInfo("qwen3-8b")]
+        },
+        summary: "backend up · no model"
+      }
     ],
     [
       "an unreadable inventory",
-      "running",
-      "connected",
-      { status: "failed" },
-      "backend up · model state unavailable"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "connected",
+        modelInventory: { status: "failed" },
+        summary: "backend up · model state unavailable"
+      }
     ]
   ])(
     "summarizes %s at the foot of the rail",
-    async (_case, backendStatus, lmStudioStatus, modelInventory, summary) => {
+    async (
+      _case,
+      { backendStatus, lmStudioStatus, modelInventory, summary }
+    ) => {
       const runtime = {
         ...READY_RUNTIME,
         backendStatus,
@@ -222,7 +266,7 @@ describe("SettingsView", () => {
       startBackendFake({
         [INVENTORY_ROUTE]: buildInventoryRoute(runtime),
         // A failed inventory read is followed by a re-read of LM Studio.
-        "GET /api/v1/llm/runtime": () =>
+        "GET /api/v1/llm/lmStudio/runtime": () =>
           buildJsonResponse(200, { status: lmStudioStatus })
       })
       const { SettingsView } = await loadFreshSettingsView(
@@ -239,7 +283,7 @@ describe("SettingsView", () => {
     }
   )
 
-  it("reads the model inventory when shown with a running backend", async () => {
+  it("reads the model inventory of each connected provider when shown with a running backend", async () => {
     const backend = startBackendFake({
       [INVENTORY_ROUTE]: buildInventoryRoute()
     })
@@ -250,7 +294,7 @@ describe("SettingsView", () => {
 
     expect(backend.requests.map((request) => request.method)).toEqual(["GET"])
     expect(new URL(backend.requests[0]?.url ?? "").pathname).toBe(
-      "/api/v1/llm/list"
+      "/api/v1/llm/lmStudio/list"
     )
   })
 

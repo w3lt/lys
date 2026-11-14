@@ -1,6 +1,6 @@
 ---
 title: Security and trust boundaries
-description: "The current trust boundary: loopback services, a chosen model provider that may be remote, schema validation, approved web reads in a micro VM and searches, MCP servers the person adds, plain-text keys and server secrets, and file-backed settings without credential management."
+description: "The current trust boundary: loopback services, the model providers turned on, which may be remote, schema validation, approved web reads in a micro VM and searches, MCP servers the person adds, plain-text keys and server secrets, and file-backed settings without credential management."
 docType: architecture
 sidebar:
   order: 8
@@ -8,12 +8,14 @@ sidebar:
 
 The current security posture is intentionally simple. The backend runs on
 loopback, request and event payloads are validated with Zod, and there is no
-credential-management subsystem yet. Every conversation goes to the model
-provider the person chose in Settings → Providers: LM Studio or a local
-Ollama server at an address the person sets, `127.0.0.1` by default and
-reached over plain HTTP, or Ollama Cloud or Groq over HTTPS with the
-person's key. A remote address, Ollama Cloud, and Groq receive the
-conversations they answer. Besides the provider, there are two outbound
+credential-management subsystem yet. The person turns model providers on in
+Settings → Providers, one or several: LM Studio or a local Ollama server at
+an address the person sets, `127.0.0.1` by default and reached over plain
+HTTP, and Ollama Cloud or Groq over HTTPS with the person's key. Each
+conversation goes only to the provider of the model it uses, and a provider
+that is off is never contacted. A remote address, Ollama Cloud, and Groq
+receive the conversations they answer. Besides the providers, there are two
+outbound
 connections, and both start off: the `read_page` tool asks vmo, a
 page reader on the same machine, to read a public web page in a headless
 browser inside a micro VM, which also loads what the page needs, and the
@@ -25,8 +27,8 @@ private key or credential file, a local or private network address, or, once
 the person lists folders tools may use, a path outside them. The
 backend decides which calls ask; the desktop shows the prompts. The clock and
 location tools, `get_current_time` and `get_location`, reach no network: their
-results go to the backend and on to the model provider with the rest of the
-conversation.
+results go to the backend and on to the provider of the conversation's model
+with the rest of the conversation.
 
 The MCP servers the person adds in Settings → MCP go further. The backend
 starts each stdio server's command as the person's OS account, or connects to
@@ -56,7 +58,7 @@ tool call policy's deny rules; see [MCP servers](#mcp-servers).
 | Backend -> vmo                   | Each tool lookup sends `GET /health` to vmo, and each `read_page` call sends the page's URL, over loopback HTTP on `127.0.0.1:8080`, without authentication.                                                                                                                                                                                                                                                                                                                                                                                                  |
 | vmo -> micro VM -> web           | vmo reads the page in headless Chromium in a fresh micro VM, which loads the page, its redirects, and what it loads.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Backend -> Tavily                | `web_search` sends one query and the saved API key to `api.tavily.com` per allowed call.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| Backend -> settings file         | Reads the model provider, its address and key, the Tavily API key, the saved Just run choices, the MCP servers with their switches, and the email accounts with their passwords from `$LYS_HOME/settings.json`; the Tauri host is the only writer.                                                                                                                                                                                                                                                                                                            |
+| Backend -> settings file         | Reads the model providers that are on, their addresses and keys, the Tavily API key, the saved Just run choices, the MCP servers with their switches, and the email accounts with their passwords from `$LYS_HOME/settings.json`; the Tauri host is the only writer.                                                                                                                                                                                                                                                                                          |
 | Backend -> stdio MCP server      | The backend starts each configured command as the OS user running Lys, without a shell, in the person's home folder, and speaks MCP over its standard input and output; the process can do whatever that account can.                                                                                                                                                                                                                                                                                                                                         |
 | Backend -> remote MCP server     | Streamable HTTP to the configured URL, `https`, or `http` only for `localhost`, `127.0.0.1`, or `[::1]`, with the configured headers; redirects are not followed.                                                                                                                                                                                                                                                                                                                                                                                             |
 | Backend -> email server          | The backend starts the email server Lys ships, `$LYS_HOME/runtime/email/email` or the file `LYS_EMAIL_SERVER_PATH` names, as one stdio MCP server process while either mailbox is switched on with its account saved, and runs its `check` subcommand for each account check, as the OS user running Lys, with the person's account and its password in the `LYS_EMAIL_ACCOUNT` variable of the process's environment and Lys's own in `LYS_EMAIL_LYS_ACCOUNT`, each only while its mailbox is on; a check gets the account it checks in `LYS_EMAIL_ACCOUNT`. |

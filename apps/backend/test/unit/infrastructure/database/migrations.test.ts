@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished } from "vitest"
 import { migrateDatabase } from "../../../../src/infrastructure/database/migrations"
 
 /** Schema version produced by the current migration list. */
-const CURRENT_SCHEMA_VERSION = 17
+const CURRENT_SCHEMA_VERSION = 18
 
 /**
  * Opens an empty in-memory database owned by the current test.
@@ -361,7 +361,26 @@ function revertVersion17TableSql(tableSql: string): string {
 }
 
 /**
- * Creates a database at version 16: the current schema whose decision
+ * Creates a database at version 17: the current schema without the
+ * replies' provider.
+ *
+ * @returns A connection at `user_version` 17, closed when the test finishes.
+ * @remarks Migration 18 only adds `conversation_messages.provider`, so
+ * dropping that column from a current database leaves exactly the
+ * version-17 schema.
+ */
+function createVersion17Database(): DatabaseSync {
+  const database = openEmptyDatabase()
+  migrateDatabase(database)
+  database.exec(`
+    ALTER TABLE conversation_messages DROP COLUMN provider;
+    PRAGMA user_version = 17
+  `)
+  return database
+}
+
+/**
+ * Creates a database at version 16: the version-17 schema whose decision
  * tables cannot store the policy's identity, its usage and budget denials,
  * or its open-world and paid-tool approval reasons.
  *
@@ -372,8 +391,7 @@ function revertVersion17TableSql(tableSql: string): string {
  * version-16 table.
  */
 function createVersion16Database(): DatabaseSync {
-  const database = openEmptyDatabase()
-  migrateDatabase(database)
+  const database = createVersion17Database()
   recreateDecisionTable(
     database,
     TOOL_CALL_DECISION_OBJECTS,
@@ -2308,6 +2326,93 @@ describe("migrateDatabase", () => {
         updated_at: "2026-01-06T00:00:00.000Z"
       }
     ])
+  })
+
+  it("upgrades a version-17 database by adding the replies' provider, leaving it unknown on every stored row and changing nothing else", () => {
+    const database = createVersion17Database()
+    saveRunningSearchCall(database)
+    database.exec(`
+      INSERT INTO conversation_messages (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
+      VALUES ('u1', 'c1', 'user', NULL, 'Hello', NULL, NULL, '2026-01-01T00:30:00.000Z', NULL)
+    `)
+    const readMessages = () =>
+      database
+        .prepare(
+          `SELECT ${VERSION_8_MESSAGE_COLUMNS}, reply_id, position, content
+          FROM conversation_messages ORDER BY id`
+        )
+        .all()
+    const version17Messages = readMessages()
+    const version17Columns = listColumns(database, "conversation_messages")
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
+    expect(listColumns(database, "conversation_messages")).toEqual([
+      ...version17Columns,
+      "provider"
+    ])
+    expect(readMessages()).toEqual(version17Messages)
+    expect(
+      database
+        .prepare("SELECT id, provider FROM conversation_messages ORDER BY id")
+        .all()
+    ).toEqual([
+      { id: "a1", provider: null },
+      { id: "f1", provider: null },
+      { id: "u1", provider: null }
+    ])
+    expect(listSchemaObjects(database, "index")).toEqual(
+      expect.arrayContaining([
+        "conversation_messages_conversation_idx",
+        "conversation_messages_reply_part_idx"
+      ])
+    )
+  })
+
+  it.each(["lmStudio", "ollama", "ollamaCloud", "groq"])(
+    "stores the provider %s on a reply",
+    (provider) => {
+      const database = openEmptyDatabase()
+      migrateDatabase(database)
+      saveRunningSearchCall(database)
+
+      database
+        .prepare(
+          "UPDATE conversation_messages SET provider = ? WHERE id = 'a1'"
+        )
+        .run(provider)
+
+      expect(
+        database
+          .prepare("SELECT provider FROM conversation_messages WHERE id = 'a1'")
+          .get()
+      ).toEqual({ provider })
+    }
+  )
+
+  it.each([
+    ["a provider Lys cannot reach on a reply", "a1", "openai"],
+    ["a provider on a user message", "u1", "lmStudio"],
+    ["a provider on a reply part", "f1", "lmStudio"]
+  ])("refuses %s", (_label, id, provider) => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    saveRunningSearchCall(database)
+    database.exec(`
+      INSERT INTO conversation_messages (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
+      VALUES ('u1', 'c1', 'user', NULL, 'Hello', NULL, NULL, '2026-01-01T00:30:00.000Z', NULL)
+    `)
+    const update = database.prepare(
+      "UPDATE conversation_messages SET provider = ? WHERE id = ?"
+    )
+
+    expect(() => update.run(provider, id)).toThrow(/constraint failed/)
+    expect(
+      database
+        .prepare("SELECT provider FROM conversation_messages WHERE id = ?")
+        .get(id)
+    ).toEqual({ provider: null })
   })
 
   it("rejects a database created by a newer version without changing it", () => {

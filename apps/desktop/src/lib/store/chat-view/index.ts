@@ -4,11 +4,13 @@ import type {
   ChatGenerationEvent,
   ChatReplyEvent,
   ChatReplyPathParams,
+  LlmInfo,
   MessageGenerationOptions
 } from "@lys/protocol"
 import {
   CALIGINIA_AGENT_CODE,
-  type ConversationAssistantMessageStatus
+  type ConversationAssistantMessageStatus,
+  type LlmModelReference
 } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
@@ -24,11 +26,14 @@ import {
   getConversation,
   type GetConversationResult
 } from "@/lib/apis/http/conversations"
+import { calculateAttachmentModelSupport } from "@/lib/models/attachment-model-support"
 import {
-  calculateAttachmentModelSupport,
-  type AttachmentModelSupport
-} from "@/lib/models/attachment-model-support"
-import { findEligibleChatModel } from "@/lib/models/model-residency"
+  calculateModelAvailability,
+  findLoadedModelInfo,
+  findNewConversationModel,
+  type ModelAvailability
+} from "@/lib/models/model-availability"
+import type { ModelAvailabilitySource } from "@/lib/models/provider-connection"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore } from "@/lib/store"
 import { useAgentStore } from "@/lib/store/agents"
@@ -128,9 +133,9 @@ export type StoredConversationReader = (
  *
  * @remarks The store owns request and open tokens and their abort controllers;
  * these dependencies provide only transport, stored-conversation reads, reply
- * stops, timestamps, model-selection, what the loaded model can take as
- * attachments, generation-settings, and tool-offer capabilities, and hand
- * replies to the tool-call store.
+ * stops, timestamps, the model of a new conversation, model availability,
+ * generation-settings, and tool-offer capabilities, and hand replies to the
+ * tool-call store.
  * Aborting a store-owned signal ends only the store's observation; the
  * backend keeps generating. The store does not share lifecycle state with
  * another store instance, and does not own the settings it reads.
@@ -150,20 +155,25 @@ export type ChatViewStoreDependencies = {
    */
   readonly createTimestamp: () => string
   /**
-   * Finds the loaded model eligible to answer the next request.
+   * Finds the model a conversation uses when it names none of its own: the
+   * session's default model, or without one the first model that can
+   * answer, in provider order.
    *
-   * @returns The model key current at call time, or `null` when chat cannot be
-   * sent. Sampling is owned by {@link ChatViewActions.sendMessage}.
+   * @returns The model current at call time, or `null` when there is
+   * neither. Sampling is owned by the action that needs it.
    */
-  readonly findEligibleChatModel: () => string | null
+  readonly findNewConversationModel: () => LlmModelReference | null
   /**
-   * Reads what the loaded model can take as attachments.
+   * Calculates whether a model can answer a chat request now.
    *
-   * @returns The support current at call time, or undefined while no loaded
-   * model is listed in a ready inventory, when nothing can be staged.
-   * Sampling is owned by {@link ChatViewActions.addAttachments}.
+   * @param model - Model to check.
+   * @returns Its availability current at call time; only `loaded` lets a
+   * message or a file go to it. Sampling is owned by the action that needs
+   * it.
    */
-  readonly readAttachmentModelSupport: () => AttachmentModelSupport | undefined
+  readonly calculateModelAvailability: (
+    model: LlmModelReference
+  ) => ModelAvailability
   /**
    * Reads the generation controls applied to the next request.
    *
@@ -183,12 +193,14 @@ export type ChatViewStoreDependencies = {
   /**
    * Gets the tools the next request offers and names as switched off.
    *
+   * @param model - Inventory entry of the loaded model the request goes to,
+   * which says whether it was trained for tool use.
    * @returns The offer current at call time: offered tools, none, or
    * `unavailable` when the tool list cannot be read, with the switched-off
    * tools unless it is `unavailable`. Sampling is owned by
    * {@link ChatViewActions.sendMessage}.
    */
-  readonly getToolOffer: () => Promise<ChatToolOfferResult>
+  readonly getToolOffer: (model: LlmInfo) => Promise<ChatToolOfferResult>
   /**
    * Starts answering the tool calls of a reply this store starts or follows.
    *
@@ -282,8 +294,8 @@ export type AttachmentRefusal = Readonly<{
  * Observable state rendered by the chat view.
  *
  * @remarks The store owns the draft, the staged files and the last refusal,
- * conversation snapshot, selected agent, request phase, conversation-open
- * phase, and latest error. Conversation and message values are replaced
+ * conversation snapshot, selected agent, model pick, request phase,
+ * conversation-open phase, and latest error. Conversation and message values are replaced
  * immutably; the UI may read them but cannot mutate the store's
  * authoritative values.
  */
@@ -307,6 +319,16 @@ export type ChatViewState = {
    * with, whatever this holds.
    */
   readonly selectedAgentCode: string
+  /**
+   * Model the person picked for the shown conversation, or for the new one
+   * the composer drafts, or null when none is picked.
+   *
+   * @remarks It wins over the model the conversation's latest reply used and
+   * over the model a new conversation uses. It is kept through sending and
+   * dropped when another conversation or the new-conversation draft is
+   * shown; it is not saved, since each reply stores its own model.
+   */
+  readonly modelPick: LlmModelReference | null
   /** Single authoritative observable request lifecycle state. */
   readonly request: ChatRequestState
   /** Whether a stored conversation is being opened to replace the shown one. */
@@ -336,16 +358,16 @@ export type ChatViewActions = {
    * @returns A promise that resolves once the tray and the refusal are
    * updated; it never rejects.
    * @remarks Each file is admitted on its own: by its name and size against
-   * the tray, then by its content and by what the loaded model can take,
-   * which is sampled once per selection. Admitted files join the tray in
+   * the tray, then by its content and by what the conversation's model can
+   * take, which is sampled once per selection. Admitted files join the tray in
    * selection order. One refusal per selection is recorded as the attachment
    * refusal, which the next selection replaces or clears: the first refusal
    * by name or size, else the first by content or by the loaded model. A
    * file that cannot be read keeps its whole selection out of the tray, and
    * its failure is the refusal recorded. Selections are staged one after
    * another, so a selection is admitted against the files of the one before
-   * it. While no loaded model is listed, every file is refused with the
-   * chat-unavailable sentence. A selection made before the conversation is
+   * it. While the conversation's model cannot answer, every file is refused
+   * with the chat-unavailable sentence. A selection made before the conversation is
    * reset or closed and not staged yet is dropped: it joins no tray and
    * records no refusal.
    */
@@ -364,21 +386,32 @@ export type ChatViewActions = {
    */
   selectAgent: (agentCode: string) => void
   /**
-   * Submits an explicit starter prompt or current composer draft when a loaded
-   * model is eligible.
+   * Picks the model of the shown conversation, or of the new one the
+   * composer drafts.
+   *
+   * @param model - Model to pick; it is kept even while it cannot answer,
+   * and sending then refuses rather than send to another model.
+   */
+  updateModelPick: (model: LlmModelReference) => void
+  /**
+   * Submits an explicit starter prompt or current composer draft when the
+   * conversation's model can answer.
    *
    * @param explicitPrompt - Optional starter prompt; omission submits the
    * current composer draft.
    * @returns A promise that resolves without opening a stream when a reply is
    * awaited or streaming, a stored conversation is opening, the prompt is
-   * empty, or no loaded model is eligible; otherwise it resolves after stream
-   * completion, failure, or invalidation.
-   * @remarks An unavailable model records an inline error and preserves the
-   * draft and conversation. A reply that is awaited or streaming, an opening
+   * empty, or the conversation's model cannot answer; otherwise it resolves
+   * after stream completion, failure, or invalidation.
+   * @remarks The conversation's model is the pick, else the model of the
+   * conversation's latest reply that names its provider, else the model a
+   * new conversation uses. Only a model whose availability is `loaded` is
+   * sent; any other records an inline error and preserves the draft and
+   * conversation, and no other model is tried. A reply that is awaited or streaming, an opening
    * conversation, or an empty prompt is ignored. After the reply completed,
    * sending stops following its stream, which may still carry a title; the
    * backend keeps generating and saving that title.
-   * The eligible model, the generation controls, and, for a new conversation,
+   * The model, the generation controls, and, for a new conversation,
    * its agent are sampled once before request ownership begins; later edits
    * affect only later requests. A selected agent that is no longer listed is
    * replaced by Caliginia. The offered tools
@@ -407,12 +440,13 @@ export type ChatViewActions = {
   stopStreaming: () => Promise<void>
   /**
    * Stops following active work and restores initial chat state, keeping the
-   * selected agent.
+   * selected agent and dropping the model pick.
    */
   resetConversation: () => void
   /**
-   * Opens a stored conversation, replacing the shown one once it is read, and
-   * follows its last reply while that reply is still generating.
+   * Opens a stored conversation, replacing the shown one and dropping the
+   * model pick once it is read, and follows its last reply while that reply
+   * is still generating.
    */
   openConversation: (conversationId: string) => Promise<void>
   /** Restores initial state when the view presents the identified conversation. */
@@ -422,9 +456,9 @@ export type ChatViewActions = {
 /** State and actions exposed by one independently owned chat-view store. */
 export type ChatViewStore = ChatViewState & ChatViewActions
 
-/** Error shown when no loaded model can take a message or a staged file. */
+/** Error shown when the conversation's model cannot take a message or a staged file. */
 const CHAT_UNAVAILABLE_MESSAGE =
-  "Chat is unavailable. Check the backend and loaded model in Settings → Model, then try again."
+  "Chat is unavailable. Check the backend and loaded model in Settings → Models, then try again."
 
 /** Error shown when an owned stream closes before its done event. */
 const PREMATURE_STREAM_CLOSE_MESSAGE = "Chat stream ended before completion."
@@ -460,6 +494,7 @@ const INITIAL_CHAT_VIEW_STATE: Readonly<ChatViewState> = Object.freeze({
   attachmentRefusal: undefined,
   conversation: undefined,
   selectedAgentCode: CALIGINIA_AGENT_CODE,
+  modelPick: null,
   request: IDLE_CHAT_REQUEST,
   conversationOpen: IDLE_CONVERSATION_OPEN,
   error: undefined
@@ -543,8 +578,8 @@ type CreateChatRequestPayloadInput = {
   readonly submittedPrompt: string
   /** Staged files sent with the prompt; none with a starter prompt. */
   readonly attachments: readonly StagedAttachment[]
-  /** Loaded model selected for this request. */
-  readonly model: string
+  /** Loaded model the request goes to. */
+  readonly model: LlmModelReference
   /** Settings-owned generation controls for this request. */
   readonly generationOptions: MessageGenerationOptions
 }
@@ -698,6 +733,41 @@ function createAwaitingTurnRequest(
 }
 
 /**
+ * Finds the model of a conversation's latest reply.
+ *
+ * @param conversation - Shown conversation, or undefined before one starts.
+ * @returns The provider and key of the last reply that names its provider,
+ * whatever its status, or null when no reply does, as for replies stored
+ * before Lys named a model by its provider.
+ */
+export function findLatestReplyModel(
+  conversation: ChatViewConversation | undefined
+): LlmModelReference | null {
+  const messages = conversation?.messages ?? []
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role === "assistant" && message.provider !== null) {
+      return { provider: message.provider, modelKey: message.model }
+    }
+  }
+  return null
+}
+
+/**
+ * Finds the model the shown conversation names for itself.
+ *
+ * @param state - The model pick and the shown conversation.
+ * @returns The pick, else the model of the conversation's latest reply, as
+ * {@link findLatestReplyModel} finds it; null when there is neither, when
+ * the conversation uses the model a new conversation uses.
+ */
+export function findShownConversationModel(
+  state: Pick<ChatViewState, "modelPick" | "conversation">
+): LlmModelReference | null {
+  return state.modelPick ?? findLatestReplyModel(state.conversation)
+}
+
+/**
  * Creates the private transport resource for one request token.
  *
  * @param token - Monotonic token assigned by the owning store.
@@ -749,11 +819,22 @@ function createChatRequestPayload(
   }
 }
 
+/** What one chat request was sampled with before it took ownership. */
+type SampledChatRequest = {
+  /** Prompt, conversation, model, and generation controls of the request. */
+  readonly requestInput: CreateChatRequestPayloadInput
+  /**
+   * Inventory entry of the request's model, sampled with it, which says
+   * whether it was trained for tool use.
+   */
+  readonly loadedModel: LlmInfo
+}
+
 /**
  * Opens the chat stream for one owned request with the tools it offers.
  *
- * @param requestInput - Prompt, conversation, model, and generation controls
- * sampled before the request took ownership.
+ * @param request - Payload values and the model's inventory entry, sampled
+ * before the request took ownership.
  * @param signal - Store-owned signal of the request.
  * @param dependencies - Tool-offer reader and chat transport of the store.
  * @returns An async generator yielding the chat events; it completes when the
@@ -762,11 +843,11 @@ function createChatRequestPayload(
  * then fails without opening the stream.
  */
 async function* openChatStreamWithToolOffer(
-  requestInput: CreateChatRequestPayloadInput,
+  { requestInput, loadedModel }: SampledChatRequest,
   signal: AbortSignal,
   dependencies: Pick<ChatViewStoreDependencies, "getToolOffer" | "streamChat">
 ): AsyncGenerator<ChatApiStreamEvent, void, unknown> {
-  const toolOffer = await dependencies.getToolOffer()
+  const toolOffer = await dependencies.getToolOffer(loadedModel)
   if (toolOffer.status === "unavailable") throw new Error(toolOffer.error)
 
   yield* dependencies.streamChat(
@@ -1437,7 +1518,9 @@ export function createChatViewStore(
       files: readonly File[],
       generation: number
     ): Promise<void> {
-      const support = dependencies.readAttachmentModelSupport()
+      const support = calculateAttachmentModelSupport(
+        findLoadedModelInfo(calculateConversationModelAvailability())
+      )
       if (support === undefined) {
         set({
           attachmentRefusal: buildAttachmentRefusal(CHAT_UNAVAILABLE_MESSAGE)
@@ -1524,6 +1607,42 @@ export function createChatViewStore(
     }
 
     /**
+     * Implements {@link ChatViewActions.updateModelPick} for this store.
+     *
+     * @param model - Model the shown conversation, or the drafted one, uses.
+     */
+    function updateModelPick(model: LlmModelReference): void {
+      set({ modelPick: model })
+    }
+
+    /**
+     * Finds the conversation's model.
+     *
+     * @returns The model {@link findShownConversationModel} finds, else the
+     * model a new conversation uses, sampled now; null when there is
+     * neither.
+     */
+    function findConversationModel(): LlmModelReference | null {
+      return (
+        findShownConversationModel(get()) ??
+        dependencies.findNewConversationModel()
+      )
+    }
+
+    /**
+     * Calculates whether the conversation's model can answer now.
+     *
+     * @returns The availability of the model {@link findConversationModel}
+     * finds, sampled now; null when there is no model.
+     */
+    function calculateConversationModelAvailability(): ModelAvailability | null {
+      const model = findConversationModel()
+      return model === null
+        ? null
+        : dependencies.calculateModelAvailability(model)
+    }
+
+    /**
      * Reports whether a new chat request may take ownership of the lifecycle.
      *
      * @returns Whether no conversation is opening and no reply is awaited:
@@ -1567,14 +1686,14 @@ export function createChatViewStore(
      *
      * @param submittedPrompt - Trimmed prompt the request sends.
      * @param attachments - Staged files the request sends.
-     * @param model - Eligible model the request names.
+     * @param model - Loaded model the request names.
      * @returns The request's conversation, prompt, files, and model, with
      * the generation controls sampled now.
      */
     function buildChatRequestInput(
       submittedPrompt: string,
       attachments: readonly StagedAttachment[],
-      model: string
+      model: LlmModelReference
     ): CreateChatRequestPayloadInput {
       return {
         conversation: buildRequestConversation(),
@@ -1600,11 +1719,14 @@ export function createChatViewStore(
         explicitPrompt === undefined ? promptSource : undefined
       const submittedPrompt = promptSource.trim()
       if (!submittedPrompt) return
-      const model = dependencies.findEligibleChatModel()
-      if (model === null) {
+      const model = findConversationModel()
+      const availability =
+        model === null ? null : dependencies.calculateModelAvailability(model)
+      if (model === null || availability?.status !== "loaded") {
         set({ error: CHAT_UNAVAILABLE_MESSAGE })
         return
       }
+      const loadedModel = availability.model
 
       const token = nextRequestToken
       nextRequestToken += 1
@@ -1631,7 +1753,11 @@ export function createChatViewStore(
       supersededRequest?.abortController.abort()
       await readChatStream(token, {
         openEvents: (signal) =>
-          openChatStreamWithToolOffer(requestInput, signal, dependencies),
+          openChatStreamWithToolOffer(
+            { requestInput, loadedModel },
+            signal,
+            dependencies
+          ),
         handleEvent: async (event) => {
           handleChatStreamEvent(event, token)
           await stopRequestedChatReply(token)
@@ -1838,6 +1964,7 @@ export function createChatViewStore(
           set({
             conversation,
             inputDraft,
+            modelPick: null,
             error: undefined,
             conversationOpen: IDLE_CONVERSATION_OPEN
           })
@@ -2019,6 +2146,7 @@ export function createChatViewStore(
       addAttachments,
       removeAttachment,
       selectAgent,
+      updateModelPick,
       sendMessage,
       stopStreaming,
       resetConversation,
@@ -2052,16 +2180,16 @@ function getStoredConversation(
  * Gets the tools the next chat request offers and what it names about the
  * tools it does not offer.
  *
+ * @param model - Inventory entry of the loaded model the request goes to.
  * @returns A promise that resolves with {@link NO_CHAT_TOOL_OFFER} when the
- * loaded model is not known to be trained for tool use; with
+ * model is not known to be trained for tool use; with
  * {@link TOOL_CALLS_OFF_OFFER}, without reading the tool list, when tool
  * calls are off; and otherwise with the offer built from the tool list,
  * which is read first when it has not been, the tool-calls switch, and the
  * saved switches, each sampled once the list is read. It never rejects.
  */
-async function getChatToolOffer(): Promise<ChatToolOfferResult> {
-  const { modelRuntime, modelInventory } = useLysStore.getState()
-  const support = calculateToolModelSupport(modelRuntime, modelInventory)
+async function getChatToolOffer(model: LlmInfo): Promise<ChatToolOfferResult> {
+  const support = calculateToolModelSupport(model)
   if (support.status !== "trained") return NO_CHAT_TOOL_OFFER
   const {
     list,
@@ -2077,6 +2205,21 @@ async function getChatToolOffer(): Promise<ChatToolOfferResult> {
     areToolCallsOn,
     toolSwitches: useLysStore.getState().settings.tools.switches
   })
+}
+
+/**
+ * Gets the application state that decides whether a model can answer.
+ *
+ * @returns The backend's state, the providers that are on, and every
+ * provider's state, current at call time.
+ */
+function getModelAvailabilitySource(): ModelAvailabilitySource {
+  const { backendServerInfo, settings, providerModels } = useLysStore.getState()
+  return {
+    backendStatus: backendServerInfo.status,
+    enabledProviders: settings.providers.enabled,
+    providerModels
+  }
 }
 
 /**
@@ -2117,11 +2260,13 @@ async function* readChatEventsRefreshingTools(
  * ceiling is omitted so the backend receives no explicit completion-token limit.
  * The backend origin for following and stopping a reply is sampled when each
  * request starts. A new conversation's agent is checked against the agent
- * store's list when the request is sent. Tool offers read the Tools pane and
- * the loaded model when each request takes ownership, what the loaded model
- * can take as attachments is read from the inventory when each selection is
- * staged, and every reply the store starts or follows is handed to the
- * tool-call store.
+ * store's list when the request is sent. A conversation that names no model
+ * uses the session's default model, else the first model that can answer.
+ * Whether a model can answer is calculated from the backend's state, the
+ * providers that are on, and their inventories when each request is sent
+ * and each selection is staged. Tool offers read the Tools pane when each
+ * request takes ownership, and every reply the store starts or follows is
+ * handed to the tool-call store.
  */
 export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
   createChatViewStore({
@@ -2135,16 +2280,13 @@ export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
       stopChatReply(target, { backendUrl: useLysStore.getState().backendUrl }),
     getConversation: getStoredConversation,
     createTimestamp: () => new Date().toISOString(),
-    findEligibleChatModel: () => {
-      const { backendServerInfo, modelRuntime } = useLysStore.getState()
-
-      return findEligibleChatModel(backendServerInfo.status, modelRuntime)
-    },
-    readAttachmentModelSupport: () => {
-      const { modelRuntime, modelInventory } = useLysStore.getState()
-
-      return calculateAttachmentModelSupport(modelRuntime, modelInventory)
-    },
+    findNewConversationModel: () =>
+      findNewConversationModel(
+        getModelAvailabilitySource(),
+        useLysStore.getState().settings.runtime.defaultModel
+      ),
+    calculateModelAvailability: (model) =>
+      calculateModelAvailability(getModelAvailabilitySource(), model),
     readGenerationOptions: () => {
       const { temperature, replyCeiling } =
         useLysStore.getState().settings.generation

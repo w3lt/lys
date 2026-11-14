@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { CALIGINIA_AGENT_CODE } from "@lys/share"
+import { CALIGINIA_AGENT_CODE, type LlmModelReference } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import {
@@ -37,6 +37,12 @@ const FIND_FILES = buildToolDefinition("find_files")
 
 /** Backend tool that can lack what it needs to run. */
 const WEB_SEARCH = buildBackendToolDefinition("web_search")
+
+/** LM Studio's `qwen3-8b`, which the arranged runtimes load. */
+const QWEN_MODEL: LlmModelReference = Object.freeze({
+  provider: "lmStudio",
+  modelKey: "qwen3-8b"
+})
 
 /** The runtime ready with `qwen3-8b` loaded and trained for tool use. */
 const TRAINED_RUNTIME: RuntimeArrangement = {
@@ -105,9 +111,64 @@ describe("useChatContextMeasurement", () => {
     expect(listMeasurementBodies(backend)).toEqual([
       {
         conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
-        model: "qwen3-8b"
+        model: QWEN_MODEL
       }
     ])
+  })
+
+  it("measures with the model the chat view picked", async () => {
+    const backend = startBackendFake({
+      [CHAT_CONTEXT_ROUTE]: () =>
+        buildJsonResponse(200, FIXTURE_CHAT_CONTEXT_MEASUREMENT)
+    })
+    const { useLysStore, useChatViewStore, useChatContextMeasurement } =
+      await loadFreshMeasurementHook()
+    const picked: LlmModelReference = {
+      provider: "lmStudio",
+      modelKey: "gemma-3"
+    }
+    updateStoreRuntime(useLysStore, {
+      ...READY_RUNTIME,
+      modelInventory: {
+        status: "ready",
+        modelLoading: "lys",
+        models: [
+          buildLlmInfo("qwen3-8b", { loaded: true }),
+          buildLlmInfo("gemma-3", { loaded: true })
+        ]
+      }
+    })
+    act(() => {
+      useChatViewStore.getState().updateModelPick(picked)
+    })
+
+    const { result } = renderHook(() => useChatContextMeasurement(true))
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false)
+    })
+
+    expect(listMeasurementBodies(backend)).toEqual([
+      {
+        conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
+        model: picked
+      }
+    ])
+  })
+
+  it("starts no measurement while the conversation's model is not loaded, measuring no other model", async () => {
+    const backend = startBackendFake({})
+    const { useChatViewStore, useChatContextMeasurement } =
+      await loadFreshMeasurementHook()
+    act(() => {
+      useChatViewStore
+        .getState()
+        .updateModelPick({ provider: "groq", modelKey: "llama-3.3-70b" })
+    })
+
+    const { result } = renderHook(() => useChatContextMeasurement(true))
+
+    expect(result.current).toEqual({ outcome: undefined, isPending: false })
+    expect(backend.requests).toEqual([])
   })
 
   it("starts no measurement while the composer is busy", async () => {
@@ -170,11 +231,11 @@ describe("useChatContextMeasurement", () => {
     expect(listMeasurementBodies(backend)).toEqual([
       {
         conversation: { kind: "existing", id: FIXTURE_CONVERSATION_ID },
-        model: "qwen3-8b"
+        model: QWEN_MODEL
       },
       {
         conversation: { kind: "existing", id: FIXTURE_CONVERSATION_ID },
-        model: "qwen3-8b"
+        model: QWEN_MODEL
       }
     ])
   })
@@ -254,7 +315,7 @@ describe("useChatContextMeasurement", () => {
     expect(listMeasurementBodies(backend)).toEqual([
       {
         conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
-        model: "qwen3-8b",
+        model: QWEN_MODEL,
         tools: { definitions: [READ_TEXT_FILE] }
       }
     ])
@@ -291,7 +352,7 @@ describe("useChatContextMeasurement", () => {
     expect(listMeasurementBodies(backend)).toEqual([
       {
         conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
-        model: "qwen3-8b",
+        model: QWEN_MODEL,
         tools: { definitions: [READ_TEXT_FILE] },
         switchedOffToolNames: ["find_files"]
       }
@@ -329,7 +390,7 @@ describe("useChatContextMeasurement", () => {
     expect(listMeasurementBodies(backend)).toEqual([
       {
         conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
-        model: "qwen3-8b",
+        model: QWEN_MODEL,
         tools: { definitions: [READ_TEXT_FILE] },
         unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
       }
@@ -361,7 +422,7 @@ describe("useChatContextMeasurement", () => {
     expect(listMeasurementBodies(backend)).toEqual([
       {
         conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
-        model: "qwen3-8b",
+        model: QWEN_MODEL,
         areToolCallsSwitchedOff: true
       }
     ])
@@ -406,7 +467,7 @@ describe("useChatContextMeasurement", () => {
     expect(listMeasurementBodies(backend)).toEqual([
       {
         conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
-        model: "qwen3-8b",
+        model: QWEN_MODEL,
         areToolCallsSwitchedOff: true
       }
     ])
@@ -438,7 +499,7 @@ describe("useChatContextMeasurement", () => {
     expect(listMeasurementBodies(backend)).toEqual([
       {
         conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
-        model: "qwen3-8b"
+        model: QWEN_MODEL
       }
     ])
   })

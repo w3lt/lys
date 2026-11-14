@@ -7,7 +7,7 @@ describe("ComposerOfflineBanner", () => {
   it("announces why generation is unavailable politely", () => {
     render(
       <ComposerOfflineBanner
-        action={{ label: "Start backend", isEnabled: true }}
+        action={{ kind: "start-backend", label: "Start backend" }}
         message="The backend is not running on http://127.0.0.1:12345."
         onReconnect={vi.fn()}
       />
@@ -25,7 +25,7 @@ describe("ComposerOfflineBanner", () => {
     const user = userEvent.setup()
     render(
       <ComposerOfflineBanner
-        action={{ label: "Start backend", isEnabled: true }}
+        action={{ kind: "start-backend", label: "Start backend" }}
         message="The backend is not running."
         onReconnect={onReconnect}
       />
@@ -36,12 +36,32 @@ describe("ComposerOfflineBanner", () => {
     expect(onReconnect).toHaveBeenCalledOnce()
   })
 
+  it("names an action that opens settings and runs it once per press", async () => {
+    const onReconnect = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <ComposerOfflineBanner
+        action={{
+          kind: "open-settings",
+          label: "Open Providers",
+          pane: "providers"
+        }}
+        message="Ollama is turned off."
+        onReconnect={onReconnect}
+      />
+    )
+
+    await user.click(screen.getByRole("button", { name: "Open Providers" }))
+
+    expect(onReconnect).toHaveBeenCalledOnce()
+  })
+
   it("keeps a disabled action in place while the runtime is already changing", async () => {
     const onReconnect = vi.fn()
     const user = userEvent.setup()
     render(
       <ComposerOfflineBanner
-        action={{ label: "Working", isEnabled: false }}
+        action={{ kind: "none", label: "Working" }}
         message="Starting the backend…"
         onReconnect={onReconnect}
       />

@@ -8,6 +8,7 @@ import {
   createNewConversationTarget,
   createTurnUserMessage
 } from "../../support/conversationFixtures"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 
 /** Wall-clock time observed by every case until it advances the clock. */
 const NOW = "2026-03-04T05:06:07.890Z"
@@ -29,7 +30,7 @@ function startTurn(): ConversationTestServices &
   const turn = services.turns.createConversationTurn({
     conversation: createNewConversationTarget("lys"),
     userMessage: createTurnUserMessage("Hello"),
-    model: "qwen/qwen3-8b"
+    model: LM_STUDIO_QWEN3_8B
   })
   return {
     ...services,

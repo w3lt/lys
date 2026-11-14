@@ -1,132 +1,62 @@
-import type { ComponentProps } from "react"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
-import ModelRow from "@/components/SettingsViewComponents/ModelRow"
-import { buildModelDescriptor } from "@/lib/models/inventory"
+import ModelRow, {
+  type ModelListEntry
+} from "@/components/SettingsViewComponents/ModelRow"
 import { buildLlmInfo } from "../../support/modelFixtures"
 
-/** Model resident in LM Studio. */
-const RESIDENT = buildModelDescriptor(
-  buildLlmInfo("qwen3-8b", { loaded: true })
-)
-
-/** Model on disk only. */
-const ON_DISK = buildModelDescriptor(buildLlmInfo("gemma-3"))
-
 /**
- * Renders one row in a list with spies for every action.
+ * Renders one row in a list with a spy for its selection request.
  *
- * @param props - Row facts the case varies.
- * @returns The action spies.
+ * @param entry - Row facts the case varies.
+ * @returns The selection spy.
  */
-function startModelRow(props: Partial<ComponentProps<typeof ModelRow>> = {}) {
-  const actions = {
-    onSelect: vi.fn(),
-    onLoad: vi.fn(() => Promise.resolve()),
-    onUnload: vi.fn(() => Promise.resolve()),
-    onTest: vi.fn(() => Promise.resolve())
-  }
+function startModelRow(entry: Partial<ModelListEntry> = {}) {
+  const onSelectModel = vi.fn()
   render(
     <ul>
       <ModelRow
-        disabled={false}
-        isDefault={false}
-        model={ON_DISK}
-        modelLoading="lys"
-        modelRuntime={{ status: "loaded", modelKey: "qwen3-8b" }}
-        {...actions}
-        {...props}
+        entry={{
+          columnValue: "4.0 GB",
+          isDefault: false,
+          isLoading: false,
+          isSelected: false,
+          model: buildLlmInfo("google/gemma-3:4b"),
+          ...entry
+        }}
+        onSelectModel={onSelectModel}
       />
     </ul>
   )
-  return actions
+  return onSelectModel
 }
 
 describe("ModelRow", () => {
-  it("makes the model the default without loading it", async () => {
-    const actions = startModelRow()
+  it("asks to show its model when pressed", async () => {
+    const onSelectModel = startModelRow()
     const user = userEvent.setup()
 
-    const choice = screen.getByRole("button", {
-      pressed: false,
-      name: /^gemma-3/
-    })
-    expect(choice).toHaveTextContent(
-      "gemma-37B · Q4_K_M · 4.0 GB4.0 GB on disk"
+    await user.click(screen.getByRole("button"))
+
+    expect(onSelectModel).toHaveBeenCalledExactlyOnceWith("google/gemma-3:4b")
+  })
+
+  it("shows the key, then its column value, and marks only the selected row as current", () => {
+    startModelRow()
+
+    expect(screen.getByRole("button")).toHaveTextContent(
+      /^google\/gemma-3:4b4\.0 GB$/
     )
-    await user.click(choice)
-
-    expect(actions.onSelect).toHaveBeenCalledExactlyOnceWith("gemma-3")
-    expect(actions.onLoad).not.toHaveBeenCalled()
+    expect(screen.getByRole("button")).not.toHaveAttribute("aria-current")
   })
 
-  it("marks the default model as pressed and labelled default", () => {
-    startModelRow({ isDefault: true })
+  it("states in words that its model is the default, loading, and selected", () => {
+    startModelRow({ isDefault: true, isLoading: true, isSelected: true })
 
-    expect(
-      screen.getByRole("button", { pressed: true, name: /^gemma-3default/ })
-    ).toBeInTheDocument()
+    expect(screen.getByRole("button")).toHaveTextContent(
+      /^google\/gemma-3:4bDefaultLoading…4\.0 GB$/
+    )
+    expect(screen.getByRole("button")).toHaveAttribute("aria-current", "true")
   })
-
-  it("loads a model on disk and unloads a resident one", async () => {
-    const onDisk = startModelRow()
-    const user = userEvent.setup()
-
-    await user.click(screen.getByRole("button", { name: "Load gemma-3" }))
-    expect(onDisk.onLoad).toHaveBeenCalledExactlyOnceWith("gemma-3")
-
-    const resident = startModelRow({ model: RESIDENT })
-    await user.click(screen.getByRole("button", { name: "Unload qwen3-8b" }))
-    expect(resident.onUnload).toHaveBeenCalledExactlyOnceWith("qwen3-8b")
-  })
-
-  it("tests whether the model is loaded", async () => {
-    const actions = startModelRow({ model: RESIDENT })
-    const user = userEvent.setup()
-
-    await user.click(screen.getByRole("button", { name: "Test qwen3-8b" }))
-
-    expect(actions.onTest).toHaveBeenCalledExactlyOnceWith("qwen3-8b")
-  })
-
-  it.each([
-    [100, true],
-    [101, false]
-  ])(
-    "offers testing a %d-character key only when the health check accepts it",
-    (keyLength, isTestable) => {
-      const modelKey = "m".repeat(keyLength)
-      startModelRow({ model: buildModelDescriptor(buildLlmInfo(modelKey)) })
-
-      expect(
-        screen.getByRole("button", { name: `Test ${modelKey}` })
-      ).toHaveProperty("disabled", !isTestable)
-    }
-  )
-
-  it("disables its actions, but not the default choice, while requests cannot be made", async () => {
-    const actions = startModelRow({ disabled: true })
-    const user = userEvent.setup()
-
-    expect(screen.getByRole("button", { name: "Test gemma-3" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Load gemma-3" })).toBeDisabled()
-    await user.click(screen.getByRole("button", { name: /^gemma-3/ }))
-
-    expect(actions.onSelect).toHaveBeenCalledOnce()
-  })
-
-  it.each(["provider", "unknown"] as const)(
-    "offers Test but no Load or Unload while the inventory reports model loading as %s",
-    (modelLoading) => {
-      startModelRow({ model: RESIDENT, modelLoading })
-
-      expect(
-        screen.getByRole("button", { name: "Test qwen3-8b" })
-      ).toBeInTheDocument()
-      expect(
-        screen.queryByRole("button", { name: "Unload qwen3-8b" })
-      ).toBeNull()
-    }
-  )
 })

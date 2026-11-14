@@ -1,8 +1,10 @@
 import { createContext, use } from "react"
 
 import type { ModelLoadConfiguration } from "@lys/share"
+import type { LlmTestModelApiResponse } from "@lys/protocol"
 
-import type { ModelState } from "@/lib/store/model-runtime"
+import type { ShownModelState } from "@/lib/hooks/conversationModel"
+import type { ModelRequestState } from "@/lib/store/model-runtime"
 import type {
   GenerationSettings,
   LysSettings,
@@ -19,15 +21,27 @@ import type {
  * outcome. Consumers must render below the provider and must not retain or
  * mutate the settings object.
  *
- * The model callbacks describe weight-lifecycle intent. `onLoadModel`,
- * `onUnloadModel`, and `onReloadModel` await backend acknowledgement and
- * inventory reconciliation. `onTestModel` observes loaded state without
- * inference. The application store owns request completion and exposes errors
- * and health results to the panes.
+ * The model request fields hold one provider's state, which the Runtime
+ * pane's request feedback reports: the provider of the model a new
+ * conversation uses while it is on, else the first provider that is on, in
+ * provider order, else LM Studio. The application store owns every request
+ * and its completion; the Runtime and Models panes read every provider's
+ * models, and start loads and unloads, through the store itself.
  */
-export type SettingsContextValue = ModelState & {
+export type SettingsContextValue = {
   /** Complete settings value currently shown by the panes. */
   readonly settings: LysSettings
+  /** The shown provider's request in flight, or idle. */
+  readonly modelRequest: ModelRequestState
+  /** The shown provider's latest safe request failure, or null. */
+  readonly modelError: string | null
+  /** The shown provider's latest health observation, or null. */
+  readonly modelHealth: LlmTestModelApiResponse | null
+  /**
+   * The model a new conversation uses, with whether it can answer: the
+   * default model, or without one the first model that can answer.
+   */
+  readonly newConversationModel: ShownModelState
   /**
    * Proposes a runtime settings patch to the provider.
    *
@@ -59,44 +73,6 @@ export type SettingsContextValue = ModelState & {
    * @param modelKey - Key of the model whose own expert count is removed.
    */
   onRemoveModelExpertCount: (modelKey: string) => void
-  /**
-   * Requests that the named weights be loaded into memory.
-   *
-   * @param modelKey - Model identifier to load.
-   * @returns Resolves after settlement or cancellation; failures other than a
-   * missing LLM runtime remain in modelError.
-   */
-  onLoadModel: (modelKey: string) => Promise<void>
-  /**
-   * Requests that the named weights be released from memory.
-   *
-   * @param modelKey - Model identifier to unload.
-   * @returns Resolves after settlement or cancellation; failures other than a
-   * missing LLM runtime remain in modelError.
-   */
-  onUnloadModel: (modelKey: string) => Promise<void>
-  /**
-   * Requests that the named loaded weights be released and loaded again with
-   * their stored load configuration.
-   *
-   * @param modelKey - Model identifier to reload.
-   * @returns Resolves after settlement or cancellation; failures other than a
-   * missing LLM runtime remain in modelError. A load that fails after the
-   * unload leaves the weights released.
-   */
-  onReloadModel: (modelKey: string) => Promise<void>
-  /**
-   * Observes whether the named weights are currently loaded.
-   *
-   * @param modelKey - Canonical model identifier to query.
-   * @returns Resolves after publishing the health observation or handled failure.
-   */
-  onTestModel: (modelKey: string) => Promise<void>
-  /**
-   * Refreshes inventory; failures other than a missing LLM runtime are exposed
-   * through modelError.
-   */
-  onRefreshModels: () => Promise<void>
 }
 
 /** Required settings context; `null` marks the absent-provider state. */

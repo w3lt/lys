@@ -11,6 +11,7 @@ import {
 import type {
   Conversation,
   ConversationAssistantMessageStatus,
+  LlmModelReference,
   ToolDefinition
 } from "@lys/share"
 import type { FastifyBaseLogger, FastifyInstance } from "fastify"
@@ -65,7 +66,7 @@ import type ReplyGenerationRegistry from "../replyGenerationRegistry"
 import createTitleGenerationTask from "../titleGenerationTask"
 import {
   findListedModelCapabilities,
-  type FindModelCapabilities,
+  type FindLlmModelCapabilities,
   type ModelCapabilities
 } from "./modelCapabilities"
 import {
@@ -111,11 +112,11 @@ export type ChatRouteRegistration = ChatRouteOptions &
     /** Registry owning every generation this route starts; not disposed here. */
     generations: ReplyGenerationRegistry
     /**
-     * Capabilities of the model a request names, read from the connected
-     * provider's inventory and remembered by the lookup while that provider
-     * stays connected; shared with the chat-context route.
+     * Capabilities of the model a request names, read from its provider's
+     * inventory and remembered by the lookup while that provider stays
+     * connected; shared with the chat-context route.
      */
-    findModelCapabilities: FindModelCapabilities
+    findModelCapabilities: FindLlmModelCapabilities
   }>
 
 /** What the chat route does with attachment files. */
@@ -145,10 +146,10 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findConversation: (conversationId: string) => Conversation | undefined
     /**
-     * Capabilities of the model a request names, read from the connected
-     * provider's inventory.
+     * Capabilities of the model a request names, read from its provider's
+     * inventory.
      */
-    findModelCapabilities: FindModelCapabilities
+    findModelCapabilities: FindLlmModelCapabilities
     /**
      * Saves each turn's attachment files, deletes them when the turn is not
      * stored, and reads stored ones.
@@ -157,11 +158,13 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
     /** Bound title operation retained separately from chat completion. */
     generateTitle: (options: TitleGenerationOptions) => Promise<string>
     /**
-     * Context length a model is loaded with, observed through the
-     * model-operation queue without loading it; undefined when it is not
-     * loaded.
+     * Context length a model is loaded with on its provider, observed
+     * through that provider's model-operation queue without loading it;
+     * undefined when it is not loaded.
      */
-    findLoadedContextLength: (model: string) => Promise<number | undefined>
+    findLoadedContextLength: (
+      model: LlmModelReference
+    ) => Promise<number | undefined>
     /** Inclusive maximum number of title requests permitted for one turn. */
     titleGenerationMaxAttempts: number
     /** Registry that owns every generation this route starts. */
@@ -272,8 +275,8 @@ type TurnGenerationInput = Readonly<{
   turn: ConversationTurn
   /** Agent that answers the turn. */
   agent: Agent
-  /** Model selected by the request. */
-  model: string
+  /** Model selected by the request, and its provider. */
+  model: LlmModelReference
   /** Sampling and reply length controls sent with the request. */
   generationOptions: MessageGenerationOptions
   /** Client tools the request offered, each name once; empty when it offered none. */
@@ -347,9 +350,12 @@ export default function updateFastifyWithChatRoute(
     attachmentFiles: app.attachmentFileStore,
     generateTitle: (options: TitleGenerationOptions) =>
       app.chatService.generateTitle(options),
-    findLoadedContextLength: async (model: string) =>
-      (await app.llmService.findLlmContextMeasurement(model, []))
-        ?.contextLength,
+    findLoadedContextLength: async (model: LlmModelReference) =>
+      (
+        await app.llmProviderServices[
+          model.provider
+        ].llmService.findLlmContextMeasurement(model.modelKey, [])
+      )?.contextLength,
     titleGenerationMaxAttempts,
     generations,
     builtInTools: app.builtInTools,
@@ -452,10 +458,11 @@ async function handleChatRequest(
  * before the inventory is read; the conversation's stored attachments come
  * from that read. The model's capabilities are then read for every turn,
  * because they decide the images the model sees and the tools the backend
- * offers it; the lookup lists the connected provider's inventory only until
- * it has seen the model, so only a model's first turn with that provider
- * waits for the model-operation queue. The agent found here is not kept: the lookup that decides who
- * answers runs again when the turn is stored.
+ * offers it; the lookup lists the inventory of the model's own provider only
+ * until it has seen the model, so only a model's first turn with that
+ * provider waits for that provider's model-operation queue. The agent found
+ * here is not kept: the lookup that decides who answers runs again when the
+ * turn is stored.
  */
 async function parseTurnRequest(
   request: ChatRouteRequest,

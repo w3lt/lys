@@ -37,6 +37,7 @@ import { createControlledPromise } from "../../support/settlement"
 import {
   buildUnreachableRuntime,
   READY_RUNTIME,
+  updateStoreRuntime,
   type RuntimeArrangement
 } from "../../support/runtimeFixtures"
 import {
@@ -219,7 +220,8 @@ function startSettingsHost(saveSettings: () => unknown = () => null) {
 
 /**
  * Renders the settings view on the MCP pane, with the stored settings in the
- * application store, and waits for the pane body and its first reads.
+ * application store except that LM Studio is on with the arranged runtime,
+ * and waits for the pane body and its first reads.
  *
  * @param routes - Backend routes the case needs besides the inventory read;
  * the stored list answers the list read and the `files` tools the tool
@@ -246,6 +248,7 @@ async function startMcpPane(
   const { useMcpServerStore } = await import("@/lib/store/mcp-servers")
   const { useToolStore } = await import("@/lib/store/tools")
   useLysStore.setState({ settings: STORED_SETTINGS })
+  updateStoreRuntime(useLysStore, runtime)
   render(<SettingsView onDone={vi.fn()} />)
   // The closing note is withheld until the lazily loaded pane body is shown.
   await screen.findByText(/^Saved in settings\.json in Lys's home folder/)

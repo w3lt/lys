@@ -328,7 +328,7 @@ The host creates the following defaults when the settings file is missing:
     "lysEmailPassword": null
   },
   "providers": {
-    "active": "lmStudio",
+    "enabled": ["lmStudio"],
     "lmStudio": { "address": null },
     "ollama": { "address": null }
   },
@@ -355,7 +355,8 @@ The host creates the following defaults when the settings file is missing:
 ```
 
 Only the Rust host writes this file. The React UI reaches it through Tauri
-`invoke` calls, and the backend reads it for the Tavily API key of
+`invoke` calls, and the backend reads it for the providers that are on with
+their addresses and keys, the Tavily API key of
 `web_search`, the tools on Just run, the MCP servers with their switches, and
 the email accounts with their passwords. Every write, including the defaults of a missing file, goes to a
 new temporary file beside it, created with mode `0600` on Unix and flushed to
@@ -386,6 +387,20 @@ text, validated on load (1 to 256 visible ASCII characters), and
 Lys's saved email accounts, each 1 to 1,024 characters without a control
 character, spaces kept; an invalid key or password makes loading fail. Its
 `Debug` output never shows a key or a password.
+
+The `providers` group (`src/settings/providers.rs`) holds `enabled`, the
+providers that are on, and the addresses of LM Studio and a local Ollama
+server. `enabled` may be empty and may list the providers in any order, but
+names each at most once; a provider listed twice or one Lys does not know
+makes loading fail. A save writes the list in provider order, `lmStudio`,
+`ollama`, `ollamaCloud`, `groq`, whatever order it was read in. A group
+without `enabled` was saved before several providers could be on: its
+`active` provider, or LM Studio when it names none, is the one on. When
+`enabled` is present, `active` is ignored but must still name a provider
+Lys knows. `active` is only read: the next save writes `enabled` without it,
+and an older Lys build refuses the group it then finds. A missing group
+means LM Studio on at its default address. The `providers` group also
+refuses an unknown field and a `null` in place of the group or of `enabled`.
 
 The `location` group holds the location the person typed, validated on load:
 each part is `null` or 1 to 100 characters with no control character and no

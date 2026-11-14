@@ -1,8 +1,10 @@
 import {
   groqApiKeySchema,
   llmProviderSchema,
+  llmProviderSettingsSchema,
   ollamaApiKeySchema,
-  providerAddressSchema
+  providerAddressSchema,
+  type LlmProvider
 } from "@lys/share"
 import * as z from "zod"
 import {
@@ -13,25 +15,35 @@ import {
 import { readSettingsFileText } from "./settingsFile"
 
 /**
- * What reading the active provider from the settings file found.
+ * What reading one provider from the settings file found.
  *
- * @remarks `configured`: how to reach the provider; a missing file, group, or
- * field means LM Studio at its default address, as before providers could be
- * chosen. `missing-key`: the active provider needs an API key and none is
- * saved. `unreadable`: the file cannot be read, is larger than the limit
- * {@link readSettingsFileText} applies, is not UTF-8, or is not a JSON object
- * whose `providers` group and the key it needs follow the settings rules. A
- * read or decode failure is never reported as a default.
+ * @remarks `configured`: the provider is on, and how to reach it. `off`: the
+ * provider is not on. The `providers.enabled` list names the providers that
+ * are on; a file without that list was saved before several providers could
+ * be on, and its `providers.active` provider is the one on, LM Studio when it
+ * names none. A missing file or group therefore means LM Studio on at its
+ * default address and every other provider off. `missing-key`: the provider
+ * is on and needs an API key, and none is saved. `unreadable`: the file
+ * cannot be read, is larger than the limit {@link readSettingsFileText}
+ * applies, is not UTF-8, or is not a JSON object whose `providers` group and
+ * the key the provider needs follow the settings rules; a `providers.enabled`
+ * list naming a provider twice, or a provider Lys does not know, breaks those
+ * rules, as it does for the desktop host. A read or decode failure is never
+ * reported as a default.
  */
 export type LlmProviderAccessRead =
   | Readonly<{
-      /** The settings name a reachable provider. */
+      /** The provider is on and reachable as the settings say. */
       status: "configured"
       /** How to reach it; may hold a secret key. */
       access: LlmProviderAccess
     }>
   | Readonly<{
-      /** The active provider needs a key that is not saved. */
+      /** The provider is not on. */
+      status: "off"
+    }>
+  | Readonly<{
+      /** The provider is on and needs a key that is not saved. */
       status: "missing-key"
       /** Provider whose key is missing. */
       provider: "ollamaCloud" | "groq"
@@ -46,19 +58,27 @@ export type LlmProviderAccessRead =
  *
  * @remarks The desktop host owns and validates the whole document. This
  * reader takes only the `providers` group and the two provider keys of the
- * `secrets` group; every other group and field is dropped unread, so a group
- * it does not know never makes the provider unreadable. Keys stay unchecked
- * here, so a malformed key of a provider that is not active does not matter.
+ * `secrets` group; every other group, and every other field of `secrets`, is
+ * dropped unread, so a group it does not know never makes a provider
+ * unreadable. The `providers` group, with its `lmStudio` and `ollama`
+ * servers, follows the rules the desktop host reads it by, so the backend
+ * never reaches a provider from a `providers` group the host refuses: a field
+ * the group or one of those servers does not have is refused; `enabled`, when
+ * present, is a list naming each provider at most once, and an empty list
+ * turns every provider off; `active`, when present, names a provider even
+ * when `enabled` makes it unused. Keys stay unchecked here, so a malformed
+ * key of another provider than the one read does not matter.
  */
 const providerSettingsDocumentSchema = z.object({
   providers: z
-    .object({
+    .strictObject({
+      enabled: llmProviderSettingsSchema.unwrap().shape.enabled.optional(),
       active: llmProviderSchema.optional(),
       lmStudio: z
-        .object({ address: providerAddressSchema.nullable().optional() })
+        .strictObject({ address: providerAddressSchema.nullable().optional() })
         .optional(),
       ollama: z
-        .object({ address: providerAddressSchema.nullable().optional() })
+        .strictObject({ address: providerAddressSchema.nullable().optional() })
         .optional()
     })
     .optional(),
@@ -73,26 +93,25 @@ const providerSettingsDocumentSchema = z.object({
 /** The part of the settings document this reader uses. */
 type ProviderSettingsDocument = z.infer<typeof providerSettingsDocumentSchema>
 
+/** What this reader takes from a missing file: no group, so the defaults. */
+const MISSING_PROVIDER_SETTINGS_DOCUMENT: ProviderSettingsDocument =
+  Object.freeze({})
+
 /** Read result when the file cannot be read as a settings document. */
 const UNREADABLE_SETTINGS: LlmProviderAccessRead = Object.freeze({
   status: "unreadable"
 })
 
-/** Read result when the file names no provider: LM Studio at its default. */
-const DEFAULT_PROVIDER: LlmProviderAccessRead = Object.freeze({
-  status: "configured",
-  access: Object.freeze({
-    provider: "lmStudio",
-    address: DEFAULT_LM_STUDIO_ADDRESS
-  })
-})
+/** Read result for a provider that is not on. */
+const OFF_PROVIDER: LlmProviderAccessRead = Object.freeze({ status: "off" })
 
 /**
- * Reads how to reach the active provider from the desktop's settings file.
+ * Reads how to reach one provider from the desktop's settings file.
  *
  * @param settingsFilePath - Absolute path of `settings.json`.
- * @returns What the file holds, as {@link LlmProviderAccessRead} describes.
- * Each call reads the file again.
+ * @param provider - Provider to read.
+ * @returns What the file holds for the provider, as
+ * {@link LlmProviderAccessRead} describes. Each call reads the file again.
  * @throws Only when closing the opened file fails.
  * @remarks Reads at most the bytes {@link readSettingsFileText} allows and
  * never writes. Parse failures are dropped, because JSON parse messages quote
@@ -100,37 +119,46 @@ const DEFAULT_PROVIDER: LlmProviderAccessRead = Object.freeze({
  * atomically, so a read sees a whole document.
  */
 export async function readLlmProviderAccess(
-  settingsFilePath: string
+  settingsFilePath: string,
+  provider: LlmProvider
 ): Promise<LlmProviderAccessRead> {
   const file = await readSettingsFileText(settingsFilePath)
   switch (file.status) {
     case "missing":
-      return DEFAULT_PROVIDER
+      return buildLlmProviderAccessRead(
+        MISSING_PROVIDER_SETTINGS_DOCUMENT,
+        provider
+      )
     case "unreadable":
       return UNREADABLE_SETTINGS
     case "read":
-      return parseLlmProviderAccess(file.text)
+      return parseLlmProviderAccess(file.text, provider)
   }
 }
 
 /**
- * Finds how to reach the active provider, for a connection attempt.
+ * Finds how to reach one provider, for a connection attempt.
  *
  * @param settingsFilePath - Absolute path of `settings.json`.
- * @returns The access {@link readLlmProviderAccess} finds configured.
- * @throws `The active model provider has no saved API key.` naming the
- * provider, or `The settings file could not be read.`; neither holds file
- * text or a key.
+ * @param provider - Provider to find.
+ * @returns The access {@link readLlmProviderAccess} finds configured, or
+ * undefined when the provider is off.
+ * @throws `The model provider is on but has no saved API key.`, whose cause
+ * names the provider, or `The settings file could not be read.`; neither
+ * holds file text or a key.
  */
 export async function findLlmProviderAccess(
-  settingsFilePath: string
-): Promise<LlmProviderAccess> {
-  const read = await readLlmProviderAccess(settingsFilePath)
+  settingsFilePath: string,
+  provider: LlmProvider
+): Promise<LlmProviderAccess | undefined> {
+  const read = await readLlmProviderAccess(settingsFilePath, provider)
   switch (read.status) {
     case "configured":
       return read.access
+    case "off":
+      return undefined
     case "missing-key":
-      throw new Error("The active model provider has no saved API key.", {
+      throw new Error("The model provider is on but has no saved API key.", {
         cause: new Error(`No API key is saved for ${read.provider}.`)
       })
     case "unreadable":
@@ -139,16 +167,39 @@ export async function findLlmProviderAccess(
 }
 
 /**
- * Parses the active provider out of settings file text.
+ * Parses one provider's access out of settings file text.
  *
  * @param text - Text of the settings file.
- * @returns The provider's access, `missing-key`, or `unreadable`.
+ * @param provider - Provider to read.
+ * @returns The provider's access, `off`, `missing-key`, or `unreadable`.
  */
-function parseLlmProviderAccess(text: string): LlmProviderAccessRead {
+function parseLlmProviderAccess(
+  text: string,
+  provider: LlmProvider
+): LlmProviderAccessRead {
   const document = parseProviderSettingsDocument(text)
   if (document === undefined) return UNREADABLE_SETTINGS
+  return buildLlmProviderAccessRead(document, provider)
+}
+
+/**
+ * Builds what the settings say about one provider.
+ *
+ * @param document - The part of the settings document this reader uses.
+ * @param provider - Provider to read.
+ * @returns `off` when the provider is not on; otherwise its access at the
+ * saved or default address, or with its saved key, `missing-key`, or
+ * `unreadable` for a key that fails the key rule.
+ */
+function buildLlmProviderAccessRead(
+  document: ProviderSettingsDocument,
+  provider: LlmProvider
+): LlmProviderAccessRead {
+  if (!listEnabledLlmProviders(document).includes(provider)) {
+    return OFF_PROVIDER
+  }
   const providers = document.providers
-  switch (providers?.active ?? "lmStudio") {
+  switch (provider) {
     case "lmStudio":
       return buildConfiguredRead({
         provider: "lmStudio",
@@ -164,6 +215,22 @@ function parseLlmProviderAccess(text: string): LlmProviderAccessRead {
     case "groq":
       return parseGroqAccess(document.secrets?.groqApiKey)
   }
+}
+
+/**
+ * Lists the providers the settings turn on.
+ *
+ * @param document - The part of the settings document this reader uses.
+ * @returns The `enabled` list when the file has one; otherwise the one
+ * provider `active` names, LM Studio when it names none or the group is
+ * missing, as a file saved before several providers could be on means.
+ */
+function listEnabledLlmProviders(
+  document: ProviderSettingsDocument
+): readonly LlmProvider[] {
+  const providers = document.providers
+  if (providers?.enabled !== undefined) return providers.enabled
+  return [providers?.active ?? "lmStudio"]
 }
 
 /**
@@ -201,7 +268,7 @@ function parseGroqAccess(value: unknown): LlmProviderAccessRead {
 /**
  * Wraps an access in a frozen `configured` result.
  *
- * @param access - How to reach the active provider.
+ * @param access - How to reach the provider.
  * @returns The frozen result.
  */
 function buildConfiguredRead(access: LlmProviderAccess): LlmProviderAccessRead {

@@ -39,14 +39,16 @@ const GROQ_ACCESS: LlmProviderAccess = Object.freeze({
  * borrows; each acquired double is presented as a runtime whose models Lys
  * loads.
  * @param findLlmProviderAccess - Saved-provider lookup the service borrows;
- * LM Studio at its default address unless a case supplies another.
+ * LM Studio on at its default address unless a case supplies another, and
+ * undefined for a provider that is off.
  * @returns The ready service, which holds no runtime until it connects, and
  * both failure reporters.
  */
 function createService(
   acquireLlmRuntime: (access: LlmProviderAccess) => Promise<FakeLlmRuntime>,
-  findLlmProviderAccess: () => Promise<LlmProviderAccess> = async () =>
-    LM_STUDIO_ACCESS
+  findLlmProviderAccess: () => Promise<
+    LlmProviderAccess | undefined
+  > = async () => LM_STUDIO_ACCESS
 ) {
   const reportLlmRuntimeAcquisitionFailure = vi.fn<(failure: unknown) => void>()
   const reportLlmRuntimeAvailabilityCheckFailure =
@@ -405,6 +407,107 @@ describe("LlmRuntimeService", () => {
       ).toHaveBeenCalledExactlyOnceWith(findingFailure)
     })
 
+    it("resolves off without acquiring or reporting anything for a provider that is off", async () => {
+      const acquireLlmRuntime = vi.fn(async () => createFakeLlmRuntime())
+      const created = createService(acquireLlmRuntime, async () => undefined)
+
+      expect(await created.service.connectLlmRuntime()).toBe("off")
+
+      expect(created.service.llmRuntimeConnectionStatus).toBe("off")
+      expect(created.service.connectedLlmProviderAccess).toBeUndefined()
+      expect(acquireLlmRuntime).not.toHaveBeenCalled()
+      expect(created.reportLlmRuntimeAcquisitionFailure).not.toHaveBeenCalled()
+      expect(
+        created.reportLlmRuntimeAvailabilityCheckFailure
+      ).not.toHaveBeenCalled()
+    })
+
+    it("releases the held runtime without probing it or reporting a failure when the provider is turned off", async () => {
+      const runtime = createFakeLlmRuntime()
+      const acquireLlmRuntime = vi.fn(async () => runtime)
+      const findLlmProviderAccess = vi
+        .fn<() => Promise<LlmProviderAccess | undefined>>()
+        .mockResolvedValueOnce(LM_STUDIO_ACCESS)
+        .mockResolvedValueOnce(undefined)
+      const created = createService(acquireLlmRuntime, findLlmProviderAccess)
+      await created.service.connectLlmRuntime()
+
+      expect(await created.service.connectLlmRuntime()).toBe("off")
+
+      expect(created.service.llmRuntimeConnectionStatus).toBe("off")
+      expect(runtime.getRuntimeAvailability).not.toHaveBeenCalled()
+      expect(runtime[Symbol.asyncDispose]).toHaveBeenCalledOnce()
+      expect(acquireLlmRuntime).toHaveBeenCalledOnce()
+      expect(created.service.connectedLlmProviderAccess).toBeUndefined()
+      expect(created.reportLlmRuntimeAcquisitionFailure).not.toHaveBeenCalled()
+    })
+
+    it("rejects with the release failure and leaves the status unreachable when releasing for a provider turned off fails", async () => {
+      const runtime = createFakeLlmRuntime()
+      const releaseFailure = new Error(
+        "The LLM runtime could not release its resources."
+      )
+      runtime[Symbol.asyncDispose].mockRejectedValue(releaseFailure)
+      const findLlmProviderAccess = vi
+        .fn<() => Promise<LlmProviderAccess | undefined>>()
+        .mockResolvedValueOnce(LM_STUDIO_ACCESS)
+        .mockResolvedValueOnce(undefined)
+      const created = createService(async () => runtime, findLlmProviderAccess)
+      await created.service.connectLlmRuntime()
+
+      await expect(created.service.connectLlmRuntime()).rejects.toBe(
+        releaseFailure
+      )
+
+      expect(created.service.llmRuntimeConnectionStatus).toBe("unreachable")
+      expect(created.service.connectedLlmProviderAccess).toBeUndefined()
+    })
+
+    it("acquires a runtime once a provider that was off is turned on", async () => {
+      const runtime = createFakeLlmRuntime()
+      const acquireLlmRuntime = vi.fn(async () => runtime)
+      const findLlmProviderAccess = vi
+        .fn<() => Promise<LlmProviderAccess | undefined>>()
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(GROQ_ACCESS)
+      const { service } = createService(
+        acquireLlmRuntime,
+        findLlmProviderAccess
+      )
+      expect(await service.connectLlmRuntime()).toBe("off")
+
+      expect(await service.connectLlmRuntime()).toBe("connected")
+
+      expect(acquireLlmRuntime).toHaveBeenCalledExactlyOnceWith(GROQ_ACCESS)
+      expect(service.connectedLlmProviderAccess).toBe(GROQ_ACCESS)
+    })
+
+    it("does not join a running attempt when the call finds the provider off", async () => {
+      const runtime = createFakeLlmRuntime()
+      const acquisition = Promise.withResolvers<FakeLlmRuntime>()
+      const acquireLlmRuntime = vi
+        .fn<(access: LlmProviderAccess) => Promise<FakeLlmRuntime>>()
+        .mockReturnValue(acquisition.promise)
+      const findLlmProviderAccess = vi
+        .fn<() => Promise<LlmProviderAccess | undefined>>()
+        .mockResolvedValueOnce(LM_STUDIO_ACCESS)
+        .mockResolvedValue(undefined)
+      const created = createService(acquireLlmRuntime, findLlmProviderAccess)
+
+      const first = created.service.connectLlmRuntime()
+      await waitForMicrotasks()
+      const second = created.service.connectLlmRuntime()
+      await waitForMicrotasks()
+      acquisition.resolve(runtime)
+
+      await expect(first).resolves.toBe("connected")
+      await expect(second).resolves.toBe("off")
+      expect(findLlmProviderAccess).toHaveBeenCalledTimes(3)
+      expect(runtime[Symbol.asyncDispose]).toHaveBeenCalledOnce()
+      expect(created.service.llmRuntimeConnectionStatus).toBe("off")
+      expect(created.reportLlmRuntimeAcquisitionFailure).not.toHaveBeenCalled()
+    })
+
     it("keeps a held runtime that still answers", async () => {
       const { service, runtime, acquireLlmRuntime } =
         await createConnectedService()
@@ -711,6 +814,25 @@ describe("LlmRuntimeService", () => {
   })
 
   describe("model operations", () => {
+    it("refuses an operation with the runtime-unavailable error without running it while the provider is off", async () => {
+      const { service } = createService(
+        async () => createFakeLlmRuntime(),
+        async () => undefined
+      )
+      await service.connectLlmRuntime()
+      const operation = vi.fn<LlmEngineOperation<string>>(async () => "ran")
+
+      const refused = await service
+        .handleLlmEngineOperationRequest(operation)
+        .then(
+          () => "accepted",
+          (error: unknown) => error
+        )
+
+      expect(isLlmRuntimeUnavailableError(refused)).toBe(true)
+      expect(operation).not.toHaveBeenCalled()
+    })
+
     it.each([
       ["before any attempt settles", false],
       ["after a failed acquisition", true]

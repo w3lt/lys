@@ -65,7 +65,7 @@ export type SettingsGroupSaves = {
   /**
    * Saves the providers group after every save sent earlier has settled.
    *
-   * @param providers - Provider choice and addresses to persist.
+   * @param providers - Providers that are on and addresses to persist.
    * @returns Resolves after the settings file is written, and rejects with
    * the native load or save rejection.
    */

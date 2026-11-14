@@ -1,4 +1,4 @@
-import type { OpenAIFunctionTool } from "@lys/share"
+import type { LlmModelReference, OpenAIFunctionTool } from "@lys/share"
 import type { ReplyContextImageSides, ReplyContextMessage } from "./replyModel"
 
 /** Context, offered tools, and model of one request to the model. */
@@ -10,8 +10,11 @@ export type ReplyContextMeasurementRequest = Readonly<{
   messages: readonly ReplyContextMessage<ReplyContextImageSides>[]
   /** Tools offered with the context, in offer order; empty when none are. */
   tools: readonly OpenAIFunctionTool[]
-  /** Identifier of the model the request is sent to. */
-  model: string
+  /**
+   * Model the request is sent to; it is measured on its provider's loaded
+   * model.
+   */
+  model: LlmModelReference
 }>
 
 /**

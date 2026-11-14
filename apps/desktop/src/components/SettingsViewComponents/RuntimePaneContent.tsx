@@ -1,14 +1,19 @@
+import type { LlmProvider } from "@lys/share"
 import type { ReactElement } from "react"
 import BackendStatusCard from "./BackendStatusCard"
-import LmStudioStatusCard from "./LmStudioStatusCard"
 import ModelRequestFeedback from "./ModelRequestFeedback"
 import ModelResidencyCard from "./ModelResidencyCard"
+import ProviderStatusCard from "./ProviderStatusCard"
 import StartupSwitchSaveStatus from "./StartupSwitchSaveStatus"
 import VmoStatusCard from "./VmoStatusCard"
 import { useBackendUptimeMs } from "@/lib/hooks/backendRuntime"
-import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
-import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
+import { useNewConversationModel } from "@/lib/hooks/conversationModel"
+import { calculateProviderAvailability } from "@/lib/models/provider-connection"
 import { useLysStore } from "@/lib/store"
+import {
+  RELEASED_PROVIDER_MODELS,
+  type ProviderModelState
+} from "@/lib/store/model-runtime"
 
 import { useSettingsContext } from "./SettingsContext"
 
@@ -79,59 +84,73 @@ function ProcessCardGroup(): ReactElement {
 }
 
 /**
- * Presents the active provider's card and, under it, the model card with the
- * model request feedback.
+ * Presents the provider connections card and, under it, the card of the
+ * model a new conversation uses, with the model request feedback.
  *
- * @remarks The application store owns the backend and provider status and
- * the connect command; the settings context owns the provider choice, the
- * default model, the model state, and the load and unload requests, and must
- * be provided. Refresh, Load, and Unload intentionally discard their promises
- * with `void`; their stores own each request's completion, and the model
- * request feedback, rendered last in the model card, reports the model
- * requests. The group renders no host of its own, so each card takes its
- * place in the pane's stack.
- * @returns The LM Studio and model cards.
+ * @remarks The application store owns the backend and provider statuses, the
+ * saved providers, keys, and default model, the connect, load, and unload
+ * commands, and the pane the settings view shows. Refresh connects again to each
+ * provider the card lists; Open Providers shows the Providers pane. Refresh,
+ * Load, and Unload intentionally discard their promises with `void`; the
+ * store owns each request's completion, and the model request feedback,
+ * rendered last in the model card, reports the model requests. The model
+ * card shows the session's default model, or without one the first model
+ * that can answer, with its provider's inventory and request; with neither,
+ * a released provider's. The group renders no host of its own, so each card
+ * takes its place in the pane's stack.
+ * @returns The provider and model cards.
  */
 function ModelRuntimeCardGroup(): ReactElement {
   const backendStatus = useLysStore((state) => state.backendServerInfo.status)
-  const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
-  const connectLmStudio = useLysStore((state) => state.connectLmStudio)
-  const {
-    settings,
-    modelRuntime,
-    modelRequest,
-    modelInventory,
-    onLoadModel,
-    onUnloadModel
-  } = useSettingsContext()
-  const availability = calculateModelRuntimeAvailability(
-    backendStatus,
-    lmStudioStatus
-  )
-  const provider = describeLlmProviderTarget(settings.providers)
+  const providers = useLysStore((state) => state.settings.providers)
+  const secrets = useLysStore((state) => state.settings.secrets)
+  const providerModels = useLysStore((state) => state.providerModels)
+  const { model, availability } = useNewConversationModel()
+  const connectProvider = useLysStore((state) => state.connectProvider)
+  const loadModel = useLysStore((state) => state.loadModel)
+  const unloadModel = useLysStore((state) => state.unloadModel)
+  const setSettingsPane = useLysStore((state) => state.setSettingsPane)
+  const modelProviderModels: Omit<ProviderModelState, "status"> =
+    model === null ? RELEASED_PROVIDER_MODELS : providerModels[model.provider]
+  const isProviderAvailable =
+    model !== null &&
+    calculateProviderAvailability(
+      { backendStatus, enabledProviders: providers.enabled, providerModels },
+      model.provider
+    ) === "available"
+
+  /**
+   * Connects again to each provider Refresh lists.
+   *
+   * @param refreshed - Providers to connect to again.
+   */
+  function handleRefreshProviders(refreshed: readonly LlmProvider[]): void {
+    for (const provider of refreshed) void connectProvider(provider)
+  }
 
   return (
     <>
-      <LmStudioStatusCard
+      <ProviderStatusCard
         backendStatus={backendStatus}
-        provider={provider}
-        lmStudioStatus={lmStudioStatus}
-        onRefreshLmStudioStatus={() => {
-          void connectLmStudio()
+        onOpenProviders={() => {
+          setSettingsPane("providers")
         }}
+        onRefreshProviders={handleRefreshProviders}
+        providerModels={providerModels}
+        providers={providers}
+        secrets={secrets}
       />
       <ModelResidencyCard
         availability={availability}
-        provider={provider}
-        defaultModel={settings.runtime.defaultModel}
-        modelInventory={modelInventory}
-        modelRequest={modelRequest}
-        modelRuntime={modelRuntime}
-        onLoadModel={(modelKey) => {
-          void onLoadModel(modelKey)
+        isProviderAvailable={isProviderAvailable}
+        model={model}
+        modelInventory={modelProviderModels.inventory}
+        modelRequest={modelProviderModels.request}
+        onLoadModel={(loaded) => {
+          void loadModel(loaded)
         }}
-        onUnloadModel={(modelKey) => {
-          void onUnloadModel(modelKey)
+        onUnloadModel={(unloaded) => {
+          void unloadModel(unloaded)
         }}
       >
         <ModelRequestFeedback />
@@ -142,14 +161,15 @@ function ModelRuntimeCardGroup(): ReactElement {
 
 /**
  * Presents the Runtime pane: Lys's backend and vmo with their startup
- * switches, then LM Studio and the model weights.
+ * switches, then the turned-on providers and the weights of the model a new
+ * conversation uses.
  *
  * @remarks The pane accepts no props and is loaded lazily by the settings
  * view, under the settings context. It owns the stack and the order of its
  * parts: the backend card, the vmo card under it, the save status of both
- * startup switches, the LM Studio card, which owns the only reconnect
- * action, and the model card. Each group selects only the application store
- * and settings context state its cards show.
+ * startup switches, the provider connections card, which owns the only
+ * reconnect action, and the model card. Each group selects only the
+ * application store and settings context state its cards show.
  * @returns The Runtime pane body.
  */
 export default function RuntimePaneContent(): ReactElement {

@@ -11,11 +11,21 @@ import type {
 } from "fastify"
 import * as z from "zod"
 import type { LlmModelStopper } from "../llmModelCapabilities"
-import type { LlmModelStopDiagnostic } from "../stopLlmModelsByKey"
+import type {
+  LlmModelStopDiagnostic,
+  StopLlmModelsByKeyOutcome
+} from "../stopLlmModelsByKey"
 import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
+import { buildLlmRouteValidatorCompiler } from "./llmRouteValidation"
 
 /** Level of the log lines about the diagnostics of one stop outcome. */
 type LlmModelStopDiagnosticLevel = "warn" | "error"
+
+/** Outcome of a stop after which instances of the model are still loaded. */
+type FailedLlmModelStopOutcome = Extract<
+  StopLlmModelsByKeyOutcome,
+  { status: "stop-failed" }
+>
 
 /**
  * Fields that name what the log line about a diagnostic is about, besides the
@@ -46,9 +56,11 @@ const LLM_MODEL_STOP_DIAGNOSTIC_MESSAGES: Readonly<
  * @returns A promise that resolves after the route is added.
  * @throws If Fastify cannot register the route. The failure rejects the
  * promise rather than escaping the call synchronously.
- * @remarks Refused queue admission returns service-busy Problem Details, a
- * missing or lost LLM runtime connection returns runtime-unavailable Problem
- * Details, and a connected provider that loads its own models returns
+ * @remarks The model is stopped on the provider the path names; a path
+ * naming no known provider is refused with 400 before the handler runs.
+ * Refused queue admission returns service-busy Problem Details, a missing or
+ * lost LLM runtime connection of the provider returns runtime-unavailable
+ * Problem Details, and a provider that loads its own models returns
  * provider-loads-models Problem Details. Other service rejections remain
  * owned by Fastify's parent error boundary.
  */
@@ -68,12 +80,13 @@ export default function updateFastifyWithLlmModelUnloadRoute(
  * @throws If Fastify cannot register the route.
  */
 function registerLlmModelUnloadRoute(app: FastifyInstance): void {
-  const llmModelStopper: LlmModelStopper = app.llmService
+  const llmProviderServices = app.llmProviderServices
 
   app.route<LlmUnloadModelApiRoute>({
     method: llmUnloadModelApi.method,
     url: llmUnloadModelApi.path,
     schema: {
+      params: z.toJSONSchema(llmUnloadModelApi.params, { target: "draft-7" }),
       body: llmUnloadModelApi.body,
       response: {
         404: z.toJSONSchema(llmUnloadModelApi.responses[404], {
@@ -87,15 +100,17 @@ function registerLlmModelUnloadRoute(app: FastifyInstance): void {
         })
       }
     },
-    validatorCompiler: () => (data) => {
-      const bodyValidationResult = llmUnloadModelApi.body.safeParse(data)
-      return bodyValidationResult.success
-        ? { value: bodyValidationResult.data }
-        : { error: bodyValidationResult.error }
-    },
+    validatorCompiler: buildLlmRouteValidatorCompiler({
+      params: llmUnloadModelApi.params,
+      body: llmUnloadModelApi.body
+    }),
     errorHandler: handleLlmServiceRequestFailure,
     handler: async (request, reply) =>
-      await handleLlmModelUnloadRequest(request, reply, llmModelStopper)
+      await handleLlmModelUnloadRequest(
+        request,
+        reply,
+        llmProviderServices[request.params.provider].llmService
+      )
   })
 }
 
@@ -104,18 +119,21 @@ function registerLlmModelUnloadRoute(app: FastifyInstance): void {
  *
  * @param request - Validated request containing the canonical model key.
  * @param reply - Fastify reply used for status-specific responses.
- * @param llmModelStopper - Application capability that performs the reconciled stop.
+ * @param llmModelStopper - Application capability of the provider the path
+ * names that performs the reconciled stop.
  * @returns A promise that resolves after a response is sent.
  * @throws If admission is refused, no LLM runtime is connected, or
  * application cleanup has begun. The route boundary translates only the
  * recognized service-busy and runtime-unavailable failures.
  * @remarks Each diagnostic of the outcome is written to the request logger
  * before the HTTP outcome is sent, with its retained failure as `err`, the
- * canonical model key as `modelKey`, the failed `operation`, and, for a stop
+ * provider as `provider`, the canonical model key as `modelKey`, the failed
+ * `operation`, and, for a stop
  * command, its `modelIdentifier`: at warn level when the stop reconciled
  * anyway, and at error level for the runtime-unavailable and stop-failed
- * outcomes. A stop-failed outcome also logs its `remainingModelIdentifiers`
- * at error level. No failure detail reaches the response body.
+ * outcomes. A stop-failed outcome also logs its `remainingModelIdentifiers`,
+ * with the provider and the model key, at error level. No failure detail
+ * reaches the response body.
  */
 async function handleLlmModelUnloadRequest(
   request: FastifyRequest<LlmUnloadModelApiRoute>,
@@ -124,7 +142,10 @@ async function handleLlmModelUnloadRequest(
 ): Promise<void> {
   const { modelId: modelKey } = request.body
   const stopOutcome = await llmModelStopper.stopLlmModelsByKey(modelKey)
-  const modelLogger = request.log.child({ modelKey })
+  const modelLogger = request.log.child({
+    provider: request.params.provider,
+    modelKey
+  })
 
   switch (stopOutcome.status) {
     case "stopped": {
@@ -162,18 +183,7 @@ async function handleLlmModelUnloadRequest(
       return
     }
     case "stop-failed": {
-      reportLlmModelStopDiagnostics(
-        stopOutcome.diagnostics,
-        modelLogger,
-        "error"
-      )
-      request.log.error(
-        {
-          modelKey,
-          remainingModelIdentifiers: stopOutcome.remainingModelIdentifiers
-        },
-        "LLM model instances remain loaded after stop reconciliation"
-      )
+      reportFailedLlmModelStop(stopOutcome, modelLogger)
 
       const problem = createLlmUnloadProblem({
         reason: "unload-failed",
@@ -187,12 +197,35 @@ async function handleLlmModelUnloadRequest(
 }
 
 /**
+ * Reports a stop after which instances of the model are still loaded: each
+ * diagnostic of the outcome, then the runtime identifiers still loaded, all
+ * at error level.
+ *
+ * @param outcome - Stop-failed outcome, with its diagnostics and remaining
+ * runtime identifiers.
+ * @param modelLogger - Request logger that names the provider and the
+ * canonical model key of the stop, as `provider` and `modelKey`, on every
+ * line.
+ */
+function reportFailedLlmModelStop(
+  outcome: FailedLlmModelStopOutcome,
+  modelLogger: FastifyBaseLogger
+): void {
+  reportLlmModelStopDiagnostics(outcome.diagnostics, modelLogger, "error")
+  modelLogger.error(
+    { remainingModelIdentifiers: outcome.remainingModelIdentifiers },
+    "LLM model instances remain loaded after stop reconciliation"
+  )
+}
+
+/**
  * Reports each diagnostic of a stop outcome through a structured logger, in
  * the outcome's order.
  *
  * @param diagnostics - Diagnostics of the outcome, each retaining its failure.
- * @param modelLogger - Request logger that names the canonical model key whose
- * stop the diagnostics belong to, as `modelKey`, on every line.
+ * @param modelLogger - Request logger that names the provider and the
+ * canonical model key whose stop the diagnostics belong to, as `provider` and
+ * `modelKey`, on every line.
  * @param level - Level of each line.
  */
 function reportLlmModelStopDiagnostics(

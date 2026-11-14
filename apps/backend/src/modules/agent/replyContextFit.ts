@@ -1,3 +1,4 @@
+import { LLM_PROVIDER_NAMES, type LlmModelReference } from "@lys/share"
 import type { ReplyContextMeasurement } from "./replyContextMeter"
 
 /**
@@ -14,10 +15,12 @@ export class ReplyModelNotLoadedError extends Error {
   /**
    * Creates the failure for one refused round.
    *
-   * @param model - Identifier the turn names.
+   * @param model - Model the turn names, and its provider.
    */
-  public constructor(model: string) {
-    super(`The model "${model}" is not loaded`)
+  public constructor(model: LlmModelReference) {
+    super(
+      `The model "${model.modelKey}" is not loaded on ${LLM_PROVIDER_NAMES[model.provider]}`
+    )
   }
 }
 
@@ -72,8 +75,8 @@ export class ReplyContextOverflowError extends Error {
 export type ReplyRoundContext = Readonly<{
   /** Measured context, or undefined when the model is not loaded. */
   measurement: ReplyContextMeasurement | undefined
-  /** Identifier of the model the round is sent to. */
-  model: string
+  /** Model the round is sent to, and its provider. */
+  model: LlmModelReference
   /**
    * Tokens held back for the reply: the reply ceiling, or 0 when the reply
    * has none.

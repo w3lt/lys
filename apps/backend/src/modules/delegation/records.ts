@@ -63,11 +63,14 @@ export type EndReport =
       content: string
     }>
   | Readonly<{
-      /**
-       * The reply was interrupted: `stopped` when the person asked it to
-       * stop, and `interrupted` when nobody did.
-       */
-      kind: "stopped" | "interrupted"
+      /** The reply was interrupted because the person asked it to stop. */
+      kind: "stopped"
+      /** Always empty: the reply's end has no text. */
+      content: ""
+    }>
+  | Readonly<{
+      /** The reply was interrupted and nobody asked it to stop. */
+      kind: "interrupted"
       /** Always empty: the reply's end has no text. */
       content: ""
     }>

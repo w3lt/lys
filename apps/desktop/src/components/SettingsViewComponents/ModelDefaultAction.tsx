@@ -1,4 +1,4 @@
-import type { ReactElement } from "react"
+import { useRef, type ReactElement } from "react"
 import { Check } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -10,8 +10,8 @@ export type ModelDefaultActionProps = {
   /** What the footer offers for the selected model. */
   readonly choice: ModelDefaultChoice
   /**
-   * Whether the offered action is disabled, as Load and set as default is
-   * while another request of the provider runs.
+   * Whether the offered action is disabled: always while the model loads,
+   * when Loading… stands in for it.
    */
   readonly isDisabled: boolean
   /** Requests that the model become the default; once per press. */
@@ -39,10 +39,13 @@ function formatModelDefaultNote(choice: ModelDefaultChoice): string {
 /**
  * Offers to make the selected model the session's default.
  *
- * @remarks Presentational. For the default itself it states so with a
- * check instead of a button; while the model loads, a disabled Loading…
- * button stands in for the action. The note says what the default does or
- * why the model must be loaded first.
+ * @remarks Owns whether a press of its button awaits
+ * the mark that replaces it. For the default itself it states so with a
+ * check instead of a button; while the model loads, the button reads
+ * Loading… and is disabled. When the model becomes the default after a
+ * press, the mark replaces the button and takes focus, unless focus moved
+ * elsewhere meanwhile, so focus does not fall back to the document. The
+ * note says what the default does or why the model must be loaded first.
  * @param props - What is offered, whether it is disabled, and the two
  * requests.
  * @returns The footer.
@@ -53,20 +56,45 @@ export default function ModelDefaultAction({
   onSetDefaultModel,
   onLoadDefaultModel
 }: ModelDefaultActionProps): ReactElement {
+  const isMarkFocusPendingRef = useRef(false)
+
+  /** Asks for the offered action, whose success replaces the button. */
+  function handleDefaultClick(): void {
+    isMarkFocusPendingRef.current = true
+    if (choice === "set") onSetDefaultModel()
+    else onLoadDefaultModel()
+  }
+
+  /**
+   * Gives focus to the mark when it replaced a pressed button that held it.
+   *
+   * @param mark - The attached mark, or null when it detaches.
+   */
+  function handleCurrentMarkAttach(mark: HTMLSpanElement | null): void {
+    if (mark === null || !isMarkFocusPendingRef.current) return
+    isMarkFocusPendingRef.current = false
+    const { activeElement, body } = mark.ownerDocument
+    if (activeElement === null || activeElement === body) mark.focus()
+  }
+
   return (
     <div className="settings-view__models-footer">
       <p className="settings-view__models-note">
         {formatModelDefaultNote(choice)}
       </p>
       {choice === "current" ? (
-        <span className="settings-view__models-current">
+        <span
+          className="settings-view__models-current"
+          ref={handleCurrentMarkAttach}
+          tabIndex={-1}
+        >
           <Check aria-hidden="true" />
           Default for new conversations
         </span>
       ) : (
         <Button
-          disabled={isDisabled || choice === "loading"}
-          onClick={choice === "set" ? onSetDefaultModel : onLoadDefaultModel}
+          disabled={isDisabled}
+          onClick={handleDefaultClick}
           type="button"
         >
           {formatModelDefaultLabel(choice)}

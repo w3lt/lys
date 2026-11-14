@@ -15,9 +15,9 @@ import ProviderCard from "./ProviderCard"
  * be on, none included. Saving which providers are on, an address, or a key
  * a turned-on provider uses makes the backend connect to each provider it
  * changed, and that provider's model inventory follows the new connection.
- * Each card shows its own provider's status, and its Test connects to that
- * provider again. The pane accepts no props and is loaded lazily by the
- * settings view.
+ * Each card shows its own provider's status and saves, and its Test
+ * connects to that provider again. The pane accepts no props and is loaded
+ * lazily by the settings view.
  * @returns The providers pane body.
  */
 export default function ProvidersPane(): ReactElement {

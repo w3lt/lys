@@ -8,17 +8,17 @@ import {
   LLM_PROVIDERS,
   ollamaApiKeySchema,
   providerAddressSchema,
-  type GroqApiKey,
   type LlmProvider,
-  type OllamaApiKey,
   type ProviderAddress
 } from "@lys/share"
 
 import {
   DEFAULT_PROVIDER_ADDRESSES,
+  findSavedProviderApiKey,
   type AddressedLlmProvider,
   type KeyedLlmProvider
 } from "@/lib/models/llm-provider-target"
+import { calculateProviderConnectionState } from "@/lib/models/provider-connection"
 import type { BackendServerStatus } from "@/lib/store"
 import type { LlmProviderStatus } from "@/lib/store/model-runtime"
 import type {
@@ -116,13 +116,11 @@ export type ProviderStatusInput = {
   readonly status: LlmProviderStatus
   /** Backend lifecycle state, which explains an `unknown` status. */
   readonly backendStatus: BackendServerStatus
-  /** Latest provider save. */
-  readonly saveState: ProviderSettingsSaveState
   /** The person's edit of the card's field. */
   readonly draft: ProviderFieldDraft
 }
 
-/** One line under a turned-on card's form. */
+/** One line of a provider card: under its form, or its save line. */
 export type ProviderMessage = {
   /** Text of the line. */
   readonly text: string
@@ -189,6 +187,18 @@ const UNSAVED_MESSAGE: ProviderMessage = Object.freeze({
 const INVALID_ADDRESS_MESSAGE: ProviderMessage = Object.freeze({
   text: "not an address: use host:port, such as 127.0.0.1:1234",
   tone: "danger"
+})
+
+/** Save line of a card while its provider's save runs. */
+const SAVING_MESSAGE: ProviderMessage = Object.freeze({
+  text: "saving…",
+  tone: "pending"
+})
+
+/** Save line of a card with no save of its provider to report. */
+const NO_SAVE_MESSAGE: ProviderMessage = Object.freeze({
+  text: "",
+  tone: "muted"
 })
 
 /**
@@ -260,20 +270,6 @@ export function findSavedProviderAddress(
   return provider === "lmStudio"
     ? providers.lmStudio.address
     : providers.ollama.address
-}
-
-/**
- * Finds the key a keyed provider saved.
- *
- * @param provider - Keyed provider.
- * @param secrets - Saved keys.
- * @returns The saved key, or null; a secret.
- */
-export function findSavedProviderApiKey(
-  provider: KeyedLlmProvider,
-  secrets: SecretsSettings
-): OllamaApiKey | GroqApiKey | null {
-  return provider === "ollamaCloud" ? secrets.ollamaApiKey : secrets.groqApiKey
 }
 
 /**
@@ -403,32 +399,16 @@ export function parseProviderKeyDraft(
 }
 
 /**
- * Answers whether a provider needs a key that is not saved.
- *
- * @param access - How the provider is reached.
- * @param secrets - Saved keys.
- * @returns True for a keyed provider without a saved key.
- */
-function isProviderKeyMissing(
-  access: ProviderAccessKind,
-  secrets: SecretsSettings
-): boolean {
-  return (
-    access.kind === "key" &&
-    findSavedProviderApiKey(access.provider, secrets) === null
-  )
-}
-
-/**
  * Calculates a provider card's badge.
  *
  * @param provider - Provider the card presents.
  * @param providers - Saved providers.
  * @param secrets - Saved keys.
  * @param status - Latest published connection status of the provider.
- * @returns `off` for a provider the saved settings leave off, or that the
- * backend reports off; `needs key` for a turned-on keyed provider without
- * its key; otherwise the connection status, `unknown` while it is not known.
+ * @returns `off` for a provider the saved settings leave off; for a
+ * turned-on one, `needs key` while it needs a key it lacks, whatever its
+ * status, and otherwise its status: `off` when the backend reports it off,
+ * `unknown` while it is not known.
  */
 export function calculateProviderBadge(
   provider: LlmProvider,
@@ -437,9 +417,9 @@ export function calculateProviderBadge(
   status: LlmProviderStatus
 ): ProviderBadge {
   if (!isProviderOn(provider, providers)) return { label: "off", tone: "muted" }
-  if (isProviderKeyMissing(findProviderAccessKind(provider), secrets))
-    return { label: "needs key", tone: "attention" }
-  switch (status) {
+  switch (calculateProviderConnectionState(provider, status, secrets)) {
+    case "needs-key":
+      return { label: "needs key", tone: "attention" }
     case "off":
       return { label: "off", tone: "muted" }
     case "unknown":
@@ -565,25 +545,55 @@ function formatDraftMessage(
 /**
  * Formats the line under a turned-on card's form.
  *
- * @param input - Access, saved settings, connection, save, and edit.
- * @returns, in order of precedence: what an edit means; a running or failed
- * save; a missing key; then the connection status.
+ * @param input - Access, saved settings, connection, and edit.
+ * @returns, in order of precedence: what an edit means; a missing key,
+ * whatever the connection status; then the connection status. A save is
+ * reported on the card's save line instead.
  */
 export function formatProviderMessage(
   input: ProviderStatusInput
 ): ProviderMessage {
   const draftMessage = formatDraftMessage(input)
   if (draftMessage !== undefined) return draftMessage
-  if (input.saveState.status === "saving")
-    return { text: "saving…", tone: "pending" }
-  if (input.saveState.status === "failed")
-    return { text: input.saveState.error, tone: "danger" }
-  if (isProviderKeyMissing(input.access, input.secrets)) {
-    const name = LLM_PROVIDER_NAMES[input.access.provider]
+  const { access, status, secrets } = input
+  const state = calculateProviderConnectionState(
+    access.provider,
+    status,
+    secrets
+  )
+  if (state === "needs-key") {
+    const name = LLM_PROVIDER_NAMES[access.provider]
     return {
       text: `No key yet. Lys can't reach ${name} until there is one.`,
       tone: "attention"
     }
   }
-  return formatConnectionMessage(input)
+  return formatConnectionMessage({ ...input, status: state })
+}
+
+/**
+ * Formats a card's save line.
+ *
+ * @param provider - Provider the card presents.
+ * @param saveState - Latest provider save, which names the provider it was
+ * for.
+ * @returns While a save for `provider` runs, that it is saving; after one
+ * failed, why; otherwise an empty line, as for a save of another provider or
+ * one that succeeded, whose effect the card shows.
+ */
+export function formatProviderSaveMessage(
+  provider: LlmProvider,
+  saveState: ProviderSettingsSaveState
+): ProviderMessage {
+  switch (saveState.status) {
+    case "idle":
+    case "saved":
+      return NO_SAVE_MESSAGE
+    case "saving":
+      return saveState.provider === provider ? SAVING_MESSAGE : NO_SAVE_MESSAGE
+    case "failed":
+      return saveState.provider === provider
+        ? { text: saveState.error, tone: "danger" }
+        : NO_SAVE_MESSAGE
+  }
 }

@@ -7,30 +7,45 @@ import type {
   LoadConfigurationSettings
 } from "@/lib/store/settings"
 
-/** Largest evaluation batch size the Model pane accepts, in tokens. */
+/** Largest evaluation batch size the Models pane accepts, in tokens. */
 export const MAXIMUM_EVAL_BATCH_SIZE = 8192
+
+/**
+ * Sentence under a model's context length naming what is measured against
+ * it, for every provider whose context length the Models pane shows.
+ */
+export const MEASURED_CONTEXT_NOTE =
+  "The composer’s context meter and the Agents pane measure against this length."
+
+/** A change to one model's stored load settings, as the Models pane shows it. */
+export type ModelLoadChange = {
+  /** Key of the model. */
+  readonly modelKey: string
+  /** Whether the model is loaded. */
+  readonly isLoaded: boolean
+  /**
+   * Settings the change is measured from: the ones a loaded model runs with,
+   * or the ones a model not loaded had when it was shown.
+   */
+  readonly baseline: CompleteModelLoadConfiguration
+  /** Settings the model would be loaded with now. */
+  readonly stored: CompleteModelLoadConfiguration
+}
 
 /**
  * Formats the note shown after a model's stored load settings changed.
  *
- * @param modelKey - Key of the model.
- * @param isLoaded - Whether the model is loaded.
- * @param baseline - Settings the change is measured from: the ones a loaded
- * model runs with, or the ones a model not loaded had when it was shown.
- * @param stored - Settings the model would be loaded with now.
+ * @param change - The model, whether it is loaded, and the settings compared.
  * @returns Null when nothing differs; else that the change is saved, and
  * that a loaded model applies it once reloaded and a model not loaded when
  * it is loaded.
  */
 export function formatModelLoadChangeNote(
-  modelKey: string,
-  isLoaded: boolean,
-  baseline: CompleteModelLoadConfiguration,
-  stored: CompleteModelLoadConfiguration
+  change: ModelLoadChange
 ): string | null {
-  if (isModelLoadConfigurationEqual(baseline, stored)) return null
-  return isLoaded
-    ? `Saved. Reload ${modelKey} to apply it.`
+  if (isModelLoadConfigurationEqual(change.baseline, change.stored)) return null
+  return change.isLoaded
+    ? `Saved. Reload ${change.modelKey} to apply it.`
     : "Saved. Applies when you load it."
 }
 

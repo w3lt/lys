@@ -8,8 +8,9 @@ import type {
   LlmProviderStatus,
   ProviderModelStates
 } from "@/lib/store/model-runtime"
-import type { ProvidersSettings } from "@/lib/store/settings"
+import type { ProvidersSettings, SecretsSettings } from "@/lib/store/settings"
 import { buildProviderModelStates } from "../../support/providerModelFixtures"
+import { STORED_SETTINGS } from "../../support/settingsFixtures"
 
 /** What one rendered card shows. */
 type ProviderStatusArrangement = {
@@ -19,6 +20,8 @@ type ProviderStatusArrangement = {
   readonly statuses: Readonly<Partial<Record<LlmProvider, LlmProviderStatus>>>
   /** Backend lifecycle state. */
   readonly backendStatus: BackendServerStatus
+  /** Saved keys; the stored ones, with a Groq key, when omitted. */
+  readonly secrets?: SecretsSettings
 }
 
 /**
@@ -58,22 +61,24 @@ function buildStatuses(
  * Renders the card with spies for its requests.
  *
  * @param arrangement - What the card shows.
- * @returns The spies and the render result's rerender function.
+ * @returns The spies, the render result's rerender function, and its
+ * container.
  */
 function startProviderStatusCard(arrangement: ProviderStatusArrangement) {
   const spies = {
     onRefreshProviders: vi.fn<(providers: readonly LlmProvider[]) => void>(),
     onOpenProviders: vi.fn<() => void>()
   }
-  const { rerender } = render(
+  const { rerender, container } = render(
     <ProviderStatusCard
       backendStatus={arrangement.backendStatus}
       providerModels={buildStatuses(arrangement.statuses)}
       providers={buildProviders(arrangement.enabled)}
+      secrets={arrangement.secrets ?? STORED_SETTINGS.secrets}
       {...spies}
     />
   )
-  return { spies, rerender }
+  return { spies, rerender, container }
 }
 
 /**
@@ -127,7 +132,7 @@ describe("ProviderStatusCard", () => {
     expect(getCard()).toHaveTextContent("1 provider on")
   })
 
-  it("says a turned-on provider the backend has off is off and where to turn it on", () => {
+  it("says the backend has a turned-on provider off until it is checked again, without asking to turn it on", () => {
     startProviderStatusCard({
       enabled: ["lmStudio"],
       statuses: { lmStudio: "off" },
@@ -136,14 +141,35 @@ describe("ProviderStatusCard", () => {
 
     expect(listRowHeadings()).toEqual(["LM Studio is off"])
     expect(getCard()).toHaveTextContent(
-      "127.0.0.1:1234 · turn it on in Providers"
+      "127.0.0.1:1234 · the backend has LM Studio off · refresh to check again"
     )
+    expect(getCard()).not.toHaveTextContent("turn it on")
   })
 
-  it("announces status changes politely", () => {
+  it.each<LlmProviderStatus>(["unreachable", "connecting", "connected"])(
+    "says a turned-on provider without its key needs one while its status is %s",
+    (status) => {
+      const { container } = startProviderStatusCard({
+        enabled: ["groq"],
+        statuses: { groq: status },
+        backendStatus: "running",
+        secrets: { ...STORED_SETTINGS.secrets, groqApiKey: null }
+      })
+
+      expect(listRowHeadings()).toEqual(["Groq needs a key"])
+      expect(getCard()).toHaveTextContent(
+        "api.groq.com · add its key in Providers"
+      )
+      expect(
+        container.querySelector(".settings-view__status-dot")
+      ).toHaveAttribute("data-tone", "warning")
+    }
+  )
+
+  it("announces each row's change politely and as one message, from the row's lines rather than the list", () => {
     const { spies, rerender } = startProviderStatusCard({
-      enabled: ["lmStudio"],
-      statuses: { lmStudio: "connecting" },
+      enabled: ["lmStudio", "groq"],
+      statuses: { lmStudio: "connecting", groq: "connected" },
       backendStatus: "running"
     })
     const heading = screen.getByRole("heading", {
@@ -153,17 +179,24 @@ describe("ProviderStatusCard", () => {
     rerender(
       <ProviderStatusCard
         backendStatus="running"
-        providerModels={buildStatuses({ lmStudio: "connected" })}
-        providers={buildProviders(["lmStudio"])}
+        providerModels={buildStatuses({
+          lmStudio: "connected",
+          groq: "connected"
+        })}
+        providers={buildProviders(["lmStudio", "groq"])}
+        secrets={STORED_SETTINGS.secrets}
         {...spies}
       />
     )
 
     expect(heading).toHaveTextContent("LM Studio connected")
-    expect(heading.closest("[aria-live]")).toHaveAttribute(
-      "aria-live",
-      "polite"
-    )
+    const region = heading.closest("[aria-live]")
+    expect(region).toHaveClass("settings-view__identity-lines")
+    expect(region).toHaveAttribute("aria-live", "polite")
+    expect(region).toHaveAttribute("aria-atomic", "true")
+    expect(region).toHaveTextContent("LM Studio connected127.0.0.1:1234")
+    expect(within(getCard()).getByRole("list")).not.toHaveAttribute("aria-live")
+    expect(getCard().querySelectorAll("[aria-live]")).toHaveLength(2)
   })
 
   it("refreshes every turned-on provider that is not connecting, once per press", async () => {

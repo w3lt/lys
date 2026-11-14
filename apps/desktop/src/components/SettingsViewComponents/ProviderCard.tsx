@@ -3,6 +3,7 @@ import { useId, useRef, useState, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { findSavedProviderApiKey } from "@/lib/models/llm-provider-target"
 import type { BackendServerStatus } from "@/lib/store"
 import type { LlmProviderStatus } from "@/lib/store/model-runtime"
 import type {
@@ -18,8 +19,8 @@ import {
   buildProvidersWithProviderOn,
   calculateProviderBadge,
   findProviderAccessKind,
-  findSavedProviderApiKey,
   formatProviderMessage,
+  formatProviderSaveMessage,
   isProviderOn,
   PROVIDER_DESCRIPTIONS,
   UNEDITED_PROVIDER_DRAFT,
@@ -29,8 +30,12 @@ import {
 
 /** Requests a provider card sends to the pane. */
 export type ProviderCardRequests = {
-  /** Requests that the pane save new provider settings; never rejects. */
+  /**
+   * Requests that the pane save new provider settings for the card's
+   * provider, which the save's state names; never rejects.
+   */
   readonly onSaveProviders: (
+    provider: LlmProvider,
     providers: ProvidersSettings
   ) => Promise<ProviderSettingsSaveOutcome>
   /** Requests that the pane save or remove a provider key; never rejects. */
@@ -87,7 +92,7 @@ type ProviderCardFooterProps = {
   readonly status: LlmProviderStatus
   /** Backend lifecycle state, which explains an `unknown` status. */
   readonly backendStatus: BackendServerStatus
-  /** Latest provider save. */
+  /** Latest provider save, which disables Test and Remove while it runs. */
   readonly saveState: ProviderSettingsSaveState
   /** The person's edit of the form's field. */
   readonly draft: ProviderFieldDraft
@@ -126,7 +131,6 @@ function ProviderCardFooter({
     secrets,
     status,
     backendStatus,
-    saveState,
     draft
   })
   const isKeySaved =
@@ -219,7 +223,7 @@ function ProviderCardBody({
   ): Promise<void> {
     if (access.kind !== "address") return
     const next = buildProvidersWithAddress(providers, access.provider, address)
-    if ((await onSaveProviders(next)) === "saved") resetEdit()
+    if ((await onSaveProviders(access.provider, next)) === "saved") resetEdit()
   }
 
   /**
@@ -291,14 +295,19 @@ function ProviderCardBody({
 
 /**
  * Presents one provider's card: its logo, name, tag, and line, its badge, a
- * switch that turns it on or off, and, while it is on, its settings.
+ * switch that turns it on or off, while it is on its settings, and its save
+ * line.
  *
  * @remarks Flipping the switch saves the enabled list with the provider
  * added or removed, in provider order, which makes the backend connect to it
  * or let it go; the other turned-on providers stay on. The switch is named
  * after the provider, described by its line, checked while the saved
  * settings turn the provider on, and disabled while a save runs. Only a card
- * whose provider is on shows its settings. The logo is the provider's
+ * whose provider is on shows its settings. The save line is a polite status
+ * region named after the provider that stays in the card whether the
+ * provider is on or off, so a save of this provider, of its switch, address,
+ * or key, is said and announced once, on this card only, even while no
+ * provider is on; it is empty otherwise. The logo is the provider's
  * monochrome mark from `@lobehub/icons`, drawn in the text color and hidden
  * from assistive technology, because the name beside it says the same.
  * @param props - Provider, saved settings, connection, save, and requests.
@@ -320,6 +329,7 @@ export default function ProviderCard({
   const description = PROVIDER_DESCRIPTIONS[provider]
   const isOn = isProviderOn(provider, providers)
   const badge = calculateProviderBadge(provider, providers, secrets, status)
+  const saveMessage = formatProviderSaveMessage(provider, saveState)
 
   return (
     <article
@@ -356,6 +366,7 @@ export default function ProviderCard({
           disabled={saveState.status === "saving"}
           onCheckedChange={(proposedIsOn) =>
             void onSaveProviders(
+              provider,
               buildProvidersWithProviderOn(providers, provider, proposedIsOn)
             )
           }
@@ -375,6 +386,15 @@ export default function ProviderCard({
           status={status}
         />
       ) : null}
+      <p
+        aria-label={`${description.name} save`}
+        aria-live="polite"
+        className="settings-view__secret-status settings-view__provider-save"
+        data-tone={saveMessage.tone}
+        role="status"
+      >
+        {saveMessage.text}
+      </p>
     </article>
   )
 }

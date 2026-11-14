@@ -94,7 +94,7 @@ describe("ModelLoadSettingFields", () => {
       expect(slider).toHaveAttribute("max", "2")
       expect(slider).toHaveAttribute("aria-valuetext", "4,096 tokens")
       expect(slider).toHaveAccessibleDescription(
-        "The composer's context meter and the Agents pane measure against this length."
+        "The composer’s context meter and the Agents pane measure against this length."
       )
       expect(screen.getByText("4,096 tokens")).toBeInTheDocument()
       expect(

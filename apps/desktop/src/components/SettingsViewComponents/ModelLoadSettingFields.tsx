@@ -19,12 +19,9 @@ import type { CompleteModelLoadConfiguration } from "@/lib/store/settings"
 import ModelContextLengthField from "./ModelContextLengthField"
 import {
   MAXIMUM_EVAL_BATCH_SIZE,
+  MEASURED_CONTEXT_NOTE,
   parseEvalBatchSize
 } from "./model-load-presentation"
-
-/** Note under the context length, naming what is measured against it. */
-const CONTEXT_LENGTH_NOTE =
-  "The composer's context meter and the Agents pane measure against this length."
 
 /** Note under the evaluation batch size while the typed size is accepted. */
 const EVAL_BATCH_SIZE_NOTE =
@@ -335,7 +332,7 @@ export type ModelLoadSettingFieldsProps = {
 /**
  * Edits the five load settings LM Studio applies when it loads one model.
  *
- * @remarks Interactive feature. The parent owns the configuration and
+ * @remarks The parent owns the configuration and
  * applies every proposal; the rows render the supplied values until it
  * supplies new ones.
  * @param props - Model facts, current configuration, and the two actions.
@@ -355,7 +352,7 @@ export default function ModelLoadSettingFields({
       <ModelContextLengthField
         contextLength={configuration.contextLength}
         maxContextLength={maxContextLength}
-        note={CONTEXT_LENGTH_NOTE}
+        note={MEASURED_CONTEXT_NOTE}
         onContextLengthChange={(contextLength) =>
           onAssignModelLoadSettings(modelKey, { contextLength })
         }

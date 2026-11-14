@@ -1,28 +1,31 @@
-import type { ComponentProps } from "react"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
-import ModelRow from "@/components/SettingsViewComponents/ModelRow"
+import ModelRow, {
+  type ModelListEntry
+} from "@/components/SettingsViewComponents/ModelRow"
 import { buildLlmInfo } from "../../support/modelFixtures"
 
 /**
  * Renders one row in a list with a spy for its selection request.
  *
- * @param props - Row facts the case varies.
+ * @param entry - Row facts the case varies.
  * @returns The selection spy.
  */
-function startModelRow(props: Partial<ComponentProps<typeof ModelRow>> = {}) {
+function startModelRow(entry: Partial<ModelListEntry> = {}) {
   const onSelectModel = vi.fn()
   render(
     <ul>
       <ModelRow
-        columnValue="4.0 GB"
-        isDefault={false}
-        isLoading={false}
-        isSelected={false}
-        model={buildLlmInfo("google/gemma-3:4b")}
+        entry={{
+          columnValue: "4.0 GB",
+          isDefault: false,
+          isLoading: false,
+          isSelected: false,
+          model: buildLlmInfo("google/gemma-3:4b"),
+          ...entry
+        }}
         onSelectModel={onSelectModel}
-        {...props}
       />
     </ul>
   )

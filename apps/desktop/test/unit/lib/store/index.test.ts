@@ -999,7 +999,7 @@ describe("useLysStore", () => {
       store.setSettings(autosavedGroupsEditedSettings)
       const outcomes = Promise.all([
         store.saveTavilyApiKey(null),
-        store.saveProviderSettings(EDITED_PROVIDERS_SETTINGS),
+        store.saveProviderSettings("lmStudio", EDITED_PROVIDERS_SETTINGS),
         store.saveLocation(NO_LOCATION_SETTINGS),
         store.saveMcpServers([]),
         store.deleteEmailAccount(() =>

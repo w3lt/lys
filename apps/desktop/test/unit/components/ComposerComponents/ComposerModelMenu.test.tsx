@@ -12,11 +12,10 @@ import type { ModelAvailability } from "@/lib/models/model-availability"
 import type { ModelInventoryState } from "@/lib/store/model-runtime"
 import { buildLlmInfo } from "../../support/modelFixtures"
 import {
-  buildModelAvailabilitySource,
+  buildComposerRuntime,
   type ProviderModelArrangement
 } from "../../support/providerModelFixtures"
 import { openMenuWithKeyboard } from "../../support/rendering"
-import { STORED_PROVIDERS_SETTINGS } from "../../support/settingsFixtures"
 
 /** LM Studio inventory with one resident model and one on disk. */
 const LM_STUDIO_INVENTORY: ModelInventoryState = {
@@ -92,10 +91,7 @@ type ModelMenuArrangement = {
 function buildGroups(
   providers: ProviderModelArrangement
 ): readonly ComposerModelGroup[] {
-  return listComposerModelGroups(
-    buildModelAvailabilitySource(providers),
-    STORED_PROVIDERS_SETTINGS
-  )
+  return listComposerModelGroups(buildComposerRuntime(providers))
 }
 
 /**

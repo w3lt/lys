@@ -31,7 +31,7 @@ type PlacementIconProps = {
 /**
  * Draws a cloud for a cloud provider and a screen for this machine.
  *
- * @remarks Presentational and hidden from assistive technology; the words
+ * @remarks Hidden from assistive technology; the words
  * beside it say the same.
  * @param props - Where the provider runs models.
  * @returns The icon.
@@ -65,7 +65,7 @@ type ProviderChoiceProps = {
 /**
  * Presents one provider in the picker as a radio item.
  *
- * @remarks Presentational. Shows the provider's name, its status beside a
+ * @remarks Shows the provider's name, its status beside a
  * toned dot, its model count, where Lys reaches it, and the session's
  * default model when it is the provider's; the radio item marks the shown
  * provider with a check.
@@ -112,7 +112,7 @@ type ProviderChoiceGroupProps = {
 /**
  * Presents one group of the picker's providers under its heading.
  *
- * @remarks Presentational. A separator precedes every group but the first;
+ * @remarks A separator precedes every group but the first;
  * the heading labels the group's items.
  * @param props - The group and whether it is the first.
  * @returns The separator, when one is needed, and the labelled group.
@@ -136,20 +136,12 @@ function ProviderChoiceGroup({
   )
 }
 
-/** Properties accepted by {@link ModelProviderCard}. */
-export type ModelProviderCardProps = {
+/** Properties accepted by {@link ModelProviderPicker}. */
+type ModelProviderPickerProps = {
   /** Summary of the provider the pane shows. */
   readonly shown: ModelProviderSummary
   /** Summaries of every provider that is on, in provider order. */
   readonly choices: readonly ModelProviderSummary[]
-  /** What the shown provider does with its models. */
-  readonly note: string
-  /** When the provider was last read, or what a refresh is doing. */
-  readonly refreshNote: string
-  /** Whether a refresh of the shown provider is in flight. */
-  readonly isRefreshing: boolean
-  /** Whether Refresh is disabled, because a request runs or none can start. */
-  readonly isRefreshDisabled: boolean
   /**
    * Proposes another provider for the pane to show, called once per
    * choice of a provider other than the shown one.
@@ -157,36 +149,24 @@ export type ModelProviderCardProps = {
    * @param provider - The chosen provider.
    */
   readonly onShownProviderChange: (provider: LlmProvider) => void
-  /** Requests that the shown provider be read again; once per press. */
-  readonly onRefreshProvider: () => void
 }
 
 /**
- * Lets the person choose which provider's models the Model pane shows, and
- * shows that provider's status with a way to read it again.
+ * Lets the person choose which provider's models the Model pane shows.
  *
- * @remarks Interactive feature: the menu owns only its open state; the
- * parent owns the shown provider. The picker lists the providers that are
- * on, cloud ones first, as radio items. Base UI supplies the menu's
- * keyboard and focus behavior. The status is a word beside a toned dot,
- * the refresh note is a status region, and Refresh reads Refreshing… while
- * its request runs.
- * @param props - Shown provider, choices, note, refresh state, and the two
- * requests.
- * @returns The provider card.
+ * @remarks The menu owns only its open state; the
+ * parent owns the shown provider. The trigger names the shown provider and
+ * where it runs models. The menu lists the providers that are on, cloud
+ * ones first, as radio items, the shown one checked. Base UI supplies the
+ * menu's keyboard and focus behavior.
+ * @param props - Shown provider, choices, and the proposal.
+ * @returns The picker's trigger and menu.
  */
-export default function ModelProviderCard({
+function ModelProviderPicker({
   shown,
   choices,
-  note,
-  refreshNote,
-  isRefreshing,
-  isRefreshDisabled,
-  onShownProviderChange,
-  onRefreshProvider
-}: ModelProviderCardProps): ReactElement {
-  const headingId = useId()
-
+  onShownProviderChange
+}: ModelProviderPickerProps): ReactElement {
   /**
    * Proposes the chosen provider when it is another one.
    *
@@ -200,6 +180,110 @@ export default function ModelProviderCard({
   }
 
   return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="settings-view__models-picker"
+        type="button"
+      >
+        <PlacementIcon placement={shown.placement} />
+        <span className="settings-view__models-picker-name">{shown.name}</span>
+        <span className="settings-view__models-picker-where">
+          {formatModelPlacementName(shown.placement)}
+        </span>
+        <ChevronDown
+          aria-hidden="true"
+          className="settings-view__models-icon"
+        />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="settings-view__models-menu">
+        <DropdownMenuRadioGroup
+          onValueChange={handleProviderValueChange}
+          value={shown.provider}
+        >
+          {listModelProviderGroups(choices).map((group, index) => (
+            <ProviderChoiceGroup
+              group={group}
+              isFirst={index === 0}
+              key={group.placement}
+            />
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/** Properties accepted by {@link ModelProviderRefresh}. */
+type ModelProviderRefreshProps = {
+  /** When the provider was last read, or what a refresh is doing. */
+  readonly refreshNote: string
+  /** Whether a refresh of the shown provider is in flight. */
+  readonly isRefreshing: boolean
+  /** Whether Refresh is disabled, because a request runs or none can start. */
+  readonly isRefreshDisabled: boolean
+  /** Requests that the shown provider be read again; once per press. */
+  readonly onRefreshProvider: () => void
+}
+
+/**
+ * Offers to read the shown provider again, beside when it was last read.
+ *
+ * @remarks The note is a status region, so a change is
+ * announced, and Refresh reads Refreshing… while its request runs.
+ * @param props - The note, the refresh state, and the request.
+ * @returns The note and the Refresh button.
+ */
+function ModelProviderRefresh({
+  refreshNote,
+  isRefreshing,
+  isRefreshDisabled,
+  onRefreshProvider
+}: ModelProviderRefreshProps): ReactElement {
+  return (
+    <div className="settings-view__models-refresh">
+      <span className="settings-view__models-note" role="status">
+        {refreshNote}
+      </span>
+      <Button
+        disabled={isRefreshDisabled}
+        onClick={onRefreshProvider}
+        size="sm"
+        type="button"
+        variant="outline"
+      >
+        <RefreshCw aria-hidden="true" />
+        {isRefreshing ? "Refreshing…" : "Refresh"}
+      </Button>
+    </div>
+  )
+}
+
+/** Properties accepted by {@link ModelProviderCard}. */
+export type ModelProviderCardProps = ModelProviderPickerProps &
+  ModelProviderRefreshProps & {
+    /** What the shown provider does with its models. */
+    readonly note: string
+  }
+
+/**
+ * Lets the person choose which provider's models the Model pane shows, and
+ * shows that provider's status with a way to read it again.
+ *
+ * @remarks The parent owns the shown provider and the
+ * refresh. The picker names the shown provider; beside it, its status is a
+ * word beside a toned dot with its model count and where Lys reaches it;
+ * under them, what the provider does with its models; and at the side, the
+ * refresh note and Refresh.
+ * @param props - Shown provider, choices, note, refresh state, and the two
+ * requests.
+ * @returns The provider card.
+ */
+export default function ModelProviderCard(
+  props: ModelProviderCardProps
+): ReactElement {
+  const { shown } = props
+  const headingId = useId()
+  return (
     <section
       aria-labelledby={headingId}
       className="settings-view__models-provider"
@@ -209,41 +293,11 @@ export default function ModelProviderCard({
           Provider
         </h2>
         <div className="settings-view__models-provider-line">
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className="settings-view__models-picker"
-              type="button"
-            >
-              <PlacementIcon placement={shown.placement} />
-              <span className="settings-view__models-picker-name">
-                {shown.name}
-              </span>
-              <span className="settings-view__models-picker-where">
-                {formatModelPlacementName(shown.placement)}
-              </span>
-              <ChevronDown
-                aria-hidden="true"
-                className="settings-view__models-icon"
-              />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              className="settings-view__models-menu"
-            >
-              <DropdownMenuRadioGroup
-                onValueChange={handleProviderValueChange}
-                value={shown.provider}
-              >
-                {listModelProviderGroups(choices).map((group, index) => (
-                  <ProviderChoiceGroup
-                    group={group}
-                    isFirst={index === 0}
-                    key={group.placement}
-                  />
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <ModelProviderPicker
+            choices={props.choices}
+            onShownProviderChange={props.onShownProviderChange}
+            shown={shown}
+          />
           <p className="settings-view__models-provider-status">
             <span
               aria-hidden="true"
@@ -254,23 +308,14 @@ export default function ModelProviderCard({
             <span className="settings-view__models-mono">{`· ${shown.location}`}</span>
           </p>
         </div>
-        <p className="settings-view__models-note">{note}</p>
+        <p className="settings-view__models-note">{props.note}</p>
       </div>
-      <div className="settings-view__models-refresh">
-        <span className="settings-view__models-note" role="status">
-          {refreshNote}
-        </span>
-        <Button
-          disabled={isRefreshDisabled}
-          onClick={onRefreshProvider}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          <RefreshCw aria-hidden="true" />
-          {isRefreshing ? "Refreshing…" : "Refresh"}
-        </Button>
-      </div>
+      <ModelProviderRefresh
+        isRefreshDisabled={props.isRefreshDisabled}
+        isRefreshing={props.isRefreshing}
+        onRefreshProvider={props.onRefreshProvider}
+        refreshNote={props.refreshNote}
+      />
     </section>
   )
 }

@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { formatTokenCount } from "@/lib/models/model-load-configuration"
 
-import ModelRow from "./ModelRow"
+import ModelRow, { type ModelListEntry } from "./ModelRow"
 import {
   describeModelPaneProvider,
+  formatModelFilterResult,
   formatModelListHeading,
   formatModelSize,
   listMatchingModels
@@ -21,33 +22,15 @@ type ModelRowGroup = {
   readonly label: string | null
   /** Whether the heading carries the loaded dot. */
   readonly isLoaded: boolean
-  /** The group's models, in inventory order. */
-  readonly models: readonly LlmInfo[]
+  /** The group's rows, in inventory order. */
+  readonly entries: readonly ModelListEntry[]
 }
 
-/**
- * Groups the shown models as the list presents them.
- *
- * @param provider - Provider whose models are listed.
- * @param models - Models the filter leaves.
- * @returns For a provider on this machine, the loaded models and the ones
- * only on disk, each with its count and without an empty group; for a cloud
- * provider, one unlabelled run.
- */
-function listModelRowGroups(
-  provider: LlmProvider,
-  models: readonly LlmInfo[]
-): readonly ModelRowGroup[] {
-  if (describeModelPaneProvider(provider).placement === "cloud") {
-    return [{ label: null, isLoaded: false, models }]
-  }
-  const loaded = models.filter((model) => model.loaded)
-  const onDisk = models.filter((model) => !model.loaded)
-  return [
-    { label: `Loaded · ${loaded.length}`, isLoaded: true, models: loaded },
-    { label: `On disk · ${onDisk.length}`, isLoaded: false, models: onDisk }
-  ].filter((group) => group.models.length > 0)
-}
+/** Keys of the models the list marks as selected, default, and loading. */
+type ModelListMarks = Pick<
+  ModelListProps,
+  "selectedModelKey" | "defaultModelKey" | "loadingModelKey"
+>
 
 /**
  * Formats the value of the list's right column for one model.
@@ -62,30 +45,79 @@ function formatModelColumnValue(provider: LlmProvider, model: LlmInfo): string {
   return model.sizeBytes === undefined ? "—" : formatModelSize(model.sizeBytes)
 }
 
+/**
+ * Builds the row of one model.
+ *
+ * @param provider - Provider whose models are listed.
+ * @param model - Model of the row.
+ * @param marks - Keys of the selected, default, and loading models.
+ * @returns The model with its column value and whether each mark is its.
+ */
+function buildModelListEntry(
+  provider: LlmProvider,
+  model: LlmInfo,
+  marks: ModelListMarks
+): ModelListEntry {
+  return {
+    model,
+    columnValue: formatModelColumnValue(provider, model),
+    isSelected: model.modelKey === marks.selectedModelKey,
+    isDefault: model.modelKey === marks.defaultModelKey,
+    isLoading: model.modelKey === marks.loadingModelKey
+  }
+}
+
+/**
+ * Groups the shown models' rows as the list presents them.
+ *
+ * @param provider - Provider whose models are listed.
+ * @param models - Models the filter leaves.
+ * @param marks - Keys of the selected, default, and loading models.
+ * @returns For a provider on this machine, the loaded models and the ones
+ * only on disk, each with its count and without an empty group; for a cloud
+ * provider, one unlabelled run.
+ */
+function listModelRowGroups(
+  provider: LlmProvider,
+  models: readonly LlmInfo[],
+  marks: ModelListMarks
+): readonly ModelRowGroup[] {
+  const entries = models.map((model) =>
+    buildModelListEntry(provider, model, marks)
+  )
+  if (describeModelPaneProvider(provider).placement === "cloud") {
+    return [{ label: null, isLoaded: false, entries }]
+  }
+  const loaded = entries.filter((entry) => entry.model.loaded)
+  const onDisk = entries.filter((entry) => !entry.model.loaded)
+  return [
+    { label: `Loaded · ${loaded.length}`, isLoaded: true, entries: loaded },
+    { label: `On disk · ${onDisk.length}`, isLoaded: false, entries: onDisk }
+  ].filter((group) => group.entries.length > 0)
+}
+
 /** Properties accepted by {@link ModelGroup}. */
-type ModelGroupProps = Omit<ModelListProps, "models"> & {
+type ModelGroupProps = {
   /** The group to present. */
   readonly group: ModelRowGroup
+  /**
+   * Requests that the Model pane show a model, called once per row press.
+   *
+   * @param modelKey - Key of the pressed row's model.
+   */
+  readonly onSelectModel: (modelKey: string) => void
 }
 
 /**
  * Presents one run of the model list's rows under its heading.
  *
- * @remarks Presentational. The heading of the loaded models carries the
+ * @remarks The heading of the loaded models carries the
  * loaded dot beside its words; the rows form a list named by the heading,
  * or by "Models" for an unlabelled run.
- * @param props - The group, and the list's provider, states, and selection
- * request.
+ * @param props - The group and the selection request.
  * @returns The heading, when the group has one, and its rows.
  */
-function ModelGroup({
-  provider,
-  group,
-  selectedModelKey,
-  defaultModelKey,
-  loadingModelKey,
-  onSelectModel
-}: ModelGroupProps): ReactElement {
+function ModelGroup({ group, onSelectModel }: ModelGroupProps): ReactElement {
   return (
     <div>
       {group.label === null ? null : (
@@ -101,14 +133,10 @@ function ModelGroup({
         </p>
       )}
       <ul aria-label={group.label ?? "Models"}>
-        {group.models.map((model) => (
+        {group.entries.map((entry) => (
           <ModelRow
-            columnValue={formatModelColumnValue(provider, model)}
-            isDefault={model.modelKey === defaultModelKey}
-            isLoading={model.modelKey === loadingModelKey}
-            isSelected={model.modelKey === selectedModelKey}
-            key={model.modelKey}
-            model={model}
+            entry={entry}
+            key={entry.model.modelKey}
             onSelectModel={onSelectModel}
           />
         ))}
@@ -140,15 +168,19 @@ export type ModelListProps = {
 /**
  * Filters a provider's models by name and lets the person pick one.
  *
- * @remarks Interactive feature. Owns the filter text, which the parent
+ * @remarks Owns the filter text, which the parent
  * resets by remounting it for another provider. The heading counts the
  * models, or how many of them the filter shows; the right column's name is
  * hidden from assistive technology, since each row ends with its value. A
- * provider on this machine groups its rows into loaded models and models on
- * disk. A filter that leaves nothing says so and offers to clear it.
+ * visually hidden status region, rendered from the start, repeats the
+ * count, or says that nothing matches, so each change of the filter's
+ * result is announced. A provider on this machine groups its rows into
+ * loaded models and models on disk. A filter that leaves nothing says so
+ * and offers to clear it.
  * @param props - Provider, models, the selected, default, and loading
  * models, and the selection request.
- * @returns The list section: its filter box, heading, and rows.
+ * @returns The list section: its filter box, heading, result status, and
+ * rows.
  */
 export default function ModelList({
   provider,
@@ -158,6 +190,7 @@ export default function ModelList({
   loadingModelKey,
   onSelectModel
 }: ModelListProps): ReactElement {
+  const marks = { selectedModelKey, defaultModelKey, loadingModelKey }
   const headingId = useId()
   const filterId = useId()
   const [query, setQuery] = useState("")
@@ -179,6 +212,9 @@ export default function ModelList({
             value={query}
           />
         </div>
+        <p aria-label="Filter results" className="sr-only" role="status">
+          {formatModelFilterResult(matches.length, models.length, query)}
+        </p>
         <div className="settings-view__models-list-heading">
           <h3 id={headingId}>
             {formatModelListHeading(matches.length, models.length)}
@@ -202,15 +238,11 @@ export default function ModelList({
             </Button>
           </div>
         ) : (
-          listModelRowGroups(provider, matches).map((group) => (
+          listModelRowGroups(provider, matches, marks).map((group) => (
             <ModelGroup
-              defaultModelKey={defaultModelKey}
               group={group}
               key={group.label ?? "all"}
-              loadingModelKey={loadingModelKey}
               onSelectModel={onSelectModel}
-              provider={provider}
-              selectedModelKey={selectedModelKey}
             />
           ))
         )}

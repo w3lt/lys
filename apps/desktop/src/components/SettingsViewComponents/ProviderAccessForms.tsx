@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   DEFAULT_PROVIDER_ADDRESSES,
+  findSavedProviderApiKey,
   type AddressedLlmProvider,
   type KeyedLlmProvider
 } from "@/lib/models/llm-provider-target"
@@ -15,7 +16,6 @@ import { LLM_PROVIDER_NAMES, type ProviderAddress } from "@lys/share"
 import {
   calculateProviderKeyFieldValue,
   findSavedProviderAddress,
-  findSavedProviderApiKey,
   formatProviderAddressPlaceholder,
   formatProviderKeyPlaceholder,
   parseProviderAddressDraft,

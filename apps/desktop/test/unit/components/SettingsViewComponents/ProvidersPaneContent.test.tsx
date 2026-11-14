@@ -199,6 +199,40 @@ function readProviderBadge(name: string): string | null {
   )
 }
 
+/**
+ * Finds the status line under a turned-on card's form, the card's one status
+ * region without a name.
+ *
+ * @param name - Provider's name, which names its card.
+ * @returns The status line.
+ */
+function getProviderStatusLine(name: string): HTMLElement {
+  return within(screen.getByRole("article", { name })).getByRole("status", {
+    name: ""
+  })
+}
+
+/**
+ * Finds a card's save line, the status region named after its provider.
+ *
+ * @param name - Provider's name, which names its card.
+ * @returns The save line.
+ */
+function getProviderSaveLine(name: string): HTMLElement {
+  return within(screen.getByRole("article", { name })).getByRole("status", {
+    name: `${name} save`
+  })
+}
+
+/** Stored settings with every provider off. */
+const NO_PROVIDER_SETTINGS: LysSettings = Object.freeze({
+  ...STORED_SETTINGS,
+  providers: llmProviderSettingsSchema.parse({
+    ...STORED_PROVIDERS_SETTINGS,
+    enabled: []
+  })
+})
+
 describe("ProvidersPaneContent", () => {
   it("lists every provider in provider order with a switch that is on for the turned-on one", async () => {
     startNativeHostFake({})
@@ -232,14 +266,16 @@ describe("ProvidersPaneContent", () => {
       "placeholder",
       "192.168.1.20:11434"
     )
-    expect(within(ollama).getByRole("status")).toHaveTextContent(
+    expect(getProviderStatusLine("Ollama")).toHaveTextContent(
       "connected · 192.168.1.20:11434"
     )
     for (const name of ["LM Studio", "Ollama Cloud", "Groq"]) {
       const card = screen.getByRole("article", { name })
       expect(within(card).queryByRole("textbox")).toBeNull()
-      expect(within(card).queryByRole("status")).toBeNull()
+      expect(within(card).queryByRole("status", { name: "" })).toBeNull()
     }
+    for (const name of PROVIDER_NAMES)
+      expect(getProviderSaveLine(name)).toBeEmptyDOMElement()
   })
 
   it("shows each provider's logo on its card, hidden from assistive technology", async () => {
@@ -340,7 +376,7 @@ describe("ProvidersPaneContent", () => {
     expect(listSettingsWrites(host.commands)).toHaveLength(1)
     const cloud = screen.getByRole("article", { name: "Ollama Cloud" })
     expect(readProviderBadge("Ollama Cloud")).toBe("needs key")
-    expect(within(cloud).getByRole("status")).toHaveTextContent(
+    expect(getProviderStatusLine("Ollama Cloud")).toHaveTextContent(
       "No key yet. Lys can't reach Ollama Cloud until there is one."
     )
     expect(
@@ -376,16 +412,21 @@ describe("ProvidersPaneContent", () => {
     }
   )
 
-  it("disables every switch while a provider save runs", async () => {
+  it("disables every switch while a provider save runs, and says so on that provider's card only", async () => {
     startNativeHostFake({})
     const { useLysStore } = await startProvidersPane()
 
     act(() => {
-      useLysStore.setState({ providerSettingsSave: { status: "saving" } })
+      useLysStore.setState({
+        providerSettingsSave: { status: "saving", provider: "groq" }
+      })
     })
 
     for (const control of screen.getAllByRole("switch"))
       expect(control).toHaveAttribute("aria-disabled", "true")
+    expect(getProviderSaveLine("Groq")).toHaveTextContent("saving…")
+    for (const name of ["LM Studio", "Ollama", "Ollama Cloud"])
+      expect(getProviderSaveLine(name)).toBeEmptyDOMElement()
   })
 
   it("keeps the providers as they were when the switch's save fails, and says why", async () => {
@@ -401,11 +442,54 @@ describe("ProvidersPaneContent", () => {
     ])
     expect(countReconnections(backend, "groq")).toBe(0)
     expect(screen.getByRole("switch", { name: "Groq" })).not.toBeChecked()
-    expect(
-      within(screen.getByRole("article", { name: "Ollama" })).getByRole(
-        "status"
-      )
-    ).toHaveTextContent("Lys couldn't write the provider to its settings file.")
+    expect(getProviderSaveLine("Groq")).toHaveTextContent(
+      "Lys couldn't write the provider to its settings file."
+    )
+    expect(getProviderSaveLine("Ollama")).toBeEmptyDOMElement()
+    expect(getProviderStatusLine("Ollama")).toHaveTextContent(
+      "connected · 192.168.1.20:11434"
+    )
+  })
+
+  it("says why a switch's save failed on that card while no provider is on", async () => {
+    startFailingSettingsHost()
+    const { useLysStore, backend } =
+      await startProvidersPane(NO_PROVIDER_SETTINGS)
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole("switch", { name: "LM Studio" }))
+    await waitForRenderedWork()
+
+    expect(useLysStore.getState().settings.providers.enabled).toEqual([])
+    expect(countReconnections(backend, "lmStudio")).toBe(0)
+    expect(screen.getByRole("switch", { name: "LM Studio" })).not.toBeChecked()
+    expect(getProviderSaveLine("LM Studio")).toHaveTextContent(
+      "Lys couldn't write the provider to its settings file."
+    )
+    for (const name of ["Ollama", "Ollama Cloud", "Groq"])
+      expect(getProviderSaveLine(name)).toBeEmptyDOMElement()
+  })
+
+  it("says why an address save failed on the card of that address", async () => {
+    startFailingSettingsHost()
+    const { useLysStore } = await startProvidersPane()
+    const user = userEvent.setup()
+
+    await user.type(
+      screen.getByLabelText("Server address"),
+      "localhost:11500{Enter}"
+    )
+    await waitForRenderedWork()
+
+    expect(useLysStore.getState().settings.providers.ollama.address).toBe(
+      STORED_PROVIDERS_SETTINGS.ollama.address
+    )
+    expect(screen.getByLabelText("Server address")).toHaveValue(
+      "localhost:11500"
+    )
+    expect(getProviderSaveLine("Ollama")).toHaveTextContent(
+      "Lys couldn't write the provider to its settings file."
+    )
   })
 
   it("saves a new server address on Enter and refuses one that is not an address", async () => {
@@ -416,11 +500,9 @@ describe("ProvidersPaneContent", () => {
 
     await user.type(field, "localhost")
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
-    expect(
-      within(screen.getByRole("article", { name: "Ollama" })).getByRole(
-        "status"
-      )
-    ).toHaveTextContent("not an address: use host:port")
+    expect(getProviderStatusLine("Ollama")).toHaveTextContent(
+      "not an address: use host:port"
+    )
     await user.type(field, ":11500{Enter}")
     await waitForRenderedWork()
 

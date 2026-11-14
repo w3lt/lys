@@ -1,4 +1,10 @@
-import { useId, useState, type ReactElement, type ReactNode } from "react"
+import {
+  useId,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode
+} from "react"
 import type { LlmInfo } from "@lys/protocol"
 import type { LlmProvider } from "@lys/share"
 
@@ -15,17 +21,14 @@ import ModelContextLengthField from "./ModelContextLengthField"
 import ModelLoadSettingFields from "./ModelLoadSettingFields"
 import {
   buildLoadSettingsWithBaseline,
-  formatModelLoadChangeNote
+  formatModelLoadChangeNote,
+  MEASURED_CONTEXT_NOTE
 } from "./model-load-presentation"
 import {
   findModelTransition,
   formatContextTokens
 } from "./model-pane-presentation"
 import { useSettingsContext } from "./SettingsContext"
-
-/** Note under a context length the composer measures against. */
-const MEASURED_CONTEXT_NOTE =
-  "The composer's context meter and the Agents pane measure against this length."
 
 /**
  * Formats the load-configuration save outcome announced beneath the settings.
@@ -53,7 +56,7 @@ function formatLoadConfigurationSaveStatus(
  * a write fails.
  *
  * @returns A persistent status region and a retry button only after failure.
- * @remarks Composition view over the application store, which owns saves
+ * @remarks The application store owns saves
  * across pane unmounts; failure leaves edits available and allows an
  * explicit retry.
  */
@@ -99,7 +102,7 @@ type LoadSettingsSectionProps = {
 /**
  * Presents the titled region holding the selected model's load settings.
  *
- * @remarks Presentational; owns no state. The title is a level-four heading
+ * @remarks The title is a level-four heading
  * under the selected model's heading.
  * @param props - Title, caption, and the settings.
  * @returns The section.
@@ -120,6 +123,53 @@ function LoadSettingsSection({
   )
 }
 
+/** Properties accepted by {@link ModelLoadChangeActions}. */
+type ModelLoadChangeActionsProps = {
+  /** Whether the model is loaded, so a reload can apply the change. */
+  readonly isLoaded: boolean
+  /** Whether one of LM Studio's requests is in flight. */
+  readonly isBusy: boolean
+  /** Requests that the model be reloaded; called once per press of Reload. */
+  readonly onReloadModel: () => void
+  /** Requests that the change be undone; called once per press of Undo. */
+  readonly onUndoChange: () => void
+}
+
+/**
+ * Offers to apply a saved change by reloading the model, or to undo it.
+ *
+ * @remarks Reload is offered only for a loaded model and is
+ * disabled while one of LM Studio's requests is in flight, since LM Studio
+ * admits one at a time; Undo is always offered.
+ * @param props - Model state, whether a request runs, and the two requests.
+ * @returns Reload, when it applies, and Undo.
+ */
+function ModelLoadChangeActions({
+  isLoaded,
+  isBusy,
+  onReloadModel,
+  onUndoChange
+}: ModelLoadChangeActionsProps): ReactElement {
+  return (
+    <>
+      {isLoaded ? (
+        <Button
+          disabled={isBusy}
+          onClick={onReloadModel}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Reload
+        </Button>
+      ) : null}
+      <Button onClick={onUndoChange} size="sm" type="button" variant="ghost">
+        Undo
+      </Button>
+    </>
+  )
+}
+
 /** Properties accepted by {@link ModelLoadChangeNotice}. */
 type ModelLoadChangeNoticeProps = {
   /** Model whose stored settings changed. */
@@ -134,13 +184,15 @@ type ModelLoadChangeNoticeProps = {
  * Tells the person that a model's stored load settings changed, and offers
  * to reload a loaded model or undo the change.
  *
- * @remarks Composition view over SettingsContext and the application store.
+ * @remarks Requires SettingsContext and the application store.
  * The status region stays mounted, so the note is announced when it
  * appears; it is empty while nothing differs from the baseline and while
  * the model itself is being loaded or unloaded. Reload asks the store to
- * reload the model with the stored settings and is disabled while any of
- * LM Studio's requests is in flight. Undo gives the model the baseline as
- * its own settings in one change, which is saved like any edit.
+ * reload the model with the stored settings. Undo gives the model the
+ * baseline as its own settings in one change, which is saved like any edit.
+ * Either one empties the region, which removes its buttons, so pressing one
+ * first moves focus to the region itself, which can take focus but is not
+ * in the tab order.
  * @param props - Model, baseline, and stored settings.
  * @returns The status region with its note and, with a note, its buttons.
  */
@@ -155,19 +207,26 @@ function ModelLoadChangeNotice({
   const reloadModel = useLysStore(
     (state) => state.updateLoadedModelConfiguration
   )
-  const reference = { provider: "lmStudio", modelKey: model.modelKey } as const
-  const note =
-    findModelTransition(request, model.modelKey) === null
-      ? formatModelLoadChangeNote(
-          model.modelKey,
-          model.loaded,
-          baseline,
-          stored
-        )
-      : null
+  const regionRef = useRef<HTMLDivElement>(null)
+  const isTransitioning = findModelTransition(request, model.modelKey) !== null
+  const note = isTransitioning
+    ? null
+    : formatModelLoadChangeNote({
+        modelKey: model.modelKey,
+        isLoaded: model.loaded,
+        baseline,
+        stored
+      })
 
-  /** Gives the model the baseline as its own load settings again. */
+  /** Moves focus to the region, then reloads the model. */
+  function handleReloadClick(): void {
+    regionRef.current?.focus()
+    void reloadModel({ provider: "lmStudio", modelKey: model.modelKey })
+  }
+
+  /** Moves focus to the region, then gives the model the baseline again. */
   function handleUndoClick(): void {
+    regionRef.current?.focus()
     setSettings({
       ...settings,
       loadConfiguration: buildLoadSettingsWithBaseline(
@@ -182,7 +241,9 @@ function ModelLoadChangeNotice({
     <div
       aria-label="Load settings changes"
       className="settings-view__models-change"
+      ref={regionRef}
       role="status"
+      tabIndex={-1}
     >
       {note === null ? null : (
         <>
@@ -192,25 +253,12 @@ function ModelLoadChangeNotice({
             data-tone="warning"
           />
           <span>{note}</span>
-          {model.loaded ? (
-            <Button
-              disabled={request.status !== "idle"}
-              onClick={() => void reloadModel(reference)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              Reload
-            </Button>
-          ) : null}
-          <Button
-            onClick={handleUndoClick}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            Undo
-          </Button>
+          <ModelLoadChangeActions
+            isBusy={request.status !== "idle"}
+            isLoaded={model.loaded}
+            onReloadModel={handleReloadClick}
+            onUndoChange={handleUndoClick}
+          />
         </>
       )}
     </div>
@@ -227,7 +275,7 @@ type LmStudioLoadSettingsProps = {
  * Connects one LM Studio model's load settings to the settings and model
  * state the application owns.
  *
- * @remarks Composition view over SettingsContext and the application store.
+ * @remarks Requires SettingsContext and the application store.
  * Each edit is a request to the settings owner, which applies it in memory
  * and saves it; the rows show the owner's values. A change is measured from
  * the settings a loaded model runs with, as the store knows them, or for a
@@ -281,7 +329,7 @@ function LmStudioLoadSettings({
  * Shows how long Ollama keeps an idle model loaded, disabled because Lys
  * cannot set it yet.
  *
- * @remarks Presentational. The native select shows Ollama's own default of
+ * @remarks The native select shows Ollama's own default of
  * five minutes; its label names it and its note, which also says that Lys
  * cannot change it, describes it.
  * @returns The labelled, disabled select and its note.
@@ -323,7 +371,7 @@ type ProviderLoadSettingsProps = {
  * Shows the load settings of a model whose provider applies its own, with
  * the controls disabled because Lys cannot set them yet.
  *
- * @remarks Presentational. The context length is the one the model is
+ * @remarks The context length is the one the model is
  * loaded with, else its maximum. For Ollama, the idle unload delay shows
  * Ollama's own default of five minutes. The caption says why nothing can be
  * changed.
@@ -363,7 +411,7 @@ export type ModelLoadConfigurationPanelProps = {
  * Presents the load settings of the Model pane's selected model, as its
  * provider lets them be set.
  *
- * @remarks Composition view. LM Studio's models have editable settings
+ * @remarks LM Studio's models have editable settings
  * that Lys saves and sends with each load; Ollama and Ollama Cloud apply
  * their own, which are shown disabled; Groq sets the context of its models,
  * which is shown as a fact. The parent remounts it for each model, so text
@@ -384,7 +432,7 @@ export default function ModelLoadConfigurationPanel({
     case "groq":
       return (
         <LoadSettingsSection
-          caption="Set by Groq for this model. The composer’s context meter and the Agents pane measure against it."
+          caption={`Set by Groq for this model. ${MEASURED_CONTEXT_NOTE}`}
           title="Context"
         >
           <div className="settings-view__models-fixed">

@@ -1,6 +1,5 @@
 import type { LlmInfo } from "@lys/protocol"
 import {
-  MAXIMUM_MODEL_LOAD_SETTING_VALUE,
   modelLoadConfigurationSchema,
   type ModelLoadConfiguration
 } from "@lys/share"
@@ -18,12 +17,6 @@ import committedDefaultModelLoadConfigurationFile from "./default_model_load_con
  */
 const MINIMUM_CONTEXT_LENGTH_STOP_TOKENS = 2048
 
-/**
- * Inclusive minimum of a context length typed in the Model pane, in tokens.
- * A model whose maximum is lower accepts typed values down to one token.
- */
-const MINIMUM_TYPED_CONTEXT_LENGTH_TOKENS = 512
-
 /** Tokens per unit of the abbreviated `k` token count. */
 const TOKENS_PER_KILO_UNIT = 1024
 
@@ -39,7 +32,7 @@ export type ModelLoadTarget = {
 }
 
 /** Name of one load setting. */
-export type ModelLoadSettingName = keyof ModelLoadConfiguration
+type ModelLoadSettingName = keyof ModelLoadConfiguration
 
 /**
  * One change to the load settings a model has of its own.
@@ -142,7 +135,7 @@ const COMMITTED_DEFAULT_MODEL_LOAD_CONFIGURATION: CompleteModelLoadConfiguration
  * when none is known.
  * @returns True for a whole number of at least one token.
  */
-export function isUsableContextLimit(
+function isUsableContextLimit(
   maxContextLength: number | null
 ): maxContextLength is number {
   return (
@@ -414,29 +407,6 @@ export function calculateContextLengthStopIndex(
 ): number {
   const reachedStopCount = stops.filter((stop) => stop <= contextLength).length
   return Math.max(0, reachedStopCount - 1)
-}
-
-/**
- * Calculates the context length committed for a typed value.
- *
- * @param typedTokens - Whole number of tokens the person typed.
- * @param maxContextLength - Maximum the runtime reports for the model.
- * @returns The typed value kept within 512 tokens and the model's maximum,
- * both inclusive. A maximum below 512 lowers the minimum to one token, and an
- * unusable maximum is replaced by the largest value a load setting accepts.
- */
-export function calculateContextLength(
-  typedTokens: number,
-  maxContextLength: number
-): number {
-  const maximum = isUsableContextLimit(maxContextLength)
-    ? maxContextLength
-    : MAXIMUM_MODEL_LOAD_SETTING_VALUE
-  const minimum =
-    maximum < MINIMUM_TYPED_CONTEXT_LENGTH_TOKENS
-      ? 1
-      : MINIMUM_TYPED_CONTEXT_LENGTH_TOKENS
-  return Math.min(Math.max(typedTokens, minimum), maximum)
 }
 
 /**

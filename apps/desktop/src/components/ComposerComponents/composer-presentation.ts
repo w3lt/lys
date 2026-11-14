@@ -10,12 +10,16 @@ import {
   describeLlmProviderTarget,
   type LlmProviderTarget
 } from "@/lib/models/llm-provider-target"
-import type { ModelAvailability } from "@/lib/models/model-availability"
 import {
-  calculateProviderAvailability,
+  findLoadedModelInfo,
+  type ModelAvailability
+} from "@/lib/models/model-availability"
+import {
+  calculateProviderReadiness,
   formatModelReferenceLabel,
   listEnabledProviders,
-  type ModelAvailabilitySource
+  type ModelAvailabilitySource,
+  type ProviderReadiness
 } from "@/lib/models/provider-connection"
 import type { BackendServerStatus } from "@/lib/store"
 import {
@@ -28,9 +32,10 @@ import type {
 } from "@/lib/store/chat-view"
 import type {
   ModelInventoryState,
-  ModelRequestState
+  ModelRequestState,
+  ProviderModelStates
 } from "@/lib/store/model-runtime"
-import type { ProvidersSettings } from "@/lib/store/settings"
+import type { LysSettings } from "@/lib/store/settings"
 
 /**
  * Chat work that keeps the composer from sending.
@@ -69,7 +74,7 @@ export type ComposerBannerAction =
       readonly label: string
     }
   | {
-      /** Shows one model in the Model pane, where it is loaded. */
+      /** Shows one model in the Models pane, where it is loaded. */
       readonly kind: "show-model"
       /** Label shown on the button. */
       readonly label: string
@@ -118,10 +123,29 @@ export type ComposerModelGroup =
  * Whether the conversation's model can answer, as the composer describes it.
  *
  * @remarks Ordered by prerequisite: the backend must answer, then the
- * model's provider must be on and connected, then the model must be loaded.
+ * model's provider must be on, have its key, and be connected, then the
+ * model must be loaded.
  */
 export type LocalRuntimeConnection =
   "ready" | "no-model" | "provider-unavailable" | "offline"
+
+/** The application state the composer's banner and model menu read. */
+export type ComposerRuntime = {
+  /** Store-owned backend lifecycle state. */
+  readonly backendStatus: BackendServerStatus
+  /** Saved providers, which are on and where, and saved keys. */
+  readonly settings: Pick<LysSettings, "providers" | "secrets">
+  /** What the desktop knows of every provider. */
+  readonly providerModels: ProviderModelStates
+}
+
+/** A provider the composer names, and whether it can answer. */
+export type ComposerProviderState = {
+  /** The provider, named with its location in the copy. */
+  readonly target: LlmProviderTarget
+  /** Whether it can answer now, a missing key counted. */
+  readonly readiness: ProviderReadiness
+}
 
 /** The model the composer's next message goes to, as the banner explains it. */
 export type ComposerModelState = {
@@ -131,8 +155,13 @@ export type ComposerModelState = {
   readonly model: LlmModelReference | null
   /** Its availability, or null when there is no model. */
   readonly availability: ModelAvailability | null
-  /** The model's provider, named with its location in the copy. */
-  readonly provider: LlmProviderTarget
+  /**
+   * The provider the composer names: the model's provider; without a
+   * model, the first turned-on provider, in provider order, while no
+   * turned-on provider can answer. Null without a model while one can
+   * answer or none is on.
+   */
+  readonly provider: ComposerProviderState | null
   /** Whether the saved settings turn any provider on. */
   readonly hasProviderOn: boolean
 }
@@ -143,33 +172,163 @@ export type UnavailableRuntimeState = ComposerModelState & {
   readonly backendAddress: string
 }
 
+/** Why a provider the composer names cannot answer. */
+type UnavailableProviderReadiness = Exclude<ProviderReadiness, "available">
+
+/** The banner sentence while some provider can answer and no model is set. */
+const NO_MODEL_LOADED_MESSAGE = "The backend is up, but no model is loaded."
+
+/**
+ * Builds the state whether a provider or a model can answer depends on.
+ *
+ * @param runtime - Backend state, saved settings, and every provider's
+ * state.
+ * @returns The backend's state, the providers that are on, and every
+ * provider's state.
+ */
+function buildAvailabilitySource(
+  runtime: ComposerRuntime
+): ModelAvailabilitySource {
+  return {
+    backendStatus: runtime.backendStatus,
+    enabledProviders: runtime.settings.providers.enabled,
+    providerModels: runtime.providerModels
+  }
+}
+
+/**
+ * Describes one provider as the composer names it.
+ *
+ * @param runtime - Backend state, saved settings, and every provider's
+ * state.
+ * @param provider - Provider to describe, whether on or off.
+ * @returns The provider with where it is reached, and whether it can answer
+ * now, a missing key counted.
+ */
+function describeComposerProvider(
+  runtime: ComposerRuntime,
+  provider: LlmProvider
+): ComposerProviderState {
+  return {
+    target: describeLlmProviderTarget(provider, runtime.settings.providers),
+    readiness: calculateProviderReadiness(
+      buildAvailabilitySource(runtime),
+      runtime.settings.secrets,
+      provider
+    )
+  }
+}
+
+/**
+ * Lists every turned-on provider as the composer names it.
+ *
+ * @param runtime - Backend state, saved settings, and every provider's
+ * state.
+ * @returns One state per turned-on provider, in provider order.
+ */
+function listComposerProviders(
+  runtime: ComposerRuntime
+): ComposerProviderState[] {
+  return listEnabledProviders(runtime.settings.providers.enabled).map(
+    (provider) => describeComposerProvider(runtime, provider)
+  )
+}
+
+/**
+ * Finds the provider the composer names while there is no model.
+ *
+ * @param runtime - Backend state, saved settings, and every provider's
+ * state.
+ * @returns The first turned-on provider, in provider order, while none can
+ * answer, since then no model can be chosen until it can; null while one
+ * can answer or none is on.
+ */
+function findUnavailableProvider(
+  runtime: ComposerRuntime
+): ComposerProviderState | null {
+  const providers = listComposerProviders(runtime)
+  if (providers.some((provider) => provider.readiness === "available"))
+    return null
+  return providers[0] ?? null
+}
+
+/**
+ * Builds what the composer's banner, placeholder, and Send read of the
+ * conversation's model.
+ *
+ * @param runtime - Backend state, saved settings, and every provider's
+ * state.
+ * @param shown - The conversation's model and its availability.
+ * @returns The model with its provider, or, without a model, the turned-on
+ * provider that keeps every model from answering, if any.
+ */
+export function buildComposerModelState(
+  runtime: ComposerRuntime,
+  shown: Pick<ComposerModelState, "model" | "availability">
+): ComposerModelState {
+  const { model, availability } = shown
+  return {
+    backendStatus: runtime.backendStatus,
+    model,
+    availability,
+    provider:
+      model === null
+        ? findUnavailableProvider(runtime)
+        : describeComposerProvider(runtime, model.provider),
+    hasProviderOn: runtime.settings.providers.enabled.length > 0
+  }
+}
+
+/**
+ * Calculates whether the model can answer once the backend runs and the
+ * composer names a provider.
+ *
+ * @param readiness - Whether that provider can answer.
+ * @param availability - Availability of the model, or null when there is
+ * none.
+ * @returns `provider-unavailable` while the provider is off, lacks its key,
+ * connects, or cannot be reached; once it can answer, `ready` only for a
+ * loaded model.
+ */
+function calculateProviderConnection(
+  readiness: ProviderReadiness,
+  availability: ModelAvailability | null
+): LocalRuntimeConnection {
+  switch (readiness) {
+    case "backend-offline":
+      return "offline"
+    case "provider-off":
+    case "provider-needs-key":
+    case "provider-connecting":
+    case "provider-unreachable":
+      return "provider-unavailable"
+    case "available":
+      return findLoadedModelInfo(availability) === undefined
+        ? "no-model"
+        : "ready"
+  }
+}
+
 /**
  * Calculates whether the conversation's model can answer, as the composer
  * describes it.
  *
- * @param backendStatus - Store-owned backend lifecycle state.
- * @param availability - Availability of the conversation's model, or null
- * when there is none.
- * @returns The first missing prerequisite, or `ready` only while the model's
- * availability is `loaded`; no other model answers in its place.
+ * @param state - The backend, the model, its availability, and the
+ * provider the composer names.
+ * @returns The first missing prerequisite, or `ready` only while the model
+ * is loaded and its provider can answer; no other model answers in its
+ * place. Without a model it is `no-model`, or `provider-unavailable` while
+ * no turned-on provider can answer.
  */
 export function calculateLocalRuntimeConnection(
-  backendStatus: BackendServerStatus,
-  availability: ModelAvailability | null
+  state: ComposerModelState
 ): LocalRuntimeConnection {
-  if (backendStatus !== "running") return "offline"
-  switch (availability?.status) {
-    case "loaded":
-      return "ready"
-    case "backend-not-running":
-      return "offline"
-    case "provider-off":
-    case "provider-connecting":
-    case "provider-unreachable":
-      return "provider-unavailable"
-    default:
-      return "no-model"
-  }
+  if (state.backendStatus !== "running") return "offline"
+  if (state.provider === null) return "no-model"
+  return calculateProviderConnection(
+    state.provider.readiness,
+    state.availability
+  )
 }
 
 /**
@@ -196,6 +355,32 @@ export function formatUnavailableRuntimeMessage(
 }
 
 /**
+ * Formats why a provider the composer names cannot answer.
+ *
+ * @param target - The provider, with its location.
+ * @param readiness - Why it cannot answer.
+ * @returns That the backend isn't running, or that the provider is off,
+ * needs a key, is being connected to, or cannot be reached at its location.
+ */
+function formatProviderReadinessMessage(
+  target: LlmProviderTarget,
+  readiness: UnavailableProviderReadiness
+): string {
+  switch (readiness) {
+    case "backend-offline":
+      return "The backend isn't running."
+    case "provider-off":
+      return `${target.name} is turned off.`
+    case "provider-needs-key":
+      return `${target.name} needs a key.`
+    case "provider-connecting":
+      return `Connecting to ${target.name}…`
+    case "provider-unreachable":
+      return `${target.name} can't be reached on ${target.location}.`
+  }
+}
+
+/**
  * Formats the banner sentence for a model that is listed and not loaded.
  *
  * @param model - The conversation's model.
@@ -215,42 +400,34 @@ function formatNotLoadedMessage(
 }
 
 /**
- * Formats the banner sentence while the backend runs.
+ * Formats the banner sentence for the model's own state.
  *
- * @param runtime - The conversation's model, its availability, its
- * provider, and whether any provider is on.
- * @returns The model's first missing prerequisite: no provider on, no model,
- * its provider off, connecting, or not reachable, its state unread, the
- * model not listed, not loaded, or in a load or unload.
+ * @param model - The conversation's model.
+ * @param availability - Its availability.
+ * @param target - Its provider, with its location.
+ * @returns Its provider's state while that keeps it from answering; else its
+ * state unread, the model not listed, not loaded, or in a load or unload.
  */
-function formatRunningRuntimeMessage({
-  model,
-  availability,
-  provider,
-  hasProviderOn
-}: ComposerModelState): string {
-  if (model === null || availability === null) {
-    return hasProviderOn
-      ? "The backend is up, but no model is loaded."
-      : "No provider is on."
-  }
+function formatModelAvailabilityMessage(
+  model: LlmModelReference,
+  availability: ModelAvailability,
+  target: LlmProviderTarget
+): string {
   switch (availability.status) {
     case "provider-off":
-      return `${provider.name} is turned off.`
     case "provider-connecting":
-      return `Connecting to ${provider.name}…`
     case "provider-unreachable":
-      return `${provider.name} can't be reached on ${provider.location}.`
+      return formatProviderReadinessMessage(target, availability.status)
     case "backend-not-running":
     case "inventory-unread":
     case "inventory-failed":
       return "The backend is up, but model state is unavailable."
     case "not-listed":
-      return `${model.modelKey} isn't on ${provider.name}.`
+      return `${model.modelKey} isn't on ${target.name}.`
     case "not-loaded":
       return formatNotLoadedMessage(
         model,
-        provider.name,
+        target.name,
         availability.modelLoading
       )
     case "loading":
@@ -260,6 +437,29 @@ function formatRunningRuntimeMessage({
     case "loaded":
       return `${model.modelKey} is loaded.`
   }
+}
+
+/**
+ * Formats the banner sentence while the backend runs.
+ *
+ * @param runtime - The conversation's model, its availability, the provider
+ * the composer names, and whether any provider is on.
+ * @returns The first missing prerequisite: no provider on; a provider that
+ * is off, needs a key, is being connected to, or cannot be reached; no model
+ * while a provider can answer; then the model's own state.
+ */
+function formatRunningRuntimeMessage({
+  model,
+  availability,
+  provider,
+  hasProviderOn
+}: ComposerModelState): string {
+  if (provider === null)
+    return hasProviderOn ? NO_MODEL_LOADED_MESSAGE : "No provider is on."
+  if (provider.readiness !== "available")
+    return formatProviderReadinessMessage(provider.target, provider.readiness)
+  if (model === null || availability === null) return NO_MODEL_LOADED_MESSAGE
+  return formatModelAvailabilityMessage(model, availability, provider.target)
 }
 
 /** The banner action while the state already changes. */
@@ -281,15 +481,22 @@ const OPEN_PROVIDERS_ACTION: ComposerBannerAction = Object.freeze({
   pane: "providers"
 })
 
+/** The banner action that opens the Models pane to check the models. */
+const CHECK_MODELS_ACTION: ComposerBannerAction = Object.freeze({
+  kind: "open-settings",
+  label: "Check models",
+  pane: "model"
+})
+
 /**
  * Finds the banner's recovery action for a model that is listed and not
  * loaded.
  *
  * @param model - The conversation's model.
  * @param modelLoading - Who loads its provider's models.
- * @returns Load, which shows the model in the Model pane, when Lys loads the
- * provider's models; otherwise Choose model, because the provider decides
- * what it runs.
+ * @returns Load, which shows the model in the Models pane, when Lys loads
+ * the provider's models; otherwise Choose model, because the provider
+ * decides what it runs.
  */
 function findNotLoadedAction(
   model: LlmModelReference,
@@ -301,30 +508,49 @@ function findNotLoadedAction(
 }
 
 /**
- * Finds the banner's recovery action while the backend runs.
+ * Finds the banner's recovery action for a provider that cannot answer.
  *
- * @param runtime - The conversation's model, its availability, and whether
- * any provider is on.
- * @returns Open Providers while no provider is on or the model's provider is
- * off or not reachable; Choose model, which opens the model menu, without a
- * model or for one its provider does not list; Check models, which opens
- * the Model pane, while the inventory is unread; Load or Choose model for a
- * model that is not loaded; no action while the state already changes.
+ * @param readiness - Why it cannot answer.
+ * @returns Open Providers for a provider that is off, needs a key, or
+ * cannot be reached; no action while it is being connected to or the
+ * backend changes state.
  */
-function findRunningBannerAction({
-  model,
-  availability,
-  hasProviderOn
-}: ComposerModelState): ComposerBannerAction {
-  if (model === null || availability === null)
-    return hasProviderOn ? CHOOSE_MODEL_ACTION : OPEN_PROVIDERS_ACTION
+function findProviderReadinessAction(
+  readiness: UnavailableProviderReadiness
+): ComposerBannerAction {
+  switch (readiness) {
+    case "provider-off":
+    case "provider-needs-key":
+    case "provider-unreachable":
+      return OPEN_PROVIDERS_ACTION
+    case "backend-offline":
+    case "provider-connecting":
+      return WORKING_ACTION
+  }
+}
+
+/**
+ * Finds the banner's recovery action for the model's own state.
+ *
+ * @param model - The conversation's model.
+ * @param availability - Its availability.
+ * @returns Open Providers while its provider is off or not reachable; Check
+ * models, which opens the Models pane, while the inventory is unread; Choose
+ * model, which opens the model menu, for a model its provider does not list;
+ * Load or Choose model for a model that is not loaded; no action while the
+ * state already changes.
+ */
+function findModelAvailabilityAction(
+  model: LlmModelReference,
+  availability: ModelAvailability
+): ComposerBannerAction {
   switch (availability.status) {
     case "provider-off":
     case "provider-unreachable":
       return OPEN_PROVIDERS_ACTION
     case "inventory-unread":
     case "inventory-failed":
-      return { kind: "open-settings", label: "Check models", pane: "model" }
+      return CHECK_MODELS_ACTION
     case "not-listed":
       return CHOOSE_MODEL_ACTION
     case "not-loaded":
@@ -339,14 +565,37 @@ function findRunningBannerAction({
 }
 
 /**
+ * Finds the banner's recovery action while the backend runs.
+ *
+ * @param runtime - The conversation's model, its availability, the provider
+ * the composer names, and whether any provider is on.
+ * @returns Open Providers while no provider is on; the named provider's
+ * action while it cannot answer; Choose model without a model while a
+ * provider can answer; then the action for the model's own state.
+ */
+function findRunningBannerAction({
+  model,
+  availability,
+  provider,
+  hasProviderOn
+}: ComposerModelState): ComposerBannerAction {
+  if (provider === null)
+    return hasProviderOn ? CHOOSE_MODEL_ACTION : OPEN_PROVIDERS_ACTION
+  if (provider.readiness !== "available")
+    return findProviderReadinessAction(provider.readiness)
+  if (model === null || availability === null) return CHOOSE_MODEL_ACTION
+  return findModelAvailabilityAction(model, availability)
+}
+
+/**
  * Finds the banner's recovery action for the current runtime state.
  *
  * @param runtime - The backend, the conversation's model, its availability,
- * its provider, and whether any provider is on.
+ * the provider the composer names, and whether any provider is on.
  * @returns Start backend for a stopped backend, Check backend, which opens
  * the Runtime pane, for one that does not respond, no action while it starts
- * or stops, and otherwise the action for the model's first missing
- * prerequisite. Nothing is ever sent to another provider instead.
+ * or stops, and otherwise the action for the first missing prerequisite.
+ * Nothing is ever sent to another provider instead.
  */
 export function findComposerBannerAction(
   runtime: ComposerModelState
@@ -419,79 +668,54 @@ function formatInventoryMenuStatus(
 }
 
 /**
- * Formats why a turned-on provider cannot list models now.
- *
- * @param source - Backend state, the providers that are on, and every
- * provider's state.
- * @param provider - The provider, with its name and location.
- * @returns Why its models cannot be read, or null while it is connected.
- */
-function formatProviderMenuStatus(
-  source: ModelAvailabilitySource,
-  provider: LlmProviderTarget
-): string | null {
-  switch (calculateProviderAvailability(source, provider.provider)) {
-    case "backend-offline":
-      return "The backend isn't running."
-    case "provider-off":
-      return `${provider.name} is turned off.`
-    case "provider-connecting":
-      return `Connecting to ${provider.name}…`
-    case "provider-unreachable":
-      return `${provider.name} can't be reached on ${provider.location}.`
-    case "available":
-      return null
-  }
-}
-
-/**
  * Builds one turned-on provider's group of the model menu.
  *
- * @param source - Backend state, the providers that are on, and every
- * provider's state.
- * @param provider - The provider, with its name and location.
- * @returns Its models while it is connected and its inventory lists any;
- * otherwise a line saying why it lists none.
+ * @param runtime - Backend state, saved settings, and every provider's
+ * state.
+ * @param provider - The provider, with its location and whether it can
+ * answer.
+ * @returns Its models while it can answer and its inventory lists any;
+ * otherwise a line saying why it lists none, as the banner would say it.
  */
 function buildComposerModelGroup(
-  source: ModelAvailabilitySource,
-  provider: LlmProviderTarget
+  runtime: ComposerRuntime,
+  provider: ComposerProviderState
 ): ComposerModelGroup {
-  const status = formatProviderMenuStatus(source, provider)
-  if (status !== null)
-    return { kind: "status", provider: provider.provider, status }
-  const { inventory, request } = source.providerModels[provider.provider]
+  const { target, readiness } = provider
+  if (readiness !== "available") {
+    return {
+      kind: "status",
+      provider: target.provider,
+      status: formatProviderReadinessMessage(target, readiness)
+    }
+  }
+  const { inventory, request } = runtime.providerModels[target.provider]
   if (inventory.status !== "ready" || inventory.models.length === 0) {
     return {
       kind: "status",
-      provider: provider.provider,
-      status: formatInventoryMenuStatus(inventory, provider.name)
+      provider: target.provider,
+      status: formatInventoryMenuStatus(inventory, target.name)
     }
   }
   const choices = inventory.models.map((info) =>
-    buildComposerModelChoice(provider.provider, info, request)
+    buildComposerModelChoice(target.provider, info, request)
   )
-  return { kind: "models", provider: provider.provider, choices }
+  return { kind: "models", provider: target.provider, choices }
 }
 
 /**
  * Lists the groups of the composer's model menu.
  *
- * @param source - Backend state, the providers that are on, and every
- * provider's state.
- * @param providers - Saved providers, for each provider's location.
+ * @param runtime - Backend state, saved settings, and every provider's
+ * state.
  * @returns One group per turned-on provider, in provider order, each as its
  * own inventory arrives; empty while no provider is on.
  */
 export function listComposerModelGroups(
-  source: ModelAvailabilitySource,
-  providers: ProvidersSettings
+  runtime: ComposerRuntime
 ): readonly ComposerModelGroup[] {
-  return listEnabledProviders(source.enabledProviders).map((provider) =>
-    buildComposerModelGroup(
-      source,
-      describeLlmProviderTarget(provider, providers)
-    )
+  return listComposerProviders(runtime).map((provider) =>
+    buildComposerModelGroup(runtime, provider)
   )
 }
 
@@ -521,25 +745,41 @@ export function calculateComposerActivity(
 }
 
 /**
+ * Formats the placeholder while the conversation's model cannot answer.
+ *
+ * @param connection - Why the model cannot answer.
+ * @param provider - The provider the composer names, or null when there is
+ * none.
+ * @returns That the composer waits on the backend, on the named provider, or
+ * on a model while no provider is named.
+ */
+function formatWaitingPlaceholder(
+  connection: Exclude<LocalRuntimeConnection, "ready">,
+  provider: ComposerProviderState | null
+): string {
+  if (connection === "offline") return "Waiting on the backend…"
+  return `Waiting on ${provider?.target.name ?? "a model"}…`
+}
+
+/**
  * Formats the composer textarea placeholder.
  *
- * @param connection - Whether the conversation's model can answer.
+ * @param state - The backend, the conversation's model, and the provider
+ * the composer names.
  * @param activity - Chat work that keeps the composer from sending.
  * @param agent - Agent that answers the next message.
- * @param providerName - Name of the model's provider, or null when there is
- * no model.
  * @returns The placeholder shown while the field is empty: what the composer
  * waits on, that a conversation whose agent was deleted is read-only, or an
  * invitation naming the agent.
  */
 export function formatComposerPlaceholder(
-  connection: LocalRuntimeConnection,
+  state: ComposerModelState,
   activity: ComposerActivity,
-  agent: ConversationAgent,
-  providerName: string | null
+  agent: ConversationAgent
 ): string {
-  if (connection === "offline") return "Waiting on the backend…"
-  if (connection !== "ready") return `Waiting on ${providerName ?? "a model"}…`
+  const connection = calculateLocalRuntimeConnection(state)
+  if (connection !== "ready")
+    return formatWaitingPlaceholder(connection, state.provider)
   if (agent.status === "deleted") return "This conversation is read-only."
 
   switch (activity) {
@@ -570,6 +810,54 @@ export function formatComposerActivity(activity: ComposerActivity): string {
 }
 
 /**
+ * Finds the load or unload a model is in, as the composer's label names it.
+ *
+ * @param availability - Availability of the model.
+ * @returns `loading` or `releasing` while Lys loads or unloads the model;
+ * null in every other state.
+ */
+function findModelTransition(
+  availability: ModelAvailability
+): "loading" | "releasing" | null {
+  switch (availability.status) {
+    case "loading":
+      return "loading"
+    case "unloading":
+      return "releasing"
+    case "backend-not-running":
+    case "provider-off":
+    case "provider-connecting":
+    case "provider-unreachable":
+    case "inventory-unread":
+    case "inventory-failed":
+    case "not-listed":
+    case "not-loaded":
+    case "loaded":
+      return null
+  }
+}
+
+/**
+ * Formats the model label while the backend runs.
+ *
+ * @param model - The model the next message goes to, or null when there is
+ * none.
+ * @param availability - Its availability, or null when there is no model.
+ * @returns The model with its provider and any load or unload it is in, or
+ * that no model is selected.
+ */
+function formatRunningModelLabel(
+  model: LlmModelReference | null,
+  availability: ModelAvailability | null
+): string {
+  if (model === null) return "no model selected"
+  const name = formatModelReferenceLabel(model)
+  const transition =
+    availability === null ? null : findModelTransition(availability)
+  return transition === null ? name : `${name} · ${transition}`
+}
+
+/**
  * Formats the model label shown beside the composer's weights indicator.
  *
  * @param backendStatus - Store-owned backend process lifecycle state.
@@ -595,16 +883,6 @@ export function formatComposerModelLabel(
     case "unresponsive":
       return "backend not responding"
     case "running":
-      break
-  }
-  if (model === null) return "no model selected"
-  const name = formatModelReferenceLabel(model)
-  switch (availability?.status) {
-    case "loading":
-      return `${name} · loading`
-    case "unloading":
-      return `${name} · releasing`
-    default:
-      return name
+      return formatRunningModelLabel(model, availability)
   }
 }

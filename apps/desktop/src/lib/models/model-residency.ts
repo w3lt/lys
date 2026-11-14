@@ -116,7 +116,7 @@ export function formatModelResidencyMeta(
   availability: ModelAvailability | null
 ): string {
   if (model === null || availability === null) {
-    return "no default model chosen · pick one in Model"
+    return "no default model chosen · pick one in Models"
   }
   const providerName = LLM_PROVIDER_NAMES[model.provider]
   switch (availability.status) {

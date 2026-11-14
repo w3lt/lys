@@ -9,6 +9,7 @@ import {
   formatProviderAddressPlaceholder,
   formatProviderKeyPlaceholder,
   formatProviderMessage,
+  formatProviderSaveMessage,
   isProviderOn,
   parseProviderAddressDraft,
   PROVIDER_DESCRIPTIONS,
@@ -75,7 +76,6 @@ function buildStatusInput(
     secrets: SECRETS,
     status: "connected",
     backendStatus: "running",
-    saveState: { status: "idle" },
     draft: UNEDITED_PROVIDER_DRAFT,
     ...overrides
   }
@@ -344,10 +344,7 @@ describe("provider-presentation", () => {
     it("explains an edit before anything else", () => {
       expect(
         formatProviderMessage(
-          buildStatusInput({
-            draft: buildEditedDraft("localhost"),
-            saveState: { status: "saving" }
-          })
+          buildStatusInput({ draft: buildEditedDraft("localhost") })
         )
       ).toEqual({
         text: "not an address: use host:port, such as 127.0.0.1:1234",
@@ -370,21 +367,6 @@ describe("provider-presentation", () => {
           })
         ).tone
       ).toBe("danger")
-    })
-
-    it("reports a running or failed save", () => {
-      expect(
-        formatProviderMessage(
-          buildStatusInput({ saveState: { status: "saving" } })
-        )
-      ).toEqual({ text: "saving…", tone: "pending" })
-      expect(
-        formatProviderMessage(
-          buildStatusInput({
-            saveState: { status: "failed", error: "Lys couldn't write." }
-          })
-        )
-      ).toEqual({ text: "Lys couldn't write.", tone: "danger" })
     })
 
     it("asks for a missing key before the connection", () => {
@@ -456,6 +438,51 @@ describe("provider-presentation", () => {
         "the backend is stopping",
         "the backend is not responding, so Lys can't reach Ollama"
       ])
+    })
+  })
+
+  describe("formatProviderSaveMessage", () => {
+    it("reports a running or failed save of the card's own provider", () => {
+      expect(
+        formatProviderSaveMessage("groq", {
+          status: "saving",
+          provider: "groq"
+        })
+      ).toEqual({ text: "saving…", tone: "pending" })
+      expect(
+        formatProviderSaveMessage("groq", {
+          status: "failed",
+          provider: "groq",
+          error: "Lys couldn't write."
+        })
+      ).toEqual({ text: "Lys couldn't write.", tone: "danger" })
+    })
+
+    it("leaves the line empty for a save of another provider", () => {
+      expect(
+        formatProviderSaveMessage("ollama", {
+          status: "saving",
+          provider: "groq"
+        })
+      ).toEqual({ text: "", tone: "muted" })
+      expect(
+        formatProviderSaveMessage("ollama", {
+          status: "failed",
+          provider: "groq",
+          error: "Lys couldn't write."
+        })
+      ).toEqual({ text: "", tone: "muted" })
+    })
+
+    it("leaves the line empty with no save, or after one that succeeded", () => {
+      expect(formatProviderSaveMessage("groq", { status: "idle" })).toEqual({
+        text: "",
+        tone: "muted"
+      })
+      expect(formatProviderSaveMessage("groq", { status: "saved" })).toEqual({
+        text: "",
+        tone: "muted"
+      })
     })
   })
 })

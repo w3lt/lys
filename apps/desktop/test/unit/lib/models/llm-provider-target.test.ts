@@ -1,6 +1,25 @@
-import { llmProviderSettingsSchema } from "@lys/share"
+import { llmProviderSettingsSchema, ollamaApiKeySchema } from "@lys/share"
 import { describe, expect, it } from "vitest"
-import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
+import {
+  describeLlmProviderTarget,
+  findSavedProviderApiKey,
+  isLlmProviderKeyMissing
+} from "@/lib/models/llm-provider-target"
+import type { SecretsSettings } from "@/lib/store/settings"
+import {
+  STORED_GROQ_API_KEY,
+  STORED_SETTINGS
+} from "../../support/settingsFixtures"
+
+/** Ollama key a case saves: a made-up value of a key's shape. */
+const OLLAMA_API_KEY = ollamaApiKeySchema.parse("ollama-fixture-3333333")
+
+/** Saved keys with neither provider key. */
+const NO_PROVIDER_KEYS: SecretsSettings = Object.freeze({
+  ...STORED_SETTINGS.secrets,
+  ollamaApiKey: null,
+  groqApiKey: null
+})
 
 /**
  * Builds providers from the first-run ones.
@@ -81,4 +100,40 @@ describe("describeLlmProviderTarget", () => {
       ).location
     ).toBe("192.168.1.20:11434")
   })
+})
+
+describe("findSavedProviderApiKey", () => {
+  it("finds each keyed provider's own key", () => {
+    const secrets: SecretsSettings = {
+      ...STORED_SETTINGS.secrets,
+      ollamaApiKey: OLLAMA_API_KEY
+    }
+
+    expect(findSavedProviderApiKey("ollamaCloud", secrets)).toBe(OLLAMA_API_KEY)
+    expect(findSavedProviderApiKey("groq", secrets)).toBe(STORED_GROQ_API_KEY)
+  })
+
+  it("finds no key while none is saved", () => {
+    expect(findSavedProviderApiKey("groq", NO_PROVIDER_KEYS)).toBeNull()
+  })
+})
+
+describe("isLlmProviderKeyMissing", () => {
+  it.each(["ollamaCloud", "groq"] as const)(
+    "says %s needs a key while none is saved",
+    (provider) => {
+      expect(isLlmProviderKeyMissing(provider, NO_PROVIDER_KEYS)).toBe(true)
+    }
+  )
+
+  it("says a keyed provider with its key saved lacks none", () => {
+    expect(isLlmProviderKeyMissing("groq", STORED_SETTINGS.secrets)).toBe(false)
+  })
+
+  it.each(["lmStudio", "ollama"] as const)(
+    "never says %s, reached at an address, needs a key",
+    (provider) => {
+      expect(isLlmProviderKeyMissing(provider, NO_PROVIDER_KEYS)).toBe(false)
+    }
+  )
 })

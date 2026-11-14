@@ -2364,6 +2364,12 @@ legend.settings-view__mcp-field-label {
   outline-offset: 2px;
 }
 
+/* While its provider is off, the default's key is plain text. */
+.settings-view__models-default-key--text {
+  text-decoration: none;
+  cursor: default;
+}
+
 .settings-view__models-provider,
 .settings-view__models-list,
 .settings-view__models-details,
@@ -2624,6 +2630,13 @@ legend.settings-view__mcp-field-label {
 .settings-view__models-row[aria-current="true"] {
   background: var(--app-surface-navigation-active);
   box-shadow: inset 2px 0 0 var(--lys-violet);
+}
+
+/* A focused selected row keeps its violet edge inside the focus ring. */
+.settings-view__models-row[aria-current="true"]:focus-visible {
+  box-shadow:
+    inset 0 0 0 2px var(--app-focus),
+    inset 4px 0 0 var(--lys-violet);
 }
 
 .settings-view__models-key {
@@ -3001,8 +3014,15 @@ legend.settings-view__mcp-field-label {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 10px;
+  border-radius: 2px;
   font-size: 13px;
   color: var(--app-text);
+}
+
+/* Undo and Reload hand focus to this region, so it shows a focus ring. */
+.settings-view__models-change:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
 }
 
 /*
@@ -3044,9 +3064,16 @@ legend.settings-view__mcp-field-label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  border-radius: 2px;
   font-size: 13px;
   font-weight: 500;
   color: var(--app-text-strong);
+}
+
+/* The mark takes focus from the Set as default button it replaces. */
+.settings-view__models-current:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
 }
 
 .settings-view__models-current svg {
@@ -3656,6 +3683,15 @@ legend.settings-view__mcp-field-label {
   color: var(--app-text-faint);
   font-family: var(--font-mono);
   font-size: 12px;
+}
+
+/* A card's save line stays in the card, on or off, so a save is announced; empty, it takes no room. */
+.settings-view__provider-save {
+  padding: 0 18px 16px 68px;
+
+  &:empty {
+    padding: 0;
+  }
 }
 
 /* Runtime: one row per turned-on provider under the connections heading. */

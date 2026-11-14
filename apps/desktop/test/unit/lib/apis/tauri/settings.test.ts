@@ -206,6 +206,20 @@ describe("loadSettings", () => {
     expect(settings.runtime.defaultModel).toBeNull()
   })
 
+  it("reads an empty stored default model's key as no model while a provider is on", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        providers: { ...STORED_PROVIDERS_SETTINGS, enabled: ["lmStudio"] },
+        runtime: { ...STORED_SETTINGS_DOCUMENT.runtime, defaultModel: "" }
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.runtime.defaultModel).toBeNull()
+  })
+
   it("reads the providers that are on with their addresses", async () => {
     startNativeHostFake({ load_settings: () => STORED_SETTINGS_DOCUMENT })
 

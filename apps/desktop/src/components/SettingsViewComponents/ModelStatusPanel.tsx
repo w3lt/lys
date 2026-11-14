@@ -59,9 +59,12 @@ type LocalModelActionProps = Pick<
 /**
  * Offers Load for a model on disk and Unload for a loaded model.
  *
- * @remarks Presentational. Both are disabled while a request is in flight
- * and while Lys cannot load the provider's models; Unload also for the
- * session's default. Each is described by the status note, which says why.
+ * @remarks Both are disabled while a request is in flight,
+ * the model's own load or unload included, and while Lys cannot load the
+ * provider's models; Unload also for the session's default. The one button
+ * stays mounted through a load or unload and changes its word when it
+ * ends, so focus stays on it. Each is described by the status note, which
+ * says why.
  * @param props - Model state, the note's identifier, and the two requests.
  * @returns The button that applies.
  */
@@ -102,7 +105,7 @@ type ModelCheckActionProps = {
 /**
  * Offers to ask a cloud provider about the model.
  *
- * @remarks Presentational. Reads Try again after a failed check and Check
+ * @remarks Reads Try again after a failed check and Check
  * status otherwise; disabled while a request is in flight.
  * @param props - Whether the check failed or a request runs, and the
  * request.
@@ -151,25 +154,86 @@ function describeModelStatus(
       )
     case "ollamaCloud":
     case "groq":
-      return describeCloudModelStatus(provider, model, {
+      return describeCloudModelStatus(provider, model.modelKey, {
         ...observation,
         isCheckRequested
       })
   }
 }
 
+/** Properties accepted by {@link ModelStatusLines}. */
+type ModelStatusLinesProps = {
+  /** The status to show. */
+  readonly status: ModelStatusDescription
+  /** Identifier given to the note, so the action can be described by it. */
+  readonly noteId: string
+}
+
+/**
+ * Shows the selected model's state beside a toned dot, and the note on it.
+ *
+ * @remarks The state is a word beside the dot, so it does
+ * not rely on colour; the note is a status region, so changes are
+ * announced.
+ * @param props - The status and the note's identifier.
+ * @returns The state line and the note.
+ */
+function ModelStatusLines({
+  status,
+  noteId
+}: ModelStatusLinesProps): ReactElement {
+  return (
+    <div className="settings-view__models-status-lines">
+      <p className="settings-view__models-status-word">
+        <span
+          aria-hidden="true"
+          className="settings-view__status-dot"
+          data-tone={status.tone}
+        />
+        <span>{status.word}</span>
+        <span>{status.place}</span>
+      </p>
+      <p className="settings-view__models-note" id={noteId} role="status">
+        {status.note}
+      </p>
+    </div>
+  )
+}
+
+/** Properties accepted by {@link ModelLoadProgress}. */
+type ModelLoadProgressProps = {
+  /** Key of the model being loaded. */
+  readonly modelKey: string
+}
+
+/**
+ * Shows that a model is being loaded, without claiming how far the load is.
+ *
+ * @remarks Nothing reports how far a load is, so the native
+ * bar stays indeterminate and carries the semantics, named after the model,
+ * while the track draws the sweep, which a native bar cannot render.
+ * @param props - The model being loaded.
+ * @returns The indeterminate progress bar.
+ */
+function ModelLoadProgress({ modelKey }: ModelLoadProgressProps): ReactElement {
+  return (
+    <div className="settings-view__progress settings-view__models-progress">
+      <progress aria-label={`Loading ${modelKey}`} className="sr-only" />
+      <span aria-hidden="true" className="settings-view__progress-fill" />
+    </div>
+  )
+}
+
 /**
  * Shows whether the selected model can answer, and offers the action that
  * changes or confirms it.
  *
- * @remarks Interactive feature: owns whether the person asked to check this
+ * @remarks Owns whether the person asked to check this
  * model, so only that check's failure reads Couldn't check; the parent
- * remounts it for another model. The state is a word beside a toned dot,
- * so it does not rely on colour, and the note is a status region, so
- * changes are announced. A model on this machine offers Load or Unload,
- * and shows an indeterminate progress bar while it loads, since nothing
- * reports how far a load is; nothing is offered while it loads or unloads.
- * A cloud model offers Check status, or Try again after a failed check.
+ * remounts it for another model. A model on this machine offers Load or
+ * Unload, kept in place and disabled while it loads or unloads, and shows
+ * an indeterminate progress bar while it loads. A cloud model offers Check
+ * status, or Try again after a failed check.
  * @param props - Provider, model, observations, and the three requests.
  * @returns The status box.
  */
@@ -179,10 +243,9 @@ export default function ModelStatusPanel(
   const { provider, model, observation } = props
   const noteId = useId()
   const [isCheckRequested, setIsCheckRequested] = useState(false)
-  const status = describeModelStatus(props, isCheckRequested)
-  const transition = findModelTransition(observation.request, model.modelKey)
   const isBusy = observation.request.status !== "idle"
   const isLocal = provider === "lmStudio" || provider === "ollama"
+  const transition = findModelTransition(observation.request, model.modelKey)
 
   /** Remembers that the person asked to check this model, then asks. */
   function handleCheckModel(): void {
@@ -192,21 +255,11 @@ export default function ModelStatusPanel(
 
   return (
     <div className="settings-view__models-status">
-      <div className="settings-view__models-status-lines">
-        <p className="settings-view__models-status-word">
-          <span
-            aria-hidden="true"
-            className="settings-view__status-dot"
-            data-tone={status.tone}
-          />
-          <span>{status.word}</span>
-          <span>{status.place}</span>
-        </p>
-        <p className="settings-view__models-note" id={noteId} role="status">
-          {status.note}
-        </p>
-      </div>
-      {isLocal && transition === null ? (
+      <ModelStatusLines
+        noteId={noteId}
+        status={describeModelStatus(props, isCheckRequested)}
+      />
+      {isLocal ? (
         <LocalModelAction
           canLoadModels={props.canLoadModels}
           isBusy={isBusy}
@@ -216,8 +269,7 @@ export default function ModelStatusPanel(
           onLoadModel={props.onLoadModel}
           onUnloadModel={props.onUnloadModel}
         />
-      ) : null}
-      {isLocal ? null : (
+      ) : (
         <ModelCheckAction
           isBusy={isBusy}
           isFailed={isModelCheckFailed(
@@ -228,13 +280,7 @@ export default function ModelStatusPanel(
         />
       )}
       {transition === "loading" ? (
-        <div className="settings-view__progress settings-view__models-progress">
-          <progress
-            aria-label={`Loading ${model.modelKey}`}
-            className="sr-only"
-          />
-          <span aria-hidden="true" className="settings-view__progress-fill" />
-        </div>
+        <ModelLoadProgress modelKey={model.modelKey} />
       ) : null}
     </div>
   )

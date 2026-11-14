@@ -2,15 +2,17 @@ import { llmProviderSettingsSchema } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   calculateProviderAvailability,
+  calculateProviderConnectionState,
+  calculateProviderReadiness,
   calculateProviderStatusTone,
   formatModelReferenceLabel,
   formatProviderConnectionsSummary,
   formatProviderStatusLabel,
   formatProviderStatusMeta,
-  formatProviderUnreachableMessage,
   listEnabledProviders,
   listRefreshableProviders
 } from "@/lib/models/provider-connection"
+import type { SecretsSettings } from "@/lib/store/settings"
 import {
   buildModelAvailabilitySource,
   buildProviderModelStates
@@ -19,6 +21,13 @@ import {
   GROQ_TARGET,
   LM_STUDIO_TARGET
 } from "../../support/providerTargetFixtures"
+import { STORED_SETTINGS } from "../../support/settingsFixtures"
+
+/** Saved keys without the Groq key the stored ones hold. */
+const NO_GROQ_KEY: SecretsSettings = Object.freeze({
+  ...STORED_SETTINGS.secrets,
+  groqApiKey: null
+})
 
 describe("calculateProviderAvailability", () => {
   it.each(["starting", "stopping", "stopped", "unresponsive"] as const)(
@@ -76,13 +85,110 @@ describe("calculateProviderAvailability", () => {
   })
 })
 
+describe("calculateProviderReadiness", () => {
+  it.each(["connected", "connecting", "unreachable", "unknown"] as const)(
+    "says a turned-on Groq without a key needs one while its status is %s",
+    (status) => {
+      const source = buildModelAvailabilitySource({
+        providers: { groq: { status } }
+      })
+
+      expect(calculateProviderReadiness(source, NO_GROQ_KEY, "groq")).toBe(
+        "provider-needs-key"
+      )
+    }
+  )
+
+  it("keeps a Groq the settings leave off as off, though it has no key", () => {
+    const source = buildModelAvailabilitySource({
+      enabledProviders: ["lmStudio"],
+      providers: { groq: { status: "unreachable" } }
+    })
+
+    expect(calculateProviderReadiness(source, NO_GROQ_KEY, "groq")).toBe(
+      "provider-off"
+    )
+  })
+
+  it("keeps the backend offline first, though Groq has no key", () => {
+    const source = buildModelAvailabilitySource({
+      backendStatus: "stopped",
+      providers: { groq: { status: "unknown" } }
+    })
+
+    expect(calculateProviderReadiness(source, NO_GROQ_KEY, "groq")).toBe(
+      "backend-offline"
+    )
+  })
+
+  it.each([
+    ["groq", "connected", "available"],
+    ["groq", "unreachable", "provider-unreachable"],
+    ["lmStudio", "connecting", "provider-connecting"],
+    ["lmStudio", "connected", "available"]
+  ] as const)(
+    "follows the availability of %s, whose key is saved or not needed, while it is %s",
+    (provider, status, readiness) => {
+      const source = buildModelAvailabilitySource({
+        providers: { [provider]: { status } }
+      })
+
+      expect(
+        calculateProviderReadiness(source, STORED_SETTINGS.secrets, provider)
+      ).toBe(readiness)
+    }
+  )
+
+  it("asks no key of a provider reached at an address", () => {
+    const source = buildModelAvailabilitySource({
+      providers: { lmStudio: { status: "connected" } }
+    })
+    const noKey: SecretsSettings = { ...NO_GROQ_KEY, ollamaApiKey: null }
+
+    expect(calculateProviderReadiness(source, noKey, "lmStudio")).toBe(
+      "available"
+    )
+  })
+})
+
+describe("calculateProviderConnectionState", () => {
+  it.each([
+    "unknown",
+    "connecting",
+    "connected",
+    "unreachable",
+    "off"
+  ] as const)(
+    "says a provider without the key it needs needs one, whatever its %s status",
+    (status) => {
+      expect(
+        calculateProviderConnectionState("groq", status, NO_GROQ_KEY)
+      ).toBe("needs-key")
+    }
+  )
+
+  it("keeps the status of a provider whose key is saved, or that needs none", () => {
+    expect(
+      calculateProviderConnectionState(
+        "groq",
+        "unreachable",
+        STORED_SETTINGS.secrets
+      )
+    ).toBe("unreachable")
+    expect(
+      calculateProviderConnectionState("lmStudio", "connected", NO_GROQ_KEY)
+    ).toBe("connected")
+  })
+})
+
 describe("formatProviderStatusLabel", () => {
   it.each([
     ["unknown", "LM Studio status unknown"],
     ["connecting", "Connecting to LM Studio"],
     ["connected", "LM Studio connected"],
     ["unreachable", "LM Studio not reachable"],
-    ["off", "LM Studio is off"]
+    ["off", "LM Studio is off"],
+    ["needs-key", "LM Studio needs a key"]
   ] as const)("labels %s as %j", (status, label) => {
     expect(formatProviderStatusLabel(status, LM_STUDIO_TARGET)).toBe(label)
   })
@@ -120,7 +226,11 @@ describe("formatProviderStatusMeta", () => {
       "running",
       "127.0.0.1:1234 · start LM Studio, then refresh"
     ],
-    ["off", "running", "127.0.0.1:1234 · turn it on in Providers"]
+    [
+      "off",
+      "running",
+      "127.0.0.1:1234 · the backend has LM Studio off · refresh to check again"
+    ]
   ] as const)(
     "describes %s with the backend %s as %j",
     (status, backendStatus, meta) => {
@@ -135,18 +245,10 @@ describe("formatProviderStatusMeta", () => {
       formatProviderStatusMeta("unreachable", "running", GROQ_TARGET)
     ).toBe("api.groq.com · check the key in Providers, then refresh")
   })
-})
 
-describe("formatProviderUnreachableMessage", () => {
-  it("asks to start a provider at an address, or to check its address", () => {
-    expect(formatProviderUnreachableMessage(LM_STUDIO_TARGET)).toBe(
-      "LM Studio is not reachable. Start LM Studio, or check its address in Providers, then press Refresh on its status in Runtime."
-    )
-  })
-
-  it("asks to check a hosted provider's key and the network", () => {
-    expect(formatProviderUnreachableMessage(GROQ_TARGET)).toBe(
-      "Groq is not reachable. Check its key in Providers and your network, then press Refresh on its status in Runtime."
+  it("asks to add the key of a provider that needs one", () => {
+    expect(formatProviderStatusMeta("needs-key", "running", GROQ_TARGET)).toBe(
+      "api.groq.com · add its key in Providers"
     )
   })
 })
@@ -157,7 +259,8 @@ describe("calculateProviderStatusTone", () => {
     ["off", "idle"],
     ["connecting", "pending"],
     ["connected", "active"],
-    ["unreachable", "danger"]
+    ["unreachable", "danger"],
+    ["needs-key", "warning"]
   ] as const)("shows %s in the %s tone", (status, tone) => {
     expect(calculateProviderStatusTone(status)).toBe(tone)
   })

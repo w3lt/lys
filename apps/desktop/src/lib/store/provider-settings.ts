@@ -12,13 +12,22 @@ import type {
   SecretsSettings
 } from "./settings"
 
-/** Lifecycle of the latest provider settings save. */
+/**
+ * Lifecycle of the latest provider settings save, and while it runs or after
+ * it failed, the provider it was for.
+ */
 export type ProviderSettingsSaveState =
   | { readonly status: "idle" }
-  | { readonly status: "saving" }
+  | {
+      readonly status: "saving"
+      /** Provider whose card asked for the save. */
+      readonly provider: LlmProvider
+    }
   | { readonly status: "saved" }
   | {
       readonly status: "failed"
+      /** Provider whose card asked for the save. */
+      readonly provider: LlmProvider
       /** Caller-safe reason, without a key or a native path. */
       readonly error: string
     }
@@ -54,18 +63,22 @@ export type ProviderSettingsSlice = {
    * to connect again to every provider the save changed: turned on or off,
    * or given another address. The backend answers `off` for a provider
    * turned off.
+   * @param provider - Provider whose card asks for the save: the one turned
+   * on or off, or given another address. The save's state names it, so only
+   * that card reports the save.
    * @param providers - Providers that are on and addresses to save.
    * @returns `saved` after the settings file and the store hold the group
    * and the reconnections settled, `failed` when the save failed, or `busy`
    * without saving while another provider save runs. It never rejects.
    */
   readonly saveProviderSettings: (
+    provider: LlmProvider,
     providers: ProvidersSettings
   ) => Promise<ProviderSettingsSaveOutcome>
   /**
    * Saves a provider's key, or removes it with null, then asks the backend
    * to connect to that provider again while it is on.
-   * @param change - Provider and key.
+   * @param change - Provider and key; the save's state names the provider.
    * @returns The same outcomes as {@link saveProviderSettings}. It never
    * rejects.
    */
@@ -103,17 +116,12 @@ export type ProviderSettingsDependencies = {
 /** Save state before any save. */
 const IDLE_SAVE: ProviderSettingsSaveState = Object.freeze({ status: "idle" })
 
-/** Save state while a save runs. */
-const SAVING: ProviderSettingsSaveState = Object.freeze({ status: "saving" })
-
 /** Save state after a save. */
 const SAVED: ProviderSettingsSaveState = Object.freeze({ status: "saved" })
 
-/** Save state after a failed save. */
-const SAVE_FAILED: ProviderSettingsSaveState = Object.freeze({
-  status: "failed",
-  error: "Lys couldn't write the provider to its settings file."
-})
+/** Caller-safe reason of a failed save. */
+const SAVE_FAILED_ERROR =
+  "Lys couldn't write the provider to its settings file."
 
 /**
  * Answers whether a provider sends its key, so a change of that key changes
@@ -177,7 +185,9 @@ function buildSecretsChange(
  * @param dependencies - Group saves and the reconnection.
  * @returns The slice.
  * @remarks One provider save runs at a time; a request while one runs
- * answers `busy`. The store's settings change only after the file holds the
+ * answers `busy`. A running or failed save names the provider it is for, so
+ * the pane reports it on that provider's card only. The store's settings
+ * change only after the file holds the
  * change, so the pane never shows a group the backend cannot read. The
  * backend reads the providers group and the keys at each connection
  * attempt, so the slice reconnects each provider a save changes, all at
@@ -190,20 +200,28 @@ export function createProviderSettingsSlice(
 ): ProviderSettingsSlice {
   /**
    * Runs one save, publishing its state, unless another save runs.
+   * @param provider - Provider the save is for, which its state names.
    * @param save - Writes the change to the settings file.
    * @param applySaved - Applies the saved change to the store's settings.
    * @returns The save outcome.
    */
   async function runProviderSave(
+    provider: LlmProvider,
     save: () => Promise<void>,
     applySaved: (settings: LysSettings) => LysSettings
   ): Promise<ProviderSettingsSaveOutcome> {
     if (get().providerSettingsSave.status === "saving") return "busy"
-    set({ providerSettingsSave: SAVING })
+    set({ providerSettingsSave: Object.freeze({ status: "saving", provider }) })
     try {
       await save()
     } catch {
-      set({ providerSettingsSave: SAVE_FAILED })
+      set({
+        providerSettingsSave: Object.freeze({
+          status: "failed",
+          provider,
+          error: SAVE_FAILED_ERROR
+        })
+      })
       return "failed"
     }
     set((state) => ({
@@ -215,18 +233,20 @@ export function createProviderSettingsSlice(
 
   /** Implements {@link ProviderSettingsSlice.saveProviderSettings}. */
   async function saveProviderSettings(
+    provider: LlmProvider,
     providers: ProvidersSettings
   ): Promise<ProviderSettingsSaveOutcome> {
     const previous = get().settings.providers
     const outcome = await runProviderSave(
+      provider,
       () => dependencies.saveProviderSettings(providers),
       (settings) => ({ ...settings, providers })
     )
     if (outcome === "saved") {
       await Promise.all(
-        LLM_PROVIDERS.filter((provider) =>
-          hasProviderChanged(previous, providers, provider)
-        ).map((provider) => dependencies.connectLlmProvider(provider))
+        LLM_PROVIDERS.filter((changed) =>
+          hasProviderChanged(previous, providers, changed)
+        ).map((changed) => dependencies.connectLlmProvider(changed))
       )
     }
     return outcome
@@ -238,6 +258,7 @@ export function createProviderSettingsSlice(
   ): Promise<ProviderSettingsSaveOutcome> {
     const secretsChange = buildSecretsChange(change)
     const outcome = await runProviderSave(
+      change.provider,
       () => dependencies.saveSecretsSettings(secretsChange),
       (settings) => ({
         ...settings,

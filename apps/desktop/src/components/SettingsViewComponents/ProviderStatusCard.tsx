@@ -6,26 +6,25 @@ import {
   type LlmProviderTarget
 } from "@/lib/models/llm-provider-target"
 import {
+  calculateProviderConnectionState,
   calculateProviderStatusTone,
   formatProviderConnectionsSummary,
   formatProviderStatusLabel,
   formatProviderStatusMeta,
   listEnabledProviders,
-  listRefreshableProviders
+  listRefreshableProviders,
+  type ProviderConnectionState
 } from "@/lib/models/provider-connection"
 import type { BackendServerStatus } from "@/lib/store"
-import type {
-  LlmProviderStatus,
-  ProviderModelStates
-} from "@/lib/store/model-runtime"
-import type { ProvidersSettings } from "@/lib/store/settings"
+import type { ProviderModelStates } from "@/lib/store/model-runtime"
+import type { ProvidersSettings, SecretsSettings } from "@/lib/store/settings"
 
 /** Properties accepted by {@link ProviderStatusRow}. */
 type ProviderStatusRowProps = {
   /** Provider the row shows, which it names and locates. */
   readonly provider: LlmProviderTarget
-  /** Latest status of that provider published by the application store. */
-  readonly status: LlmProviderStatus
+  /** That provider's connection, a missing key counted. */
+  readonly state: ProviderConnectionState
   /** Backend lifecycle state, which explains an `unknown` status. */
   readonly backendStatus: BackendServerStatus
 }
@@ -34,6 +33,8 @@ type ProviderStatusRowProps = {
 type ProviderStatusCardProps = {
   /** Saved providers: which are on, and their addresses. */
   readonly providers: ProvidersSettings
+  /** Saved keys, which tell a provider that needs a key it lacks. */
+  readonly secrets: SecretsSettings
   /** What the desktop knows of every provider, of which the card reads the status. */
   readonly providerModels: ProviderModelStates
   /** Backend lifecycle state; only a running backend can be asked to reconnect. */
@@ -55,13 +56,15 @@ type ProviderStatusCardProps = {
  * heading, and where the provider is with the next step.
  *
  * @remarks A pure projection of its props. The dot is hidden from assistive
- * technology; the heading carries the state.
- * @param props - Provider, its status, and the backend's state.
+ * technology; the heading carries the state. The heading and the line under
+ * it are the row's polite live region, announced together when the
+ * provider's connection changes, so one change is one announcement.
+ * @param props - Provider, its connection, and the backend's state.
  * @returns The row.
  */
 function ProviderStatusRow({
   provider,
-  status,
+  state,
   backendStatus
 }: ProviderStatusRowProps): ReactElement {
   return (
@@ -69,12 +72,16 @@ function ProviderStatusRow({
       <span
         aria-hidden="true"
         className="settings-view__status-dot"
-        data-tone={calculateProviderStatusTone(status)}
+        data-tone={calculateProviderStatusTone(state)}
       />
-      <div className="settings-view__identity-lines">
-        <h3>{formatProviderStatusLabel(status, provider)}</h3>
+      <div
+        aria-atomic="true"
+        aria-live="polite"
+        className="settings-view__identity-lines"
+      >
+        <h3>{formatProviderStatusLabel(state, provider)}</h3>
         <p className="settings-view__meta">
-          {formatProviderStatusMeta(status, backendStatus, provider)}
+          {formatProviderStatusMeta(state, backendStatus, provider)}
         </p>
       </div>
     </li>
@@ -86,9 +93,11 @@ function ProviderStatusRow({
  * order, with one Refresh action; or, while no provider is on, says so and
  * offers to open Providers.
  *
- * @remarks The parent owns the statuses and the requests; the card owns no
- * state, effect, or store access. The rows are announced politely when they
- * change. Refresh asks the backend to connect again to each turned-on
+ * @remarks The parent owns the statuses, the keys, and the requests; the
+ * card owns no state, effect, or store access. A turned-on provider that
+ * needs a key it lacks is shown as needing one, whatever its status. Each
+ * row announces its own provider's changes politely; the list itself is not
+ * live. Refresh asks the backend to connect again to each turned-on
  * provider that is not connecting, and is disabled while the backend is not
  * running or every turned-on provider is connecting. It is the pane's only
  * reconnect control.
@@ -98,6 +107,7 @@ function ProviderStatusRow({
  */
 export default function ProviderStatusCard({
   providers,
+  secrets,
   providerModels,
   backendStatus,
   onRefreshProviders,
@@ -136,13 +146,17 @@ export default function ProviderStatusCard({
           )}
         </div>
       </div>
-      <ul aria-live="polite" className="settings-view__provider-status-list">
+      <ul className="settings-view__provider-status-list">
         {enabled.map((provider) => (
           <ProviderStatusRow
             backendStatus={backendStatus}
             key={provider}
             provider={describeLlmProviderTarget(provider, providers)}
-            status={providerModels[provider].status}
+            state={calculateProviderConnectionState(
+              provider,
+              providerModels[provider].status,
+              secrets
+            )}
           />
         ))}
       </ul>

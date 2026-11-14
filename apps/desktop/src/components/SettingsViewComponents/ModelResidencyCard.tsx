@@ -66,11 +66,11 @@ function formatModelResidencyNote(
   model: LlmModelReference | null
 ): string {
   if (model === null || modelLoading === "unknown")
-    return "This summary shows the model a new conversation uses; see every model in Model settings."
+    return "This summary shows the model a new conversation uses; see every model in Models."
   const providerName = LLM_PROVIDER_NAMES[model.provider]
   return modelLoading === "lys"
-    ? `Loading and unloading use ${providerName} through the backend. This summary shows the model a new conversation uses; manage every loaded model in Model settings.`
-    : `${providerName} decides which models are in memory, so Lys does not load or unload them. This summary shows the model a new conversation uses; see every model in Model settings.`
+    ? `Loading and unloading use ${providerName} through the backend. This summary shows the model a new conversation uses; manage every loaded model in Models.`
+    : `${providerName} decides which models are in memory, so Lys does not load or unload them. This summary shows the model a new conversation uses; see every model in Models.`
 }
 
 /**

@@ -115,13 +115,16 @@ describe("createProviderSettingsSlice", () => {
       const { host, writes } = startControlledSettingsHost()
       const { store, connectLlmProvider } = createProviderStore()
 
-      const save = store.getState().saveProviderSettings(GROQ_ADDED)
+      const save = store.getState().saveProviderSettings("groq", GROQ_ADDED)
       await waitForMicrotasks()
       const whileWriting = store.getState()
       writes[0]?.resolve(null)
 
       await expect(save).resolves.toBe("saved")
-      expect(whileWriting.providerSettingsSave).toEqual({ status: "saving" })
+      expect(whileWriting.providerSettingsSave).toEqual({
+        status: "saving",
+        provider: "groq"
+      })
       expect(whileWriting.settings.providers).toBe(STORED_PROVIDERS_SETTINGS)
       expect(store.getState().providerSettingsSave).toEqual({
         status: "saved"
@@ -137,7 +140,9 @@ describe("createProviderSettingsSlice", () => {
       const { writes } = startControlledSettingsHost()
       const { store, connectLlmProvider } = createProviderStore()
 
-      const save = store.getState().saveProviderSettings(OLLAMA_CLOUD_ONLY)
+      const save = store
+        .getState()
+        .saveProviderSettings("ollamaCloud", OLLAMA_CLOUD_ONLY)
       await waitForMicrotasks()
       writes[0]?.resolve(null)
       await save
@@ -157,7 +162,7 @@ describe("createProviderSettingsSlice", () => {
         lmStudio: { address: "192.168.1.5:1234" }
       })
 
-      const save = store.getState().saveProviderSettings(moved)
+      const save = store.getState().saveProviderSettings("ollama", moved)
       await waitForMicrotasks()
       writes[0]?.resolve(null)
       await save
@@ -169,13 +174,14 @@ describe("createProviderSettingsSlice", () => {
       const { writes } = startControlledSettingsHost()
       const { store, connectLlmProvider } = createProviderStore()
 
-      const save = store.getState().saveProviderSettings(GROQ_ADDED)
+      const save = store.getState().saveProviderSettings("groq", GROQ_ADDED)
       await waitForMicrotasks()
       writes[0]?.reject("EACCES: /Users/someone/.lys/settings.json")
 
       await expect(save).resolves.toBe("failed")
       expect(store.getState().providerSettingsSave).toEqual({
         status: "failed",
+        provider: "groq",
         error: "Lys couldn't write the provider to its settings file."
       })
       expect(store.getState().settings.providers).toBe(
@@ -188,7 +194,7 @@ describe("createProviderSettingsSlice", () => {
       const { host, writes } = startControlledSettingsHost()
       const { store } = createProviderStore()
 
-      const first = store.getState().saveProviderSettings(GROQ_ADDED)
+      const first = store.getState().saveProviderSettings("groq", GROQ_ADDED)
       await waitForMicrotasks()
       const second = await store
         .getState()
@@ -259,6 +265,32 @@ describe("createProviderSettingsSlice", () => {
 
       expect(local.connectLlmProvider).not.toHaveBeenCalled()
       expect(cloud.connectLlmProvider.mock.calls).toEqual([["ollamaCloud"]])
+    })
+
+    it("names the key's provider in the save state while it runs and after it fails", async () => {
+      const { writes } = startControlledSettingsHost()
+      const { store, connectLlmProvider } = createProviderStore()
+
+      const save = store.getState().saveProviderApiKey({
+        provider: "ollamaCloud",
+        apiKey: NEW_OLLAMA_API_KEY
+      })
+      await waitForMicrotasks()
+      const whileWriting = store.getState()
+      writes[0]?.reject("EACCES: /Users/someone/.lys/settings.json")
+
+      await expect(save).resolves.toBe("failed")
+      expect(whileWriting.providerSettingsSave).toEqual({
+        status: "saving",
+        provider: "ollamaCloud"
+      })
+      expect(store.getState().providerSettingsSave).toEqual({
+        status: "failed",
+        provider: "ollamaCloud",
+        error: "Lys couldn't write the provider to its settings file."
+      })
+      expect(store.getState().settings.secrets).toBe(STORED_SETTINGS.secrets)
+      expect(connectLlmProvider).not.toHaveBeenCalled()
     })
 
     it("removes a key with null without connecting while its provider is off", async () => {

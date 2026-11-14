@@ -34,17 +34,17 @@ import ComposerPlusMenu from "./ComposerComponents/ComposerPlusMenu"
 import ComposerToolCallPrompt from "./ComposerComponents/ComposerToolCallPrompt"
 import { buildContextMeterState } from "./ComposerComponents/composer-context"
 import {
+  buildComposerModelState,
   calculateComposerActivity,
+  calculateLocalRuntimeConnection,
   findComposerBannerAction,
   formatComposerActivity,
   formatComposerModelLabel,
   formatComposerPlaceholder,
   formatUnavailableRuntimeMessage,
-  calculateLocalRuntimeConnection,
   listComposerModelGroups,
-  type ComposerModelState
+  type ComposerRuntime
 } from "./ComposerComponents/composer-presentation"
-import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
 
 import "./Composer.scss"
 
@@ -89,8 +89,10 @@ export type ComposerProps = {
  * banner names the first missing prerequisite — the backend, the model's
  * provider, or its loaded weights — and its action starts a stopped backend
  * or opens the settings pane that fixes the problem: Runtime for the
- * backend, Providers for a provider that is off or not reachable, Model for
- * inventory and loading.
+ * backend, Providers for a provider that is off, needs a key, or is not
+ * reachable, Models for inventory and loading. Without a model, while no
+ * turned-on provider can answer, the banner names the first of them, in
+ * provider order, and why it cannot.
  *
  * The primary control is Stop while a reply is awaited — while the
  * conversation turn is awaited and while the reply streams — and Send
@@ -145,9 +147,9 @@ export type ComposerProps = {
  * settings. While the conversation's model cannot answer, Send stays off and
  * the banner above the field says why, with one action: start the backend,
  * open the settings pane that fixes it, open the model menu, or show the
- * model in the Model pane to load it there. A model whose provider is off or
- * not reachable stays the conversation's model, and nothing is sent to
- * another provider instead. Context figures come from the
+ * model in the Models pane to load it there. A model whose provider is off,
+ * needs a key, or is not reachable stays the conversation's model, and
+ * nothing is sent to another provider instead. Context figures come from the
  * backend's measurement of the conversation with its loaded model, plus an
  * estimate of the draft and of the staged images, and are marked `~`
  * wherever they appear; staged text files are read on request, so they are
@@ -207,30 +209,11 @@ export function Composer({
 
   const backendStatus = backendServerInfo.status
   const { model, availability } = conversationModel
-  const connection = calculateLocalRuntimeConnection(
-    backendStatus,
-    availability
-  )
-  const provider = describeLlmProviderTarget(
-    model?.provider ?? "lmStudio",
-    settings.providers
-  )
-  const modelState: ComposerModelState = {
-    backendStatus,
-    model,
-    availability,
-    provider,
-    hasProviderOn: settings.providers.enabled.length > 0
-  }
+  const runtime: ComposerRuntime = { backendStatus, settings, providerModels }
+  const modelState = buildComposerModelState(runtime, conversationModel)
+  const connection = calculateLocalRuntimeConnection(modelState)
   const bannerAction = findComposerBannerAction(modelState)
-  const modelGroups = listComposerModelGroups(
-    {
-      backendStatus,
-      enabledProviders: settings.providers.enabled,
-      providerModels
-    },
-    settings.providers
-  )
+  const modelGroups = listComposerModelGroups(runtime)
   const isUnavailable = connection !== "ready"
   const activity = calculateComposerActivity(request, conversationOpen)
   const activityLabel = formatComposerActivity(activity)
@@ -402,7 +385,7 @@ export function Composer({
   /**
    * Carries out the banner's recovery action: starts the backend, opens the
    * settings pane that fixes the missing prerequisite, opens the model menu,
-   * or shows the model in the Model pane to be loaded there.
+   * or shows the model in the Models pane to be loaded there.
    */
   function handleBannerAction(): void {
     switch (bannerAction.kind) {
@@ -516,10 +499,9 @@ export function Composer({
               onFocus={() => setIsFocused(true)}
               onKeyDown={handleKeyDown}
               placeholder={formatComposerPlaceholder(
-                connection,
+                modelState,
                 activity,
-                answeringAgent,
-                model === null ? null : provider.name
+                answeringAgent
               )}
               ref={messageFieldRef}
               rows={1}

@@ -13,12 +13,7 @@ import type {
   ModelInventoryState,
   ModelRequestState
 } from "@/lib/store/model-runtime"
-import type {
-  LoadConfigurationSettings,
-  SecretsSettings
-} from "@/lib/store/settings"
-
-import { findSavedProviderApiKey } from "./provider-presentation"
+import type { LoadConfigurationSettings } from "@/lib/store/settings"
 
 /** Where a provider runs its models. */
 export type ModelPlacement = "local" | "cloud"
@@ -141,14 +136,8 @@ export type ModelCheckObservation = {
 type CheckedModelWording = {
   /** Provider asked by the check. */
   readonly providerName: string
-  /** The state the model was last known in, in one or two words. */
-  readonly knownWord: string
-  /** Where the model is in that state. */
-  readonly knownPlace: string
-  /** What a check asks. */
-  readonly caption: string
-  /** Sentence after the check time when the model answered as known. */
-  readonly confirmed: string
+  /** Where the model is while the provider offers it to the key. */
+  readonly place: string
 }
 
 /** Bytes in one decimal gigabyte, the unit model sizes are shown in. */
@@ -186,7 +175,7 @@ export function describeModelPaneProvider(
       return {
         placement: "cloud",
         runsOn: "Ollama Cloud",
-        note: "Ollama Cloud decides what stays in memory. A model it isn’t running answers once you start it there."
+        note: "Ollama Cloud runs its models and decides which stay in memory. A model answers when a message names it, so there is nothing to load."
       }
     case "groq":
       return {
@@ -283,7 +272,7 @@ export function formatModelPlacementName(placement: ModelPlacement): string {
  * @returns Active when they do, pending while it connects, danger while it
  * cannot be reached, idle otherwise.
  */
-export function calculateModelProviderTone(
+function calculateModelProviderTone(
   availability: ProviderAvailability
 ): ModelPaneTone {
   switch (availability) {
@@ -308,7 +297,7 @@ export function calculateModelProviderTone(
  * Connected or Can't be reached for a cloud provider, and the backend's or
  * the connection's state otherwise.
  */
-export function formatModelProviderStatus(
+function formatModelProviderStatus(
   availability: ProviderAvailability,
   placement: ModelPlacement
 ): string {
@@ -334,7 +323,7 @@ export function formatModelProviderStatus(
  * @returns How many of the listed models are loaded on this machine, or
  * how many models a cloud provider lists; null until an inventory is read.
  */
-export function formatModelCount(
+function formatModelCount(
   inventory: ModelInventoryState,
   placement: ModelPlacement
 ): string | null {
@@ -383,7 +372,7 @@ export function buildModelProviderSummary(
  * @param time - Time to format, read in the local time zone.
  * @returns The time as `HH:MM`.
  */
-export function formatClockTime(time: Date): string {
+function formatClockTime(time: Date): string {
   const hours = String(time.getHours()).padStart(2, "0")
   const minutes = String(time.getMinutes()).padStart(2, "0")
   return `${hours}:${minutes}`
@@ -460,6 +449,25 @@ export function formatModelListHeading(
   return shownCount === totalCount
     ? `All models · ${totalCount}`
     : `Showing ${shownCount} of ${totalCount}`
+}
+
+/**
+ * Formats what the filter of the model list leaves, as it is announced.
+ *
+ * @param shownCount - Models the filter leaves.
+ * @param totalCount - Models the inventory lists.
+ * @param query - Text typed into the filter, as typed.
+ * @returns That no model matches the typed text when the filter leaves none;
+ * else the list's heading, which counts the models it shows.
+ */
+export function formatModelFilterResult(
+  shownCount: number,
+  totalCount: number,
+  query: string
+): string {
+  return shownCount === 0
+    ? `No model matches “${query}”.`
+    : formatModelListHeading(shownCount, totalCount)
 }
 
 /**
@@ -646,39 +654,46 @@ function describeModelTransition(
  * Describes the status of a model a cloud provider runs.
  *
  * @param provider - Ollama Cloud or Groq.
- * @param model - The selected model.
+ * @param modelKey - Key of the selected model.
  * @param observation - The provider's request, health, failure, and
  * settlement time, and whether this model's check was asked for.
  * @returns Checking while its check runs; a failed check with the last
- * known state; the checked state with its time; else the listed state and
- * what Check status does.
+ * known state; whether the provider still offers the model to the key, with
+ * the check time; else available, which every model the provider lists is,
+ * and what Check status does.
+ * @remarks The provider lists the models it offers to the saved key and
+ * runs one when a message names it, so a listed model is available; which
+ * of them are in memory is not known.
  */
 export function describeCloudModelStatus(
   provider: "ollamaCloud" | "groq",
-  model: LlmInfo,
+  modelKey: string,
   observation: ModelCheckObservation
 ): ModelStatusDescription {
-  const wording = buildCheckedModelWording(provider, model)
+  const wording = buildCheckedModelWording(provider)
   const { request, settledAt } = observation
-  if (request.status === "testing" && request.modelKey === model.modelKey) {
+  if (request.status === "testing" && request.modelKey === modelKey) {
     return {
       tone: "pending",
       word: "Checking…",
       place: `Asking ${wording.providerName}…`,
-      note: wording.caption
+      note: formatModelCheckCaption(wording)
     }
   }
-  if (isModelCheckFailed(observation, model.modelKey)) {
+  if (isModelCheckFailed(observation, modelKey)) {
     return {
       tone: "danger",
       word: "Couldn’t check",
       place: "",
-      note: `${wording.providerName} didn’t answer. The last known state was ${wording.knownWord.toLowerCase()}.`
+      note: `${wording.providerName} didn’t answer. The last known state was available.`
     }
   }
-  const health = findModelHealth(observation.health, model.modelKey)
+  const health = findModelHealth(observation.health, modelKey)
   if (health === null || settledAt === null) {
-    return { ...describeKnownModelStatus(wording), note: wording.caption }
+    return {
+      ...describeOfferedModelStatus(wording),
+      note: formatModelCheckCaption(wording)
+    }
   }
   return describeCheckedModelStatus(wording, health, settledAt)
 }
@@ -687,51 +702,40 @@ export function describeCloudModelStatus(
  * Builds the words a cloud provider's model status uses.
  *
  * @param provider - Ollama Cloud or Groq.
- * @param model - The selected model.
- * @returns For Ollama Cloud, loaded or not loaded as its inventory says; for
- * Groq, which hosts every model, available.
+ * @returns The provider's name and where a model it offers is: hosted by
+ * Groq, or run by Ollama Cloud when a message names it.
  */
 function buildCheckedModelWording(
-  provider: "ollamaCloud" | "groq",
-  model: LlmInfo
+  provider: "ollamaCloud" | "groq"
 ): CheckedModelWording {
-  if (provider === "groq") {
-    return {
-      providerName: LLM_PROVIDER_NAMES.groq,
-      knownWord: "Available",
-      knownPlace: "Hosted by Groq",
-      caption:
-        "Check status asks Groq whether your key can use this model. It does not generate a reply.",
-      confirmed: "Available."
-    }
-  }
-  return {
-    providerName: LLM_PROVIDER_NAMES.ollamaCloud,
-    knownWord: model.loaded ? "Loaded" : "Not loaded",
-    knownPlace: model.loaded
-      ? "In memory on Ollama Cloud"
-      : "Not in memory on Ollama Cloud",
-    caption:
-      "Check status asks Ollama Cloud whether this model is in memory. It does not generate a reply.",
-    confirmed: model.loaded ? "Still loaded." : "Still not loaded."
-  }
+  const providerName = LLM_PROVIDER_NAMES[provider]
+  return provider === "groq"
+    ? { providerName, place: "Hosted by Groq" }
+    : { providerName, place: "Ollama Cloud runs it when a message names it" }
 }
 
 /**
- * Describes the state a cloud model was last known in.
+ * Formats what Check status asks a cloud provider.
  *
  * @param wording - The provider's words.
- * @returns Active while it was known loaded or available, idle otherwise;
- * the note is left to the caller.
+ * @returns That the check asks whether the provider still offers the model
+ * to the key, without generating a reply.
  */
-function describeKnownModelStatus(
+function formatModelCheckCaption(wording: CheckedModelWording): string {
+  return `Check status asks ${wording.providerName} whether it still offers this model to your key. It does not generate a reply.`
+}
+
+/**
+ * Describes a cloud model the provider offers to the key.
+ *
+ * @param wording - The provider's words.
+ * @returns Available, with where the model is; the note is left to the
+ * caller.
+ */
+function describeOfferedModelStatus(
   wording: CheckedModelWording
 ): Omit<ModelStatusDescription, "note"> {
-  return {
-    tone: wording.knownWord === "Not loaded" ? "idle" : "active",
-    word: wording.knownWord,
-    place: wording.knownPlace
-  }
+  return { tone: "active", word: "Available", place: wording.place }
 }
 
 /**
@@ -740,8 +744,8 @@ function describeKnownModelStatus(
  * @param wording - The provider's words.
  * @param health - The check's observation of this model.
  * @param settledAt - When the check settled.
- * @returns The confirmed state, or not loaded when the provider reports the
- * model is not in memory, with the check time.
+ * @returns Available when the provider still offers the model to the key,
+ * else not available, each with the check time.
  */
 function describeCheckedModelStatus(
   wording: CheckedModelWording,
@@ -751,16 +755,15 @@ function describeCheckedModelStatus(
   const checkedAt = `Checked at ${formatClockTime(settledAt)}.`
   if (health.status === "ready") {
     return {
-      ...describeKnownModelStatus(wording),
-      tone: "active",
-      note: `${checkedAt} ${wording.confirmed}`
+      ...describeOfferedModelStatus(wording),
+      note: `${checkedAt} ${wording.providerName} still offers it to your key.`
     }
   }
   return {
     tone: "idle",
-    word: "Not loaded",
-    place: `Not in memory on ${wording.providerName}`,
-    note: `${checkedAt} ${wording.providerName} isn’t running it now.`
+    word: "Not available",
+    place: `Not offered to your key on ${wording.providerName}`,
+    note: `${checkedAt} ${wording.providerName} doesn’t offer it to your key now.`
   }
 }
 
@@ -922,28 +925,6 @@ export function describeInventoryEmptyState(
 }
 
 /**
- * Answers whether a provider that needs a key has none saved.
- *
- * @param provider - Provider to check.
- * @param secrets - Saved secrets.
- * @returns True for Ollama Cloud or Groq without a saved key; false for a
- * provider on this machine, which needs none.
- */
-export function isModelProviderKeyMissing(
-  provider: LlmProvider,
-  secrets: SecretsSettings
-): boolean {
-  switch (provider) {
-    case "lmStudio":
-    case "ollama":
-      return false
-    case "ollamaCloud":
-    case "groq":
-      return findSavedProviderApiKey(provider, secrets) === null
-  }
-}
-
-/**
  * Calculates the context length a model is shown with.
  *
  * @param provider - Provider of the model.
@@ -1004,4 +985,33 @@ export function findModelDefaultChoice(
     return "loading"
   }
   return provider === "lmStudio" && !model.loaded ? "load-and-set" : "set"
+}
+
+/**
+ * Answers whether the button of the selected model's footer is disabled.
+ *
+ * @param choice - What the footer offers.
+ * @param request - The provider's request in flight, or idle.
+ * @param modelKey - Key of the selected model.
+ * @returns For Set as default, true while the model is being unloaded; for
+ * Load and set as default, true while any request of the provider runs,
+ * which admits one at a time; true while the model loads, when Loading…
+ * stands in for the action; false for the current default, which offers no
+ * button.
+ */
+export function isModelDefaultActionDisabled(
+  choice: ModelDefaultChoice,
+  request: ModelRequestState,
+  modelKey: string
+): boolean {
+  switch (choice) {
+    case "set":
+      return findModelTransition(request, modelKey) === "unloading"
+    case "load-and-set":
+      return request.status !== "idle"
+    case "loading":
+      return true
+    case "current":
+      return false
+  }
 }

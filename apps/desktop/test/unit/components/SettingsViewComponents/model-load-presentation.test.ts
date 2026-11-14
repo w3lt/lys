@@ -20,19 +20,34 @@ const CHANGED: CompleteModelLoadConfiguration = Object.freeze({
 describe("formatModelLoadChangeNote", () => {
   it("says nothing while the stored settings equal the baseline", () => {
     expect(
-      formatModelLoadChangeNote("qwen3-8b", true, BASELINE, { ...BASELINE })
+      formatModelLoadChangeNote({
+        modelKey: "qwen3-8b",
+        isLoaded: true,
+        baseline: BASELINE,
+        stored: { ...BASELINE }
+      })
     ).toBeNull()
   })
 
   it("asks to reload a loaded model to apply a change", () => {
-    expect(formatModelLoadChangeNote("qwen3-8b", true, BASELINE, CHANGED)).toBe(
-      "Saved. Reload qwen3-8b to apply it."
-    )
+    expect(
+      formatModelLoadChangeNote({
+        modelKey: "qwen3-8b",
+        isLoaded: true,
+        baseline: BASELINE,
+        stored: CHANGED
+      })
+    ).toBe("Saved. Reload qwen3-8b to apply it.")
   })
 
   it("says a change applies when a model that is not loaded is loaded", () => {
     expect(
-      formatModelLoadChangeNote("qwen3-8b", false, BASELINE, CHANGED)
+      formatModelLoadChangeNote({
+        modelKey: "qwen3-8b",
+        isLoaded: false,
+        baseline: BASELINE,
+        stored: CHANGED
+      })
     ).toBe("Saved. Applies when you load it.")
   })
 })

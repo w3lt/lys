@@ -314,12 +314,12 @@ describe("ModelResidencyCard", () => {
       screen.getByRole("heading", { name: "No model loaded" })
     ).toBeInTheDocument()
     expect(
-      screen.getByText("no default model chosen · pick one in Model")
+      screen.getByText("no default model chosen · pick one in Models")
     ).toBeInTheDocument()
     expect(getCard()).not.toHaveTextContent(" · LM Studio")
     expect(
       screen.getByText(
-        "This summary shows the model a new conversation uses; see every model in Model settings."
+        "This summary shows the model a new conversation uses; see every model in Models."
       )
     ).toBeInTheDocument()
   })
@@ -405,7 +405,7 @@ describe("ModelResidencyCard", () => {
     startModelResidencyCard(READY_TO_LOAD)
 
     const note = screen.getByText(
-      "Loading and unloading use LM Studio through the backend. This summary shows the model a new conversation uses; manage every loaded model in Model settings."
+      "Loading and unloading use LM Studio through the backend. This summary shows the model a new conversation uses; manage every loaded model in Models."
     )
     const feedback = screen.getByText(REQUEST_FEEDBACK)
     expect(
@@ -444,7 +444,7 @@ describe("ModelResidencyCard", () => {
       expect(screen.queryByRole("button", { name: "Unload" })).toBeNull()
       expect(
         screen.getByText(
-          "This summary shows the model a new conversation uses; see every model in Model settings."
+          "This summary shows the model a new conversation uses; see every model in Models."
         )
       ).toBeInTheDocument()
     }
@@ -474,7 +474,7 @@ describe("ModelResidencyCard", () => {
     expect(screen.queryByRole("button", { name: "Unload" })).toBeNull()
     expect(
       screen.getByText(
-        "Groq decides which models are in memory, so Lys does not load or unload them. This summary shows the model a new conversation uses; see every model in Model settings."
+        "Groq decides which models are in memory, so Lys does not load or unload them. This summary shows the model a new conversation uses; see every model in Models."
       )
     ).toBeInTheDocument()
   })

@@ -8,7 +8,7 @@ import {
   type LlmModelReference,
   type LlmProvider
 } from "@lys/share"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { createStore } from "zustand/vanilla"
 import { createModelSlice, type ModelActions } from "@/lib/store/model-actions"
 import {
@@ -231,6 +231,7 @@ describe("createModelSlice", () => {
         request: { status: "idle" },
         error: null,
         health: null,
+        settledAt: null,
         loadedModelConfigurations: new Map()
       })
     }
@@ -259,6 +260,20 @@ describe("createModelSlice", () => {
       expect(store.getState().providerModels.groq.inventory).toEqual({
         status: "unavailable"
       })
+    })
+
+    it("records when the listing settled", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] })
+      onTestFinished(() => {
+        vi.useRealTimers()
+      })
+      vi.setSystemTime(new Date(2026, 10, 13, 9, 5))
+      startModelBackend({ [LIST_ROUTE]: buildInventoryRoute(INVENTORY) })
+      const { store, getLmStudio } = createModelStore()
+
+      await store.getState().updateModelInventory("lmStudio")
+
+      expect(getLmStudio().settledAt).toEqual(new Date(2026, 10, 13, 9, 5))
     })
 
     it("assumes the stored configuration for each LM Studio model it finds already loaded", async () => {
@@ -946,6 +961,18 @@ describe("createModelSlice", () => {
         inventory: { status: "unavailable" },
         error: null
       })
+    })
+
+    it("forgets when the provider's latest operation settled", async () => {
+      startModelBackend({ [LIST_ROUTE]: buildInventoryRoute(INVENTORY) })
+      const { store, getLmStudio } = createModelStore()
+      await store.getState().updateModelInventory("lmStudio")
+      const settledBeforeRelease = getLmStudio().settledAt
+
+      store.getState().releaseProviderModels("lmStudio")
+
+      expect(settledBeforeRelease).toBeInstanceOf(Date)
+      expect(getLmStudio().settledAt).toBeNull()
     })
 
     it("forgets the configurations of the loaded models", async () => {

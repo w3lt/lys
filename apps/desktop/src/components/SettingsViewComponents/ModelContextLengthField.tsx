@@ -2,7 +2,6 @@ import { useId, type ReactElement } from "react"
 
 import { Slider } from "@/components/ui/slider"
 import {
-  calculateContextLength,
   calculateContextLengthStopIndex,
   formatTokenCount,
   listContextLengthStops
@@ -22,8 +21,8 @@ export type ModelContextLengthFieldProps = {
    * Proposes a context length, called once for each stop the thumb reaches;
    * null shows the length without letting it be changed.
    *
-   * @param contextLength - Proposed length in tokens, within the model's
-   * maximum.
+   * @param contextLength - Proposed length in tokens: one of the slider's
+   * stops, so never above the model's maximum.
    */
   readonly onContextLengthChange: ((contextLength: number) => void) | null
 }
@@ -31,12 +30,12 @@ export type ModelContextLengthFieldProps = {
 /**
  * Edits a model's context length on a slider over the model's stops.
  *
- * @remarks Interactive feature. The parent owns the length; the slider
- * proposes the stop it moves to, kept within the model's maximum, and shows
- * a length between two stops at the lower one. The exact length is shown in
- * tokens beside the label and announced as the slider's value text, and each
- * stop is labelled under the track; the labels are hidden from assistive
- * technology, which reads the value text. The label names the slider and the
+ * @remarks The parent owns the length; the slider
+ * proposes the stop it moves to, which never exceeds the model's maximum,
+ * and shows a length between two stops at the lower one. The exact length
+ * is shown in tokens beside the label and announced as the slider's value
+ * text, and each stop is labelled under the track; the labels are hidden
+ * from assistive technology, which reads the value text. The label names the slider and the
  * note describes it. Without a change callback the slider is disabled. A
  * model whose maximum gives fewer than two stops shows only the length.
  * @param props - Shown length, the model's maximum, the note, and the
@@ -63,7 +62,7 @@ export default function ModelContextLengthField({
     const stopIndex = typeof emission === "number" ? emission : emission[0]
     const stop = stopIndex === undefined ? undefined : stops.at(stopIndex)
     if (stop === undefined || onContextLengthChange === null) return
-    onContextLengthChange(calculateContextLength(stop, maxContextLength))
+    onContextLengthChange(stop)
   }
 
   return (

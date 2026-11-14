@@ -2,13 +2,17 @@ import type { ReactElement } from "react"
 import type { LlmInfo } from "@lys/protocol"
 import type { LlmProvider } from "@lys/share"
 
-import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
+import {
+  describeLlmProviderTarget,
+  isLlmProviderKeyMissing
+} from "@/lib/models/llm-provider-target"
 import {
   calculateProviderAvailability,
   listEnabledProviders,
   type ModelAvailabilitySource
 } from "@/lib/models/provider-connection"
 import { useLysStore } from "@/lib/store"
+import type { ModelInventoryState } from "@/lib/store/model-runtime"
 import type { LysSettings } from "@/lib/store/settings"
 
 import ModelDefaultSummary from "./ModelDefaultSummary"
@@ -26,7 +30,6 @@ import {
   findModelPaneModelKey,
   findModelPaneProvider,
   formatModelRefreshNote,
-  isModelProviderKeyMissing,
   type ModelPaneChoiceSource,
   type ModelPaneEmptyState,
   type ModelProviderSummary
@@ -107,7 +110,7 @@ type ModelBrowserProps = {
 /**
  * Lists one provider's models beside the details of the selected one.
  *
- * @remarks Composition view over the application store, which holds the
+ * @remarks The application store holds the
  * pane's selection. Pressing a row selects its model. The list is remounted
  * for another provider, which clears its filter, and the details for
  * another model.
@@ -160,6 +163,54 @@ function ModelBrowser({
   )
 }
 
+/** Properties accepted by {@link ModelProviderInventory}. */
+type ModelProviderInventoryProps = {
+  /** Provider the pane shows. */
+  readonly provider: LlmProvider
+  /** Its latest inventory observation. */
+  readonly inventory: ModelInventoryState
+  /** Why none of its models are listed, or null while they can be. */
+  readonly notice: ModelPaneEmptyState | null
+  /** The pane's and the session's choices of provider and model. */
+  readonly choice: ModelPaneChoiceSource
+}
+
+/**
+ * Shows the shown provider's models with the selected one's details, or
+ * why none are listed.
+ *
+ * @remarks Requires the application store, whose settings
+ * pane the notice's button opens. The models show only while there is no
+ * notice and the inventory is read; an inventory not yet read asks for a
+ * refresh.
+ * @param props - Provider, its inventory, the notice, and the choices.
+ * @returns The list and details, or the notice.
+ */
+function ModelProviderInventory({
+  provider,
+  inventory,
+  notice,
+  choice
+}: ModelProviderInventoryProps): ReactElement {
+  const setSettingsPane = useLysStore((state) => state.setSettingsPane)
+  if (notice === null && inventory.status === "ready") {
+    return (
+      <ModelBrowser
+        canLoadModels={inventory.modelLoading === "lys"}
+        choice={choice}
+        models={inventory.models}
+        provider={provider}
+      />
+    )
+  }
+  return (
+    <ModelInventoryNotice
+      onOpenSettingsPane={setSettingsPane}
+      state={notice ?? UNREAD_INVENTORY_STATE}
+    />
+  )
+}
+
 /** Properties accepted by {@link ModelProviderSection}. */
 type ModelProviderSectionProps = {
   /** Provider the pane shows. */
@@ -173,12 +224,14 @@ type ModelProviderSectionProps = {
 /**
  * Shows the pane's provider card, then its models or why there are none.
  *
- * @remarks Composition view over SettingsContext and the application
- * store. Choosing a provider shows it with no model selected. Refresh reads
- * the inventory of a connected provider again and asks the backend to
- * connect to one that cannot be reached; it is disabled while the
- * provider's request runs, while it connects, and while the backend is not
- * running. The provider's latest request failure is an alert.
+ * @remarks Requires SettingsContext and the application
+ * store. Choosing another provider in the card clears the pane's selected
+ * model, so that provider shows the session's default when the default is
+ * one of its models, and no selected model otherwise. Refresh reads the
+ * inventory of a connected provider again and asks the backend to connect
+ * to one that cannot be reached; it is disabled while the provider's
+ * request runs, while it connects, and while the backend is not running.
+ * The provider's latest request failure is an alert.
  * @param props - Shown provider, the choices, and the model state.
  * @returns The provider card, the list and details or a notice, and the
  * failure alert.
@@ -192,7 +245,6 @@ function ModelProviderSection({
   const setModelPaneProvider = useLysStore(
     (state) => state.setModelPaneProvider
   )
-  const setSettingsPane = useLysStore((state) => state.setSettingsPane)
   const updateModelInventory = useLysStore(
     (state) => state.updateModelInventory
   )
@@ -201,10 +253,7 @@ function ModelProviderSection({
   const availability = calculateProviderAvailability(source, provider)
   const { inventory, request, error, settledAt } =
     source.providerModels[provider]
-  const isKeyMissing = isModelProviderKeyMissing(provider, settings.secrets)
-  const notice =
-    describeProviderEmptyState(availability, target, isKeyMissing) ??
-    describeInventoryEmptyState(inventory, request, target)
+  const isKeyMissing = isLlmProviderKeyMissing(provider, settings.secrets)
   const canRefresh =
     availability === "available" || availability === "provider-unreachable"
 
@@ -231,19 +280,15 @@ function ModelProviderSection({
           choice.defaultModel
         )}
       />
-      {notice === null && inventory.status === "ready" ? (
-        <ModelBrowser
-          canLoadModels={inventory.modelLoading === "lys"}
-          choice={choice}
-          models={inventory.models}
-          provider={provider}
-        />
-      ) : (
-        <ModelInventoryNotice
-          onOpenSettingsPane={setSettingsPane}
-          state={notice ?? UNREAD_INVENTORY_STATE}
-        />
-      )}
+      <ModelProviderInventory
+        choice={choice}
+        inventory={inventory}
+        notice={
+          describeProviderEmptyState(availability, target, isKeyMissing) ??
+          describeInventoryEmptyState(inventory, request, target)
+        }
+        provider={provider}
+      />
       <p className="settings-view__models-alert" role="alert">
         {error}
       </p>
@@ -255,14 +300,14 @@ function ModelProviderSection({
  * Composes the Models pane: the session's default, a provider picker, and
  * the chosen provider's models with the selected model's details.
  *
- * @remarks Composition view over SettingsContext and the application
+ * @remarks Requires SettingsContext and the application
  * store, which owns every provider's models, requests, and failures, and
  * the pane's selection, kept across visits to settings. The pane shows the
  * selected model's provider, else the provider the picker chose, else the
  * default model's provider, else the first provider that is on; the
  * selected model is the one the pane was asked to show, else the default.
- * Pressing the default model's key selects it. With no provider on, a
- * notice links to Providers.
+ * Pressing the default model's key selects it, while its provider is on.
+ * With no provider on, a notice links to Providers.
  * @returns The pane body.
  */
 export default function ModelPaneContent(): ReactElement {
@@ -285,6 +330,10 @@ export default function ModelPaneContent(): ReactElement {
       <ModelDefaultSummary
         contextLength={findDefaultModelContextLength(settings, source)}
         defaultModel={defaultModel}
+        isProviderOn={
+          defaultModel !== null &&
+          enabledProviders.includes(defaultModel.provider)
+        }
         onSelectDefaultModel={() => setModelPaneSelection(defaultModel)}
       />
       {provider === null ? (

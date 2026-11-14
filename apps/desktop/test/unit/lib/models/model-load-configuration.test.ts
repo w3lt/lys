@@ -1,18 +1,13 @@
-import {
-  MAXIMUM_MODEL_LOAD_SETTING_VALUE,
-  type ModelLoadConfiguration
-} from "@lys/share"
+import type { ModelLoadConfiguration } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   buildDefaultModelLoadConfiguration,
   buildLoadConfigurationSettings,
   buildModelLoadConfiguration,
-  calculateContextLength,
   calculateContextLengthStopIndex,
   formatTokenCount,
   isLoadConfigurationSettingsEqual,
   isModelLoadConfigurationEqual,
-  isUsableContextLimit,
   listContextLengthStops
 } from "@/lib/models/model-load-configuration"
 import type { LoadConfigurationSettings } from "@/lib/store/settings"
@@ -384,19 +379,6 @@ describe("isLoadConfigurationSettingsEqual", () => {
   })
 })
 
-describe("isUsableContextLimit", () => {
-  it.each([1, 2048, 131_072])("accepts %d tokens", (maxContextLength) => {
-    expect(isUsableContextLimit(maxContextLength)).toBe(true)
-  })
-
-  it.each([null, ...UNUSABLE_CONTEXT_LIMITS])(
-    "rejects %o",
-    (maxContextLength) => {
-      expect(isUsableContextLimit(maxContextLength)).toBe(false)
-    }
-  )
-})
-
 describe("listContextLengthStops", () => {
   it.each([
     [8192, [2048, 4096, 8192]],
@@ -431,39 +413,6 @@ describe("calculateContextLengthStopIndex", () => {
       expect(
         calculateContextLengthStopIndex([2048, 4096, 8192], contextLength)
       ).toBe(stopIndex)
-    }
-  )
-})
-
-describe("calculateContextLength", () => {
-  it.each([
-    [4000, 8192, 4000],
-    [512, 8192, 512],
-    [511, 8192, 512],
-    [8192, 8192, 8192],
-    [8193, 8192, 8192],
-    [100, 256, 100],
-    [300, 256, 256],
-    [0, 256, 1]
-  ])(
-    "commits %d typed tokens for a model that tops out at %d as %d",
-    (typedTokens, maxContextLength, committed) => {
-      expect(calculateContextLength(typedTokens, maxContextLength)).toBe(
-        committed
-      )
-    }
-  )
-
-  it.each(UNUSABLE_CONTEXT_LIMITS)(
-    "bounds a typed value by the largest accepted setting when the maximum is %o",
-    (maxContextLength) => {
-      expect(
-        calculateContextLength(
-          MAXIMUM_MODEL_LOAD_SETTING_VALUE + 1,
-          maxContextLength
-        )
-      ).toBe(MAXIMUM_MODEL_LOAD_SETTING_VALUE)
-      expect(calculateContextLength(100, maxContextLength)).toBe(512)
     }
   )
 })

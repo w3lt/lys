@@ -6,8 +6,13 @@ import {
   OLLAMA_HOST,
   OLLAMA_PORT
 } from "@lys/protocol"
-import { LLM_PROVIDER_NAMES, type LlmProvider } from "@lys/share"
-import type { ProvidersSettings } from "@/lib/store/settings"
+import {
+  LLM_PROVIDER_NAMES,
+  type GroqApiKey,
+  type LlmProvider,
+  type OllamaApiKey
+} from "@lys/share"
+import type { ProvidersSettings, SecretsSettings } from "@/lib/store/settings"
 
 /** Provider reached at a server address the person may set. */
 export type AddressedLlmProvider = "lmStudio" | "ollama"
@@ -78,5 +83,44 @@ export function describeLlmProviderTarget(
         access: "key",
         location: GROQ_API_HOST
       }
+  }
+}
+
+/**
+ * Finds the key a keyed provider saved.
+ *
+ * @param provider - Keyed provider.
+ * @param secrets - Saved keys.
+ * @returns The saved key, or null; a secret.
+ */
+export function findSavedProviderApiKey(
+  provider: KeyedLlmProvider,
+  secrets: SecretsSettings
+): OllamaApiKey | GroqApiKey | null {
+  return provider === "ollamaCloud" ? secrets.ollamaApiKey : secrets.groqApiKey
+}
+
+/**
+ * Answers whether a provider needs a key and none is saved.
+ *
+ * @param provider - Provider to check, whether on or off.
+ * @param secrets - Saved keys.
+ * @returns True for Ollama Cloud or Groq without a saved key; false for a
+ * provider reached at an address, which needs none.
+ * @remarks This is the one rule behind every "needs a key" the desktop
+ * shows: a turned-on provider that needs a key it lacks is shown as needing
+ * one, whatever the backend reports of its connection.
+ */
+export function isLlmProviderKeyMissing(
+  provider: LlmProvider,
+  secrets: SecretsSettings
+): boolean {
+  switch (provider) {
+    case "lmStudio":
+    case "ollama":
+      return false
+    case "ollamaCloud":
+    case "groq":
+      return findSavedProviderApiKey(provider, secrets) === null
   }
 }

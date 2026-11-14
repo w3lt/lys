@@ -1,7 +1,9 @@
 import type { LlmRuntimeConnectionStatus } from "@lys/protocol"
 import { LLM_PROVIDERS, type LlmProvider } from "@lys/share"
+import type { ComposerRuntime } from "@/components/ComposerComponents/composer-presentation"
 import type { ModelAvailabilitySource } from "@/lib/models/provider-connection"
 import type { BackendServerStatus } from "@/lib/store"
+import type { SecretsSettings } from "@/lib/store/settings"
 import {
   INITIAL_PROVIDER_MODEL_STATES,
   updateProviderModelState,
@@ -13,6 +15,7 @@ import {
   type BackendRoute,
   type BackendRoutes
 } from "./backendFake"
+import { STORED_PROVIDERS_SETTINGS, STORED_SETTINGS } from "./settingsFixtures"
 
 /** What a case arranges of the providers; every omitted fact keeps its default. */
 export type ProviderModelArrangement = Readonly<{
@@ -65,6 +68,35 @@ export function buildModelAvailabilitySource(
       arrangement.enabledProviders ??
       Object.freeze(Object.keys(providers) as LlmProvider[]),
     providerModels: buildProviderModelStates(providers)
+  })
+}
+
+/**
+ * Builds the application state the composer's banner and model menu read.
+ *
+ * @param arrangement - Backend state, the providers that are on, and each
+ * provider's state.
+ * @param secrets - Saved keys; when omitted, the stored ones, which hold a
+ * Groq key and no Ollama key.
+ * @returns A frozen runtime whose saved providers keep the stored addresses
+ * (LM Studio at its default, local Ollama at 192.168.1.20:11434) with the
+ * arranged providers on.
+ */
+export function buildComposerRuntime(
+  arrangement: ProviderModelArrangement = {},
+  secrets: SecretsSettings = STORED_SETTINGS.secrets
+): ComposerRuntime {
+  const source = buildModelAvailabilitySource(arrangement)
+  return Object.freeze({
+    backendStatus: source.backendStatus,
+    settings: Object.freeze({
+      providers: Object.freeze({
+        ...STORED_PROVIDERS_SETTINGS,
+        enabled: source.enabledProviders
+      }),
+      secrets
+    }),
+    providerModels: source.providerModels
   })
 }
 

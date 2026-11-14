@@ -140,7 +140,7 @@ describe("formatModelResidencyMeta", () => {
 
   it("asks for a model to be chosen while there is none", () => {
     expect(formatModelResidencyMeta(null, null)).toBe(
-      "no default model chosen · pick one in Model"
+      "no default model chosen · pick one in Models"
     )
   })
 })

@@ -55,6 +55,7 @@ import {
   READY_RUNTIME,
   type RuntimeArrangement
 } from "../support/runtimeFixtures"
+import { STORED_GROQ_API_KEY } from "../support/settingsFixtures"
 import {
   createControlledPromise,
   waitForMicrotasks
@@ -850,6 +851,17 @@ describe("Composer", () => {
         pane: "providers"
       },
       {
+        name: "LM Studio can't be reached while no model is chosen",
+        runtime: {
+          ...buildUnreachableRuntime("running", "unreachable"),
+          defaultModel: null
+        },
+        banner: "LM Studio can't be reached on 127.0.0.1:1234.",
+        placeholder: "Waiting on LM Studio…",
+        actionLabel: "Open Providers",
+        pane: "providers"
+      },
+      {
         name: "LM Studio is turned off",
         runtime: buildUnreachableRuntime("running", "off"),
         banner: "LM Studio is turned off.",
@@ -893,21 +905,84 @@ describe("Composer", () => {
       }
     )
 
-    it("says a provider is connecting and offers nothing to do meanwhile", async () => {
-      const { Composer } = await loadFreshComposer(
-        buildUnreachableRuntime("running", "connecting")
+    it.each([
+      { name: "for the chosen model", defaultModel: "qwen3-8b" },
+      { name: "while no model is chosen", defaultModel: null }
+    ])(
+      "says a provider is connecting $name and offers nothing to do meanwhile",
+      async ({ defaultModel }) => {
+        const { Composer } = await loadFreshComposer({
+          ...buildUnreachableRuntime("running", "connecting"),
+          defaultModel
+        })
+        render(
+          <Composer
+            messageFieldRef={createRef()}
+            onStartConversation={vi.fn()}
+          />
+        )
+
+        expect(listStatusTexts()).toContainEqual(
+          expect.stringContaining("Connecting to LM Studio…")
+        )
+        expect(getMessageField()).toHaveAttribute(
+          "placeholder",
+          "Waiting on LM Studio…"
+        )
+        expect(screen.getByRole("button", { name: "Working" })).toBeDisabled()
+      }
+    )
+
+    it("says the model's provider needs a key, in the banner and the model menu, and opens Providers", async () => {
+      const { useLysStore, Composer } = await loadFreshComposer(
+        buildUnreachableRuntime("running", "off")
       )
+      const { settings, providerModels } = useLysStore.getState()
+      useLysStore.setState({
+        settings: {
+          ...settings,
+          providers: { ...settings.providers, enabled: ["groq"] },
+          secrets: { ...settings.secrets, groqApiKey: null },
+          runtime: {
+            ...settings.runtime,
+            defaultModel: { provider: "groq", modelKey: "llama-3.3-70b" }
+          }
+        },
+        providerModels: updateProviderModelState(providerModels, "groq", {
+          status: "unreachable"
+        })
+      })
+      const user = userEvent.setup()
       render(
         <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
       )
 
       expect(listStatusTexts()).toContainEqual(
-        expect.stringContaining("Connecting to LM Studio…")
+        expect.stringContaining("Groq needs a key.")
       )
-      expect(screen.getByRole("button", { name: "Working" })).toBeDisabled()
+      expect(getMessageField()).toHaveAttribute(
+        "placeholder",
+        "Waiting on Groq…"
+      )
+      await openMenuWithKeyboard(
+        user,
+        screen.getByRole("button", { name: /^llama-3\.3-70b · Groq/ })
+      )
+      expect(
+        within(screen.getByRole("group", { name: "Groq" })).getByRole(
+          "menuitem"
+        )
+      ).toHaveTextContent("Groq needs a key.")
+      await user.keyboard("{Escape}")
+      await user.click(screen.getByRole("button", { name: "Open Providers" }))
+
+      expect(useLysStore.getState()).toMatchObject({
+        activeView: "settings",
+        settingsPane: "providers"
+      })
     })
 
-    it("shows a model Lys has not loaded in the Model pane, where Load is, and keeps Send off", async () => {
+    it("shows a model Lys has not loaded in the Models pane, where Load is, and keeps Send off", async () => {
       const { useLysStore, useChatViewStore, Composer } =
         await loadFreshComposer({
           ...READY_RUNTIME,
@@ -999,6 +1074,7 @@ describe("Composer", () => {
         settings: {
           ...settings,
           providers: { ...settings.providers, enabled: ["groq"] },
+          secrets: { ...settings.secrets, groqApiKey: STORED_GROQ_API_KEY },
           runtime: {
             ...settings.runtime,
             defaultModel: { provider: "groq", modelKey: "llama-3.3-70b" }
@@ -1703,7 +1779,7 @@ describe("Composer", () => {
       })
     })
 
-    it("opens Model settings to change the context window", async () => {
+    it("opens the Models pane to change the context window", async () => {
       const { useLysStore, Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(

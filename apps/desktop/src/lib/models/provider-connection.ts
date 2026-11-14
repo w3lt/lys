@@ -9,8 +9,11 @@ import type {
   LlmProviderStatus,
   ProviderModelStates
 } from "@/lib/store/model-runtime"
-import type { ProvidersSettings } from "@/lib/store/settings"
-import type { LlmProviderTarget } from "./llm-provider-target"
+import type { ProvidersSettings, SecretsSettings } from "@/lib/store/settings"
+import {
+  isLlmProviderKeyMissing,
+  type LlmProviderTarget
+} from "./llm-provider-target"
 
 /**
  * Whether model requests can reach one provider, and why not.
@@ -36,26 +39,25 @@ export type ModelAvailabilitySource = {
   readonly providerModels: ProviderModelStates
 }
 
-/** Visual tone of the provider status indicator. */
-export type ProviderStatusTone = "active" | "pending" | "idle" | "danger"
+/**
+ * Whether one provider can answer, a missing key counted.
+ *
+ * @remarks {@link ProviderAvailability}, with `provider-needs-key` for a
+ * turned-on provider that needs a key and has none saved, whatever the
+ * backend reports of its connection.
+ */
+export type ProviderReadiness = ProviderAvailability | "provider-needs-key"
 
 /**
- * Formats the explanation shown wherever model features wait for an
- * unreachable provider.
- *
- * @param provider - Provider that cannot be reached.
- * @returns What to check: a server at an address, or a key and the network
- * for a hosted provider; then where to refresh.
+ * A turned-on provider's connection as the provider lists name it: the
+ * status the backend reported, or `needs-key` for a provider without the
+ * key it needs.
  */
-export function formatProviderUnreachableMessage(
-  provider: LlmProviderTarget
-): string {
-  const check =
-    provider.access === "address"
-      ? `Start ${provider.name}, or check its address in Providers`
-      : "Check its key in Providers and your network"
-  return `${provider.name} is not reachable. ${check}, then press Refresh on its status in Runtime.`
-}
+export type ProviderConnectionState = LlmProviderStatus | "needs-key"
+
+/** Visual tone of the provider status indicator. */
+export type ProviderStatusTone =
+  "active" | "pending" | "warning" | "idle" | "danger"
 
 /**
  * Calculates whether model requests can reach one provider, and why not.
@@ -89,17 +91,64 @@ export function calculateProviderAvailability(
 }
 
 /**
+ * Calculates whether one provider can answer, a missing key counted.
+ *
+ * @param source - Backend state, the providers that are on, and every
+ * provider's status.
+ * @param secrets - Saved keys.
+ * @param provider - Provider to check.
+ * @returns The provider's {@link calculateProviderAvailability availability},
+ * except `provider-needs-key` for a turned-on provider that needs a key and
+ * has none saved, whatever its status; a provider the saved settings leave
+ * off stays `provider-off`.
+ */
+export function calculateProviderReadiness(
+  source: ModelAvailabilitySource,
+  secrets: SecretsSettings,
+  provider: LlmProvider
+): ProviderReadiness {
+  const availability = calculateProviderAvailability(source, provider)
+  if (
+    availability === "backend-offline" ||
+    !source.enabledProviders.includes(provider)
+  ) {
+    return availability
+  }
+  return isLlmProviderKeyMissing(provider, secrets)
+    ? "provider-needs-key"
+    : availability
+}
+
+/**
+ * Calculates a turned-on provider's connection as the provider lists name
+ * it.
+ *
+ * @param provider - Turned-on provider.
+ * @param status - Latest published status of that provider.
+ * @param secrets - Saved keys.
+ * @returns `needs-key` for a provider that needs a key and has none saved,
+ * whatever its status; otherwise the status.
+ */
+export function calculateProviderConnectionState(
+  provider: LlmProvider,
+  status: LlmProviderStatus,
+  secrets: SecretsSettings
+): ProviderConnectionState {
+  return isLlmProviderKeyMissing(provider, secrets) ? "needs-key" : status
+}
+
+/**
  * Formats the provider status card heading.
  *
- * @param status - Latest published provider status.
+ * @param state - The provider's connection, a missing key counted.
  * @param provider - Provider the card shows.
  * @returns The heading naming the provider and the connection state.
  */
 export function formatProviderStatusLabel(
-  status: LlmProviderStatus,
+  state: ProviderConnectionState,
   provider: LlmProviderTarget
 ): string {
-  switch (status) {
+  switch (state) {
     case "unknown":
       return `${provider.name} status unknown`
     case "connecting":
@@ -110,6 +159,8 @@ export function formatProviderStatusLabel(
       return `${provider.name} not reachable`
     case "off":
       return `${provider.name} is off`
+    case "needs-key":
+      return `${provider.name} needs a key`
   }
 }
 
@@ -142,20 +193,21 @@ function formatUnknownProviderStatusReason(
  * Formats where the provider is and the next step, shown under the provider
  * status heading.
  *
- * @param status - Latest published provider status.
+ * @param state - The provider's connection, a missing key counted.
  * @param backendStatus - Store-owned backend lifecycle state.
  * @param provider - Provider the card shows.
  * @returns The meta line, starting with the provider's location; an
  * `unknown` status adds why it is not known, which depends on the backend's
- * state, an `unreachable` one what to check, and an `off` one where to turn
- * it on.
+ * state, an `unreachable` one what to check, an `off` one that the backend
+ * has the turned-on provider off until it is checked again, and a missing
+ * key where to add it.
  */
 export function formatProviderStatusMeta(
-  status: LlmProviderStatus,
+  state: ProviderConnectionState,
   backendStatus: BackendServerStatus,
   provider: LlmProviderTarget
 ): string {
-  switch (status) {
+  switch (state) {
     case "unknown":
       return `${provider.location} · ${formatUnknownProviderStatusReason(backendStatus)}`
     case "connecting":
@@ -167,25 +219,30 @@ export function formatProviderStatusMeta(
         ? `${provider.location} · start ${provider.name}, then refresh`
         : `${provider.location} · check the key in Providers, then refresh`
     case "off":
-      return `${provider.location} · turn it on in Providers`
+      return `${provider.location} · the backend has ${provider.name} off · refresh to check again`
+    case "needs-key":
+      return `${provider.location} · add its key in Providers`
   }
 }
 
 /**
  * Selects the provider status indicator tone.
  *
- * @param status - Latest published provider status.
- * @returns The tone consumed by the status dot's styles.
+ * @param state - The provider's connection, a missing key counted.
+ * @returns The tone consumed by the status dot's styles: steady amber for a
+ * missing key, which needs the person and is not in progress.
  */
 export function calculateProviderStatusTone(
-  status: LlmProviderStatus
+  state: ProviderConnectionState
 ): ProviderStatusTone {
-  switch (status) {
+  switch (state) {
     case "unknown":
     case "off":
       return "idle"
     case "connecting":
       return "pending"
+    case "needs-key":
+      return "warning"
     case "connected":
       return "active"
     case "unreachable":

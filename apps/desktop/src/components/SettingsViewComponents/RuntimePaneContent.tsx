@@ -88,8 +88,8 @@ function ProcessCardGroup(): ReactElement {
  * model a new conversation uses, with the model request feedback.
  *
  * @remarks The application store owns the backend and provider statuses, the
- * saved providers and default model, the connect, load, and unload commands,
- * and the pane the settings view shows. Refresh connects again to each
+ * saved providers, keys, and default model, the connect, load, and unload
+ * commands, and the pane the settings view shows. Refresh connects again to each
  * provider the card lists; Open Providers shows the Providers pane. Refresh,
  * Load, and Unload intentionally discard their promises with `void`; the
  * store owns each request's completion, and the model request feedback,
@@ -103,6 +103,7 @@ function ProcessCardGroup(): ReactElement {
 function ModelRuntimeCardGroup(): ReactElement {
   const backendStatus = useLysStore((state) => state.backendServerInfo.status)
   const providers = useLysStore((state) => state.settings.providers)
+  const secrets = useLysStore((state) => state.settings.secrets)
   const providerModels = useLysStore((state) => state.providerModels)
   const { model, availability } = useNewConversationModel()
   const connectProvider = useLysStore((state) => state.connectProvider)
@@ -137,6 +138,7 @@ function ModelRuntimeCardGroup(): ReactElement {
         onRefreshProviders={handleRefreshProviders}
         providerModels={providerModels}
         providers={providers}
+        secrets={secrets}
       />
       <ModelResidencyCard
         availability={availability}

@@ -20,7 +20,7 @@ export type ModelInventoryNoticeProps = {
 /**
  * Says why the Model pane lists no model, in place of the list and details.
  *
- * @remarks Presentational. The title and body are a status region, so a
+ * @remarks The title and body are a status region, so a
  * change is announced; the button names the pane it opens and appears only
  * when a pane resolves the situation.
  * @param props - The situation and the request to open its pane.

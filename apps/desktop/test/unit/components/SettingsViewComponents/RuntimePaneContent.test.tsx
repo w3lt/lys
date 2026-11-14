@@ -14,6 +14,7 @@ import { buildLlmInfo } from "../../support/modelFixtures"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import {
   FIRST_RUN_LOAD_CONFIGURATION,
+  STORED_GROQ_API_KEY,
   type SettingsDocument
 } from "../../support/settingsFixtures"
 import {
@@ -448,6 +449,7 @@ describe("RuntimePaneContent", () => {
         settings: {
           ...settings,
           providers: { ...settings.providers, enabled: ["lmStudio", "groq"] },
+          secrets: { ...settings.secrets, groqApiKey: STORED_GROQ_API_KEY },
           runtime: {
             ...settings.runtime,
             defaultModel: { provider: "groq", modelKey: "llama-3.3-70b" }
@@ -494,6 +496,40 @@ describe("RuntimePaneContent", () => {
           .getAllByRole("heading", { level: 3 })
           .map((heading) => heading.textContent)
       ).toEqual(["LM Studio connected", "Groq connected"])
+    })
+
+    it("says a turned-on provider without its key needs one, whatever the backend reports", async () => {
+      startBackendFake({})
+      const { useLysStore, SettingsView } = await loadFreshSettingsView(
+        "runtime",
+        buildUnreachableRuntime("running", "unreachable")
+      )
+      const { settings, providerModels } = useLysStore.getState()
+      useLysStore.setState({
+        settings: {
+          ...settings,
+          providers: { ...settings.providers, enabled: ["lmStudio", "groq"] },
+          secrets: { ...settings.secrets, groqApiKey: null }
+        },
+        providerModels: updateProviderModelState(providerModels, "groq", {
+          status: "unreachable"
+        })
+      })
+      render(<SettingsView onDone={vi.fn()} />)
+      await screen.findByRole("switch", { name: "Start it when Lys opens" })
+      await waitForRenderedWork()
+      const connections = screen.getByRole("region", {
+        name: "Provider connections"
+      })
+
+      expect(
+        within(connections)
+          .getAllByRole("heading", { level: 3 })
+          .map((heading) => heading.textContent)
+      ).toEqual(["LM Studio not reachable", "Groq needs a key"])
+      expect(connections).toHaveTextContent(
+        "api.groq.com · add its key in Providers"
+      )
     })
 
     it("says no provider is on and opens Providers", async () => {
@@ -599,7 +635,7 @@ describe("RuntimePaneContent", () => {
       await startRuntimePane({ ...NOTHING_LOADED, defaultModel: null })
 
       expect(
-        screen.getByText("no default model chosen · pick one in Model")
+        screen.getByText("no default model chosen · pick one in Models")
       ).toBeInTheDocument()
       expect(screen.queryByRole("button", { name: "Load" })).toBeNull()
       expect(screen.queryByRole("button", { name: "Unload" })).toBeNull()

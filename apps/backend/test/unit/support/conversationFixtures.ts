@@ -377,6 +377,7 @@ export function createConversationTurn(
       id: FIXTURE_CONVERSATION_ID,
       title: null,
       agentCode: fixture.agentCode,
+      kind: "main",
       parentConversationId: null,
       jobNumber: null,
       delegatorAgentCode: null,

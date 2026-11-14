@@ -199,13 +199,13 @@ type PickFromEachVariant<
  * Where a conversation stands in delegation: the job it is, when it is one,
  * and the jobs started from it.
  *
- * @remarks Keeps the variants of {@link Conversation} apart: a main
- * conversation has no parent, number, or delegator, and a job has all three
- * and no jobs.
+ * @remarks Keeps the variants of {@link Conversation} apart, as `kind`
+ * selects: a main conversation has no number or delegator, and a job has
+ * both and no jobs.
  */
 export type ConversationDelegation = PickFromEachVariant<
   Conversation,
-  "parentConversationId" | "jobNumber" | "delegatorAgentCode" | "jobs"
+  "kind" | "jobNumber" | "delegatorAgentCode" | "jobs"
 >
 
 /**
@@ -226,7 +226,7 @@ export function buildDelegationOffer(
   offersDelegateWork: boolean,
   findAgentName: (code: string) => string | undefined
 ): DelegationOffer {
-  const isMainConversation = conversation.parentConversationId === null
+  const isMainConversation = conversation.kind === "main"
   const job = findJobTurn(conversation, findAgentName)
   return Object.freeze({
     mayDelegate: isMainConversation && offersDelegateWork,
@@ -250,7 +250,7 @@ function findJobTurn(
   conversation: ConversationDelegation,
   findAgentName: (code: string) => string | undefined
 ): JobTurn | undefined {
-  if (conversation.parentConversationId === null) return undefined
+  if (conversation.kind === "main") return undefined
   const { jobNumber, delegatorAgentCode } = conversation
   const delegatorName = findAgentName(delegatorAgentCode) ?? delegatorAgentCode
   return Object.freeze({ delegatorName, jobNumber })

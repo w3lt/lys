@@ -546,8 +546,8 @@ export function buildEndedChatViewReply(
  *
  * @param id - Conversation identity.
  * @param title - Stored title, or null before title generation saves one.
- * @returns Frozen metadata without a parent, job number, or delegator,
- * validated by the shared schema.
+ * @returns Frozen metadata of the `main` kind, without a parent, job
+ * number, or delegator, validated by the shared schema.
  */
 export function buildConversationMetadata(
   id: string,
@@ -558,6 +558,7 @@ export function buildConversationMetadata(
       id,
       title,
       agentCode: CALIGINIA_AGENT_CODE,
+      kind: "main",
       parentConversationId: null,
       jobNumber: null,
       delegatorAgentCode: null,
@@ -741,14 +742,15 @@ export function buildConversationWithJobs(
  *
  * @param conversation - The job's conversation, such as
  * {@link buildConversation} builds it under {@link FIXTURE_JOB_ID}.
- * @returns A frozen copy of the conversation with its parent, job number,
- * and delegator, validated by the shared schema.
+ * @returns A frozen copy of the conversation of the `job` kind, with its
+ * parent, job number, and delegator, validated by the shared schema.
  * @throws If the conversation has jobs, which a job never has.
  */
 export function buildJobConversation(conversation: Conversation): Conversation {
   return Object.freeze(
     conversationSchema.parse({
       ...conversation,
+      kind: "job",
       parentConversationId: FIXTURE_CONVERSATION_ID,
       jobNumber: FIXTURE_JOB_NUMBER,
       delegatorAgentCode: CALIGINIA_AGENT_CODE

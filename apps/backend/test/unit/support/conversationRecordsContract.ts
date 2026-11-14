@@ -751,11 +751,12 @@ function saveConversationWithReply(
  * @returns Valid metadata created at {@link CHANGED_AT}, with no parent, job
  * number, or delegator.
  */
-function createNewConversationMetadata(id: string) {
+function createNewConversationMetadata(id: string): ConversationMetadata {
   return {
     id,
     title: null,
     agentCode: "lys",
+    kind: "main",
     parentConversationId: null,
     jobNumber: null,
     delegatorAgentCode: null,
@@ -1149,6 +1150,7 @@ function registerJobReadCases(
       id: job.id,
       title: "Job 3",
       agentCode: "researcher",
+      kind: "job",
       parentConversationId: mainId,
       jobNumber: 3,
       delegatorAgentCode: "caliginia",
@@ -1449,6 +1451,7 @@ function registerConversationMetadataReadCases(
       id: CONVERSATION_ID,
       title: "Trip plan",
       agentCode: "lys",
+      kind: "main",
       parentConversationId: null,
       jobNumber: null,
       delegatorAgentCode: null,
@@ -1472,6 +1475,7 @@ function registerConversationMetadataReadCases(
       id: job.id,
       title: "Job 3",
       agentCode: "researcher",
+      kind: "job",
       parentConversationId: mainId,
       jobNumber: 3,
       delegatorAgentCode: "caliginia",
@@ -1550,6 +1554,7 @@ export function registerConversationRecordReaderContractSuite(
           id: CONVERSATION_ID,
           title: "Trip plan",
           agentCode: "lys",
+          kind: "main",
           parentConversationId: null,
           jobNumber: null,
           delegatorAgentCode: null,
@@ -2086,6 +2091,7 @@ export function registerConversationRecordEditorContractSuite(
           id: CONVERSATION_ID,
           title: "Greeting",
           agentCode: "stored-agent",
+          kind: "main",
           parentConversationId: null,
           jobNumber: null,
           delegatorAgentCode: null,
@@ -2149,6 +2155,7 @@ export function registerConversationRecordEditorContractSuite(
           id: job.id,
           title: "Renamed",
           agentCode: "researcher",
+          kind: "job",
           parentConversationId: mainId,
           jobNumber: 2,
           delegatorAgentCode: "caliginia",
@@ -2981,6 +2988,7 @@ function createNewJobMetadata(
     id: createFixtureUuidV7(sequence),
     title: "Find what moths eat",
     agentCode: "researcher",
+    kind: "job",
     parentConversationId: parentId,
     jobNumber,
     delegatorAgentCode: "caliginia",
@@ -3300,6 +3308,7 @@ export function registerConversationTurnTransactionContractSuite(
         id: CONVERSATION_ID,
         title: "Trip plan",
         agentCode: "stored-agent",
+        kind: "main",
         parentConversationId: null,
         jobNumber: null,
         delegatorAgentCode: null,

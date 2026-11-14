@@ -8,7 +8,7 @@ import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 
 /** A main conversation no job was started from. */
 const MAIN_CONVERSATION: ConversationDelegation = Object.freeze({
-  parentConversationId: null,
+  kind: "main",
   jobNumber: null,
   delegatorAgentCode: null,
   jobs: Object.freeze([])
@@ -16,7 +16,7 @@ const MAIN_CONVERSATION: ConversationDelegation = Object.freeze({
 
 /** Job 3 of a main conversation of Caliginia. */
 const JOB_CONVERSATION: ConversationDelegation = Object.freeze({
-  parentConversationId: createFixtureUuidV7(1),
+  kind: "job",
   jobNumber: 3,
   delegatorAgentCode: "caliginia",
   jobs: Object.freeze([])

@@ -625,6 +625,7 @@ describe("updateFastifyWithChatRoute", () => {
         type: "start-new-conversation-turn",
         conversation: {
           agentCode,
+          kind: "main",
           parentConversationId: null,
           jobNumber: null,
           delegatorAgentCode: null
@@ -3059,6 +3060,7 @@ describe("updateFastifyWithChatRoute", () => {
       expect(
         testApp.app.conversationHistoryReader.getConversation(job.id)
       ).toMatchObject({
+        kind: "job",
         parentConversationId: conversationId,
         jobNumber: 1,
         messages: [

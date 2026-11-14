@@ -70,6 +70,23 @@ const PARTIAL_JOB_FIELDS = [
 ] as const
 
 /**
+ * A kind that names the other variant: each row gives the fields of one
+ * variant under the kind of the other, which neither variant allows.
+ */
+const MISMATCHED_KIND_FIELDS = [
+  ["a main conversation's fields under the job kind", { kind: "job" }],
+  [
+    "a job's fields under the main kind",
+    {
+      kind: "main",
+      parentConversationId: FIXTURE_CONVERSATION_ID,
+      jobNumber: 1,
+      delegatorAgentCode: "caliginia"
+    }
+  ]
+] as const
+
+/**
  * Builds the body of a conversation whose one message delivered a report, as
  * a backend could send it, without validating the report.
  *
@@ -260,6 +277,7 @@ describe("getConversation", () => {
     expect(result).toEqual({ status: "found", conversation: jobConversation })
     expect(result).toMatchObject({
       conversation: {
+        kind: "job",
         parentConversationId: FIXTURE_CONVERSATION_ID,
         jobNumber: 1,
         delegatorAgentCode: "caliginia"
@@ -359,7 +377,7 @@ describe("getConversation", () => {
     expect(backend.requests).toEqual([])
   })
 
-  it.each(PARTIAL_JOB_FIELDS)(
+  it.each([...PARTIAL_JOB_FIELDS, ...MISMATCHED_KIND_FIELDS])(
     "rejects a conversation with %s and keeps the decoding failure as its cause",
     async (_label, fields) => {
       startBackendFake({
@@ -546,7 +564,7 @@ describe("updateConversationTitle", () => {
     ).rejects.toThrow(Error)
   })
 
-  it.each(PARTIAL_JOB_FIELDS)(
+  it.each([...PARTIAL_JOB_FIELDS, ...MISMATCHED_KIND_FIELDS])(
     "rejects metadata with %s and keeps the decoding failure as its cause",
     async (_label, fields) => {
       startBackendFake({

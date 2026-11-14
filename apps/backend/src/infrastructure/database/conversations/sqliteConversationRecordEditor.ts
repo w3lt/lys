@@ -15,8 +15,9 @@ import type {
  * @param conversationId - UUIDv7 to rename.
  * @param title - Validated title, stored as given.
  * @returns The renamed conversation's metadata, or undefined when it is not
- * stored. A job carries its parent, its number, and its parent's agent as
- * the delegator; a main conversation carries none of the three.
+ * stored. A conversation with a stored parent is of the `job` kind and
+ * carries its parent, its number, and its parent's agent as the delegator;
+ * one without is of the `main` kind and carries none of the three.
  * @throws If SQLite fails or the renamed row violates the metadata contract;
  * the row is validated before the caller's transaction commits, so either
  * failure rolls the rename back.
@@ -30,6 +31,7 @@ function updateConversationTitle(
     .getStatement(
       `UPDATE conversations SET title = ? WHERE id = ?
       RETURNING id, title, agent_code AS agentCode,
+        CASE WHEN parent_conversation_id IS NULL THEN 'main' ELSE 'job' END AS kind,
         parent_conversation_id AS parentConversationId, job_number AS jobNumber,
         (SELECT p.agent_code FROM conversations p
           WHERE p.id = conversations.parent_conversation_id) AS delegatorAgentCode,

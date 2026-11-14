@@ -97,8 +97,9 @@ function listStoredMessageAttachments(
  * @param statements - Statement compilation lent to the caller's transaction.
  * @param conversationId - Stored UUIDv7 to look up.
  * @returns Independent metadata, or undefined for an absent conversation. A
- * job carries its parent, its number, and its parent's agent as the
- * delegator; a main conversation carries none of the three. Its messages,
+ * conversation with a stored parent is of the `job` kind and carries its
+ * parent, its number, and its parent's agent as the delegator; one without
+ * is of the `main` kind and carries none of the three. Its messages,
  * sources, and jobs are not read, so invalid ones do not fail the read.
  * @throws If SQLite access or validation of the stored metadata fails.
  */
@@ -109,6 +110,7 @@ export function findConversationMetadata(
   const row = statements
     .getStatement(
       `SELECT c.id, c.title, c.agent_code AS agentCode,
+    CASE WHEN c.parent_conversation_id IS NULL THEN 'main' ELSE 'job' END AS kind,
     c.parent_conversation_id AS parentConversationId, c.job_number AS jobNumber,
     p.agent_code AS delegatorAgentCode,
     c.created_at AS createdAt, c.updated_at AS updatedAt

@@ -450,8 +450,8 @@ export const jobSchema = z.strictObject({
  *
  * @remarks Both variants of a conversation extend it, and read projections
  * such as the history's summary pick their fields from it. It is not a
- * conversation contract of its own: it lacks the fields that tell a main
- * conversation from a job.
+ * conversation contract of its own: it lacks `kind`, which tells a main
+ * conversation from a job, and the fields each kind pairs.
  */
 export const conversationBaseSchema = z.strictObject({
   /** UUIDv7 identity of the conversation. */
@@ -471,6 +471,8 @@ export const conversationBaseSchema = z.strictObject({
 
 /** Validates the metadata of a main conversation, which no job started. */
 const mainConversationMetadataSchema = conversationBaseSchema.extend({
+  /** Selects the main conversation's variant. */
+  kind: z.literal("main"),
   /** A main conversation has no parent. */
   parentConversationId: z.null(),
   /** A main conversation has no job number. */
@@ -481,6 +483,8 @@ const mainConversationMetadataSchema = conversationBaseSchema.extend({
 
 /** Validates the metadata of a job: a conversation started from another. */
 const jobConversationMetadataSchema = conversationBaseSchema.extend({
+  /** Selects the job's variant. */
+  kind: z.literal("job"),
   /** Conversation this job was started from. */
   parentConversationId: z.uuidv7(),
   /** The job's number in its parent, from 1. */
@@ -521,13 +525,14 @@ const jobConversationSchema = jobConversationMetadataSchema.extend({
  * Validates the persisted conversation record and its ordered message
  * history: a main conversation or a job.
  *
- * @remarks A main conversation has no parent, job number, or delegator, and
- * has the jobs started from it. A job has all three and no jobs, because
- * jobs go one level deep. `parentConversationId` selects the variant: null
- * for a main conversation, and the parent's identity for a job. No mixture
- * of the two passes.
+ * @remarks `kind` selects the variant: `main` for a conversation no job
+ * started, and `job` for a conversation started from another. A main
+ * conversation has no parent, job number, or delegator, and has the jobs
+ * started from it. A job has all three and no jobs, because jobs go one
+ * level deep. No mixture of the two passes, a kind that names the other
+ * variant included.
  */
-export const conversationSchema = z.union([
+export const conversationSchema = z.discriminatedUnion("kind", [
   mainConversationSchema,
   jobConversationSchema
 ])
@@ -536,10 +541,10 @@ export const conversationSchema = z.union([
  * Validates conversation metadata: a conversation without its messages,
  * sources, and jobs, as a main conversation or a job.
  *
- * @remarks Its variants pair the parent, the job number, and the delegator
- * as {@link conversationSchema} does.
+ * @remarks `kind` selects the variant, which pairs the parent, the job
+ * number, and the delegator as {@link conversationSchema} does.
  */
-export const conversationMetadataSchema = z.union([
+export const conversationMetadataSchema = z.discriminatedUnion("kind", [
   mainConversationMetadataSchema,
   jobConversationMetadataSchema
 ])
@@ -636,14 +641,13 @@ export type ConversationSource = z.infer<typeof conversationSourceSchema>
 
 /**
  * Persisted conversation record including its ordered message history: a
- * main conversation or a job, as `parentConversationId` selects.
+ * main conversation or a job, as `kind` selects.
  */
 export type Conversation = z.infer<typeof conversationSchema>
 
 /**
  * Persisted conversation metadata used when message history is not
- * transferred: a main conversation's or a job's, as `parentConversationId`
- * selects.
+ * transferred: a main conversation's or a job's, as `kind` selects.
  */
 export type ConversationMetadata = z.infer<typeof conversationMetadataSchema>
 

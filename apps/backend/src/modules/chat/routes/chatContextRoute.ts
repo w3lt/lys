@@ -107,7 +107,7 @@ const NO_CONVERSATION_JOBS: ConversationDelegation["jobs"] = Object.freeze([])
 
 /** Where a new conversation stands in delegation: a main one, with no job. */
 const NEW_CONVERSATION_DELEGATION: ConversationDelegation = Object.freeze({
-  parentConversationId: null,
+  kind: "main",
   jobNumber: null,
   delegatorAgentCode: null,
   jobs: NO_CONVERSATION_JOBS

@@ -101,6 +101,7 @@ describe("createJobMessage", () => {
     })
     expect(services.conversation.history.getConversation(job.id)).toMatchObject(
       {
+        kind: "job",
         parentConversationId: conversationId,
         jobNumber: 1,
         delegatorAgentCode: CALIGINIA_AGENT_CODE,

@@ -412,10 +412,7 @@ function findTurnConversation(
     conversation.kind === "existing"
       ? dependencies.findConversation(conversation.id)
       : undefined
-  if (
-    storedConversation !== undefined &&
-    storedConversation.parentConversationId !== null
-  ) {
+  if (storedConversation?.kind === "job") {
     sendUnansweredTurnProblem(
       reply,
       { status: "conversation-is-job", conversationId: storedConversation.id },
@@ -741,10 +738,10 @@ function buildTurnSettings(
 
 /**
  * Builds the metadata of a stored conversation: the conversation without its
- * messages, sources, and jobs, in the same variant.
+ * messages, sources, and jobs, of the same kind.
  *
  * @param conversation - Stored conversation snapshot.
- * @returns Its identity, title, agent, and times, with its parent, job
+ * @returns Its identity, title, agent, times, and kind, with its parent, job
  * number, and delegator, which a main conversation has none of.
  */
 function buildConversationMetadata(
@@ -752,15 +749,23 @@ function buildConversationMetadata(
 ): ConversationMetadata {
   const { id, title, agentCode, createdAt, updatedAt } = conversation
   const fields = { id, title, agentCode, createdAt, updatedAt }
-  if (conversation.parentConversationId === null)
+  if (conversation.kind === "main")
     return {
       ...fields,
+      kind: "main",
       parentConversationId: null,
       jobNumber: null,
       delegatorAgentCode: null
     }
-  const { parentConversationId, jobNumber, delegatorAgentCode } = conversation
-  return { ...fields, parentConversationId, jobNumber, delegatorAgentCode }
+  const { kind, parentConversationId, jobNumber, delegatorAgentCode } =
+    conversation
+  return {
+    ...fields,
+    kind,
+    parentConversationId,
+    jobNumber,
+    delegatorAgentCode
+  }
 }
 
 /**

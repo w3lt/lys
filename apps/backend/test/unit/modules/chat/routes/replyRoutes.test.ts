@@ -78,6 +78,7 @@ const CONVERSATION = Object.freeze({
   id: CONVERSATION_ID,
   title: "Trip plan",
   agentCode: "lys",
+  kind: "main",
   parentConversationId: null,
   jobNumber: null,
   delegatorAgentCode: null,

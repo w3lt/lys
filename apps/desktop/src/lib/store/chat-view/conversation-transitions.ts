@@ -241,7 +241,7 @@ export function startConversationTurn(
     sources: previousConversation?.sources ?? noSources
   }
   return Object.freeze(
-    conversation.parentConversationId === null
+    conversation.kind === "main"
       ? { ...conversation, jobs: previousConversation?.jobs ?? noJobs }
       : { ...conversation, jobs: NO_JOBS_OF_JOB }
   )
@@ -736,7 +736,7 @@ function createStoredLastMessage(
  *
  * @param conversation - Schema-validated conversation read from storage.
  * @returns A transitively frozen conversation in stored order, with its
- * parent, job number, delegator, and jobs as stored.
+ * kind, parent, job number, delegator, and jobs as stored.
  * @throws If a stored assistant violates its status and finish-reason pairing.
  * @remarks A `streaming` reply that ends the transcript stays streaming so the
  * chat view can follow its generation; {@link findStreamingReply} finds it.
@@ -762,7 +762,7 @@ export function createStoredChatViewConversation(
     )
   }
   return Object.freeze(
-    storedConversation.parentConversationId === null
+    storedConversation.kind === "main"
       ? {
           ...storedConversation,
           jobs: Object.freeze(

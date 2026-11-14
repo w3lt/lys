@@ -216,6 +216,7 @@ describe("createConversationTurn", () => {
       id: expect.any(String),
       title: null,
       agentCode: "options-agent",
+      kind: "main",
       parentConversationId: null,
       jobNumber: null,
       delegatorAgentCode: null,
@@ -470,6 +471,7 @@ describe("createConversationTurn", () => {
     expect(turn.conversation).toMatchObject({
       title: "Find what moths eat",
       agentCode: "researcher",
+      kind: "job",
       parentConversationId: mainId,
       jobNumber: 1,
       createdAt: NOW,

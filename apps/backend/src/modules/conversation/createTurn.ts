@@ -113,8 +113,8 @@ function buildUserMessageAuthor(
  * @param target - Identity of the new conversation and the code of the agent
  * that answers it.
  * @param now - Creation time, also its initial activity time.
- * @returns The newly stored independent conversation snapshot, with no
- * parent, job number, delegator, or jobs.
+ * @returns The newly stored independent conversation snapshot, of the
+ * `main` kind, with no parent, job number, delegator, or jobs.
  * @throws If validation fails, the transaction has ended, or the write fails.
  */
 function createMainConversation(
@@ -126,6 +126,7 @@ function createMainConversation(
     id: target.id,
     title: null,
     agentCode: target.agentCode,
+    kind: "main",
     parentConversationId: null,
     jobNumber: null,
     delegatorAgentCode: null,
@@ -156,9 +157,9 @@ function calculateNextJobNumber(parent: Conversation): number {
  * @param target - Identity of the new job, the code of the agent that works
  * on it, its parent, and its title.
  * @param now - Creation time, also its initial activity time.
- * @returns The newly stored independent job snapshot: numbered one above the
- * highest number its parent's jobs have, with its parent's agent as the
- * delegator, and without messages, sources, or jobs.
+ * @returns The newly stored independent job snapshot, of the `job` kind:
+ * numbered one above the highest number its parent's jobs have, with its
+ * parent's agent as the delegator, and without messages, sources, or jobs.
  * @throws ConversationNotFoundError if the parent is not stored.
  * @throws If validation fails, the transaction has ended, a stored value
  * violates the conversation contract, or the write fails.
@@ -180,6 +181,7 @@ function createJob(
     id: target.id,
     title: target.title,
     agentCode: target.agentCode,
+    kind: "job",
     parentConversationId: parent.id,
     jobNumber: calculateNextJobNumber(parent),
     delegatorAgentCode: parent.agentCode,
@@ -221,7 +223,7 @@ function updateContinuedConversation(
   records.turn.updateStreamingAssistantMessagesToInterrupted(target.id, now)
   const conversation = records.turn.findConversation(target.id)
   if (conversation === undefined) throw new ConversationNotFoundError()
-  if (isJobTarget && conversation.parentConversationId === null)
+  if (isJobTarget && conversation.kind === "main")
     throw new Error(jobMessageRefusal)
   return conversation
 }

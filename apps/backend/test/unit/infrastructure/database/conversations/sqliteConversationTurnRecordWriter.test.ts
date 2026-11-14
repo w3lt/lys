@@ -62,6 +62,7 @@ describe("SqliteConversationTurnRecordWriter", () => {
       id: createFixtureUuidV7(2),
       title: null,
       agentCode: "lys",
+      kind: "main",
       parentConversationId: null,
       jobNumber: null,
       delegatorAgentCode: null,

@@ -39,7 +39,7 @@ export function handleTurnStarted(
   context: TurnDelegationContext
 ): void {
   const { conversation } = context.turn
-  const isMainConversation = conversation.parentConversationId === null
+  const isMainConversation = conversation.kind === "main"
   if (context.startedBy !== "person" || !isMainConversation) return
   if (conversation.jobs.some((job) => job.state === "working"))
     runtime.wakeSettings.addWakeSettings(conversation.id, context.settings)

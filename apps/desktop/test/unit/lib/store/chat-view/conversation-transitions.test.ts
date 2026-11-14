@@ -107,6 +107,7 @@ function buildChatViewConversation(
 ): ChatViewConversation {
   return Object.freeze({
     ...buildConversationMetadata(FIXTURE_CONVERSATION_ID, null),
+    kind: "main",
     parentConversationId: null,
     jobNumber: null,
     delegatorAgentCode: null,
@@ -647,6 +648,7 @@ describe("createStoredChatViewConversation", () => {
     const stored = conversationSchema.parse({
       ...buildConversation(STORED_JOB.id, "News", [jobMessage]),
       agentCode: "nyx",
+      kind: "job",
       parentConversationId: FIXTURE_CONVERSATION_ID,
       jobNumber: 1,
       delegatorAgentCode: "caliginia"

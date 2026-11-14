@@ -254,6 +254,7 @@ describe("StoredConversationTurns", () => {
         id: turn.conversation.id,
         title: null,
         agentCode: "lys",
+        kind: "main",
         parentConversationId: null,
         jobNumber: null,
         delegatorAgentCode: null,

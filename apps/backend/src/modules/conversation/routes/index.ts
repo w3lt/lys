@@ -191,8 +191,7 @@ function findConversationIsJobProblem(
   instance: string
 ): ConversationIsJobProblem | undefined {
   const metadata = history.getConversationMetadata(conversationId)
-  if (metadata === undefined || metadata.parentConversationId === null)
-    return undefined
+  if (metadata === undefined || metadata.kind === "main") return undefined
   return createConversationIsJobProblem(conversationId, instance)
 }
 

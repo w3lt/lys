@@ -40,6 +40,7 @@ describe("SqliteConversationRecordReader", () => {
         id: conversationId,
         title: "Trip plan",
         agentCode: "caliginia",
+        kind: "main",
         parentConversationId: null,
         jobNumber: null,
         delegatorAgentCode: null,

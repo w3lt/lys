@@ -830,7 +830,7 @@ function updateConversationJobs(
   jobUpdates: readonly Job[]
 ): ChatViewConversation {
   if (jobUpdates.length === 0) return conversation
-  if (conversation.parentConversationId !== null)
+  if (conversation.kind === "job")
     throw new Error("The backend reported a job started from a job")
 
   const jobsById = new Map(conversation.jobs.map((job) => [job.id, job]))

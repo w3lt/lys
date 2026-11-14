@@ -11,6 +11,7 @@ import type {
 } from "@lys/share"
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import type { GetAttachmentImageFileStatus } from "../../agent/agentContext"
+import { listAgentMcpTools } from "../../agent/builtInAgents"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
 import type { AttachmentFileStatus } from "../../attachment/attachmentFileStore"
 import { buildAttachmentImageFileStatusLookup } from "../../attachment/attachmentImageReader"
@@ -166,7 +167,9 @@ export default function registerChatContextRoute(
  * inventory does not list sees no image and is offered no reader. Image
  * files are looked up, never read: an image counts from its stored sides.
  * An offered MCP tool whose server is not connected is left out, because
- * its definition is known only while the server is connected.
+ * its definition is known only while the server is connected, and so is a
+ * tool only Lys may use when the agent is neither Caliginia nor Lysiptera,
+ * as its turn would not offer it.
  */
 async function handleChatContextRequest(
   request: FastifyRequest<ChatContextApiRoute>,
@@ -204,7 +207,13 @@ async function handleChatContextRequest(
     capabilities.trainedForToolUse,
     measured.attachments
   )
-  const tools = buildOfferedDefinitions(body, requestedTools)
+  const tools = buildOfferedDefinitions(body, {
+    ...requestedTools,
+    mcpTools: listAgentMcpTools(
+      requestedAgent.agent.code,
+      requestedTools.mcpTools
+    )
+  })
   const measurement = await requestedAgent.agent.findContextMeasurement({
     history: measured.history,
     model: body.model,

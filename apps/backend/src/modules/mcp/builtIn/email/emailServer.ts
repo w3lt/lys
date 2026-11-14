@@ -1,5 +1,6 @@
 import type { McpServerList } from "@lys/protocol"
 import {
+  buildMcpToolNamePrefix,
   isBuiltInMcpServerOn,
   mcpServerSettingsSchema,
   type BuiltInMcpServerName,
@@ -23,6 +24,13 @@ import type {
 
 /** Name the email server is listed under, and its tools are prefixed with. */
 export const EMAIL_SERVER_NAME = "email" satisfies BuiltInMcpServerName
+
+/**
+ * Start of the model-facing name of each tool of Lys's own mailbox: the
+ * server's prefix, then the `lys_` the email server names those tools
+ * with.
+ */
+const LYS_MAILBOX_TOOL_NAME_PREFIX = `${buildMcpToolNamePrefix(EMAIL_SERVER_NAME)}lys_`
 
 /**
  * Environment variable the email server reads the person's account and
@@ -188,6 +196,16 @@ export class EmailMcpServer implements BuiltInMcpServer {
       applied.isBuiltIn &&
       applied.state.status !== "off"
     return isServing ? this.#lysAddress : null
+  }
+
+  /**
+   * Implements {@link BuiltInMcpServer.isLysOnlyTool} for the email server.
+   * @param toolName - Model-facing name of one of its tools.
+   * @returns True for a tool of Lys's own mailbox, whose name begins with
+   * `mcp__email__lys_`; false for a tool of the person's.
+   */
+  public isLysOnlyTool(toolName: string): boolean {
+    return toolName.startsWith(LYS_MAILBOX_TOOL_NAME_PREFIX)
   }
 }
 

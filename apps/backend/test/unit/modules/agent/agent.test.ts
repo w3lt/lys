@@ -8,6 +8,7 @@ import {
   type ChatToolResult
 } from "@lys/protocol"
 import {
+  CALIGINIA_AGENT_CODE,
   calculateImageTokens,
   toolDefinitionSchema,
   type ConversationAssistantMessage,
@@ -674,7 +675,7 @@ const ECHO_MOTH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
 
 /** What a case's MCP server marks its echo tool as. */
 type McpToolMarks = Partial<
-  Pick<TurnMcpTool, "isDestructive" | "isOpenWorldWrite">
+  Pick<TurnMcpTool, "isDestructive" | "isOpenWorldWrite" | "isLysOnly">
 >
 
 /** Marks of an echo tool its server calls an open-world write. */
@@ -685,6 +686,11 @@ const OPEN_WORLD_WRITE_MARKS = Object.freeze({
 /** Marks of an echo tool its server calls destructive. */
 const DESTRUCTIVE_MARKS = Object.freeze({
   isDestructive: true
+} satisfies McpToolMarks)
+
+/** Marks of an echo tool only Lys herself may use. */
+const LYS_ONLY_MARKS = Object.freeze({
+  isLysOnly: true
 } satisfies McpToolMarks)
 
 /**
@@ -706,6 +712,7 @@ function createMcpEchoTool(
     definition: MCP_ECHO_DEFINITION,
     isDestructive: marks.isDestructive ?? false,
     isOpenWorldWrite: marks.isOpenWorldWrite ?? false,
+    isLysOnly: marks.isLysOnly ?? false,
     sendToolCall: call
   })
   return { tool, call }
@@ -3399,6 +3406,57 @@ describe("Agent", () => {
           status: "rejected",
           result: DECLINED_APPROVAL.content
         })
+      ])
+    })
+
+    it("answers another agent's call of an MCP tool only Lys may use as a call of a tool it was not offered, without prompting the person or calling the server", async () => {
+      const { tool, call } = createMcpEchoTool(undefined, LYS_ONLY_MARKS)
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND),
+        clientTools: [READ_TEXT_FILE_TOOL],
+        mcpTools: [tool],
+        justRunToolNames: ["mcp__files__echo"],
+        sendToolApprovalPrompt
+      })
+
+      expect(call).not.toHaveBeenCalled()
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          toolName: "mcp__files__echo",
+          status: "failed",
+          result:
+            'No tool is named "mcp__files__echo". The tools you can call are: read_text_file.'
+        })
+      ])
+    })
+
+    it("runs Caliginia's call of an MCP tool only Lys may use", async () => {
+      const { tool, call } = createMcpEchoTool(undefined, LYS_ONLY_MARKS)
+      const agent = new Agent(
+        { ...AGENT_PROFILE, code: CALIGINIA_AGENT_CODE },
+        {
+          replyModel: {
+            openReplyStream: createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND)
+          },
+          replyContextMeter: createRoomyReplyContextMeter(),
+          stateReader: UNEXPECTED_STATE_READER,
+          toolKeeper: UNEXPECTED_TOOL_KEEPER,
+          readEmailAddress: readNoEmailAddress
+        }
+      )
+
+      const run = await getAgentReplyOutcome({
+        agent,
+        mcpTools: [tool],
+        justRunToolNames: ["mcp__files__echo"]
+      })
+
+      expect(call).toHaveBeenCalledOnce()
+      expect(run.parts).toEqual([
+        expect.objectContaining({ status: "succeeded" })
       ])
     })
 

@@ -42,6 +42,7 @@ import {
   buildAgentStateTools,
   type AgentStateReader
 } from "./agentStateTools"
+import { isLysAgentCode } from "./builtInAgents"
 import type { ReportToolSearchFailure, ToolKeeper } from "./findToolsTool"
 import {
   findReplyRoundFitFailure,
@@ -197,7 +198,9 @@ export type AgentTurn = Readonly<{
    * MCP tools found for the turn, each name once and none named like
    * another offered tool; empty when none are offered. Each call the tool
    * call policy does not deny asks the person first, unless they saved the
-   * tool as Just run and its server does not mark it as destructive.
+   * tool as Just run and its server does not mark it as destructive. A tool
+   * only Lys may use is among them only for Caliginia and Lysiptera; the
+   * gateway refuses another agent's call of one anyway.
    */
   mcpTools: readonly TurnMcpTool[]
   /**
@@ -655,24 +658,25 @@ export default class Agent {
    * `find_tools` in their place, whose calls run at once and ask the tool
    * keeper which of them fit a task, and each tool it found is offered from
    * the next round on, its calls passing the gate as any other. A call of a
-   * tool its round did not offer is stored as failed with a result saying
-   * so, and never runs. The reply holds one of the agent's request slots from
-   * the call's start to its end, also while it waits on the person. When
-   * every slot is held, it waits in line for one, first come first served,
-   * and starts once a slot frees; Stop or shutdown while it waits ends it as
-   * cancelled before anything is read or sent. When every slot is held and
-   * the line is full, the reply is refused: stored as failed without
-   * reaching the model, with an `error` event that says why. The request is
-   * listed in the agent's activity from the call's start, preparing round 0,
-   * or waiting while it waits for a slot, until the returned promise
+   * tool its round did not offer is stored as failed with a result saying so,
+   * and never runs, and so is a call of an MCP tool only Lys may use when the
+   * agent is neither Caliginia nor Lysiptera. The reply holds one of the
+   * agent's request slots from the call's start to its end, also while it waits
+   * on the person. When every slot is held, it waits in line for one, first
+   * come first served, and starts once a slot frees; Stop or shutdown while it
+   * waits ends it as cancelled before anything is read or sent. When every slot
+   * is held and the line is full, the reply is refused: stored as failed
+   * without reaching the model, with an `error` event that says why. The
+   * request is listed in the agent's activity from the call's start, preparing
+   * round 0, or waiting while it waits for a slot, until the returned promise
    * settles, whatever the outcome; a refused reply is never listed. Each
    * round's start shows it preparing that round, and each part or tool call
-   * change the reply stores shows the step it puts the request at. A reply
-   * that a newer turn of its conversation supersedes, or whose conversation
-   * is deleted, settles only once its next write is refused, so one waiting
-   * on an approval or a tool result stays listed until the call is answered,
-   * the reply is stopped, or the backend stops. One that waits in line keeps
-   * its place until a slot frees for it, then reads its stored state before
+   * change the reply stores shows the step it puts the request at. A reply that
+   * a newer turn of its conversation supersedes, or whose conversation is
+   * deleted, settles only once its next write is refused, so one waiting on an
+   * approval or a tool result stays listed until the call is answered, the
+   * reply is stopped, or the backend stops. One that waits in line keeps its
+   * place until a slot frees for it, then reads its stored state before
    * anything else: when it is no longer streaming, it ends as interrupted
    * without reading, measuring, or sending anything, and frees the slot.
    */
@@ -798,6 +802,7 @@ export default class Agent {
     const { turn } = state
     const roundMessages = await handleToolCallRound(round, {
       tools: state.replyTools.toolOffer.listOfferedToolset(),
+      canUseLysOnlyTools: isLysAgentCode(this.#identity.code),
       unofferedTools: state.unofferedTools,
       sendClientToolCall: turn.sendClientToolCall,
       toolCallPolicy: turn.toolCallPolicy,

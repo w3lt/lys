@@ -328,12 +328,15 @@ type FakeBuiltInServer = Readonly<{
  *
  * @param read - Outcome of each read until the case sets another; a start
  * with the fake stdio server named `email` when omitted.
+ * @param isLysOnlyTool - Which of its tools only Lys may use; none when
+ * omitted.
  * @returns The server and its recorded reads.
  */
 function createFakeBuiltInServer(
   read: BuiltInMcpServerRead = buildBuiltInRead(
     buildFakeStdioServerSettings("email")
-  )
+  ),
+  isLysOnlyTool: BuiltInMcpServer["isLysOnlyTool"] = () => false
 ): FakeBuiltInServer {
   let nextRead = read
   const readServer = vi.fn<
@@ -342,7 +345,8 @@ function createFakeBuiltInServer(
   const server: BuiltInMcpServer = Object.freeze({
     name: "email",
     transport: "stdio",
-    readServer
+    readServer,
+    isLysOnlyTool
   })
   return Object.freeze({
     server,
@@ -1738,6 +1742,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           definition: harness.registry.listToolDefinitions()[1],
           isDestructive: false,
           isOpenWorldWrite: false,
+          isLysOnly: false,
           sendToolCall: expect.any(Function)
         }
       })
@@ -2405,6 +2410,38 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         buildList([buildStdioStatus("email", buildConnectedState(1))])
       )
       expect(harness.openServer).toHaveBeenCalledTimes(2)
+    })
+
+    it("marks a built-in server's tool as only Lys's when the server says so, and no tool of an added server that takes its name", async () => {
+      const builtIn = createFakeBuiltInServer(
+        buildBuiltInRead(buildFakeStdioServerSettings("email")),
+        (toolName) => toolName === "mcp__email__echo"
+      )
+      const harness = createRegistryHarness({
+        builtInServers: [builtIn.server]
+      })
+      harness.updateReadServers([], EMAIL_ON)
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildEmailStatus(buildConnectedState(1))])
+      )
+      const builtInEcho = findTool(harness.registry, "mcp__email__echo")
+      harness.updateReadServers(
+        [buildFakeStdioServerSettings("email")],
+        EMAIL_ON
+      )
+
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("email", buildConnectedState(1))])
+      )
+
+      expect(builtInEcho.isLysOnly).toBe(true)
+      expect(findTool(harness.registry, "mcp__email__echo").isLysOnly).toBe(
+        false
+      )
     })
 
     it("stops a running added server as removed when the built-in server of its name returns with equal settings, and lists the built-in server", async () => {

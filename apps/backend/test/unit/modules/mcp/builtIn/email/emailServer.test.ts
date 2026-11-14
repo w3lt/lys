@@ -297,6 +297,24 @@ describe("EmailMcpServer", () => {
     expect(readAccounts).not.toHaveBeenCalled()
   })
 
+  it("tells the tools of Lys's own mailbox, and only those, as Lys-only", () => {
+    const server = new EmailMcpServer(INSTALLED_COMMAND, () =>
+      Promise.resolve(BOTH_READ)
+    )
+    const toolNames = [
+      "mcp__email__lys_send_email",
+      "mcp__email__send_email",
+      "mcp__email__lys_read_email",
+      "mcp__email__read_email",
+      "mcp__files__lys_send_email"
+    ]
+
+    expect(toolNames.filter((name) => server.isLysOnlyTool(name))).toEqual([
+      "mcp__email__lys_send_email",
+      "mcp__email__lys_read_email"
+    ])
+  })
+
   describe("readLysEmailAddress", () => {
     /** Address of Lys's account; personal data in production. */
     const LYS_ADDRESS = LYS_ACCOUNT.address

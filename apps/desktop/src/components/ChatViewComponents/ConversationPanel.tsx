@@ -32,6 +32,11 @@ type ConversationPanelCommonProps = {
    * and named in the pending-work status.
    */
   readonly agentName: string
+  /**
+   * Name of the agent that wrote the messages of the shown job; undefined in
+   * a main conversation.
+   */
+  readonly delegatorName: string | undefined
   /** Numbered sources of the conversation, which replies may cite. */
   readonly sources: readonly ConversationSource[]
   /** Cards of every job of the conversation, in number order. */
@@ -91,6 +96,7 @@ function buildConversationBody(props: ConversationPanelProps): ReactElement {
   }
 
   const transcriptProps = {
+    delegatorName: props.delegatorName,
     error: props.error,
     jobCards: props.jobCards,
     onOpenJob: props.onOpenJob,
@@ -118,11 +124,11 @@ function buildConversationBody(props: ConversationPanelProps): ReactElement {
  * Presents the conversation transcript and its navigation affordances.
  *
  * @remarks The parent owns conversation state, sources, and jobs, transcript
- * position, scrolling, submission, what opening and stopping a job do, and
- * the name of the agent that answers. The panel exposes no
- * interruption control, because cancellation must stay reachable in active
- * phases that have no assistant message and is therefore owned by the
- * composer. Starter clicks call `onSendMessage` once and intentionally discard
+ * position, scrolling, submission, what opening and stopping a job do, the
+ * name of the agent that answers, and, in a job, the name of its delegator.
+ * The panel exposes no interruption control, because cancellation must stay
+ * reachable in active phases that have no assistant message and is therefore
+ * owned by the composer. Starter clicks call `onSendMessage` once and intentionally discard
  * its settlement because the store owns request failure state. The transcript
  * host is the supplied ref target and exposes native scroll semantics; the
  * jump control appears only when the parent reports that the reader is away

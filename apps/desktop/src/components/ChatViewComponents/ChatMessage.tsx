@@ -29,6 +29,11 @@ export type ChatMessageProps = {
    * reports it delivered. Empty when there are none.
    */
   readonly jobCards: readonly JobCardPresentation[]
+  /**
+   * Name of the agent that wrote the messages of the shown job, which labels
+   * them; undefined in a main conversation.
+   */
+  readonly delegatorName: string | undefined
   /** Opens a job's conversation; receives the job's identity. */
   readonly onOpenJob: (jobId: string) => void
   /** Stops a job's latest reply; receives the job. */
@@ -59,11 +64,11 @@ function hasSameItems<Item>(
  *
  * @param previous - Properties of the earlier render.
  * @param next - Properties of the next render.
- * @returns True when the message object, the speaker's name, the reply's
- * position, and the open and stop callbacks are the same, and the source and
- * job card lists hold the same objects in the same order; the transcript
- * builds new lists for every render, so comparing the lists themselves would
- * always differ.
+ * @returns True when the message object, the speaker's and the delegator's
+ * names, the reply's position, and the open and stop callbacks are the same,
+ * and the source and job card lists hold the same objects in the same order;
+ * the transcript builds new lists for every render, so comparing the lists
+ * themselves would always differ.
  */
 function isSameChatMessage(
   previous: ChatMessageProps,
@@ -72,6 +77,7 @@ function isSameChatMessage(
   const identityComparedProps = [
     "message",
     "speakerName",
+    "delegatorName",
     "replyNumber",
     "onOpenJob",
     "onStopJob"
@@ -93,21 +99,29 @@ function isSameChatMessage(
  * {@link isSameChatMessage} holds, so a reply whose sources did not change
  * is not rendered again when another reply finds sources, and a message that
  * shows no job is not rendered again when a job changes.
- * @param props - The message, the name its replies are shown under, the
- * sources a reply may cite, a reply's position, and the jobs the message
- * shows with their open and stop callbacks.
+ * @param props - The message, the names its replies and a job's messages
+ * are shown under, the sources a reply may cite, a reply's position, and the
+ * jobs the message shows or names with their open and stop callbacks.
  * @returns The rendered user message, streaming reply, or ended reply.
  */
 function ChatMessage({
   message,
   speakerName,
+  delegatorName,
   sources,
   replyNumber,
   jobCards,
   onOpenJob,
   onStopJob
 }: ChatMessageProps): ReactElement {
-  if (message.role === "user") return <UserMessage message={message} />
+  if (message.role === "user")
+    return (
+      <UserMessage
+        delegatorName={delegatorName}
+        jobCards={jobCards}
+        message={message}
+      />
+    )
   if (message.status === "streaming")
     return (
       <LysMessage

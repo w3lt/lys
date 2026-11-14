@@ -22,6 +22,11 @@ import {
 type ConversationTranscriptCommonProps = {
   /** Name of the agent that answers the conversation. */
   readonly speakerName: string
+  /**
+   * Name of the agent that wrote the messages of the shown job; undefined in
+   * a main conversation.
+   */
+  readonly delegatorName: string | undefined
   /** Numbered sources of the conversation, which replies may cite. */
   readonly sources: readonly ConversationSource[]
   /** Current lifecycle error rendered after messages when defined. */
@@ -60,6 +65,8 @@ const NO_SOURCES: readonly ConversationSource[] = Object.freeze([])
 type TranscriptEntryContext = Readonly<{
   /** Name of the agent that answers the conversation. */
   speakerName: string
+  /** Name of the agent that wrote a job's messages; undefined in a main one. */
+  delegatorName: string | undefined
   /** Numbered sources of the conversation, in number order. */
   sources: readonly ConversationSource[]
   /** Source numbers each reply may cite, by reply identifier. */
@@ -78,8 +85,8 @@ type TranscriptEntryContext = Readonly<{
  * @param message - Message of the transcript.
  * @param replyNumber - One-based position of a reply among the replies; 0
  * for a user message.
- * @param context - Speaker name, sources, the numbers each reply may cite,
- * and the jobs with their callbacks, shared by every entry.
+ * @param context - Speaker and delegator names, sources, the numbers each
+ * reply may cite, and the jobs with their callbacks, shared by every entry.
  * @returns The keyed message element; a reply gets the sources it may cite,
  * and every message the cards of the jobs it shows or names.
  */
@@ -91,6 +98,7 @@ function buildTranscriptEntry(
   const citableNumbers = context.citableSourceNumbers.get(message.id)
   return (
     <ChatMessage
+      delegatorName={context.delegatorName}
       jobCards={listMessageJobCards(message, context.jobCards)}
       key={message.id}
       message={message}
@@ -111,8 +119,8 @@ function buildTranscriptEntry(
  * Builds the transcript entries in conversation order.
  *
  * @param messages - Transcript messages in conversation order.
- * @param context - Speaker name, sources, the numbers each reply may cite,
- * and the jobs with their callbacks, shared by every entry.
+ * @param context - Speaker and delegator names, sources, the numbers each
+ * reply may cite, and the jobs with their callbacks, shared by every entry.
  * @returns One element per message, as {@link buildTranscriptEntry} builds
  * it; replies are numbered from 1 in order.
  */
@@ -138,20 +146,21 @@ function buildTranscriptEntries(
  * @remarks The explicit variant selects
  * whether one streaming assistant follows the completed prefix. The parent
  * owns messages, lifecycle state, the conversation's sources and jobs, the
- * name every assistant reply is shown under, and what opening and stopping a
- * job do. The transcript gives each reply the sources its model read, so a
- * reply's `[n]` never links to a source a later reply or a failed earlier
- * reply found, and each message the cards of the jobs it shows or names, so
- * a job's change renders again only the messages that show it. It exposes
- * no interruption control, because cancellation must stay reachable in
- * active phases that have no assistant message and is therefore owned by the
- * composer. Every message,
- * the streaming tail included, is one entry of the same list keyed by its
+ * name every assistant reply is shown under, the name a job's messages are
+ * shown under, and what opening and stopping a job do. The transcript gives
+ * each reply the sources its model read, so a reply's `[n]` never links to a
+ * source a later reply or a failed earlier reply found, and each message the
+ * cards of the jobs it shows or names, so a job's change renders again only
+ * the messages that show it, such as a reply's card or the reports a
+ * message delivered. It exposes no interruption control, because
+ * cancellation must stay reachable in active phases that have no assistant
+ * message and is therefore owned by the composer. Every message, the
+ * streaming tail included, is one entry of the same list keyed by its
  * immutable identifier, so a reply that ends updates in place and keeps its
  * open disclosures and focus. A lifecycle error is announced after the
  * transcript when supplied.
  * @param props - Completed-only or streaming-tail transcript presentation,
- * with the conversation's jobs and their callbacks.
+ * with the delegator's name and the conversation's jobs and their callbacks.
  * @returns The rendered transcript list and optional lifecycle error.
  */
 export default function ConversationTranscript(
@@ -163,6 +172,7 @@ export default function ConversationTranscript(
       : props.completedMessages
   const entryContext: TranscriptEntryContext = {
     speakerName: props.speakerName,
+    delegatorName: props.delegatorName,
     sources: props.sources,
     citableSourceNumbers: calculateReplyCitableSourceNumbers(messages),
     jobCards: props.jobCards,

@@ -778,13 +778,17 @@ describe("ChatView", () => {
       return backend
     }
 
-    it("opens a job from its card", async () => {
+    it("opens a job from its card and names who wrote each message", async () => {
       const jobRoute = `GET /api/v1/conversations/${FIXTURE_JOB_ID}`
+      // Lysiptera works on the job that Caliginia gave.
       const job = buildJobConversation(
-        buildConversation(FIXTURE_JOB_ID, "News", [
-          buildDelegatorMessage(68, "Find the news."),
-          buildCompletedAssistantMessage(61, "Here is the news.")
-        ])
+        conversationSchema.parse({
+          ...buildConversation(FIXTURE_JOB_ID, "News", [
+            buildDelegatorMessage(68, "Find the news."),
+            buildCompletedAssistantMessage(61, "Here is the news.")
+          ]),
+          agentCode: LYSIPTERA_AGENT_CODE
+        })
       )
       const backend = await startParentConversation({
         [jobRoute]: () => buildJsonResponse(200, job)
@@ -797,7 +801,9 @@ describe("ChatView", () => {
       expect(listRequestsBesideMeasurements(backend).at(-1)?.routeKey).toBe(
         jobRoute
       )
-      expect(screen.getByText("Here is the news.")).toBeInTheDocument()
+      expect(
+        screen.getAllByRole("article").map((article) => article.textContent)
+      ).toEqual(["CaliginiaFind the news.", "LysipteraHere is the news."])
     })
 
     it("stops a job from its card", async () => {

@@ -7,13 +7,16 @@ import ConversationTranscript, {
 } from "@/components/ChatViewComponents/ConversationTranscript"
 import {
   buildCompletedChatViewReply,
+  buildDelegatorMessage,
   buildJob,
   buildJobCard,
+  buildJobReport,
   buildReasoningPart,
   buildStreamingChatViewReply,
   buildTextPart,
   buildToolCallPart,
-  buildUserMessage
+  buildUserMessage,
+  buildWakeUpMessage
 } from "../../support/conversationFixtures"
 
 /** First user message of the fixture transcript. */
@@ -45,11 +48,12 @@ function listRenderedMessages(): string[] {
 const NO_SOURCES = Object.freeze([])
 
 /**
- * Job properties of a conversation that started no job; nothing calls the
- * callbacks.
+ * Job properties of a main conversation that started no job: no cards, no
+ * delegator, and callbacks nothing calls.
  */
 const NO_JOBS = Object.freeze({
   jobCards: [],
+  delegatorName: undefined,
   onOpenJob: vi.fn(),
   onStopJob: vi.fn()
 })
@@ -414,5 +418,61 @@ describe("ConversationTranscript", () => {
 
     expect(screen.getByText("Replied")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Stop job 1" })).toBeNull()
+  })
+
+  it("names the agent of a delivered report from its job's card", async () => {
+    const user = userEvent.setup()
+    render(
+      <ConversationTranscript
+        {...NO_JOBS}
+        completedMessages={[
+          QUESTION,
+          ANSWER,
+          buildWakeUpMessage(5, [buildJobReport()])
+        ]}
+        jobCards={[buildJobCard(buildJob())]}
+        kind="completed-only"
+        speakerName={SPEAKER_NAME}
+        sources={NO_SOURCES}
+      />
+    )
+
+    await user.click(screen.getByText("Reports · 1"))
+
+    expect(screen.getByText("Nyx · News · Result")).toBeVisible()
+  })
+
+  it("shows a job's messages under the delegator's name when that name changes", () => {
+    const messages = [
+      buildDelegatorMessage(68, "Find the news."),
+      buildCompletedChatViewReply(61, "Here is the news.")
+    ]
+    const { rerender } = render(
+      <ConversationTranscript
+        {...NO_JOBS}
+        completedMessages={messages}
+        delegatorName={CALIGINIA_AGENT_CODE}
+        kind="completed-only"
+        speakerName="Nyx"
+        sources={NO_SOURCES}
+      />
+    )
+    expect(listRenderedMessages()[0]).toBe("caliginiaFind the news.")
+
+    rerender(
+      <ConversationTranscript
+        {...NO_JOBS}
+        completedMessages={messages}
+        delegatorName={SPEAKER_NAME}
+        kind="completed-only"
+        speakerName="Nyx"
+        sources={NO_SOURCES}
+      />
+    )
+
+    expect(listRenderedMessages()).toEqual([
+      "CaliginiaFind the news.",
+      "NyxHere is the news."
+    ])
   })
 })

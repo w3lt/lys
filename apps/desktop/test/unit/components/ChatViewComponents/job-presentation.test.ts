@@ -3,7 +3,9 @@ import {
   canStopJob,
   createJobCardPresentations,
   createReplyJobsPresentation,
+  formatDeliveredReportsLabel,
   formatJobCardState,
+  formatJobReportKind,
   listMessageJobCards
 } from "@/components/ChatViewComponents/job-presentation"
 import type { AgentListState } from "@/lib/store/agents"
@@ -139,6 +141,26 @@ describe("job-presentation", () => {
   ] as const)("offers Stop for a %s job: %s", (state, isStoppable) => {
     expect(canStopJob(state)).toBe(isStoppable)
   })
+
+  it.each([
+    ["note", "Progress note"],
+    ["result", "Result"],
+    ["failed", "Failed"],
+    ["stopped", "Stopped"],
+    ["interrupted", "Interrupted"]
+  ] as const)("formats a %s report as %s", (kind, label) => {
+    expect(formatJobReportKind(kind)).toBe(label)
+  })
+
+  it.each([
+    ["one report", 1, "1 report delivered with this message"],
+    ["two reports", 2, "2 reports delivered with this message"]
+  ] as const)(
+    "counts %s delivered with a message",
+    (_label, reportCount, line) => {
+      expect(formatDeliveredReportsLabel(reportCount)).toBe(line)
+    }
+  )
 
   it.each([
     ["started it", [65], [CARD], []],

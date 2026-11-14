@@ -1,4 +1,4 @@
-import type { Job, JobState } from "@lys/share"
+import type { Job, JobReportKind, JobState } from "@lys/share"
 
 import type { AgentListState } from "@/lib/store/agents"
 import {
@@ -220,4 +220,37 @@ export function canStopJob(state: JobCardState): boolean {
     case "interrupted":
       return false
   }
+}
+
+/**
+ * Formats what a delivered report says.
+ *
+ * @param kind - Kind of the report.
+ * @returns A short label, such as `Progress note` for a note.
+ */
+export function formatJobReportKind(kind: JobReportKind): string {
+  switch (kind) {
+    case "note":
+      return "Progress note"
+    case "result":
+      return "Result"
+    case "failed":
+      return "Failed"
+    case "stopped":
+      return "Stopped"
+    case "interrupted":
+      return "Interrupted"
+  }
+}
+
+/**
+ * Formats the line under a person's message that delivered reports.
+ *
+ * @param reportCount - Number of reports the message delivered, from 1.
+ * @returns Such as `1 report delivered with this message` or
+ * `2 reports delivered with this message`.
+ */
+export function formatDeliveredReportsLabel(reportCount: number): string {
+  const noun = reportCount === 1 ? "report" : "reports"
+  return `${reportCount} ${noun} delivered with this message`
 }

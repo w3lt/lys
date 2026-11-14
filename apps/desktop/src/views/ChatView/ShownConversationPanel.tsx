@@ -19,7 +19,10 @@ import {
 } from "@/components/ChatViewComponents/job-presentation"
 import { useAnsweringAgent } from "@/lib/hooks/answeringAgent"
 import { useAgentStore } from "@/lib/store/agents"
-import { formatConversationAgentName } from "@/lib/store/agents/conversation-agent"
+import {
+  findConversationAgent,
+  formatConversationAgentName
+} from "@/lib/store/agents/conversation-agent"
 import {
   type ChatRequestState,
   type ConversationOpenState,
@@ -175,6 +178,25 @@ function useJobCards(jobs: readonly Job[]): readonly JobCardPresentation[] {
 }
 
 /**
+ * Names the agent that wrote the messages of the shown job.
+ *
+ * @param delegatorAgentCode - Code of the shown conversation's delegator,
+ * null in a main conversation; read reactively.
+ * @returns The delegator's name from the agent list, its code once the agent
+ * is deleted or while the list is unread, or undefined when the shown
+ * conversation is not a job.
+ */
+function useDelegatorName(
+  delegatorAgentCode: string | null
+): string | undefined {
+  const agentList = useAgentStore((state) => state.list)
+  if (delegatorAgentCode === null) return undefined
+
+  const delegator = findConversationAgent(agentList, delegatorAgentCode)
+  return formatConversationAgentName(delegator)
+}
+
+/**
  * Presents the shown conversation: its transcript, the cards of its jobs,
  * its pending work, and its position.
  *
@@ -182,13 +204,13 @@ function useJobCards(jobs: readonly Job[]): readonly JobCardPresentation[] {
  * open state, sending a starter prompt, and stopping a job; the tool-call
  * store owns the calls that wait for the person, which mark a working job as
  * needing approval; the agent store owns the agent list that names the
- * agents. The parent owns whether the transcript is pinned and what opening
- * a job does. The component owns the transcript host: it keeps the latest
- * content in view while pinned and messages exist, reports the reader's
- * position as they scroll, and pins the transcript when the reader jumps to
- * the latest content. Stopping a job is asked of the store, which records a
- * failed stop as the view's error. An empty conversation renders the
- * starter view.
+ * agents, a job's delegator among them. The parent owns whether the
+ * transcript is pinned and what opening a job does. The component owns the
+ * transcript host: it keeps the latest content in view while pinned and
+ * messages exist, reports the reader's position as they scroll, and pins the
+ * transcript when the reader jumps to the latest content. Stopping a job is
+ * asked of the store, which records a failed stop as the view's error. An
+ * empty conversation renders the starter view.
  * @param props - Parent-owned transcript position, its change notification,
  * and the opening of a job.
  * @returns The conversation landmark.
@@ -206,6 +228,9 @@ export default function ShownConversationPanel(
   const agentName = formatConversationAgentName(useAnsweringAgent())
   const messages = conversation?.messages ?? EMPTY_CONVERSATION_MESSAGES
   const jobCards = useJobCards(conversation?.jobs ?? EMPTY_CONVERSATION_JOBS)
+  const delegatorName = useDelegatorName(
+    conversation?.delegatorAgentCode ?? null
+  )
   const { transcriptRef, handleTranscriptScroll, handleJumpToLatest } =
     useTranscriptPosition(atBottom, messages, onScrollPositionChange)
 
@@ -214,6 +239,7 @@ export default function ShownConversationPanel(
       {...createConversationPresentation(messages)}
       activity={calculateConversationActivity(request, conversationOpen)}
       agentName={agentName}
+      delegatorName={delegatorName}
       error={error}
       isAtBottom={atBottom}
       jobCards={jobCards}

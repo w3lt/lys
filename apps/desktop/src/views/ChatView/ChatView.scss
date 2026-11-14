@@ -647,6 +647,43 @@
   outline-offset: 2px;
 }
 
+/*
+ * Reports a message delivered: a line under a person's message, or the whole
+ * row of a wake-up message, that opens to them.
+ */
+.chat-view__reports {
+  margin-top: 12px;
+}
+
+.chat-view__reports:first-child {
+  margin-top: 0;
+}
+
+.chat-view__report-list {
+  display: grid;
+  margin: 8px 0 0;
+  padding: 0 0 0 12px;
+  border-left: 1px solid var(--app-border-subtle);
+  gap: 12px;
+  list-style: none;
+}
+
+.chat-view__report-heading {
+  margin: 0;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+/* A job wrote the content: shown as written, never as Markdown. */
+.chat-view__report-content {
+  margin: 4px 0 0;
+  color: var(--app-text);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .chat-view__jump {
   position: absolute;
   right: 24px;

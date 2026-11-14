@@ -1638,12 +1638,22 @@ describe("migrateDatabase", () => {
     [
       "an empty note",
       "('r1', 'job1', 'ja1', 'note', 'Find what moths eat', '', '[]', '2026-01-02T00:00:00.000Z', NULL)",
-      /CHECK constraint failed: kind NOT IN/
+      /CHECK constraint failed: kind NOT IN \('note', 'failed'\)/
     ],
     [
       "an empty failed report",
       "('r1', 'job1', 'ja1', 'failed', 'Find what moths eat', '', '[]', '2026-01-02T00:00:00.000Z', NULL)",
-      /CHECK constraint failed: kind NOT IN/
+      /CHECK constraint failed: kind NOT IN \('note', 'failed'\)/
+    ],
+    [
+      "a stopped report with text",
+      "('r1', 'job1', 'ja1', 'stopped', 'Find what moths eat', 'Text', '[]', '2026-01-02T00:00:00.000Z', NULL)",
+      /CHECK constraint failed: kind NOT IN \('stopped', 'interrupted'\)/
+    ],
+    [
+      "an interrupted report citing a source",
+      "('r1', 'job1', 'ja1', 'interrupted', 'Find what moths eat', '', '[1]', '2026-01-02T00:00:00.000Z', NULL)",
+      /CHECK constraint failed: kind NOT IN \('stopped', 'interrupted'\)/
     ],
     [
       "an empty title",

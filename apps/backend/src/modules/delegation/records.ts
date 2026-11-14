@@ -45,7 +45,37 @@ export type EndedReplyRecord = Readonly<{
 /** What an end report says: every kind of report except the progress note. */
 export type EndReportKind = Exclude<JobReportKind, "note">
 
-/** One end report to store for a reply of a job. */
+/**
+ * What the end report of a reply of a job says, before it is stored, in the
+ * variant its kind selects.
+ */
+export type EndReport =
+  | Readonly<{
+      /** The reply completed. */
+      kind: "result"
+      /** Text of the reply's last round, possibly empty. */
+      content: string
+    }>
+  | Readonly<{
+      /** The reply failed. */
+      kind: "failed"
+      /** The failure sentence; never empty. */
+      content: string
+    }>
+  | Readonly<{
+      /**
+       * The reply was interrupted: `stopped` when the person asked it to
+       * stop, and `interrupted` when nobody did.
+       */
+      kind: "stopped" | "interrupted"
+      /** Always empty: the reply's end has no text. */
+      content: ""
+    }>
+
+/**
+ * One end report to store for a reply of a job, in the variant its kind
+ * selects.
+ */
 export type NewEndReport = Readonly<{
   /** UUIDv7 identity of the report, which is not stored yet. */
   id: string
@@ -53,15 +83,12 @@ export type NewEndReport = Readonly<{
   jobId: string
   /** UUIDv7 of the reply of that job whose end the report tells. */
   replyId: string
-  /** How the reply ended. */
-  kind: EndReportKind
   /** Non-empty title of the job message the reply answers. */
   title: string
-  /** Text of the report; non-empty for a `failed` report. */
-  content: string
   /** Time the report is written. */
   createdAt: string
-}>
+}> &
+  EndReport
 
 /** One progress note to store for a reply of a job. */
 export type NewProgressNote = Readonly<{

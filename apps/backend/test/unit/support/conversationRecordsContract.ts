@@ -1385,8 +1385,6 @@ function registerDeliveredReportReadCases(
   })
 
   it.each([
-    ["a stopped report with text", "stopped", "They eat wool.", []],
-    ["an interrupted report with text", "interrupted", "They eat wool.", []],
     ["a report citing its sources out of order", "result", "Wool.", [5, 2]],
     ["a report citing a source twice", "result", "Wool.", [2, 2]]
   ] as const)(

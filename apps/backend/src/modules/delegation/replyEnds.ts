@@ -194,12 +194,11 @@ function saveEndReport(
   if (found === undefined) return undefined
   const createdAt = new Date().toISOString()
   const endReport: NewEndReport = {
+    ...report,
     id: uuidv7(),
     jobId: found.job.id,
     replyId: reply.assistantMessageId,
-    kind: report.kind,
     title: found.job.title,
-    content: report.content,
     createdAt
   }
   if (!runtime.reports.createEndReport(endReport)) return undefined

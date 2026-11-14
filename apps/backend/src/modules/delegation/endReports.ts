@@ -1,17 +1,5 @@
-import type { EndedReplyRecord, EndReportKind } from "./records"
+import type { EndedReplyRecord, EndReport } from "./records"
 import type { StopRequester } from "./replyStopRequests"
-
-/** What the end report of a reply of a job says, before it is stored. */
-export type EndReport = Readonly<{
-  /** How the reply ended. */
-  kind: EndReportKind
-  /**
-   * Text of the report: for a `result`, the text of the reply's last round,
-   * possibly empty; for a `failed` report, a non-empty failure sentence; for
-   * a `stopped` or an `interrupted` report, empty.
-   */
-  content: string
-}>
 
 /**
  * Builds the report that tells a job's delegator how a reply of the job
@@ -64,7 +52,7 @@ export function buildEndReport(
  */
 function buildResultReport(
   reply: Pick<EndedReplyRecord, "finishReason" | "lastRoundText">
-): EndReport {
+): Extract<EndReport, { kind: "result" }> {
   const { lastRoundText } = reply
   if (reply.finishReason !== "length")
     return Object.freeze({ kind: "result", content: lastRoundText })
@@ -85,7 +73,9 @@ function buildResultReport(
  * `The agent's reply failed.` when the sentence is missing, empty, or only
  * whitespace.
  */
-function buildFailedReport(errorMessage: string | undefined): EndReport {
+function buildFailedReport(
+  errorMessage: string | undefined
+): Extract<EndReport, { kind: "failed" }> {
   if (errorMessage === undefined || errorMessage.trim() === "")
     return Object.freeze({
       kind: "failed",
@@ -105,7 +95,7 @@ function buildFailedReport(errorMessage: string | undefined): EndReport {
  */
 function buildInterruptedReport(
   requester: StopRequester | undefined
-): EndReport | undefined {
+): Extract<EndReport, { kind: "stopped" | "interrupted" }> | undefined {
   switch (requester) {
     case "delegator":
       return undefined

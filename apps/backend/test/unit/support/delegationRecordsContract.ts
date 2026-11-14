@@ -240,31 +240,46 @@ function registerJobStateCases(
   it.each([
     [
       "completed, with a result report, as replied",
-      { replyStatus: "completed", kind: "result", state: "replied" }
+      {
+        replyStatus: "completed",
+        report: { kind: "result", content: "They eat wool." },
+        state: "replied"
+      }
     ],
     [
       "failed, with a failed report, as failed",
-      { replyStatus: "failed", kind: "failed", state: "failed" }
+      {
+        replyStatus: "failed",
+        report: { kind: "failed", content: "The feed was down." },
+        state: "failed"
+      }
     ],
     [
       "interrupted, with a stopped report, as stopped",
-      { replyStatus: "interrupted", kind: "stopped", state: "stopped" }
+      {
+        replyStatus: "interrupted",
+        report: { kind: "stopped", content: "" },
+        state: "stopped"
+      }
     ],
     [
       "interrupted, with an interrupted report, as interrupted",
-      { replyStatus: "interrupted", kind: "interrupted", state: "interrupted" }
+      {
+        replyStatus: "interrupted",
+        report: { kind: "interrupted", content: "" },
+        state: "interrupted"
+      }
     ]
   ] as const)(
     "reads a job whose latest reply is %s",
-    (_label, { replyStatus, kind, state }) => {
+    (_label, { replyStatus, report, state }) => {
       const harness = createHarness()
       const mainId = saveMainConversation(harness, 1)
       const job = saveJob(harness, createJobFixture(mainId, 1, replyStatus))
       saveReport(harness, job, {
+        ...report,
         sequence: 200,
-        kind,
         title: "Job 1",
-        content: "Text of the report",
         createdAt: createFixtureTimestamp(1, 3)
       })
 
@@ -565,20 +580,23 @@ function registerWakingReportCases(
   createHarness: DelegationRecordsHarnessFactory
 ): void {
   it.each([
-    ["result report waits", "result", true],
-    ["failed report waits", "failed", true],
-    ["note does not wait", "note", false],
-    ["stopped report does not wait", "stopped", false],
-    ["interrupted report does not wait", "interrupted", false]
-  ] as const)("says that an undelivered %s", (_label, kind, isWaiting) => {
+    ["result report waits", { kind: "result", content: "Wool." }, true],
+    ["failed report waits", { kind: "failed", content: "It failed." }, true],
+    ["note does not wait", { kind: "note", content: "Looking." }, false],
+    ["stopped report does not wait", { kind: "stopped", content: "" }, false],
+    [
+      "interrupted report does not wait",
+      { kind: "interrupted", content: "" },
+      false
+    ]
+  ] as const)("says that an undelivered %s", (_label, report, isWaiting) => {
     const harness = createHarness()
     const mainId = saveMainConversation(harness, 1)
     const job = saveJob(harness, createJobFixture(mainId, 1, "completed"))
     saveReport(harness, job, {
+      ...report,
       sequence: 200,
-      kind,
       title: "Job 1",
-      content: "Text of the report",
       createdAt: createFixtureTimestamp(1, 3)
     })
 
@@ -947,24 +965,26 @@ function registerEndReportCases(
   })
 
   it.each([
-    ["a result without text", "result", ""],
-    ["a failed report", "failed", "The agent's reply failed."],
-    ["a stopped report", "stopped", ""],
-    ["an interrupted report", "interrupted", ""]
-  ] as const)("stores %s as given", (_label, kind, content) => {
+    ["a result without text", { kind: "result", content: "" }],
+    [
+      "a failed report",
+      { kind: "failed", content: "The agent's reply failed." }
+    ],
+    ["a stopped report", { kind: "stopped", content: "" }],
+    ["an interrupted report", { kind: "interrupted", content: "" }]
+  ] as const)("stores %s as given", (_label, endReport) => {
     const harness = createHarness()
     const mainId = saveMainConversation(harness, 1)
     const job = saveJob(harness, createJobFixture(mainId, 1, "interrupted"))
     const report: NewEndReport = {
       ...createResultReport(job, 200),
-      kind,
-      content
+      ...endReport
     }
 
     expect(harness.jobReportWriter.createEndReport(report)).toBe(true)
 
     expect(harness.listJobReports()).toEqual([
-      buildStoredReportRow(report, kind)
+      buildStoredReportRow(report, endReport.kind)
     ])
   })
 

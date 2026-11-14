@@ -420,6 +420,14 @@ describe("getConversation", () => {
     ["a failure without its sentence", { kind: "failed", content: "" }],
     ["a stop with text", { kind: "stopped", content: "Done." }],
     ["an interruption with text", { kind: "interrupted", content: "Done." }],
+    [
+      "a stop citing a source",
+      { kind: "stopped", content: "", sourceNumbers: [1] }
+    ],
+    [
+      "an interruption citing a source",
+      { kind: "interrupted", content: "", sourceNumbers: [1] }
+    ],
     ["its source numbers out of order", { sourceNumbers: [2, 1] }],
     ["a source number twice", { sourceNumbers: [1, 1] }]
   ])(

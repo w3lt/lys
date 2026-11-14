@@ -3,11 +3,11 @@ import type {
   ConversationAssistantMessageStatus
 } from "@lys/share"
 import { describe, expect, it } from "vitest"
-import {
-  buildEndReport,
-  type EndReport
-} from "../../../../src/modules/delegation/endReports"
-import type { EndedReplyRecord } from "../../../../src/modules/delegation/records"
+import { buildEndReport } from "../../../../src/modules/delegation/endReports"
+import type {
+  EndedReplyRecord,
+  EndReport
+} from "../../../../src/modules/delegation/records"
 import type { StopRequester } from "../../../../src/modules/delegation/replyStopRequests"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 

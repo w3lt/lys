@@ -543,10 +543,12 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
   // would accept a job that has no title. job_reports holds what a job sends
   // back: progress notes, and at most one report of how each of its replies
   // ended, which the partial unique index keeps. A note and a failed report
-  // always have text. title is the title of the job message the report answers,
-  // kept here because a later job message replaces the job's title.
-  // source_numbers is a JSON list, of which SQLite checks only that it is JSON;
-  // the report schema checks the rest of every row the backend reads.
+  // always have text. A stopped and an interrupted report never have text, so
+  // they cite no source. title is the title of the job message the report
+  // answers, kept here because a later job message replaces the job's title.
+  // source_numbers is a JSON list, of which SQLite checks only that it is JSON,
+  // and that it is exactly `[]` for a stopped or an interrupted report; the
+  // report schema checks the rest of every row the backend reads.
   // delivered_message_id is the user-role message of the turn that delivered
   // the report, NULL until then. Each column that references a conversation or
   // a message has an index, so deleting the referenced row scans neither table.
@@ -594,7 +596,11 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
       created_at TEXT NOT NULL,
       delivered_message_id TEXT
         REFERENCES conversation_messages(id) ON DELETE CASCADE,
-      CHECK (kind NOT IN ('note', 'failed') OR content <> '')
+      CHECK (kind NOT IN ('note', 'failed') OR content <> ''),
+      CHECK (
+        kind NOT IN ('stopped', 'interrupted')
+        OR (content = '' AND source_numbers = '[]')
+      )
     ) STRICT;
     CREATE UNIQUE INDEX job_reports_reply_end_idx
       ON job_reports (reply_id) WHERE kind <> 'note';

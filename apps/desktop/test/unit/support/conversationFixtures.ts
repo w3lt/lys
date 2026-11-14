@@ -78,9 +78,6 @@ export const FIXTURE_JOB_REPLY_ID = createFixtureUuidV7(61)
  */
 export const FIXTURE_WAKE_REPLY_ID = createFixtureUuidV7(62)
 
-/** Identity of the report {@link buildJobReport} builds by default. */
-export const FIXTURE_JOB_REPORT_ID = createFixtureUuidV7(63)
-
 /**
  * The `delegate_work` call of {@link FIXTURE_CONVERSATION_ID} that started
  * {@link FIXTURE_JOB_ID}; a call made inside the job has another identity.
@@ -675,7 +672,7 @@ export function buildJobCard(
  * `News`.
  */
 export type JobReportFixture = Readonly<{
-  /** Identity of the report; defaults to {@link FIXTURE_JOB_REPORT_ID}. */
+  /** Identity of the report; defaults to the fixture UUIDv7 of sequence 63. */
   id?: string
   /** What the report says; defaults to `result`. */
   kind?: JobReportKind
@@ -687,7 +684,8 @@ export type JobReportFixture = Readonly<{
   content?: string
   /**
    * Numbers of the parent's sources the content cites, ascending; defaults
-   * to none.
+   * to none, the only list `stopped` and `interrupted` allow, since they
+   * have no text to cite from.
    */
   sourceNumbers?: readonly number[]
 }>
@@ -699,15 +697,18 @@ export type JobReportFixture = Readonly<{
  * for their defaults.
  * @returns A frozen report written at {@link FIXTURE_TIMESTAMP}, validated by
  * the shared schema.
- * @throws If the case gives content its kind does not allow.
+ * @throws If the case gives content or source numbers its kind does not
+ * allow.
  */
 export function buildJobReport(fixture: JobReportFixture = {}): JobReport {
+  /** Identity of the report when the case gives none. */
+  const defaultReportId = createFixtureUuidV7(63)
   const kind = fixture.kind ?? "result"
   const defaultContent =
     kind === "stopped" || kind === "interrupted" ? "" : "Done."
   return Object.freeze(
     jobReportSchema.parse({
-      id: fixture.id ?? FIXTURE_JOB_REPORT_ID,
+      id: fixture.id ?? defaultReportId,
       jobId: FIXTURE_JOB_ID,
       jobNumber: FIXTURE_JOB_NUMBER,
       agentCode: FIXTURE_JOB_AGENT_CODE,

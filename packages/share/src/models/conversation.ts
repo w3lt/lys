@@ -114,6 +114,16 @@ const jobReportBase = {
    * never changes it.
    */
   title: z.string().min(1),
+  /** Time the report was written. */
+  createdAt: timestampSchema
+}
+
+/**
+ * Fields every report that may have text has: a note, a result, and a
+ * failure.
+ */
+const textJobReportBase = {
+  ...jobReportBase,
   /**
    * Numbers of the parent conversation's sources the content cites,
    * ascending, so each once; empty when none.
@@ -124,14 +134,12 @@ const jobReportBase = {
       isAscending,
       "A report lists the sources it cites in ascending order, each once."
     )
-    .readonly(),
-  /** Time the report was written. */
-  createdAt: timestampSchema
+    .readonly()
 }
 
 /** Validates a progress note. */
 const noteJobReportSchema = z.strictObject({
-  ...jobReportBase,
+  ...textJobReportBase,
   kind: jobReportKindSchema.extract(["note"]),
   /** The note; never empty. */
   content: z.string().min(1)
@@ -139,7 +147,7 @@ const noteJobReportSchema = z.strictObject({
 
 /** Validates the result that ended a reply. */
 const resultJobReportSchema = z.strictObject({
-  ...jobReportBase,
+  ...textJobReportBase,
   kind: jobReportKindSchema.extract(["result"]),
   /** Text of the reply's last round, possibly empty. */
   content: z.string()
@@ -147,7 +155,7 @@ const resultJobReportSchema = z.strictObject({
 
 /** Validates the failure that ended a reply. */
 const failedJobReportSchema = z.strictObject({
-  ...jobReportBase,
+  ...textJobReportBase,
   kind: jobReportKindSchema.extract(["failed"]),
   /** The failure sentence; never empty. */
   content: z.string().min(1)
@@ -158,7 +166,9 @@ const stoppedJobReportSchema = z.strictObject({
   ...jobReportBase,
   kind: jobReportKindSchema.extract(["stopped"]),
   /** Always empty. */
-  content: z.literal("")
+  content: z.literal(""),
+  /** Always empty: the report has no text to cite from. */
+  sourceNumbers: z.tuple([]).readonly()
 })
 
 /** Validates the interruption that ended a reply, which has no text. */
@@ -166,7 +176,9 @@ const interruptedJobReportSchema = z.strictObject({
   ...jobReportBase,
   kind: jobReportKindSchema.extract(["interrupted"]),
   /** Always empty. */
-  content: z.literal("")
+  content: z.literal(""),
+  /** Always empty: the report has no text to cite from. */
+  sourceNumbers: z.tuple([]).readonly()
 })
 
 /**
@@ -175,7 +187,7 @@ const interruptedJobReportSchema = z.strictObject({
  * selects.
  *
  * @remarks `note` and `failed` have text, `result` may have none, and
- * `stopped` and `interrupted` have none.
+ * `stopped` and `interrupted` have none, so they cite no source.
  */
 export const jobReportSchema = z.discriminatedUnion("kind", [
   noteJobReportSchema,

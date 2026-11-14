@@ -110,6 +110,21 @@ const LOOK_DOT_UP_TOOL = buildTool("look.up")
 /** Tool the model calls `look_up` too. */
 const LOOK_UNDERSCORE_UP_TOOL = buildTool("look_up")
 
+/**
+ * Names that are no MCP tool name of a server with an `echo` tool: no
+ * prefix, a server no setting names, a tool the server does not list, and
+ * names the prefix and separator do not split into a server and a tool.
+ */
+const UNKNOWN_TOOL_NAMES: readonly string[] = Object.freeze([
+  "echo",
+  "read_page",
+  "mcp__ghost__echo",
+  "mcp__alpha__missing",
+  "mcp__alpha",
+  "mcp____echo",
+  "mcp__alpha_echo"
+])
+
 /** State of a server being opened. */
 const CONNECTING: McpServerState = Object.freeze({ status: "connecting" })
 
@@ -1724,15 +1739,6 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         buildFakeStdioServerSettings("delta")
       ])
       await harness.registry.updateServers()
-      const unknownNames = [
-        "echo",
-        "read_page",
-        "mcp__ghost__echo",
-        "mcp__alpha__missing",
-        "mcp__alpha",
-        "mcp____echo",
-        "mcp__alpha_echo"
-      ]
 
       const found = harness.registry.findTurnTool("mcp__alpha__look_up")
 
@@ -1753,8 +1759,8 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         status: "not-connected"
       })
       expect(
-        unknownNames.map((name) => harness.registry.findTurnTool(name))
-      ).toEqual(unknownNames.map(() => ({ status: "unknown" })))
+        UNKNOWN_TOOL_NAMES.map((name) => harness.registry.findTurnTool(name))
+      ).toEqual(UNKNOWN_TOOL_NAMES.map(() => ({ status: "unknown" })))
     })
   })
 

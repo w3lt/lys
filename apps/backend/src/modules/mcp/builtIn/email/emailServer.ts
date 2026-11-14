@@ -263,18 +263,24 @@ function listServedMailboxes(
   mailboxes: readonly SwitchedOnMailbox[]
 ): readonly EmailServerMailbox[] {
   return Object.freeze(
-    mailboxes.flatMap(({ variableName, read }) =>
-      read.status === "read"
-        ? [
-            Object.freeze({
-              variableName,
-              account: read.account,
-              password: read.password
-            })
-          ]
-        : []
-    )
+    mailboxes.flatMap((mailbox) => listServedMailbox(mailbox))
   )
+}
+
+/**
+ * Lists one mailbox that is on as the server would serve it.
+ *
+ * @param mailbox - The mailbox, with the read of its account.
+ * @returns The frozen mailbox alone when its account and password are
+ * saved and usable; nothing otherwise.
+ */
+function listServedMailbox(
+  mailbox: SwitchedOnMailbox
+): readonly EmailServerMailbox[] {
+  const { variableName, read } = mailbox
+  if (read.status !== "read") return NO_MAILBOXES
+  const { account, password } = read
+  return [Object.freeze({ variableName, account, password })]
 }
 
 /**

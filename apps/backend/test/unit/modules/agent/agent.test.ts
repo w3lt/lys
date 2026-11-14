@@ -861,6 +861,18 @@ const UNEXPECTED_STATE: StateDependencies = Object.freeze({
   readEmailAddress: readNoEmailAddress
 })
 
+/**
+ * What `read_my_state` tells the leader of the read_my_state cases, whose
+ * address is `lys@example.net`, while the call runs in its only request.
+ */
+const OWN_STATE_RESULT = [
+  "You are Lys (code lys), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state. Your email address is lys@example.net.",
+  `Now: ${NOW}.`,
+  "Request slots: 1 of 2 in use.",
+  `1. This reply, in this conversation: started ${NOW} (less than a minute ago) with ${TURN_REQUEST.model}; using tools: read_my_state running.`,
+  "Nothing else is in progress."
+].join("\n")
+
 /** Keeper of an agent whose case searches no tool; any search fails it. */
 const UNEXPECTED_TOOL_KEEPER: ToolKeeper = Object.freeze({
   findTools: handleUnexpectedToolCall
@@ -5331,10 +5343,7 @@ describe("Agent", () => {
           { openReplyStream },
           createRoomyReplyContextMeter(),
           {
-            stateReader: {
-              listAgentMatches: handleUnexpectedToolCall,
-              findAgentState
-            },
+            stateReader: { ...UNEXPECTED_STATE_READER, findAgentState },
             readEmailAddress
           }
         )
@@ -5348,13 +5357,6 @@ describe("Agent", () => {
           createToolCallGate
         })
 
-        const result = [
-          "You are Lys (code lys), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state. Your email address is lys@example.net.",
-          `Now: ${NOW}.`,
-          "Request slots: 1 of 2 in use.",
-          `1. This reply, in this conversation: started ${NOW} (less than a minute ago) with ${TURN_REQUEST.model}; using tools: read_my_state running.`,
-          "Nothing else is in progress."
-        ].join("\n")
         expect(createToolCallGate).not.toHaveBeenCalled()
         expect(readEmailAddress).toHaveBeenCalledOnce()
         expect(findAgentState).toHaveBeenCalledExactlyOnceWith(
@@ -5365,12 +5367,12 @@ describe("Agent", () => {
           kind: "tool-call",
           toolName: "read_my_state",
           status: "succeeded",
-          result
+          result: OWN_STATE_RESULT
         })
         expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toEqual({
           role: "tool",
           toolCallId: run.parts[0]?.id,
-          content: result
+          content: OWN_STATE_RESULT
         })
         expect(run.events.at(-1)).toEqual({
           type: "done",

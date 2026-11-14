@@ -769,39 +769,42 @@ describe("parseEmailAccountDraft of an account that opens the other mailbox", ()
   })
 
   it.each([
-    [
-      "Lys's card, the person's address and sign-in",
-      lysBasis,
-      { ...SAVED_DRAFT, password },
-      lysProblems
-    ],
-    [
-      "Lys's card, the person's address in other case",
-      lysBasis,
-      {
+    {
+      label: "Lys's card, the person's address and sign-in",
+      basis: lysBasis,
+      draft: { ...SAVED_DRAFT, password },
+      problems: lysProblems
+    },
+    {
+      label: "Lys's card, the person's address in other case",
+      basis: lysBasis,
+      draft: {
         ...SAVED_DRAFT,
         address: "ADA@fastmail.com",
         userName: "lys@fastmail.com",
         password
       },
-      { address: lysProblems.address }
-    ],
-    [
-      "Lys's card, the person's sign-in",
-      lysBasis,
-      { ...SAVED_DRAFT, address: "lys@fastmail.com", password },
-      { userName: lysProblems.userName }
-    ],
-    [
-      "the person's card, Lys's address and sign-in",
-      personBasis,
-      { ...buildEmailAccountDraft(LYS_EMAIL_ACCOUNT, "person"), password },
-      {
+      problems: { address: lysProblems.address }
+    },
+    {
+      label: "Lys's card, the person's sign-in",
+      basis: lysBasis,
+      draft: { ...SAVED_DRAFT, address: "lys@fastmail.com", password },
+      problems: { userName: lysProblems.userName }
+    },
+    {
+      label: "the person's card, Lys's address and sign-in",
+      basis: personBasis,
+      draft: {
+        ...buildEmailAccountDraft(LYS_EMAIL_ACCOUNT, "person"),
+        password
+      },
+      problems: {
         address: "This is the address of Lys's account.",
         userName: "This signs in to Lys's mailbox."
       }
-    ]
-  ] as const)("refuses, on %s", (_label, basis, draft, problems) => {
+    }
+  ] as const)("refuses, on $label", ({ basis, draft, problems }) => {
     expect(parseEmailAccountDraft(draft, basis)).toEqual({
       status: "invalid",
       problems

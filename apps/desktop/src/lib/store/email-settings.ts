@@ -359,18 +359,15 @@ export function createEmailSettingsSlice(
     check: EmailAccountCheckState,
     save: EmailAccountSaveState
   ): void {
-    set((state) => ({
+    const { emailAccountChecks, emailAccountSaves } = get()
+    set({
       emailAccountChecks: replaceMailboxState(
-        state.emailAccountChecks,
+        emailAccountChecks,
         mailbox,
         check
       ),
-      emailAccountSaves: replaceMailboxState(
-        state.emailAccountSaves,
-        mailbox,
-        save
-      )
-    }))
+      emailAccountSaves: replaceMailboxState(emailAccountSaves, mailbox, save)
+    })
   }
 
   /**
@@ -407,18 +404,15 @@ export function createEmailSettingsSlice(
       publishSave(mailbox, saveFailed)
       return "failed"
     }
-    set((state) => ({
-      settings: buildEmailMailboxAccountSettings(
-        state.settings,
-        mailbox,
-        saved
-      ),
+    const { settings, emailAccountSaves } = get()
+    set({
+      settings: buildEmailMailboxAccountSettings(settings, mailbox, saved),
       emailAccountSaves: replaceMailboxState(
-        state.emailAccountSaves,
+        emailAccountSaves,
         mailbox,
         savedState
       )
-    }))
+    })
     return "saved"
   }
 

@@ -320,27 +320,27 @@ describe("createMcpSettingsSlice", () => {
     })
 
     it.each([
-      [
-        "on, with only the person's account saved",
-        STORED_SETTINGS,
-        true,
-        { enabled: true, lysEnabled: false }
-      ],
-      [
-        "on, with both accounts saved",
-        LYS_MAILBOX_ON_SETTINGS,
-        true,
-        { enabled: true, lysEnabled: true }
-      ],
-      [
-        "off",
-        LYS_MAILBOX_ON_SETTINGS,
-        false,
-        { enabled: false, lysEnabled: false }
-      ]
+      {
+        label: "on, with only the person's account saved",
+        settings: STORED_SETTINGS,
+        isOn: true,
+        email: { enabled: true, lysEnabled: false }
+      },
+      {
+        label: "on, with both accounts saved",
+        settings: LYS_MAILBOX_ON_SETTINGS,
+        isOn: true,
+        email: { enabled: true, lysEnabled: true }
+      },
+      {
+        label: "off",
+        settings: LYS_MAILBOX_ON_SETTINGS,
+        isOn: false,
+        email: { enabled: false, lysEnabled: false }
+      }
     ] as const)(
-      "switches the email server %s, as each mailbox's switch",
-      async (_label, settings, isOn, email) => {
+      "switches the email server $label, as each mailbox's switch",
+      async ({ settings, isOn, email }) => {
         startNativeHostFake({
           load_settings: () => STORED_SETTINGS_DOCUMENT,
           save_settings: () => null

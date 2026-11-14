@@ -263,13 +263,14 @@ function saveReplyRow(
   statements
     .getStatement(
       `INSERT INTO conversation_messages
-      (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
-      VALUES (?, ?, 'assistant', ?, '', ?, ?, ?, ?)`
+      (id, conversation_id, role, model, provider, content, status, finish_reason, created_at, updated_at)
+      VALUES (?, ?, 'assistant', ?, ?, '', ?, ?, ?, ?)`
     )
     .run(
       row.id,
       row.conversationId,
       row.model,
+      row.provider,
       row.status,
       row.finishReason,
       row.createdAt,

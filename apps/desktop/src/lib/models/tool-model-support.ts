@@ -1,11 +1,6 @@
-import type {
-  ModelInventoryState,
-  ModelRuntimeState
-} from "@/lib/store/model-runtime"
+import type { LlmInfo } from "@lys/protocol"
 
-import { findLoadedModel } from "./model-residency"
-
-/** Whether the loaded model can be offered tools. */
+/** Whether a loaded model can be offered tools. */
 export type ToolModelSupport =
   | {
       /** No model is loaded, or the inventory cannot say how it was trained. */
@@ -30,19 +25,17 @@ const UNKNOWN_TOOL_MODEL_SUPPORT: ToolModelSupport = Object.freeze({
 })
 
 /**
- * Calculates whether the loaded model can be offered tools.
+ * Calculates whether a loaded model can be offered tools.
  *
- * @param modelRuntime - Residency summary; only a loaded model counts.
- * @param modelInventory - Latest inventory, which says how each model was
- * trained.
- * @returns `trained` or `untrained` for a loaded model listed in a ready
- * inventory, and `unknown` otherwise.
+ * @param loadedModel - Inventory entry of the model, which says how it was
+ * trained, while it is loaded; undefined while it is not, or there is no
+ * model.
+ * @returns `trained` or `untrained` for a loaded model, and `unknown`
+ * otherwise.
  */
 export function calculateToolModelSupport(
-  modelRuntime: ModelRuntimeState,
-  modelInventory: ModelInventoryState
+  loadedModel: LlmInfo | undefined
 ): ToolModelSupport {
-  const loadedModel = findLoadedModel(modelRuntime, modelInventory)
   if (loadedModel === undefined) return UNKNOWN_TOOL_MODEL_SUPPORT
 
   return Object.freeze({

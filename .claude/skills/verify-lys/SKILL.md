@@ -27,15 +27,18 @@ What stands in, each at a production boundary:
   HTTP. Chrome cannot drive the desktop's WKWebView on macOS, so the renderer
   runs in headless Chrome with `window.__TAURI_INTERNALS__.invoke` forwarded
   to this host. It mirrors the Rust host: `load_settings` writes the default
-  document when the file is missing, `save_settings` writes atomically with
-  mode 0600, `start_backend`/`stop_backend` run the real backend in its own
-  process group and stop it with `SIGTERM` then `SIGKILL`, vmo is reported
-  stopped, and `list_tools` is empty.
+  document when the file is missing, both `load_settings` and `save_settings`
+  read a legacy `providers.active` as the one provider on and answer or
+  write `providers.enabled` in provider order without it, `save_settings`
+  writes atomically with mode 0600, `start_backend`/`stop_backend` run the
+  real backend in its own process group and stop it with `SIGTERM` then
+  `SIGKILL`, vmo is reported stopped, and `list_tools` is empty.
 
 Not covered, say so when asked: the Rust host's own code (only the opt-in
 native probe below runs it, and it needs a GUI login session), vmo and
 `read_page`, `web_search` (needs a Tavily key), MCP servers, client tools,
-the LM Studio, Groq, and Ollama Cloud providers, the production backend
+the LM Studio, Groq, and Ollama Cloud providers, several providers on at
+once (the stack turns only Ollama on), the production backend
 bundle (`dist/backend.mjs` is not what runs), and anything on a real
 WKWebView.
 
@@ -66,18 +69,22 @@ node .claude/skills/verify-lys/scripts/verify-lys.mjs launch
 
 Creates `.agent-work/verify-lys/runs/<run-id>/` and starts, in order: the fake
 provider on a free port, the scratch `LYS_HOME` seeded with `settings.json`
-(Ollama active at the fake's address, vmo autostart off, everything else the
-host's defaults), the fake host on a free port, the real backend through the
-host's `start_backend`, Vite on port 1420 with `--strictPort`, and headless
-Chrome with a scratch profile and a DevTools endpoint. Every process runs
+(`providers.enabled: ["ollama"]` with Ollama at the fake's address, no
+default model, vmo autostart off, everything else the host's defaults), the
+fake host on a free port, the real backend through the host's
+`start_backend`, Vite on port 1420 with `--strictPort`, and headless Chrome
+with a scratch profile and a DevTools endpoint. Every process runs
 detached in its own process group and is recorded in `run.json` with its pid
 and start time as it starts, so a half-failed launch can still be cleaned up.
 
 Ready means usable, not just answering: launch ends by opening the renderer
 once and waiting for the composer placeholder `Say something to Caliginia`,
 which needs the backend healthy, the provider connected, and a loaded model
-listed. The last line of a good launch prints that placeholder. A launch
-takes about 15 seconds; a cold Vite dependency pass can take a minute.
+listed. With no default model saved, the conversation's model is the first
+loaded model in provider order, so Ollama alone makes the composer ready
+with `lys-verify:latest · Ollama` (seen on 2026-11-14). The last line of a
+good launch prints that placeholder. A launch takes about 15 seconds; a cold
+Vite dependency pass can take a minute.
 
 The run id is written to `.agent-work/verify-lys/runs/active-run`; `doctor`,
 `drive`, and `cleanup` use it unless `--run <id>` names another. Launch
@@ -110,15 +117,15 @@ node .claude/skills/verify-lys/scripts/verify-lys.mjs run --keep     # same, but
 
 Journeys and what each proves, grouped by feature file in `features/`:
 
-| Journey                  | Feature              | Proof                                                                                                                                                                                                                                     |
-| ------------------------ | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `backend-health`         | backend-lifecycle    | `GET /api/v1/heath` answers `{ok: true}`; every pid listening on 12345 is in the host's backend process group; `GET /api/v1/llm/runtime` is `connected`; `GET /api/v1/llm/list` lists `lys-verify:latest` as loaded.                      |
-| `chat-stream-api`        | chat-streaming       | `POST /api/v1/chat` streams `start-new-conversation-turn`, a `reply-part` text part, at least 10 timed `reply-part-delta` events spread over at least 1 s, `done` with `stop`, and `title`; the conversation route and SQLite rows match. |
-| `chat-stream-ui`         | chat-streaming       | Typing and Send show the streaming caret, a Stop button, partial text mid-stream, the whole reply when done, and the titled conversation in Past conversations.                                                                           |
-| `settings-generation-ui` | settings-persistence | Reply ceiling switch off writes `generation.replyCeiling: 0` to `settings.json`, survives a reload, and switches back to 2048.                                                                                                            |
-| `settings-autostart-ui`  | settings-persistence | "Start it when Lys opens" off writes `runtime.autoStartBackend: false`, survives a reload, and switches back to true.                                                                                                                     |
-| `backend-lifecycle-ui`   | backend-lifecycle    | Stop backend ends the process (status "Backend stopped", port closed, "stopping on a signal" logged); Start backend starts a new pid that answers health.                                                                                 |
-| `host-lifecycle-native`  | backend-lifecycle    | Opt-in `--native`: the real Tauri debug binary with a fresh `LYS_HOME` writes the default `settings.json` with mode 0600, starts a backend, and stops it on quit. Needs a GUI login session and `cargo build`; opens a visible window.    |
+| Journey                  | Feature              | Proof                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `backend-health`         | backend-lifecycle    | `GET /api/v1/heath` answers `{ok: true}`; every pid listening on 12345 is in the host's backend process group; `GET /api/v1/llm/ollama/runtime` is `connected`; `GET /api/v1/llm/ollama/list` lists `lys-verify:latest` as loaded.                                                                                                                     |
+| `chat-stream-api`        | chat-streaming       | `POST /api/v1/chat` with `model: {provider: "ollama", modelKey: "lys-verify:latest"}` streams `start-new-conversation-turn`, a `reply-part` text part, at least 10 timed `reply-part-delta` events spread over at least 1 s, `done` with `stop`, and `title`; the conversation route and SQLite rows match and store the reply with provider `ollama`. |
+| `chat-stream-ui`         | chat-streaming       | Typing and Send show the streaming caret, a Stop button, partial text mid-stream, the whole reply when done, and the titled conversation in Past conversations.                                                                                                                                                                                        |
+| `settings-generation-ui` | settings-persistence | Reply ceiling switch off writes `generation.replyCeiling: 0` to `settings.json`, survives a reload, and switches back to 2048.                                                                                                                                                                                                                         |
+| `settings-autostart-ui`  | settings-persistence | "Start it when Lys opens" off writes `runtime.autoStartBackend: false`, survives a reload, and switches back to true.                                                                                                                                                                                                                                  |
+| `backend-lifecycle-ui`   | backend-lifecycle    | Stop backend ends the process (status "Backend stopped", port closed, "stopping on a signal" logged); Start backend starts a new pid that answers health.                                                                                                                                                                                              |
+| `host-lifecycle-native`  | backend-lifecycle    | Opt-in `--native`: the real Tauri debug binary with a fresh `LYS_HOME` writes the default `settings.json` with mode 0600, starts a backend, and stops it on quit. Needs a GUI login session and `cargo build`; opens a visible window.                                                                                                                 |
 
 Renderer journeys open a fresh Chrome page each, so renderer state never
 leaks between them; the backend's database does carry over within a run, so
@@ -134,7 +141,7 @@ composer textarea `textarea[aria-label^="Message "]` whose placeholder reads
 `button[title="Past conversations (⌘K)"]`, the dialog
 `[aria-label="Past conversations"]`, the tabs under
 `[aria-label="Settings sections"]` (text starts with the pane name:
-Runtime, Model, Generation, Agents, Tools, MCP, Providers, Secrets), switches
+Runtime, Models, Generation, Agents, Tools, MCP, Providers, Secrets), switches
 `[role="switch"][aria-label="Reply ceiling"]` and
 `[role="switch"][aria-label="Start it when Lys opens"]`, buttons
 `[aria-label="Stop backend"]` and `[aria-label="Start backend"]`, and the

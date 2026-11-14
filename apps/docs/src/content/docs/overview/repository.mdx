@@ -39,8 +39,8 @@ conversation state for the user, and browses stored conversations.
 ### `apps/backend`
 
 The local service process. It registers Fastify routes for health checks; model
-inventory, health, load, and unload operations; the LM Studio connection status
-and reconnect; conversation history; and the chat stream. It also owns the
+inventory, health, load, and unload operations and each model provider's
+connection status and reconnect; conversation history; and the chat stream. It also owns the
 SQLite database layer and conversation persistence, and the LM Studio /
 OpenAI-compatible service adapters.
 

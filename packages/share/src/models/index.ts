@@ -147,9 +147,14 @@ export {
   type BuiltInMcpSettings
 } from "./mcp"
 export {
+  isSameLlmModelReference,
+  LLM_PROVIDER_NAMES,
+  LLM_PROVIDERS,
+  llmModelReferenceSchema,
   llmProviderSchema,
   llmProviderSettingsSchema,
   providerAddressSchema,
+  type LlmModelReference,
   type LlmProvider,
   type LlmProviderSettings,
   type ProviderAddress

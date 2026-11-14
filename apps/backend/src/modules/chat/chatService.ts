@@ -10,6 +10,7 @@ import type {
 import * as z from "zod"
 import { zodResponseFormat } from "openai/helpers/zod"
 import type { MessageGenerationOptions } from "@lys/protocol"
+import type { LlmModelReference, LlmProvider } from "@lys/share"
 import {
   ChatCompletionCancelledError,
   TitleGenerationOutputError
@@ -20,13 +21,16 @@ import { createLlmRuntimeUnavailableError } from "../llm/llmRuntimeUnavailableEr
 /** Settings used to create the application-scoped chat service. */
 export type ChatServiceCreationOptions = {
   /**
-   * Finds the OpenAI-compatible endpoint of the provider requests go to now.
+   * Finds the OpenAI-compatible endpoint of one provider.
    *
-   * @returns The endpoint, or undefined while no provider is connected.
+   * @param provider - Provider of the request's model.
+   * @returns The endpoint, or undefined while that provider is not
+   * connected.
    * @remarks Called synchronously at the start of every request, so a
-   * request goes to the provider connected when it starts.
+   * request goes to the endpoint its model's provider is connected at when
+   * it starts.
    */
-  findChatEndpoint: () => LlmChatEndpoint | undefined
+  findChatEndpoint: (provider: LlmProvider) => LlmChatEndpoint | undefined
   /** Non-empty system prompt sent with every title-generation request. */
   titleGenerationPrompt: string
   /**
@@ -45,8 +49,11 @@ export type CompleteChatOptions = {
   messages: ChatCompletionMessageParam[]
   /** Tools the model may call, in offer order; empty sends no `tools` field. */
   tools: readonly ChatCompletionFunctionTool[]
-  /** Identifier of the model that should generate the completion. */
-  model: string
+  /**
+   * Model that should generate the completion; the request goes to its
+   * provider and names it by its key.
+   */
+  model: LlmModelReference
   /**
    * Whether the caller requested streaming in the shared option shape.
    *
@@ -63,8 +70,11 @@ export type CompleteChatOptions = {
 export type TitleGenerationOptions = {
   /** User-authored message supplied as the title-generation input. */
   message: string
-  /** Identifier of the model that generates the title. */
-  model: string
+  /**
+   * Model that generates the title; the request goes to its provider and
+   * names it by its key.
+   */
+  model: LlmModelReference
   /** Optional signal that cancels the title-generation request. */
   signal?: AbortSignal
 }
@@ -108,21 +118,27 @@ const MARKDOWN_JSON_CODE_FENCE_PATTERN = /^```(?:json)?([\s\S]*)```$/i
 
 /**
  * Adapts chat and title generation to the OpenAI-compatible endpoint of the
- * connected provider.
+ * provider each request's model is on.
  *
- * @remarks The instance owns an SDK client for the latest endpoint it used
- * and replaces it when the connected provider's endpoint changes; it owns its
- * title prompt and schema for its application lifetime. Request inputs are
+ * @remarks The instance owns, for each provider, an SDK client for the
+ * latest endpoint it used there, and replaces it when that provider's
+ * endpoint changes; it owns its title prompt and schema for its application
+ * lifetime. Request inputs are
  * borrowed and cancellation is owned by each caller. Concurrency model:
  * reentrant at this service boundary; a request keeps the client it started
  * with, no request-local mutable state is retained, and request concurrency
  * is delegated to the SDK.
  */
 export default class ChatService {
-  /** Finds the connected provider's chat endpoint at each request. */
-  readonly #findChatEndpoint: () => LlmChatEndpoint | undefined
-  /** Client for the latest endpoint used, or undefined before the first request. */
-  #chatEndpointClient: ChatEndpointClient | undefined = undefined
+  /** Finds the chat endpoint of a request's provider at each request. */
+  readonly #findChatEndpoint: (
+    provider: LlmProvider
+  ) => LlmChatEndpoint | undefined
+  /**
+   * Client for the latest endpoint used on each provider; a provider has
+   * none before its first request.
+   */
+  readonly #chatEndpointClients = new Map<LlmProvider, ChatEndpointClient>()
   /** Frozen system message sent before the user message in every title request. */
   readonly #titleSystemMessage: ChatCompletionMessageParam
   /** Validates title replies, including the configured title length limit. */
@@ -131,7 +147,7 @@ export default class ChatService {
   readonly #titleResponseFormat: ResponseFormatJSONSchema
 
   /**
-   * Creates a chat completion adapter for the connected provider and the
+   * Creates a chat completion adapter for the connected providers and the
    * title-generation settings, without contacting any provider.
    *
    * @param options - Endpoint lookup, title prompt, and title length limit
@@ -159,7 +175,8 @@ export default class ChatService {
   }
 
   /**
-   * Starts a streamed chat completion against the configured endpoint.
+   * Starts a streamed chat completion against the endpoint of the model's
+   * provider.
    *
    * @param options - Messages, offered tools, model selection, and optional
    * cancellation signal for the request.
@@ -167,10 +184,10 @@ export default class ChatService {
    * @throws {@link ChatCompletionCancelledError} If the SDK reports that
    * request creation was cancelled; the SDK failure is kept as the cause.
    * @throws A runtime-unavailable error recognized by
-   * `isLlmRuntimeUnavailableError` while no provider is connected; nothing is
-   * sent.
+   * `isLlmRuntimeUnavailableError` while the model's provider is not
+   * connected; nothing is sent.
    * @throws If the request is otherwise rejected or cannot be streamed by the
-   * connected provider's endpoint.
+   * provider's endpoint.
    */
   public async completeChatStream({
     messages,
@@ -181,12 +198,14 @@ export default class ChatService {
   }: CompleteChatOptions): Promise<AsyncIterable<ChatCompletionChunk>> {
     const { temperature, replyCeiling } = generationOptions
     const toolOffer = tools.length === 0 ? {} : { tools: [...tools] }
-    const { endpoint, openaiClient } = this.#getChatEndpointClient()
+    const { endpoint, openaiClient } = this.#getChatEndpointClient(
+      model.provider
+    )
     try {
       return await openaiClient.chat.completions.create(
         {
           messages,
-          model,
+          model: model.modelKey,
           stream: true,
           temperature,
           ...buildReplyCeilingParameter(
@@ -224,8 +243,8 @@ export default class ChatService {
    * reply that is truncated, has no content, is not JSON, does not match the
    * title shape, has a title longer than the limit, or contains a blank title.
    * @throws A runtime-unavailable error recognized by
-   * `isLlmRuntimeUnavailableError` while no provider is connected; nothing is
-   * sent.
+   * `isLlmRuntimeUnavailableError` while the model's provider is not
+   * connected; nothing is sent.
    * @throws If the request is rejected, cannot reach the endpoint, or is
    * cancelled.
    */
@@ -239,11 +258,11 @@ export default class ChatService {
       content: message
     }
 
-    const { openaiClient } = this.#getChatEndpointClient()
+    const { openaiClient } = this.#getChatEndpointClient(model.provider)
     const completion = await openaiClient.chat.completions.create(
       {
         messages: [this.#titleSystemMessage, userMessage],
-        model,
+        model: model.modelKey,
         response_format: this.#titleResponseFormat,
         stream: false
       },
@@ -264,17 +283,19 @@ export default class ChatService {
   }
 
   /**
-   * Gets the client for the connected provider's endpoint, creating one when
-   * the endpoint's base URL or key differs from the latest one used.
+   * Gets the client for one provider's endpoint, creating one when the
+   * endpoint's base URL or key differs from the latest one used on that
+   * provider.
    *
+   * @param provider - Provider of the request's model.
    * @returns The endpoint found for this request and the client a new
    * request uses.
-   * @throws A runtime-unavailable error while no provider is connected.
+   * @throws A runtime-unavailable error while the provider is not connected.
    */
-  #getChatEndpointClient(): ChatEndpointClient {
-    const endpoint = this.#findChatEndpoint()
+  #getChatEndpointClient(provider: LlmProvider): ChatEndpointClient {
+    const endpoint = this.#findChatEndpoint(provider)
     if (endpoint === undefined) throw createLlmRuntimeUnavailableError([])
-    const current = this.#chatEndpointClient
+    const current = this.#chatEndpointClients.get(provider)
     if (
       current?.endpoint.baseUrl === endpoint.baseUrl &&
       current.endpoint.apiKey === endpoint.apiKey
@@ -285,8 +306,9 @@ export default class ChatService {
       baseURL: endpoint.baseUrl,
       apiKey: endpoint.apiKey ?? DUMMY_API_KEY
     })
-    this.#chatEndpointClient = Object.freeze({ endpoint, openaiClient })
-    return this.#chatEndpointClient
+    const chatEndpointClient = Object.freeze({ endpoint, openaiClient })
+    this.#chatEndpointClients.set(provider, chatEndpointClient)
+    return chatEndpointClient
   }
 }
 

@@ -458,6 +458,25 @@
   color: var(--app-text-faint);
 }
 
+/* One group per turned-on provider; a rule sets each provider apart. */
+.composer__model-group + .composer__model-group {
+  padding-top: 4px;
+  margin-top: 4px;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+/* Why a turned-on provider lists no model: a quiet line, not a choice. */
+.composer__model-status {
+  padding: 6px 10px 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+
+  &[data-disabled] {
+    opacity: 1;
+  }
+}
+
 .composer__model-option {
   display: grid;
   align-items: center;

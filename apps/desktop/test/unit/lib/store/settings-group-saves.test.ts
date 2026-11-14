@@ -5,10 +5,7 @@ import {
   saveLatestSettingsGroup,
   type LatestSettingsGroupSave
 } from "@/lib/store/settings-group-saves"
-import type {
-  LoadConfigurationSettings,
-  RuntimeSettings
-} from "@/lib/store/settings"
+import type { LoadConfigurationSettings } from "@/lib/store/settings"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import {
   createControlledPromise,
@@ -168,7 +165,7 @@ describe("createSettingsGroupSaves", () => {
     const { writes, readStoredDocument } = startSettingsFileHost()
     const saves = createSettingsGroupSaves()
     const providers = llmProviderSettingsSchema.parse({
-      active: "groq",
+      enabled: ["lmStudio", "groq"],
       lmStudio: { address: null },
       ollama: { address: null }
     })
@@ -314,7 +311,7 @@ describe("createSettingsGroupSaves", () => {
     writes[1]?.resolve(null)
     await runtimeSave
 
-    const runtime: RuntimeSettings = {
+    const runtime: SettingsDocument["runtime"] = {
       ...STORED_SETTINGS_DOCUMENT.runtime,
       autoStartBackend: true,
       autoStartVmo: true

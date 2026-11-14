@@ -4,6 +4,7 @@ import * as z from "zod"
 import type { LlmModelHealthReader } from "../llmModelCapabilities"
 import type { LlmRuntimeFailureEvidence } from "../llmRuntimeFailureEvidence"
 import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
+import { buildLlmRouteValidatorCompiler } from "./llmRouteValidation"
 
 /**
  * Adds the protocol-defined loaded-model health endpoint to a Fastify application.
@@ -13,8 +14,11 @@ import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
  * @throws If Fastify cannot register the route. The failure rejects the
  * promise rather than escaping the call synchronously.
  * @remarks Every response prevents caching because health is a fresh observation.
- * Refused queue admission returns service-busy Problem Details, and a missing
- * or lost LLM runtime connection returns runtime-unavailable Problem Details.
+ * The model is observed on the provider the path names; a path naming no
+ * known provider is refused with 400 before the handler runs. Refused queue
+ * admission returns service-busy Problem Details, and a missing or lost LLM
+ * runtime connection of the provider returns runtime-unavailable Problem
+ * Details.
  * Accepted health work remains owned by the application service after client
  * disconnect.
  */
@@ -34,7 +38,7 @@ export default function updateFastifyWithLlmTestModelRoute(
  * @throws If Fastify cannot register the route.
  */
 function registerLlmTestModelRoute(app: FastifyInstance): void {
-  const llmModelHealthReader: LlmModelHealthReader = app.llmService
+  const llmProviderServices = app.llmProviderServices
 
   app.route<LlmTestModelApiRoute>({
     method: llmTestModelApi.method,
@@ -52,28 +56,21 @@ function registerLlmTestModelRoute(app: FastifyInstance): void {
         })
       }
     },
-    validatorCompiler: () => validateLlmTestModelParams,
+    validatorCompiler: buildLlmRouteValidatorCompiler({
+      params: llmTestModelApi.params
+    }),
     onRequest: (_request, reply) => {
       reply.header("Cache-Control", "no-store")
       return Promise.resolve()
     },
     errorHandler: handleLlmServiceRequestFailure,
     handler: async (request, reply) =>
-      await handleLlmTestModelRequest(request, reply, llmModelHealthReader)
+      await handleLlmTestModelRequest(
+        request,
+        reply,
+        llmProviderServices[request.params.provider].llmService
+      )
   })
-}
-
-/**
- * Validates untrusted path parameters for one model-health request.
- *
- * @param data - Decoded path parameters supplied by Fastify.
- * @returns Fastify's success value or validation-error representation.
- */
-function validateLlmTestModelParams(data: unknown) {
-  const paramsValidationResult = llmTestModelApi.params.safeParse(data)
-  return paramsValidationResult.success
-    ? { value: paramsValidationResult.data }
-    : { error: paramsValidationResult.error }
 }
 
 /**
@@ -81,14 +78,15 @@ function validateLlmTestModelParams(data: unknown) {
  *
  * @param request - Validated request containing the canonical model key.
  * @param reply - Fastify reply used for the validated health response.
- * @param llmModelHealthReader - Application capability that queries loaded state.
+ * @param llmModelHealthReader - Application capability of the provider the
+ * path names that queries loaded state.
  * @returns A promise that resolves after the health response is sent.
  * @throws If admission is refused, no LLM runtime is connected, or an
  * unexpected application failure occurs. The route boundary translates only
  * the recognized service-busy and runtime-unavailable failures.
  * @remarks Internal runtime diagnostics are excluded from the body. Each
- * retained runtime failure is logged at error level with the failure as `err`
- * and the canonical model key as `modelKey`.
+ * retained runtime failure is logged at error level with the failure as `err`,
+ * the provider as `provider`, and the canonical model key as `modelKey`.
  */
 async function handleLlmTestModelRequest(
   request: FastifyRequest<LlmTestModelApiRoute>,
@@ -119,7 +117,7 @@ function reportLlmModelHealthFailure(
 ): void {
   diagnostic.handleLlmRuntimeFailureReport((failure) =>
     request.log.error(
-      { err: failure, modelKey },
+      { err: failure, provider: request.params.provider, modelKey },
       "LLM runtime state could not be established during model health query"
     )
   )

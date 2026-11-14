@@ -1079,6 +1079,24 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
       SET outcome = 'interrupted', updated_at = max(updated_at, NEW.updated_at)
       WHERE search_call_id = NEW.id AND outcome = 'running';
     END;
+  `,
+  // Stores, on each reply, the provider of the model that wrote it, since
+  // the same model key on two providers names two models. SQLite checks that
+  // only a reply carries a provider and that it is one of the four Lys can
+  // reach; the conversation schemas check every row the backend writes and
+  // reads, and the backend writes one on every new reply. Replies stored
+  // before this version have none (NULL): which provider wrote them was never
+  // stored. A comparison with NULL makes a CHECK pass in SQLite, so NULL is
+  // allowed on its own before the comparisons. Adding a column keeps every
+  // row, index, and trigger.
+  `
+    ALTER TABLE conversation_messages ADD COLUMN provider TEXT CHECK (
+      provider IS NULL
+      OR (
+        role = 'assistant'
+        AND provider IN ('lmStudio', 'ollama', 'ollamaCloud', 'groq')
+      )
+    );
   `
 ]
 

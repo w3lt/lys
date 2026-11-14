@@ -2,7 +2,12 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { MessageGenerationOptions } from "@lys/protocol"
-import { ARMITAGE_AGENT_CODE, groqApiKeySchema } from "@lys/share"
+import {
+  ARMITAGE_AGENT_CODE,
+  LLM_PROVIDERS,
+  type LlmModelReference,
+  type LlmProvider
+} from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
 import type { AgentTurn } from "../../../src/modules/agent/agent"
@@ -15,6 +20,11 @@ import StoredConversationHistoryReader from "../../../src/modules/conversation/h
 import AttachmentFileStore from "../../../src/modules/attachment/attachmentFileStore"
 import StoredReplyParts from "../../../src/modules/conversation/replyParts"
 import StoredConversationTurns from "../../../src/modules/conversation/turns"
+import { buildLlmChatEndpoint } from "../../../src/modules/llm/llmProviderAccess"
+import {
+  buildLlmProviderRecord,
+  type LlmProviderRecord
+} from "../../../src/modules/llm/llmProviderServices"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "../../../src/modules/llm/llmRuntimeService"
@@ -40,6 +50,10 @@ import {
   createConnectedFakeLlmEngine,
   createFakeLlmRuntime
 } from "../support/fakeLlmRuntime"
+import {
+  LM_STUDIO_QWEN3_8B,
+  TEST_LLM_PROVIDER_ACCESSES
+} from "../support/llmFixtures"
 import { writeSettingsFile } from "../support/settingsFile"
 import {
   READ_TEXT_FILE_TOOL,
@@ -52,8 +66,28 @@ import { answerWithBody, startVmoServer } from "../support/vmoServer"
 // connects the runtime, so no case arranges the fake engine.
 vi.mock("@lmstudio/sdk", () => import("../support/lmStudioSdkFake"))
 
-/** Name of each acquisition whose release the bundle owns. */
-type AcquisitionName = "chat" | "database" | "llm-runtime"
+/**
+ * Name of each acquisition whose release the bundle owns: one LLM runtime
+ * service for each provider.
+ */
+type AcquisitionName = "chat" | "database" | `llm-runtime:${LlmProvider}`
+
+/** Qwen 3 8B on Groq, a model on a provider other than LM Studio. */
+const GROQ_QWEN3_8B: LlmModelReference = Object.freeze({
+  provider: "groq",
+  modelKey: "qwen/qwen3-8b"
+})
+
+/**
+ * Names of the providers' LLM runtime acquisitions in acquisition order,
+ * which is provider order.
+ */
+const LLM_RUNTIME_ACQUISITION_NAMES: readonly AcquisitionName[] =
+  LLM_PROVIDERS.map((provider) => `llm-runtime:${provider}` as const)
+
+/** Names of the providers' LLM runtime acquisitions in release order. */
+const LLM_RUNTIME_RELEASE_NAMES: readonly AcquisitionName[] =
+  LLM_RUNTIME_ACQUISITION_NAMES.toReversed()
 
 /**
  * Name of each service whose close the cleanup log records: the
@@ -68,10 +102,13 @@ type ClosedServiceName =
  * @returns Reporters whose calls each case can inspect.
  */
 function createLogReporters() {
-  const llmRuntime = {
-    reportLlmRuntimeAcquisitionFailure: vi.fn(),
-    reportLlmRuntimeAvailabilityCheckFailure: vi.fn()
-  } satisfies LlmRuntimeFailureReporters
+  const llmRuntime = buildLlmProviderRecord(
+    () =>
+      ({
+        reportLlmRuntimeAcquisitionFailure: vi.fn(),
+        reportLlmRuntimeAvailabilityCheckFailure: vi.fn()
+      }) satisfies LlmRuntimeFailureReporters
+  )
   const pageRendering = { reportPageReaderFailure: vi.fn() }
   const lmStudioSdk = {
     info: vi.fn(),
@@ -131,10 +168,12 @@ function updateServiceClose(
 }
 
 /**
- * Builds a turn that says `Hello` to `qwen/qwen3-8b` without history,
- * sources, or tools.
+ * Builds a turn that says `Hello` to a model without history, sources, or
+ * tools.
  *
  * @param requestId - Reply the turn writes; a fixed reply by default.
+ * @param model - Model the turn names; `qwen/qwen3-8b` on LM Studio by
+ * default.
  * @returns The turn: it finds its reply still streaming and accepts the
  * reply's final state, its part writes
  * are spies that store nothing, which the turn contract reads as a refused
@@ -142,7 +181,8 @@ function updateServiceClose(
  * only what the model was sent, or how the reply was reported.
  */
 function buildHelloAgentTurn(
-  requestId: string = createFixtureUuidV7(2)
+  requestId: string = createFixtureUuidV7(2),
+  model: LlmModelReference = LM_STUDIO_QWEN3_8B
 ): AgentTurn {
   return {
     conversationId: createFixtureUuidV7(1),
@@ -153,7 +193,7 @@ function buildHelloAgentTurn(
     userMessage: createUserMessage(1, "Hello"),
     canSeeImages: false,
     findAttachmentImage: vi.fn(),
-    model: "qwen/qwen3-8b",
+    model,
     generationOptions: { temperature: 0.4 },
     directTools: [],
     clientTools: [],
@@ -178,13 +218,92 @@ function buildHelloAgentTurn(
 }
 
 /**
+ * Creates the acquisition of a provider's real LLM runtime service that is
+ * never connected, with recorded cleanup.
+ *
+ * @param provider - Provider the service belongs to.
+ * @param closeLog - Shared log of cleanup calls in call order.
+ * @returns The acquisition, recorded as `llm-runtime:<provider>` when it is
+ * released. The service's provider lookup and runtime acquisition reject if
+ * anything attempts them.
+ */
+function createUnconnectedLlmRuntimeAcquisition(
+  provider: LlmProvider,
+  closeLog: ClosedServiceName[]
+) {
+  return createAcquisition(
+    new LlmRuntimeService({
+      ...createLogReporters().llmRuntime[provider],
+      findLlmProviderAccess: async () => {
+        throw new Error("Unexpected provider lookup")
+      },
+      acquireLlmRuntime: async () => {
+        throw new Error("Unexpected LLM runtime acquisition")
+      }
+    }),
+    `llm-runtime:${provider}`,
+    closeLog
+  )
+}
+
+/**
+ * Updates an LLM runtime service so that it runs each engine operation on a
+ * connected fake engine whose context measurement fits every turn: a context
+ * of 1,000,000 tokens and one token for each measured text.
+ *
+ * @param runtimeService - Service whose engine operations change; the fake
+ * engine's other operations reject as unexpected.
+ */
+function updateLlmEngineToFittingFake(runtimeService: LlmRuntimeService): void {
+  const engine = createFakeLlmRuntime()
+  engine.findLlmContextMeasurement.mockImplementation(
+    async (_model, texts) => ({
+      contextLength: 1_000_000,
+      textTokenCounts: texts.map(() => 1)
+    })
+  )
+  vi.spyOn(
+    runtimeService,
+    "handleLlmEngineOperationRequest"
+  ).mockImplementation(
+    async (operation) => await operation(createConnectedFakeLlmEngine(engine))
+  )
+}
+
+/**
+ * Builds an LLM runtime service factory that hands out the recorded
+ * acquisition of each provider it is asked for, except one provider, whose
+ * service cannot be created.
+ *
+ * @param acquisitions - Recorded acquisitions of the providers' services.
+ * @param failingProvider - Provider whose service creation fails.
+ * @param creationFailure - Error that creating that provider's service
+ * throws.
+ * @returns The factory.
+ */
+function buildLlmRuntimeServiceFactoryFailingFor(
+  acquisitions: LlmProviderRecord<
+    SingletonServiceAcquisition<LlmRuntimeService>
+  >,
+  failingProvider: LlmProvider,
+  creationFailure: Error
+): SingletonServiceFactories["createLlmRuntimeService"] {
+  return ({ provider }) => {
+    if (provider === failingProvider) throw creationFailure
+    return acquisitions[provider]
+  }
+}
+
+/**
  * Creates factories returning real services with recorded cleanup.
  *
- * @returns The factory mocks, their acquisitions, and the cleanup log.
- * @remarks The database is in memory and closed when the test finishes, and the
- * LLM runtime service is never connected: its provider lookup and runtime
- * acquisition reject if anything attempts them, and the chat service finds no
- * endpoint. No external resource is acquired.
+ * @returns The factory mocks, their acquisitions, and the cleanup log; the
+ * LLM runtime factory hands out the acquisition of the provider it is asked
+ * for.
+ * @remarks The database is in memory and closed when the test finishes, and no
+ * provider's LLM runtime service is ever connected: its provider lookup and
+ * runtime acquisition reject if anything attempts them, and the chat service
+ * finds no endpoint. No external resource is acquired.
  */
 function createRecordedFactories() {
   const closeLog: ClosedServiceName[] = []
@@ -203,18 +322,8 @@ function createRecordedFactories() {
       closeLog
     ),
     database: createAcquisition(database, "database", closeLog),
-    llmRuntime: createAcquisition(
-      new LlmRuntimeService({
-        ...createLogReporters().llmRuntime,
-        findLlmProviderAccess: async () => {
-          throw new Error("Unexpected provider lookup")
-        },
-        acquireLlmRuntime: async () => {
-          throw new Error("Unexpected LLM runtime acquisition")
-        }
-      }),
-      "llm-runtime",
-      closeLog
+    llmRuntime: buildLlmProviderRecord((provider) =>
+      createUnconnectedLlmRuntimeAcquisition(provider, closeLog)
     )
   }
   const factories = {
@@ -226,7 +335,7 @@ function createRecordedFactories() {
     ),
     createLlmRuntimeService: vi.fn<
       SingletonServiceFactories["createLlmRuntimeService"]
-    >(() => acquisitions.llmRuntime)
+    >(({ provider }) => acquisitions.llmRuntime[provider])
   }
   return { factories, acquisitions, closeLog }
 }
@@ -251,24 +360,36 @@ describe("createSingletonServices", () => {
     expect(factories.createDatabase).toHaveBeenCalledWith(
       TEST_BACKEND_CONFIG.databaseFilePath
     )
-    expect(factories.createLlmRuntimeService).toHaveBeenCalledWith(
-      TEST_BACKEND_CONFIG.settingsFilePath,
-      reporters.llmRuntime,
-      reporters.lmStudioSdk
+    expect(factories.createLlmRuntimeService.mock.calls).toEqual(
+      LLM_PROVIDERS.map((provider) => [
+        {
+          provider,
+          settingsFilePath: TEST_BACKEND_CONFIG.settingsFilePath,
+          llmRuntimeFailureReporters: reporters.llmRuntime[provider],
+          lmStudioSdkLogger: reporters.lmStudioSdk
+        }
+      ])
     )
   })
 
-  it("gives the chat service the endpoint of the provider the runtime service connected", async () => {
+  it("gives the chat service each provider's endpoint while that provider's runtime service is connected", async () => {
     const { factories, closeLog } = createRecordedFactories()
-    const apiKey = groqApiKeySchema.parse("gsk_synthetic_0123456789")
-    const llmRuntimeService = new LlmRuntimeService({
-      ...createLogReporters().llmRuntime,
-      findLlmProviderAccess: async () => ({ provider: "groq", apiKey }),
-      acquireLlmRuntime: async () =>
-        createAcquiredFakeLlmRuntime(createFakeLlmRuntime(), "provider")
-    })
-    factories.createLlmRuntimeService.mockReturnValue(
-      createAcquisition(llmRuntimeService, "llm-runtime", closeLog)
+    const connectedRuntimeServices = buildLlmProviderRecord(
+      (provider) =>
+        new LlmRuntimeService({
+          ...createLogReporters().llmRuntime[provider],
+          findLlmProviderAccess: async () =>
+            TEST_LLM_PROVIDER_ACCESSES[provider],
+          acquireLlmRuntime: async () =>
+            createAcquiredFakeLlmRuntime(createFakeLlmRuntime(), "provider")
+        })
+    )
+    factories.createLlmRuntimeService.mockImplementation(({ provider }) =>
+      createAcquisition(
+        connectedRuntimeServices[provider],
+        `llm-runtime:${provider}`,
+        closeLog
+      )
     )
     const services = await createSingletonServices(
       TEST_BACKEND_CONFIG,
@@ -276,18 +397,31 @@ describe("createSingletonServices", () => {
       factories
     )
     onTestFinished(async () => await closeSingletonServices(services))
-    onTestFinished(async () => await llmRuntimeService[Symbol.asyncDispose]())
+    for (const provider of LLM_PROVIDERS) {
+      onTestFinished(
+        async () =>
+          await connectedRuntimeServices[provider][Symbol.asyncDispose]()
+      )
+    }
     const findChatEndpoint =
       factories.createChatService.mock.lastCall?.[0].findChatEndpoint
 
-    expect(findChatEndpoint?.()).toBeUndefined()
-    await llmRuntimeService.connectLlmRuntime()
+    expect(findChatEndpoint?.("groq")).toBeUndefined()
+    await connectedRuntimeServices.groq.connectLlmRuntime()
+    await connectedRuntimeServices.ollama.connectLlmRuntime()
 
-    expect(findChatEndpoint?.()).toEqual({
-      baseUrl: "https://api.groq.com/openai/v1",
-      apiKey,
-      replyCeilingField: "max_completion_tokens"
-    })
+    expect(
+      LLM_PROVIDERS.map((provider) => findChatEndpoint?.(provider))
+    ).toEqual([
+      undefined,
+      buildLlmChatEndpoint(TEST_LLM_PROVIDER_ACCESSES.ollama),
+      undefined,
+      {
+        baseUrl: "https://api.groq.com/openai/v1",
+        apiKey: "gsk_synthetic_0123456789",
+        replyCeilingField: "max_completion_tokens"
+      }
+    ])
   })
 
   it("lists read_page, then web_search found by the bundle's web search tool provider", async () => {
@@ -396,8 +530,16 @@ describe("createSingletonServices", () => {
     )
     expect(services.agentService).toBeInstanceOf(AgentService)
     expect(services.agentRuntimeService).toBeInstanceOf(AgentRuntimeService)
-    expect(services.llmRuntimeService).toBe(acquisitions.llmRuntime.service)
-    expect(services.llmService).toBeInstanceOf(LlmService)
+    expect(Object.isFrozen(services.llmProviderServices)).toBe(true)
+    expect(Object.keys(services.llmProviderServices)).toEqual(LLM_PROVIDERS)
+    for (const provider of LLM_PROVIDERS) {
+      expect(services.llmProviderServices[provider].llmRuntimeService).toBe(
+        acquisitions.llmRuntime[provider].service
+      )
+      expect(services.llmProviderServices[provider].llmService).toBeInstanceOf(
+        LlmService
+      )
+    }
     expect(services.attachmentFileStore).toBeInstanceOf(AttachmentFileStore)
   })
 
@@ -413,7 +555,7 @@ describe("createSingletonServices", () => {
     const turn = services.conversationTurns.createConversationTurn({
       conversation: createNewConversationTarget("caliginia"),
       userMessage: createTurnUserMessage("Hello"),
-      model: "qwen/qwen3-8b"
+      model: LM_STUDIO_QWEN3_8B
     })
     services.conversationHistoryEditor.updateConversationTitle(
       turn.conversation.id,
@@ -484,7 +626,7 @@ describe("createSingletonServices", () => {
         })
       )
       vi.spyOn(
-        acquisitions.llmRuntime.service,
+        acquisitions.llmRuntime.lmStudio.service,
         "handleLlmEngineOperationRequest"
       ).mockImplementation(
         async (operation) =>
@@ -550,7 +692,7 @@ describe("createSingletonServices", () => {
       })
     )
     vi.spyOn(
-      acquisitions.llmRuntime.service,
+      acquisitions.llmRuntime.lmStudio.service,
       "handleLlmEngineOperationRequest"
     ).mockImplementation(
       async (operation) => await operation(createConnectedFakeLlmEngine(engine))
@@ -568,7 +710,7 @@ describe("createSingletonServices", () => {
       searchCallId: SEARCH_CALL_ID,
       tools: [READ_TEXT_FILE_TOOL],
       conversationId: createFixtureUuidV7(1),
-      model: "qwen/qwen3-8b",
+      model: LM_STUDIO_QWEN3_8B,
       generationOptions,
       abortSignal: new AbortController().signal,
       reportFailure,
@@ -590,7 +732,7 @@ describe("createSingletonServices", () => {
     expect(reportFailure).toHaveBeenCalledExactlyOnceWith(failure)
   })
 
-  it("gives every live agent the configured request slots and waiting line", async () => {
+  it("measures and sends a reply on the provider of the turn's model, never on another provider", async () => {
     const { factories, acquisitions } = createRecordedFactories()
     const services = await createSingletonServices(
       TEST_BACKEND_CONFIG,
@@ -605,12 +747,46 @@ describe("createSingletonServices", () => {
         textTokenCounts: texts.map(() => 1)
       })
     )
-    vi.spyOn(
-      acquisitions.llmRuntime.service,
-      "handleLlmEngineOperationRequest"
-    ).mockImplementation(
-      async (operation) => await operation(createConnectedFakeLlmEngine(engine))
+    const operationRequests = LLM_PROVIDERS.map((provider) =>
+      vi
+        .spyOn(
+          acquisitions.llmRuntime[provider].service,
+          "handleLlmEngineOperationRequest"
+        )
+        .mockImplementation(
+          async (operation) =>
+            await operation(createConnectedFakeLlmEngine(engine))
+        )
     )
+    const completeChatStream = vi
+      .spyOn(acquisitions.chat.service, "completeChatStream")
+      .mockRejectedValue(new Error("model not loaded"))
+
+    await services.agentRuntimeService
+      .loadChatAgent("caliginia")
+      ?.createReply(buildHelloAgentTurn(createFixtureUuidV7(2), GROQ_QWEN3_8B))
+
+    expect(
+      operationRequests.map((request) => request.mock.calls.length)
+    ).toEqual(LLM_PROVIDERS.map((provider) => (provider === "groq" ? 1 : 0)))
+    expect(engine.findLlmContextMeasurement).toHaveBeenCalledWith(
+      "qwen/qwen3-8b",
+      [TEST_BACKEND_CONFIG.caliginiaSystemPrompt, "Hello"]
+    )
+    expect(completeChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({ model: GROQ_QWEN3_8B })
+    )
+  })
+
+  it("gives every live agent the configured request slots and waiting line", async () => {
+    const { factories, acquisitions } = createRecordedFactories()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    updateLlmEngineToFittingFake(acquisitions.llmRuntime.lmStudio.service)
     const release = Promise.withResolvers<void>()
     vi.spyOn(
       acquisitions.chat.service,
@@ -658,23 +834,35 @@ describe("createSingletonServices", () => {
     )
   })
 
-  it("serves the LLM service through the runtime service's operation queue", async () => {
-    const { factories, acquisitions } = createRecordedFactories()
-    const refusal = new Error("The LLM runtime is closed.")
-    const handleLlmEngineOperationRequest = vi
-      .spyOn(acquisitions.llmRuntime.service, "handleLlmEngineOperationRequest")
-      .mockRejectedValue(refusal)
-    const services = await createSingletonServices(
-      TEST_BACKEND_CONFIG,
-      createLogReporters(),
-      factories
-    )
-    onTestFinished(async () => await closeSingletonServices(services))
+  it.each(LLM_PROVIDERS)(
+    "serves the LLM service of %s through that provider's runtime operation queue alone",
+    async (provider) => {
+      const { factories, acquisitions } = createRecordedFactories()
+      const refusal = new Error("The LLM runtime is closed.")
+      const operationRequests = LLM_PROVIDERS.map((queued) =>
+        vi
+          .spyOn(
+            acquisitions.llmRuntime[queued].service,
+            "handleLlmEngineOperationRequest"
+          )
+          .mockRejectedValue(refusal)
+      )
+      const services = await createSingletonServices(
+        TEST_BACKEND_CONFIG,
+        createLogReporters(),
+        factories
+      )
+      onTestFinished(async () => await closeSingletonServices(services))
 
-    await expect(services.llmService.listLlmModels()).rejects.toBe(refusal)
+      await expect(
+        services.llmProviderServices[provider].llmService.listLlmModels()
+      ).rejects.toBe(refusal)
 
-    expect(handleLlmEngineOperationRequest).toHaveBeenCalledOnce()
-  })
+      expect(
+        operationRequests.map((request) => request.mock.calls.length)
+      ).toEqual(LLM_PROVIDERS.map((queued) => (queued === provider ? 1 : 0)))
+    }
+  )
 
   it("acquires nothing else when the database cannot be opened", async () => {
     const { factories, closeLog } = createRecordedFactories()
@@ -712,12 +900,16 @@ describe("createSingletonServices", () => {
     expect(factories.createLlmRuntimeService).not.toHaveBeenCalled()
   })
 
-  it("releases the database when the LLM runtime service cannot be created", async () => {
-    const { factories, closeLog } = createRecordedFactories()
+  it("releases the earlier providers' runtime services, then the database, when one provider's LLM runtime service cannot be created", async () => {
+    const { factories, acquisitions, closeLog } = createRecordedFactories()
     const creationFailure = new Error("LLM runtime service construction failed")
-    factories.createLlmRuntimeService.mockImplementation(() => {
-      throw creationFailure
-    })
+    factories.createLlmRuntimeService.mockImplementation(
+      buildLlmRuntimeServiceFactoryFailingFor(
+        acquisitions.llmRuntime,
+        "ollamaCloud",
+        creationFailure
+      )
+    )
 
     await expect(
       createSingletonServices(
@@ -727,7 +919,12 @@ describe("createSingletonServices", () => {
       )
     ).rejects.toBe(creationFailure)
 
-    expect(closeLog).toEqual(["database"])
+    expect(closeLog).toEqual([
+      "llm-runtime:ollama",
+      "llm-runtime:lmStudio",
+      "database"
+    ])
+    expect(factories.createLlmRuntimeService).toHaveBeenCalledTimes(3)
     expect(factories.createChatService).not.toHaveBeenCalled()
   })
 
@@ -746,7 +943,7 @@ describe("createSingletonServices", () => {
       )
     ).rejects.toBe(creationFailure)
 
-    expect(closeLog).toEqual(["llm-runtime", "database"])
+    expect(closeLog).toEqual([...LLM_RUNTIME_RELEASE_NAMES, "database"])
   })
 
   it("keeps both failures when releasing earlier acquisitions also fails", async () => {
@@ -768,7 +965,7 @@ describe("createSingletonServices", () => {
     expect(failure).toMatchObject({
       errors: [creationFailure, cleanupFailure]
     })
-    expect(closeLog).toEqual(["llm-runtime"])
+    expect(closeLog).toEqual(LLM_RUNTIME_RELEASE_NAMES)
   })
 
   it("opens the configured database with the production factories and closes it with the bundle", async () => {
@@ -786,7 +983,7 @@ describe("createSingletonServices", () => {
     const turn = services.conversationTurns.createConversationTurn({
       conversation: createNewConversationTarget("caliginia"),
       userMessage: createTurnUserMessage("Hello"),
-      model: "qwen/qwen3-8b"
+      model: LM_STUDIO_QWEN3_8B
     })
     expect(history.getConversation(turn.conversation.id)).toBeDefined()
 
@@ -819,7 +1016,7 @@ describe("closeSingletonServices", () => {
 
     await closeSingletonServices(services)
 
-    expect(closeLog).toEqual(["chat", "llm-runtime", "database"])
+    expect(closeLog).toEqual(["chat", ...LLM_RUNTIME_RELEASE_NAMES, "database"])
   })
 
   it("closes the email account checker, then the MCP server registry, before every acquisition", async () => {
@@ -841,7 +1038,7 @@ describe("closeSingletonServices", () => {
       "email-account-checker",
       "mcp-server-registry",
       "chat",
-      "llm-runtime",
+      ...LLM_RUNTIME_RELEASE_NAMES,
       "database"
     ])
   })
@@ -855,7 +1052,11 @@ describe("closeSingletonServices", () => {
     ])
     await closeSingletonServices(services)
 
-    for (const acquisition of Object.values(acquisitions)) {
+    for (const acquisition of [
+      acquisitions.chat,
+      acquisitions.database,
+      ...Object.values(acquisitions.llmRuntime)
+    ]) {
       expect(acquisition.closeService).toHaveBeenCalledOnce()
     }
   })
@@ -863,12 +1064,46 @@ describe("closeSingletonServices", () => {
   it("attempts every release and rejects with the failure", async () => {
     const { services, acquisitions, closeLog } = await createRecordedServices()
     const releaseFailure = new Error("runtime release failed")
-    acquisitions.llmRuntime.closeService.mockRejectedValue(releaseFailure)
+    acquisitions.llmRuntime.ollama.closeService.mockRejectedValue(
+      releaseFailure
+    )
 
     await expect(closeSingletonServices(services)).rejects.toBe(releaseFailure)
 
-    expect(closeLog).toEqual(["chat", "database"])
+    expect(closeLog).toEqual([
+      "chat",
+      "llm-runtime:groq",
+      "llm-runtime:ollamaCloud",
+      "llm-runtime:lmStudio",
+      "database"
+    ])
     await expect(closeSingletonServices(services)).rejects.toBe(releaseFailure)
-    expect(acquisitions.llmRuntime.closeService).toHaveBeenCalledOnce()
+    expect(acquisitions.llmRuntime.ollama.closeService).toHaveBeenCalledOnce()
+  })
+
+  it("keeps the failures of two providers' releases and still releases the rest", async () => {
+    const { services, acquisitions, closeLog } = await createRecordedServices()
+    const groqFailure = new Error("Groq runtime release failed")
+    const lmStudioFailure = new Error("LM Studio runtime release failed")
+    acquisitions.llmRuntime.groq.closeService.mockRejectedValue(groqFailure)
+    acquisitions.llmRuntime.lmStudio.closeService.mockRejectedValue(
+      lmStudioFailure
+    )
+
+    const failure = await closeSingletonServices(services).catch(
+      (error: unknown) => error
+    )
+
+    expect(failure).toBeInstanceOf(SuppressedError)
+    expect(failure).toMatchObject({
+      error: lmStudioFailure,
+      suppressed: groqFailure
+    })
+    expect(closeLog).toEqual([
+      "chat",
+      "llm-runtime:ollamaCloud",
+      "llm-runtime:ollama",
+      "database"
+    ])
   })
 })

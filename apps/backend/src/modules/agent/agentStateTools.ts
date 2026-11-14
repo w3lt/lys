@@ -1,6 +1,7 @@
 import {
   agentCodeSchema,
   FIND_AGENTS_TOOL_NAME,
+  LLM_PROVIDER_NAMES,
   READ_AGENT_STATE_TOOL_NAME,
   READ_MY_STATE_TOOL_NAME,
   toolDefinitionSchema,
@@ -397,7 +398,8 @@ function formatRequestPlace(
  * @param request - The request.
  * @param linePlace - One-based place in line of a waiting request.
  * @param run - The reply that calls the tool, and the time of the run.
- * @returns Where it is, when it started, its model, and its step.
+ * @returns Where it is, when it started, its model and the model's provider,
+ * and its step.
  */
 function formatRequest(
   request: AgentRequestView,
@@ -406,7 +408,7 @@ function formatRequest(
 ): string {
   const place = formatRequestPlace(request, run.requestId)
   const elapsed = formatElapsedTime(request.startedAt, run.now)
-  return `${place}: started ${request.startedAt} (${elapsed}) with ${request.model}; ${formatRequestStep(request.step, linePlace)}.`
+  return `${place}: started ${request.startedAt} (${elapsed}) with ${request.model.modelKey} on ${LLM_PROVIDER_NAMES[request.model.provider]}; ${formatRequestStep(request.step, linePlace)}.`
 }
 
 /**

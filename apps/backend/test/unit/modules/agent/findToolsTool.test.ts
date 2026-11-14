@@ -18,6 +18,7 @@ import {
   registerBuiltInToolContractSuite,
   type BuiltInToolHarness
 } from "../../support/builtInToolContract"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 import {
   buildFoundToolSearchOutcome,
   RUN_TOOL_CALL_ID,
@@ -89,7 +90,7 @@ function buildContext(
     keeper,
     tools: TOOLS,
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
-    model: "qwen/qwen3-8b",
+    model: LM_STUDIO_QWEN3_8B,
     generationOptions,
     reportFailure,
     toolCallPolicy: TOOL_CALL_POLICY
@@ -177,7 +178,7 @@ describe("FindToolsTool", () => {
       searchCallId: RUN_TOOL_CALL_ID,
       tools: TOOLS,
       conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
-      model: "qwen/qwen3-8b",
+      model: LM_STUDIO_QWEN3_8B,
       generationOptions: context.generationOptions,
       abortSignal,
       reportFailure: reportUnexpectedFailure,

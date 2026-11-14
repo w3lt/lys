@@ -12,8 +12,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { findLoadedModel } from "@/lib/models/model-residency"
-import { useLysStore } from "@/lib/store"
+import { useNewConversationModel } from "@/lib/hooks/conversationModel"
+import { findLoadedModelInfo } from "@/lib/models/model-availability"
 
 import { formatAgentPromptMeasure } from "./agent-presentation"
 
@@ -259,8 +259,8 @@ export type BuiltInAgentViewProps = {
  * can be changed.
  *
  * @remarks The parent owns the agent and both actions; the view owns no
- * state. It reads the loaded model's context length from the application
- * store's model inventory to measure the prompt against the window. Each
+ * state. It reads the context length of the model a new conversation uses,
+ * while it is loaded, to measure the prompt against the window. Each
  * text is a read-only field, so it can be selected and copied but not typed
  * into. Focus starts on the back button when the view appears, and Escape
  * pressed on any of the view's fields or buttons returns to the list. A built-in agent offers no save and no delete:
@@ -273,11 +273,8 @@ export default function BuiltInAgentView({
   onCloseAgentView,
   onDuplicateAgent
 }: BuiltInAgentViewProps): ReactElement {
-  const contextLength = useLysStore(
-    (state) =>
-      findLoadedModel(state.modelRuntime, state.modelInventory)
-        ?.loadedContextLength
-  )
+  const { availability } = useNewConversationModel()
+  const contextLength = findLoadedModelInfo(availability)?.loadedContextLength
   const backButtonRef = useRef<HTMLButtonElement>(null)
 
   useLayoutEffect(() => {

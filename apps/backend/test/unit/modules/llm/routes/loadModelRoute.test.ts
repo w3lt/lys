@@ -1,9 +1,12 @@
 import {
+  buildLlmProviderApiPath,
   createLlmServiceBusyProblem,
+  llmLoadModelApi,
   llmLoadModelApiResponseBodySchema,
   llmProviderLoadsModelsProblemSchema,
   llmRuntimeUnavailableProblemSchema
 } from "@lys/protocol"
+import { LLM_PROVIDERS } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import { createLlmProviderLoadsModelsError } from "../../../../../src/modules/llm/llmProviderLoadsModelsError"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
@@ -12,8 +15,11 @@ import updateFastifyWithLlmModelLoadRoute from "../../../../../src/modules/llm/r
 import { createDownloadedLlmModel } from "../../../support/llmFixtures"
 import { createLlmRouteTestApp } from "../../../support/llmRouteTestApp"
 
-/** Published path of the load route. */
-const LOAD_MODEL_PATH = "/api/v1/llm/load"
+/** Published path of LM Studio's load route. */
+const LOAD_MODEL_PATH = buildLlmProviderApiPath(
+  llmLoadModelApi.path,
+  "lmStudio"
+)
 
 /** Valid canonical metadata of the model the service reports as loaded. */
 const LOADED_MODEL = llmLoadModelApiResponseBodySchema.parse({
@@ -38,6 +44,48 @@ describe("updateFastifyWithLlmModelLoadRoute", () => {
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual(LOADED_MODEL)
     expect(loadLlmModel).toHaveBeenCalledExactlyOnceWith("qwen3", {})
+  })
+
+  it.each(LLM_PROVIDERS)(
+    "loads the model on %s, the provider the path names, and asks no other provider",
+    async (provider) => {
+      const testApp = createLlmRouteTestApp()
+      const loads = LLM_PROVIDERS.map((loading) =>
+        vi
+          .spyOn(
+            testApp.llmProviderServices[loading].llmService,
+            "loadLlmModel"
+          )
+          .mockResolvedValue(LOADED_MODEL)
+      )
+      await updateFastifyWithLlmModelLoadRoute(testApp.app)
+
+      const response = await testApp.app.inject({
+        method: "POST",
+        url: buildLlmProviderApiPath(llmLoadModelApi.path, provider),
+        payload: { modelId: "qwen3" }
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(loads.map((load) => load.mock.calls.length)).toEqual(
+        LLM_PROVIDERS.map((loading) => (loading === provider ? 1 : 0))
+      )
+    }
+  )
+
+  it("refuses a path that names no provider Lys can reach before any provider is asked", async () => {
+    const testApp = createLlmRouteTestApp()
+    const loadLlmModel = vi.spyOn(testApp.service, "loadLlmModel")
+    await updateFastifyWithLlmModelLoadRoute(testApp.app)
+
+    const response = await testApp.app.inject({
+      method: "POST",
+      url: llmLoadModelApi.path.replace(":provider", "openai"),
+      payload: { modelId: "qwen3" }
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(loadLlmModel).not.toHaveBeenCalled()
   })
 
   it("passes the request's load settings to the loader", async () => {

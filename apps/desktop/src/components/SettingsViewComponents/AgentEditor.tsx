@@ -19,8 +19,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { findLoadedModel } from "@/lib/models/model-residency"
-import { useLysStore } from "@/lib/store"
+import { useNewConversationModel } from "@/lib/hooks/conversationModel"
+import { findLoadedModelInfo } from "@/lib/models/model-availability"
 import {
   calculateAgentCodeFromName,
   calculateAgentDraftProblemField,
@@ -435,7 +435,7 @@ type AgentDraftFieldsProps = {
  * Edits the draft's name, code, bio, and system prompt.
  *
  * @remarks The agent store owns the draft and accepts each edit; the
- * application store's model inventory supplies the loaded model's context
+ * model a new conversation uses supplies, while it is loaded, the context
  * length for the prompt measure.
  * The parent owns the shown problem, its message, and the field hosts; only
  * the field the problem concerns is marked invalid. The code field appears
@@ -450,11 +450,8 @@ function AgentDraftFields({
   problemId,
   fieldRefs
 }: AgentDraftFieldsProps): ReactElement {
-  const contextLength = useLysStore(
-    (state) =>
-      findLoadedModel(state.modelRuntime, state.modelInventory)
-        ?.loadedContextLength
-  )
+  const { availability } = useNewConversationModel()
+  const contextLength = findLoadedModelInfo(availability)?.loadedContextLength
   const updateAgentDraft = useAgentStore((state) => state.updateAgentDraft)
   const updateNewAgentCode = useAgentStore((state) => state.updateNewAgentCode)
   const isReadOnly = isAgentActivityPending(editor.activity)

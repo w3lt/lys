@@ -4,7 +4,10 @@ import {
   createLlmServiceBusyProblem,
   createLlmUnloadProblem
 } from "@lys/protocol"
-import { modelLoadConfigurationSchema } from "@lys/share"
+import {
+  modelLoadConfigurationSchema,
+  type LlmModelReference
+} from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   getModelHealth,
@@ -30,6 +33,16 @@ const LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
 })
 
 /**
+ * Names one of LM Studio's models.
+ *
+ * @param modelKey - Key of the model.
+ * @returns The reference.
+ */
+function buildLmStudioModel(modelKey: string): LlmModelReference {
+  return { provider: "lmStudio", modelKey }
+}
+
+/**
  * Builds a connection the case does not cancel.
  *
  * @returns The connection and its signal, which the request must carry.
@@ -48,8 +61,10 @@ function createConnection() {
  * @returns The rejection reason of the list request.
  */
 async function getListModelsFailure(response: Response): Promise<unknown> {
-  startBackendFake({ "GET /api/v1/llm/list": () => response })
-  return await listModels(createConnection()).catch((error: unknown) => error)
+  startBackendFake({ "GET /api/v1/llm/lmStudio/list": () => response })
+  return await listModels("lmStudio", createConnection()).catch(
+    (error: unknown) => error
+  )
 }
 
 describe("listModels", () => {
@@ -61,31 +76,49 @@ describe("listModels", () => {
         buildLlmInfo("gemma-3")
       ]
       const backend = startBackendFake({
-        "GET /api/v1/llm/list": () =>
+        "GET /api/v1/llm/lmStudio/list": () =>
           buildJsonResponse(200, { llms: models, modelLoading })
       })
       const connection = createConnection()
 
-      await expect(listModels(connection)).resolves.toEqual({
+      await expect(listModels("lmStudio", connection)).resolves.toEqual({
         llms: models,
         modelLoading
       })
       expect(backend.requests).toHaveLength(1)
       expect(backend.requests[0]?.url).toBe(
-        `${FIXTURE_BACKEND_URL}/api/v1/llm/list`
+        `${FIXTURE_BACKEND_URL}/api/v1/llm/lmStudio/list`
       )
       expect(backend.requests[0]?.signal).toBe(connection.signal)
       expect(backend.requests[0]?.cache).toBe("no-store")
     }
   )
 
+  it.each(["ollama", "ollamaCloud", "groq"] as const)(
+    "requests the list of the provider it names (%s)",
+    async (provider) => {
+      const backend = startBackendFake({
+        [`GET /api/v1/llm/${provider}/list`]: () =>
+          buildJsonResponse(200, { llms: [], modelLoading: "provider" })
+      })
+
+      await expect(listModels(provider, createConnection())).resolves.toEqual({
+        llms: [],
+        modelLoading: "provider"
+      })
+      expect(backend.requests[0]?.url).toBe(
+        `${FIXTURE_BACKEND_URL}/api/v1/llm/${provider}/list`
+      )
+    }
+  )
+
   it("rejects a list that does not say who loads the models", async () => {
     startBackendFake({
-      "GET /api/v1/llm/list": () =>
+      "GET /api/v1/llm/lmStudio/list": () =>
         buildJsonResponse(200, { llms: [buildLlmInfo("qwen3-8b")] })
     })
 
-    await expect(listModels(createConnection())).rejects.toThrow(
+    await expect(listModels("lmStudio", createConnection())).rejects.toThrow(
       "The backend returned an invalid model response."
     )
   })
@@ -93,35 +126,39 @@ describe("listModels", () => {
   it("rejects a list that names a model twice", async () => {
     const model = buildLlmInfo("qwen3-8b")
     startBackendFake({
-      "GET /api/v1/llm/list": () =>
+      "GET /api/v1/llm/lmStudio/list": () =>
         buildJsonResponse(200, { llms: [model, model], modelLoading: "lys" })
     })
 
-    await expect(listModels(createConnection())).rejects.toThrow(Error)
+    await expect(listModels("lmStudio", createConnection())).rejects.toThrow(
+      Error
+    )
   })
 
   it("rejects a list containing an empty model key", async () => {
     startBackendFake({
-      "GET /api/v1/llm/list": () =>
+      "GET /api/v1/llm/lmStudio/list": () =>
         buildJsonResponse(200, {
           llms: [buildLlmInfo("")],
           modelLoading: "lys"
         })
     })
 
-    await expect(listModels(createConnection())).rejects.toThrow(Error)
+    await expect(listModels("lmStudio", createConnection())).rejects.toThrow(
+      Error
+    )
   })
 
   it("rejects a malformed list and keeps the decoding failure as its cause", async () => {
     startBackendFake({
-      "GET /api/v1/llm/list": () =>
+      "GET /api/v1/llm/lmStudio/list": () =>
         buildJsonResponse(200, {
           llms: [{ modelKey: "raw-secret" }],
           modelLoading: "lys"
         })
     })
 
-    const models = listModels(createConnection())
+    const models = listModels("lmStudio", createConnection())
 
     await expect(models).rejects.toMatchObject({
       cause: expect.objectContaining({ name: "ZodError" })
@@ -131,23 +168,27 @@ describe("listModels", () => {
 
   it("rejects a success response that is not JSON", async () => {
     startBackendFake({
-      "GET /api/v1/llm/list": () =>
+      "GET /api/v1/llm/lmStudio/list": () =>
         new Response(JSON.stringify({ llms: [], modelLoading: "lys" }), {
           status: 200,
           headers: { "Content-Type": "text/plain" }
         })
     })
 
-    await expect(listModels(createConnection())).rejects.toThrow(Error)
+    await expect(listModels("lmStudio", createConnection())).rejects.toThrow(
+      Error
+    )
   })
 
   it("rejects a success status other than 200", async () => {
     startBackendFake({
-      "GET /api/v1/llm/list": () =>
+      "GET /api/v1/llm/lmStudio/list": () =>
         buildJsonResponse(201, { llms: [], modelLoading: "lys" })
     })
 
-    await expect(listModels(createConnection())).rejects.toThrow(Error)
+    await expect(listModels("lmStudio", createConnection())).rejects.toThrow(
+      Error
+    )
   })
 
   it("marks a runtime-unavailable refusal so callers can recognize it", async () => {
@@ -217,11 +258,11 @@ describe("listModels", () => {
 
   it("rejects with the abort reason when the caller cancels", async () => {
     startBackendFake({
-      "GET /api/v1/llm/list": () => new Promise<Response>(() => {})
+      "GET /api/v1/llm/lmStudio/list": () => new Promise<Response>(() => {})
     })
     const controller = new AbortController()
 
-    const models = listModels({
+    const models = listModels("lmStudio", {
       backendUrl: FIXTURE_BACKEND_URL,
       signal: controller.signal
     })
@@ -235,12 +276,12 @@ describe("loadModel", () => {
   it("sends the model key and only the given load settings, and returns the loaded model", async () => {
     const loaded = buildLlmInfo("qwen3-8b", { loaded: true })
     const backend = startBackendFake({
-      "POST /api/v1/llm/load": () => buildJsonResponse(200, loaded)
+      "POST /api/v1/llm/lmStudio/load": () => buildJsonResponse(200, loaded)
     })
     const connection = createConnection()
 
     await expect(
-      loadModel("qwen3-8b", LOAD_CONFIGURATION, connection)
+      loadModel(buildLmStudioModel("qwen3-8b"), LOAD_CONFIGURATION, connection)
     ).resolves.toEqual(loaded)
     expect(backend.requests[0]?.body).toEqual({
       modelId: "qwen3-8b",
@@ -254,12 +295,16 @@ describe("loadModel", () => {
 
   it("rejects a load response that does not confirm the model is loaded", async () => {
     startBackendFake({
-      "POST /api/v1/llm/load": () =>
+      "POST /api/v1/llm/lmStudio/load": () =>
         buildJsonResponse(200, buildLlmInfo("qwen3-8b", { loaded: false }))
     })
 
     await expect(
-      loadModel("qwen3-8b", LOAD_CONFIGURATION, createConnection())
+      loadModel(
+        buildLmStudioModel("qwen3-8b"),
+        LOAD_CONFIGURATION,
+        createConnection()
+      )
     ).rejects.toThrow(Error)
   })
 
@@ -267,7 +312,7 @@ describe("loadModel", () => {
     const backend = startBackendFake({})
 
     await expect(
-      loadModel("", LOAD_CONFIGURATION, createConnection())
+      loadModel(buildLmStudioModel(""), LOAD_CONFIGURATION, createConnection())
     ).rejects.toThrow()
     expect(backend.requests).toEqual([])
   })
@@ -276,14 +321,18 @@ describe("loadModel", () => {
     const backend = startBackendFake({})
 
     await expect(
-      loadModel("qwen3-8b", { contextLength: 0 }, createConnection())
+      loadModel(
+        buildLmStudioModel("qwen3-8b"),
+        { contextLength: 0 },
+        createConnection()
+      )
     ).rejects.toThrow()
     expect(backend.requests).toEqual([])
   })
 
   it("marks a runtime-unavailable refusal", async () => {
     startBackendFake({
-      "POST /api/v1/llm/load": () =>
+      "POST /api/v1/llm/lmStudio/load": () =>
         buildJsonResponse(
           503,
           createLlmRuntimeUnavailableProblem("LM Studio is not connected.")
@@ -291,7 +340,7 @@ describe("loadModel", () => {
     })
 
     const failure = await loadModel(
-      "qwen3-8b",
+      buildLmStudioModel("qwen3-8b"),
       LOAD_CONFIGURATION,
       createConnection()
     ).catch((error: unknown) => error)
@@ -301,7 +350,7 @@ describe("loadModel", () => {
 
   it("reports a refusal by a provider that loads its own models with its detail and no runtime mark", async () => {
     startBackendFake({
-      "POST /api/v1/llm/load": () =>
+      "POST /api/v1/llm/lmStudio/load": () =>
         buildJsonResponse(
           409,
           createLlmProviderLoadsModelsProblem("Groq loads its own models.")
@@ -309,7 +358,7 @@ describe("loadModel", () => {
     })
 
     const failure = await loadModel(
-      "qwen3-8b",
+      buildLmStudioModel("qwen3-8b"),
       LOAD_CONFIGURATION,
       createConnection()
     ).catch((error: unknown) => error)
@@ -322,23 +371,24 @@ describe("loadModel", () => {
 describe("unloadModel", () => {
   it("resolves for the bodyless acknowledgement after sending only the model key", async () => {
     const backend = startBackendFake({
-      "PATCH /api/v1/llm/unload": () => new Response(null, { status: 204 })
+      "PATCH /api/v1/llm/lmStudio/unload": () =>
+        new Response(null, { status: 204 })
     })
 
     await expect(
-      unloadModel("qwen3-8b", createConnection())
+      unloadModel(buildLmStudioModel("qwen3-8b"), createConnection())
     ).resolves.toBeUndefined()
     expect(backend.requests[0]?.body).toEqual({ modelId: "qwen3-8b" })
   })
 
   it("rejects an unexpected success status", async () => {
     startBackendFake({
-      "PATCH /api/v1/llm/unload": () => buildJsonResponse(200, {})
+      "PATCH /api/v1/llm/lmStudio/unload": () => buildJsonResponse(200, {})
     })
 
-    await expect(unloadModel("qwen3-8b", createConnection())).rejects.toThrow(
-      Error
-    )
+    await expect(
+      unloadModel(buildLmStudioModel("qwen3-8b"), createConnection())
+    ).rejects.toThrow(Error)
   })
 
   it.each([
@@ -352,12 +402,14 @@ describe("unloadModel", () => {
         detail: `Declared ${reason} detail.`
       })
       startBackendFake({
-        "PATCH /api/v1/llm/unload": () => buildJsonResponse(status, problem)
+        "PATCH /api/v1/llm/lmStudio/unload": () =>
+          buildJsonResponse(status, problem)
       })
 
-      const failure = await unloadModel("qwen3-8b", createConnection()).catch(
-        (error: unknown) => error
-      )
+      const failure = await unloadModel(
+        buildLmStudioModel("qwen3-8b"),
+        createConnection()
+      ).catch((error: unknown) => error)
 
       expect(failure).toMatchObject({ message: `Declared ${reason} detail.` })
       expect(isModelRuntimeUnavailableError(failure)).toBe(false)
@@ -366,23 +418,24 @@ describe("unloadModel", () => {
 
   it("reports a refusal by a provider that loads its own models with its detail", async () => {
     startBackendFake({
-      "PATCH /api/v1/llm/unload": () =>
+      "PATCH /api/v1/llm/lmStudio/unload": () =>
         buildJsonResponse(
           409,
           createLlmProviderLoadsModelsProblem("Groq loads its own models.")
         )
     })
 
-    const failure = await unloadModel("qwen3-8b", createConnection()).catch(
-      (error: unknown) => error
-    )
+    const failure = await unloadModel(
+      buildLmStudioModel("qwen3-8b"),
+      createConnection()
+    ).catch((error: unknown) => error)
 
     expect(failure).toMatchObject({ message: "Groq loads its own models." })
   })
 
   it("marks a runtime-unavailable refusal", async () => {
     startBackendFake({
-      "PATCH /api/v1/llm/unload": () =>
+      "PATCH /api/v1/llm/lmStudio/unload": () =>
         buildJsonResponse(
           503,
           createLlmUnloadProblem({
@@ -392,9 +445,10 @@ describe("unloadModel", () => {
         )
     })
 
-    const failure = await unloadModel("qwen3-8b", createConnection()).catch(
-      (error: unknown) => error
-    )
+    const failure = await unloadModel(
+      buildLmStudioModel("qwen3-8b"),
+      createConnection()
+    ).catch((error: unknown) => error)
 
     expect(isModelRuntimeUnavailableError(failure)).toBe(true)
   })
@@ -402,7 +456,9 @@ describe("unloadModel", () => {
   it("rejects an empty model key without contacting the backend", async () => {
     const backend = startBackendFake({})
 
-    await expect(unloadModel("", createConnection())).rejects.toThrow()
+    await expect(
+      unloadModel(buildLmStudioModel(""), createConnection())
+    ).rejects.toThrow()
     expect(backend.requests).toEqual([])
   })
 })
@@ -411,14 +467,33 @@ describe("getModelHealth", () => {
   it("returns the observation for the requested model", async () => {
     const health = { modelId: "qwen3-8b", status: "ready", latencyMs: 12 }
     const backend = startBackendFake({
-      "GET /api/v1/llm/qwen3-8b/health": () => buildJsonResponse(200, health)
+      "GET /api/v1/llm/lmStudio/qwen3-8b/health": () =>
+        buildJsonResponse(200, health)
     })
     const connection = createConnection()
 
-    await expect(getModelHealth("qwen3-8b", connection)).resolves.toEqual(
-      health
-    )
+    await expect(
+      getModelHealth(buildLmStudioModel("qwen3-8b"), connection)
+    ).resolves.toEqual(health)
     expect(backend.requests[0]?.signal).toBe(connection.signal)
+  })
+
+  it("asks the provider the reference names about its model", async () => {
+    const health = { modelId: "llama-3.3-70b", status: "ready", latencyMs: 40 }
+    const backend = startBackendFake({
+      "GET /api/v1/llm/groq/llama-3.3-70b/health": () =>
+        buildJsonResponse(200, health)
+    })
+
+    await expect(
+      getModelHealth(
+        { provider: "groq", modelKey: "llama-3.3-70b" },
+        createConnection()
+      )
+    ).resolves.toEqual(health)
+    expect(backend.requests[0]?.url).toBe(
+      `${FIXTURE_BACKEND_URL}/api/v1/llm/groq/llama-3.3-70b/health`
+    )
   })
 
   it("returns a not-ready observation", async () => {
@@ -429,17 +504,18 @@ describe("getModelHealth", () => {
       latencyMs: 3
     }
     startBackendFake({
-      "GET /api/v1/llm/qwen3-8b/health": () => buildJsonResponse(200, health)
+      "GET /api/v1/llm/lmStudio/qwen3-8b/health": () =>
+        buildJsonResponse(200, health)
     })
 
     await expect(
-      getModelHealth("qwen3-8b", createConnection())
+      getModelHealth(buildLmStudioModel("qwen3-8b"), createConnection())
     ).resolves.toEqual(health)
   })
 
   it("encodes a model key that contains a path separator", async () => {
     const backend = startBackendFake({
-      "GET /api/v1/llm/publisher%2Fmodel/health": () =>
+      "GET /api/v1/llm/lmStudio/publisher%2Fmodel/health": () =>
         buildJsonResponse(200, {
           modelId: "publisher/model",
           status: "ready",
@@ -447,16 +523,19 @@ describe("getModelHealth", () => {
         })
     })
 
-    await getModelHealth("publisher/model", createConnection())
+    await getModelHealth(
+      buildLmStudioModel("publisher/model"),
+      createConnection()
+    )
 
     expect(backend.requests[0]?.url).toBe(
-      `${FIXTURE_BACKEND_URL}/api/v1/llm/publisher%2Fmodel/health`
+      `${FIXTURE_BACKEND_URL}/api/v1/llm/lmStudio/publisher%2Fmodel/health`
     )
   })
 
   it("rejects an observation for a different model", async () => {
     startBackendFake({
-      "GET /api/v1/llm/qwen3-8b/health": () =>
+      "GET /api/v1/llm/lmStudio/qwen3-8b/health": () =>
         buildJsonResponse(200, {
           modelId: "gemma-3",
           status: "ready",
@@ -465,14 +544,14 @@ describe("getModelHealth", () => {
     })
 
     await expect(
-      getModelHealth("qwen3-8b", createConnection())
+      getModelHealth(buildLmStudioModel("qwen3-8b"), createConnection())
     ).rejects.toThrow(Error)
   })
 
   it("accepts a model key at the 100-character path limit", async () => {
     const modelKey = "m".repeat(100)
     startBackendFake({
-      [`GET /api/v1/llm/${modelKey}/health`]: () =>
+      [`GET /api/v1/llm/lmStudio/${modelKey}/health`]: () =>
         buildJsonResponse(200, {
           modelId: modelKey,
           status: "ready",
@@ -481,7 +560,7 @@ describe("getModelHealth", () => {
     })
 
     await expect(
-      getModelHealth(modelKey, createConnection())
+      getModelHealth(buildLmStudioModel(modelKey), createConnection())
     ).resolves.toMatchObject({ modelId: modelKey })
   })
 
@@ -489,7 +568,7 @@ describe("getModelHealth", () => {
     const backend = startBackendFake({})
 
     await expect(
-      getModelHealth("m".repeat(101), createConnection())
+      getModelHealth(buildLmStudioModel("m".repeat(101)), createConnection())
     ).rejects.toThrow()
     expect(backend.requests).toEqual([])
   })

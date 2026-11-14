@@ -86,15 +86,15 @@ describe.each([
   {
     operation: "getLlmRuntimeConnectionStatus",
     readStatus: getLlmRuntimeConnectionStatus,
-    route: "GET /api/v1/llm/runtime",
-    reportedStatuses: ["connecting", "connected", "unreachable"] as const
+    route: "GET /api/v1/llm/lmStudio/runtime",
+    reportedStatuses: ["connecting", "connected", "unreachable", "off"] as const
   },
   {
     // A connect response carries the settled status only.
     operation: "connectLlmRuntime",
     readStatus: connectLlmRuntime,
-    route: "POST /api/v1/llm/runtime/connect",
-    reportedStatuses: ["connected", "unreachable"] as const
+    route: "POST /api/v1/llm/lmStudio/runtime/connect",
+    reportedStatuses: ["connected", "unreachable", "off"] as const
   }
 ])("$operation", ({ readStatus, route, reportedStatuses }) => {
   it.each(reportedStatuses)(
@@ -106,7 +106,7 @@ describe.each([
       const signal = new AbortController().signal
 
       await expect(
-        readStatus({ backendUrl: FIXTURE_BACKEND_URL, signal })
+        readStatus("lmStudio", { backendUrl: FIXTURE_BACKEND_URL, signal })
       ).resolves.toBe(status)
       expect(backend.requests).toHaveLength(1)
       expect(backend.requests[0]?.cache).toBe("no-store")
@@ -117,12 +117,32 @@ describe.each([
     }
   )
 
+  it.each(["ollama", "ollamaCloud", "groq"] as const)(
+    "asks about the provider it names (%s)",
+    async (provider) => {
+      const providerRoute = route.replace("lmStudio", provider)
+      const backend = startBackendFake({
+        [providerRoute]: () => buildJsonResponse(200, { status: "connected" })
+      })
+
+      await expect(
+        readStatus(provider, {
+          backendUrl: FIXTURE_BACKEND_URL,
+          signal: new AbortController().signal
+        })
+      ).resolves.toBe("connected")
+      expect(backend.requests[0]?.url).toBe(
+        `${FIXTURE_BACKEND_URL}${providerRoute.split(" ")[1]}`
+      )
+    }
+  )
+
   it("rejects an unsuccessful status without exposing its body", async () => {
     startBackendFake({
       [route]: () => buildJsonResponse(503, createLlmServiceBusyProblem())
     })
 
-    const status = readStatus({
+    const status = readStatus("lmStudio", {
       backendUrl: FIXTURE_BACKEND_URL,
       signal: new AbortController().signal
     })
@@ -136,7 +156,7 @@ describe.each([
       [route]: () => buildJsonResponse(200, { status: "secret-raw-value" })
     })
 
-    const status = readStatus({
+    const status = readStatus("lmStudio", {
       backendUrl: FIXTURE_BACKEND_URL,
       signal: new AbortController().signal
     })
@@ -157,7 +177,7 @@ describe.each([
     })
 
     await expect(
-      readStatus({
+      readStatus("lmStudio", {
         backendUrl: FIXTURE_BACKEND_URL,
         signal: new AbortController().signal
       })
@@ -168,7 +188,7 @@ describe.each([
     startBackendFake({ [route]: () => new Promise<Response>(() => {}) })
     const controller = new AbortController()
 
-    const status = readStatus({
+    const status = readStatus("lmStudio", {
       backendUrl: FIXTURE_BACKEND_URL,
       signal: controller.signal
     })

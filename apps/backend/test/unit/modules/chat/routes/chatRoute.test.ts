@@ -14,6 +14,7 @@ import {
   MAXIMUM_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
   mcpSettingsSchema,
+  type LlmModelReference,
   type McpServerSettings,
   type ReplyPart
 } from "@lys/share"
@@ -49,7 +50,10 @@ import {
 } from "../../../support/chatRouteTestApp"
 import { parseSseEvents } from "../../../support/chatSseRoute"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
-import { createDownloadedLlmModel } from "../../../support/llmFixtures"
+import {
+  createDownloadedLlmModel,
+  LM_STUDIO_QWEN3_8B
+} from "../../../support/llmFixtures"
 import { buildFakeStdioServerSettings } from "../../../support/mcpTestServers"
 import { createChatCompletionChunk } from "../../../support/openAiEndpointFake"
 import { LOOK_UP_WORD_FORMAT } from "../../../support/scriptedBuiltInTool"
@@ -70,7 +74,7 @@ const CHAT_ROUTE_OPTIONS = Object.freeze({
 const NEW_CONVERSATION_REQUEST = Object.freeze({
   conversation: { kind: "new", agentCode: "caliginia" },
   message: "Plan my trip",
-  model: "qwen/qwen3-8b",
+  model: LM_STUDIO_QWEN3_8B,
   generationOptions: { temperature: 0.4 }
 })
 
@@ -272,6 +276,24 @@ describe("updateFastifyWithChatRoute", () => {
   it.each([
     ["an empty message", { ...NEW_CONVERSATION_REQUEST, message: "" }],
     [
+      "a model named by its key alone",
+      { ...NEW_CONVERSATION_REQUEST, model: "qwen/qwen3-8b" }
+    ],
+    [
+      "a model on a provider Lys cannot reach",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        model: { provider: "openai", modelKey: "qwen/qwen3-8b" }
+      }
+    ],
+    [
+      "a model with an empty key",
+      {
+        ...NEW_CONVERSATION_REQUEST,
+        model: { provider: "lmStudio", modelKey: "" }
+      }
+    ],
+    [
       "a conversation identifier that is not a UUIDv7",
       {
         ...NEW_CONVERSATION_REQUEST,
@@ -304,7 +326,7 @@ describe("updateFastifyWithChatRoute", () => {
       "no conversation",
       {
         message: "Plan my trip",
-        model: "qwen/qwen3-8b",
+        model: LM_STUDIO_QWEN3_8B,
         generationOptions: { temperature: 0.4 }
       }
     ],
@@ -313,7 +335,7 @@ describe("updateFastifyWithChatRoute", () => {
       {
         conversationId: createFixtureUuidV7(1),
         message: "Plan my trip",
-        model: "qwen/qwen3-8b",
+        model: LM_STUDIO_QWEN3_8B,
         generationOptions: { temperature: 0.4 }
       }
     ],
@@ -322,7 +344,7 @@ describe("updateFastifyWithChatRoute", () => {
       {
         conversation: { kind: "new", agentCode: "caliginia" },
         message: "Plan my trip",
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       }
     ],
     ["an unknown field", { ...NEW_CONVERSATION_REQUEST, stream: true }],
@@ -576,7 +598,7 @@ describe("updateFastifyWithChatRoute", () => {
     expect(testApp.completeChatStream).not.toHaveBeenCalled()
     expect(testApp.generateTitle).not.toHaveBeenCalled()
     expect(testApp.findLlmContextMeasurement).toHaveBeenCalledWith(
-      NEW_CONVERSATION_REQUEST.model,
+      NEW_CONVERSATION_REQUEST.model.modelKey,
       []
     )
     expect(
@@ -589,6 +611,42 @@ describe("updateFastifyWithChatRoute", () => {
         titleGenerationAttempts: 0
       })
     )
+  })
+
+  it("answers, measures, and titles with the model on the provider the request names, and stores the reply's model with that provider", async () => {
+    const testApp = await createChatRouteTestApp()
+    registerStoringChatRoute(testApp)
+    const model: LlmModelReference = {
+      provider: "groq",
+      modelKey: NEW_CONVERSATION_REQUEST.model.modelKey
+    }
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      model
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(testApp.completeChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({ model })
+    )
+    expect(testApp.generateTitle).toHaveBeenCalledWith(
+      expect.objectContaining({ model })
+    )
+    expect(
+      testApp.llmServiceSpies.groq.findLlmContextMeasurement
+    ).toHaveBeenCalledWith(model.modelKey, [])
+    expect(testApp.findLlmContextMeasurement).not.toHaveBeenCalled()
+    const conversationId = findStartedConversationId(response.body)
+    expect(
+      testApp.app.conversationHistoryReader.getConversation(conversationId)
+        ?.messages[1]
+    ).toMatchObject({
+      role: "assistant",
+      model: model.modelKey,
+      provider: "groq",
+      status: "completed"
+    })
   })
 
   it("has a stored agent answer a new conversation with its stored system prompt", async () => {
@@ -1141,7 +1199,7 @@ describe("updateFastifyWithChatRoute", () => {
         msg: "Chat round was not sent to the model",
         reqId: expect.any(String),
         err: expect.objectContaining({
-          message: `The model "${NEW_CONVERSATION_REQUEST.model}" is not loaded`
+          message: `The model "${NEW_CONVERSATION_REQUEST.model.modelKey}" is not loaded on LM Studio`
         })
       })
     )
@@ -2067,7 +2125,9 @@ describe("updateFastifyWithChatRoute", () => {
   describe("attachments", () => {
     /** The request model as the inventory lists a text-only model that uses tools. */
     const TEXT_MODEL_INFO: DownloadedLlmModel = Object.freeze({
-      ...createDownloadedLlmModel({ modelKey: NEW_CONVERSATION_REQUEST.model }),
+      ...createDownloadedLlmModel({
+        modelKey: NEW_CONVERSATION_REQUEST.model.modelKey
+      }),
       vision: false,
       trainedForToolUse: true
     })
@@ -2348,8 +2408,9 @@ describe("updateFastifyWithChatRoute", () => {
         expect(
           chatImageNeedsVisionProblemSchema.parse(response.json())
         ).toMatchObject({
+          detail: `The image photo.png needs a model with vision, and ${NEW_CONVERSATION_REQUEST.model.modelKey} on LM Studio cannot see images.`,
           fileName: "photo.png",
-          model: NEW_CONVERSATION_REQUEST.model,
+          model: NEW_CONVERSATION_REQUEST.model.modelKey,
           instance: chatApi.path
         })
         expect(testApp.completeChatStream).not.toHaveBeenCalled()
@@ -2445,7 +2506,10 @@ describe("updateFastifyWithChatRoute", () => {
       const second = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
         conversation: { kind: "existing", id: conversationId },
-        model: OTHER_TEXT_MODEL_INFO.modelKey,
+        model: {
+          provider: "lmStudio",
+          modelKey: OTHER_TEXT_MODEL_INFO.modelKey
+        },
         message: "One more",
         attachments: [buildTextAttachmentPayload("plan.txt", "Go")]
       })
@@ -2477,7 +2541,10 @@ describe("updateFastifyWithChatRoute", () => {
       const second = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
         conversation: { kind: "existing", id: conversationId },
-        model: OTHER_TEXT_MODEL_INFO.modelKey,
+        model: {
+          provider: "lmStudio",
+          modelKey: OTHER_TEXT_MODEL_INFO.modelKey
+        },
         message: "One more",
         attachments: [buildTextAttachmentPayload("plan.txt", "Go")]
       })
@@ -2510,7 +2577,7 @@ describe("updateFastifyWithChatRoute", () => {
         ...NEW_CONVERSATION_REQUEST,
         conversation: { kind: "existing", id: start.conversation.id },
         message: "And now?",
-        model: textOnlyModel
+        model: { provider: "lmStudio", modelKey: textOnlyModel }
       })
 
       expect(first.statusCode).toBe(200)
@@ -2813,7 +2880,9 @@ describe("updateFastifyWithChatRoute", () => {
   describe("agent state tools", () => {
     /** The request model as the inventory lists a model trained for tool use. */
     const TOOL_MODEL_INFO: DownloadedLlmModel = Object.freeze({
-      ...createDownloadedLlmModel({ modelKey: NEW_CONVERSATION_REQUEST.model }),
+      ...createDownloadedLlmModel({
+        modelKey: NEW_CONVERSATION_REQUEST.model.modelKey
+      }),
       trainedForToolUse: true
     })
 
@@ -2952,7 +3021,7 @@ describe("updateFastifyWithChatRoute", () => {
 
       expect(response.statusCode).toBe(200)
       const armitageRequest = testApp.completeChatStream.mock.calls[1]?.[0]
-      expect(armitageRequest?.model).toBe(NEW_CONVERSATION_REQUEST.model)
+      expect(armitageRequest?.model).toEqual(NEW_CONVERSATION_REQUEST.model)
       expect(armitageRequest?.messages.slice(0, 2)).toEqual([
         { role: "system", content: TEST_BUILT_IN_AGENT_PROMPTS.armitage },
         { role: "user", content: "define a word" }
@@ -2961,6 +3030,48 @@ describe("updateFastifyWithChatRoute", () => {
         "search_tools",
         "recommend_tool"
       ])
+    })
+
+    it("has Armitage measure and stream on the provider of the asking reply's model, sending nothing to LM Studio", async () => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      const model: LlmModelReference = {
+        provider: "groq",
+        modelKey: NEW_CONVERSATION_REQUEST.model.modelKey
+      }
+      const groq = testApp.llmServiceSpies.groq
+      groq.listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set(["look_up_word"])
+      })
+      addFoundToolTurnStreams(testApp)
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        model,
+        tools: { definitions: [], backendToolNames: ["look_up_word"] }
+      })
+
+      expect(response.statusCode).toBe(200)
+      const armitageRequest = testApp.completeChatStream.mock.calls[1]?.[0]
+      expect(armitageRequest?.messages[0]).toEqual({
+        role: "system",
+        content: TEST_BUILT_IN_AGENT_PROMPTS.armitage
+      })
+      expect(armitageRequest?.model).toEqual(model)
+      expect(groq.findLlmContextMeasurement).toHaveBeenCalledWith(
+        model.modelKey,
+        expect.arrayContaining([TEST_BUILT_IN_AGENT_PROMPTS.armitage])
+      )
+      const lmStudio = testApp.llmServiceSpies.lmStudio
+      expect(lmStudio.findLlmContextMeasurement).not.toHaveBeenCalled()
+      expect(lmStudio.listDownloadedLlmModels).not.toHaveBeenCalled()
+      expect(
+        testApp.completeChatStream.mock.calls.map(
+          ([request]) => request.model.provider
+        )
+      ).not.toContain("lmStudio")
     })
 
     it("offers the found tool from the reply's next round, runs its call saved as Just run without asking, and stores the search as the find_tools call alone", async () => {
@@ -3243,7 +3354,7 @@ describe("updateFastifyWithChatRoute", () => {
         /^You are Caliginia \(code caliginia\), a leader\. /
       )
       expect(callPart.result).toMatch(
-        /\nRequest slots: 1 of 2 in use\.\n1\. This reply, in this conversation: started [^\n]+ with qwen\/qwen3-8b; using tools: read_my_state running\.\nNothing else is in progress\.$/
+        /\nRequest slots: 1 of 2 in use\.\n1\. This reply, in this conversation: started [^\n]+ with qwen\/qwen3-8b on LM Studio; using tools: read_my_state running\.\nNothing else is in progress\.$/
       )
       expect(
         testApp.completeChatStream.mock.calls[1]?.[0].messages.at(-1)

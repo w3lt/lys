@@ -1,8 +1,11 @@
 import type { SettingsPane } from "@/app/types"
 import { loadSettings } from "@/lib/apis/tauri/settings"
 import { initialSettingsState, type LysSettings } from "./settings"
-import { buildModelRuntime } from "./model-runtime"
-import { createModelSlice, type ModelSlice } from "./model-actions"
+import {
+  INITIAL_PROVIDER_MODEL_STATES,
+  type LlmProviderStatus
+} from "./model-runtime"
+import { createModelSlice, type ModelActions } from "./model-actions"
 import {
   isGenerationSettingsEqual,
   createGenerationSettingsSlice,
@@ -43,12 +46,18 @@ import {
 import { getBackendReadiness, type BackendReadiness } from "./backend-readiness"
 import { createVmoRuntimeSlice, type VmoRuntimeSlice } from "./vmo-runtime"
 import {
-  createLmStudioStatusSlice,
-  type LmStudioStatus,
-  type LmStudioStatusSlice
-} from "./lm-studio-status"
+  createProviderStatusSlice,
+  type ProviderBackendConnection,
+  type ProviderModelsState,
+  type ProviderStatusActions
+} from "./provider-status"
 import { create, type StoreApi } from "zustand"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
+import {
+  LLM_PROVIDERS,
+  type LlmModelReference,
+  type LlmProvider
+} from "@lys/share"
 import { getBackendStatus, startBackend, stopBackend } from "../apis"
 import { getVmoStatus } from "@/lib/apis/tauri/vmo"
 import { sendWebSearchKeyCheck } from "../apis/http/tools"
@@ -80,11 +89,21 @@ export type BackendServerInfo = {
 }
 
 /** Mutable application values owned by the Zustand store. */
-type LysState = {
+type LysState = ProviderModelsState & {
   /** Active top-level view. */
   activeView: AppView
   /** Pane the settings view opens on; retained across visits to settings. */
   settingsPane: SettingsPane
+  /**
+   * Model the Models pane shows, or null for the pane's own choice; retained
+   * across visits to settings.
+   */
+  modelPaneSelection: LlmModelReference | null
+  /**
+   * Provider the Models pane's picker chose while no model of it is selected,
+   * or null for the pane's own choice; retained across visits to settings.
+   */
+  modelPaneProvider: LlmProvider | null
   /** Settings loaded from or destined for Tauri persistence. */
   settings: LysSettings
   /** Local HTTP base URL used by desktop transport consumers. */
@@ -109,6 +128,24 @@ type LysActions = {
    * @param pane - Pane to make active; it stays selected until changed again.
    */
   setSettingsPane: (pane: SettingsPane) => void
+  /**
+   * Selects the model the Models pane shows.
+   *
+   * @param model - Model to show, or null to leave the choice to the pane.
+   */
+  setModelPaneSelection: (model: LlmModelReference | null) => void
+  /**
+   * Shows one provider in the Models pane with no model of it selected.
+   *
+   * @param provider - Provider the pane's picker chose.
+   */
+  setModelPaneProvider: (provider: LlmProvider) => void
+  /**
+   * Opens the settings view on the Models pane, showing one model.
+   *
+   * @param model - Model the pane shows.
+   */
+  showModelInSettings: (model: LlmModelReference) => void
   /**
    * Replaces store-owned settings and automatically persists generation, load
    * configuration, tools, and startup switch edits.
@@ -137,7 +174,8 @@ type LysActions = {
    * answers, it exits, or the readiness timeout passes.
    *
    * @returns A promise resolving after the status is `running`,
-   * `unresponsive`, or `stopped`, and after the LM Studio status is read when running.
+   * `unresponsive`, or `stopped`, and after every provider's status is read
+   * when running.
    * @throws The Tauri status or start rejection, after `stopped` is
    * published when no backend process remains, or `unresponsive` while one
    * runs or its status cannot be read, so Start or Stop is offered again.
@@ -168,7 +206,7 @@ type LysActions = {
 /** Complete Zustand store contract combining state and actions. */
 type LysStore = LysState &
   LysActions &
-  ModelSlice &
+  ModelActions &
   GenerationSettingsSlice &
   LoadConfigurationSettingsSlice &
   SecretsSettingsSlice &
@@ -179,7 +217,7 @@ type LysStore = LysState &
   ToolSettingsSlice &
   RuntimeAutoStartSettingsSlice &
   VmoRuntimeSlice &
-  LmStudioStatusSlice
+  ProviderStatusActions
 
 /** Settings slices of {@link LysStore}, each saving its own group. */
 type LysSettingsSlices = GenerationSettingsSlice &
@@ -194,8 +232,11 @@ type LysSettingsSlices = GenerationSettingsSlice &
 
 /** Initial renderer-side store state before Tauri initialization. */
 const initialState: LysState = {
+  providerModels: INITIAL_PROVIDER_MODEL_STATES,
   activeView: "chat",
   settingsPane: "runtime",
+  modelPaneSelection: null,
+  modelPaneProvider: null,
   settings: initialSettingsState,
   backendUrl: `http://${BACKEND_HOST}:${BACKEND_PORT}`,
   initializing: true,
@@ -226,7 +267,7 @@ async function getBackendReadinessAfterFailure(): Promise<
 
 /**
  * Zustand hook and store for application view, settings, backend and vmo
- * lifecycles, and the model provider's status.
+ * lifecycles, and every model provider's status and models.
  *
  * @remarks Initialization and process actions are application-owned
  * asynchronous transitions. Tauri errors propagate from the returned promises;
@@ -237,14 +278,18 @@ async function getBackendReadinessAfterFailure(): Promise<
  * runtime-autostart slices own automatic saves and retain their completion or
  * failure state across pane changes; the store runs every group's writes one at a time, so
  * one group's save never writes back another group's older value. A saved
- * provider choice, address, or key in use makes the backend connect again.
+ * change that turns a provider on or off, changes its address, or changes a
+ * key it uses makes the backend connect to that provider again.
  *
- * Model requests are owned by the model slice, use the shared HTTP protocol,
- * and are admitted only while the backend runs and the provider is
- * connected. A provider status change to `connected` refreshes inventory;
- * any other change releases model observations. A failed model request
- * re-reads the provider status. Every load sends the stored load
- * configuration of the model being loaded.
+ * Every provider has its own status and model state in `providerModels`.
+ * Once the backend is ready, every provider's status is read at once. Model
+ * requests are owned by the model slice, use the shared HTTP protocol, and
+ * are admitted for a provider only while the backend runs and that provider
+ * is connected; providers never wait for one another. A provider's status
+ * change to `connected` refreshes its inventory; any other change releases
+ * its model observations. A failed model request re-reads its provider's
+ * status. Every load sends the stored load configuration of the model being
+ * loaded.
  */
 export const useLysStore = create<LysStore>()(createLysStoreState)
 
@@ -276,7 +321,7 @@ function createLysSettingsSlices(
     ...createProviderSettingsSlice(set, get, {
       saveProviderSettings: settingsGroupSaves.saveProviderSettings,
       saveSecretsSettings: settingsGroupSaves.saveSecretsSettings,
-      connectLlmProvider: () => get().connectLmStudio()
+      connectLlmProvider: (provider) => get().connectProvider(provider)
     }),
     ...createLocationSettingsSlice(set, get, {
       saveLocationSettings: settingsGroupSaves.saveLocationSettings
@@ -307,8 +352,8 @@ function createLysStoreState(
    * Publishes one readiness outcome unless the start transition was superseded.
    *
    * @param readiness - Outcome observed for the started backend.
-   * @returns A promise resolving after publication and, when ready, after the
-   * LM Studio status is read.
+   * @returns A promise resolving after publication and, when ready, after
+   * every provider's status is read.
    */
   async function updateBackendServerReadiness(
     readiness: BackendReadiness
@@ -323,7 +368,7 @@ function createLysStoreState(
             stoppedAt: undefined
           }
         })
-        await get().updateLmStudioStatus()
+        await get().updateProviderStatuses()
         return
       case "unresponsive":
         set({
@@ -352,9 +397,9 @@ function createLysStoreState(
    * @param stoppedAt - Renderer time at which the process was found gone.
    */
   function handleBackendProcessExit(stoppedAt: Date): void {
-    get().resetLmStudioStatus()
-    // LM Studio owns weights separately; discard observations until reconnect.
-    get().releaseModelRuntime()
+    get().resetProviderStatuses()
+    // Providers own weights separately; discard observations until reconnect.
+    releaseEveryProviderModels()
     set((prev) => ({
       ...prev,
       backendServerInfo: {
@@ -400,16 +445,38 @@ function createLysStoreState(
   }
 
   /**
-   * Refreshes model observations when LM Studio connects and releases them otherwise.
+   * Refreshes a provider's model observations when it connects and releases
+   * them otherwise.
    *
-   * @param lmStudioStatus - Newly published LM Studio status.
+   * @param provider - Provider whose status changed.
+   * @param status - Its newly published status.
    */
-  function handleLmStudioStatusChange(lmStudioStatus: LmStudioStatus): void {
-    if (lmStudioStatus === "connected") {
-      void get().updateModelInventory()
+  function handleProviderStatusChange(
+    provider: LlmProvider,
+    status: LlmProviderStatus
+  ): void {
+    if (status === "connected") {
+      void get().updateModelInventory(provider)
       return
     }
-    get().releaseModelRuntime()
+    get().releaseProviderModels(provider)
+  }
+
+  /** Releases every provider's model observations, keeping their statuses. */
+  function releaseEveryProviderModels(): void {
+    for (const provider of LLM_PROVIDERS) get().releaseProviderModels(provider)
+  }
+
+  /**
+   * Reads the backend's origin and whether it runs.
+   *
+   * @returns The origin and whether the backend's health route answered.
+   */
+  function getBackendConnection(): ProviderBackendConnection {
+    return {
+      backendUrl: get().backendUrl,
+      isBackendRunning: get().backendServerInfo.status === "running"
+    }
   }
 
   return {
@@ -417,24 +484,15 @@ function createLysStoreState(
     ...createLysSettingsSlices(set, get),
     ...createVmoRuntimeSlice(set, get),
     ...createModelSlice(set, get, {
-      getConnection: () => ({
-        backendUrl: get().backendUrl,
-        isModelRuntimeAvailable:
-          get().backendServerInfo.status === "running" &&
-          get().lmStudioStatus === "connected",
-        defaultModel: get().settings.runtime.defaultModel
-      }),
-      handleModelRequestFailure: async () => {
-        await get().updateLmStudioStatus()
+      getBackendConnection,
+      handleModelRequestFailure: async (provider) => {
+        await get().updateProviderStatus(provider)
       },
       getLoadConfigurationSettings: () => get().settings.loadConfiguration
     }),
-    ...createLmStudioStatusSlice(set, get, {
-      getBackendConnection: () => ({
-        backendUrl: get().backendUrl,
-        isBackendRunning: get().backendServerInfo.status === "running"
-      }),
-      handleLmStudioStatusChange
+    ...createProviderStatusSlice(set, get, {
+      getBackendConnection,
+      handleProviderStatusChange
     }),
 
     setActiveView: (view) => {
@@ -445,13 +503,23 @@ function createLysStoreState(
       set({ settingsPane: pane })
     },
 
+    setModelPaneSelection: (model) => {
+      set({ modelPaneSelection: model })
+    },
+
+    setModelPaneProvider: (provider) => {
+      set({ modelPaneProvider: provider, modelPaneSelection: null })
+    },
+
+    showModelInSettings: (model) => {
+      set({
+        activeView: "settings",
+        settingsPane: "model",
+        modelPaneSelection: model
+      })
+    },
+
     setSettings: (settings) => {
-      const { modelInventory, modelRequest } = get()
-      const modelRuntime = buildModelRuntime(
-        modelInventory,
-        modelRequest,
-        settings.runtime.defaultModel
-      )
       const hasGenerationChanged = !isGenerationSettingsEqual(
         get().settings.generation,
         settings.generation
@@ -477,7 +545,7 @@ function createLysStoreState(
         get().settings.runtime,
         settings.runtime
       )
-      set({ settings, modelRuntime, generationSave, loadConfigurationSave })
+      set({ settings, generationSave, loadConfigurationSave })
       if (hasGenerationChanged) void get().saveGenerationSettings()
       if (hasLoadConfigurationChanged)
         void get().saveLoadConfigurationSettings()
@@ -524,8 +592,8 @@ function createLysStoreState(
           status: "stopping"
         }
       }))
-      get().resetLmStudioStatus()
-      get().releaseModelRuntime()
+      get().resetProviderStatuses()
+      releaseEveryProviderModels()
       let processStatus: Awaited<ReturnType<typeof stopBackend>>
       try {
         processStatus = await stopBackend()

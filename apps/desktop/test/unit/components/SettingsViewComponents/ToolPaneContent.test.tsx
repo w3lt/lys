@@ -12,6 +12,7 @@ import { buildLlmInfo } from "../../support/modelFixtures"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import {
   READY_RUNTIME,
+  updateStoreRuntime,
   type RuntimeArrangement
 } from "../../support/runtimeFixtures"
 import {
@@ -478,10 +479,7 @@ describe("ToolPaneContent", () => {
     await user.click(screen.getByRole("button", { name: "read_text_file" }))
 
     act(() => {
-      useLysStore.setState({
-        modelInventory: UNTRAINED_RUNTIME.modelInventory,
-        modelRuntime: { status: "loaded", modelKey: "gemma-3" }
-      })
+      updateStoreRuntime(useLysStore, UNTRAINED_RUNTIME)
     })
 
     expect(
@@ -498,10 +496,7 @@ describe("ToolPaneContent", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "false")
 
     act(() => {
-      useLysStore.setState({
-        modelInventory: TRAINED_RUNTIME.modelInventory,
-        modelRuntime: { status: "loaded", modelKey: "qwen3-8b" }
-      })
+      updateStoreRuntime(useLysStore, TRAINED_RUNTIME)
     })
 
     expect(

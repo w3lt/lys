@@ -13,13 +13,9 @@ import {
   saveProviderSettings,
   saveRuntimeAutoStartSettings,
   saveSecretsSettings,
-  saveSettings,
   saveToolSettings
 } from "@/lib/apis/tauri/settings"
-import type {
-  LoadConfigurationSettings,
-  LysSettings
-} from "@/lib/store/settings"
+import type { LoadConfigurationSettings } from "@/lib/store/settings"
 import {
   NO_NATIVE_COMMAND_ARGS,
   startNativeHostFake
@@ -89,27 +85,13 @@ const PROTOTYPE_KEY_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   })
 })
 
-/** The renderer's settings for {@link PROTOTYPE_KEY_SETTINGS_DOCUMENT}. */
-const PROTOTYPE_KEY_SETTINGS: LysSettings = Object.freeze({
-  ...STORED_SETTINGS,
-  loadConfiguration: Object.freeze({
-    default: STORED_SETTINGS.loadConfiguration.default,
-    models: new Map([["__proto__", PROTOTYPE_KEY_LOAD_CONFIGURATION]])
-  }),
-  tools: Object.freeze({
-    approvedFolderPaths: [],
-    justRunToolNames: STORED_SETTINGS.tools.justRunToolNames,
-    switches: new Map([["__proto__", false]])
-  })
-})
-
 /** Load settings a mixture-of-experts model has of its own after an edit. */
 const EDITED_MODEL_LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
   numExperts: 4
 })
 
 /**
- * Load settings the store holds after the Model pane edited them: only
+ * Load settings the store holds after the Models pane edited them: only
  * `qwen3-30b-a3b` has settings of its own, and the store's copy of the stored
  * default, read at startup, predates a hand edit of the file.
  */
@@ -195,7 +177,63 @@ describe("loadSettings", () => {
     }
   )
 
-  it("reads the provider choice with its addresses", async () => {
+  it("reads the stored default model's key on the first provider that is on, in provider order", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        providers: { ...STORED_PROVIDERS_SETTINGS, enabled: ["groq", "ollama"] }
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.runtime.defaultModel).toEqual({
+      provider: "ollama",
+      modelKey: "qwen3-8b"
+    })
+  })
+
+  it("reads the stored default model's key as no model while no provider is on", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        providers: { ...STORED_PROVIDERS_SETTINGS, enabled: [] }
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.runtime.defaultModel).toBeNull()
+  })
+
+  it("reads a settings file without a default model as no model", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        runtime: { ...STORED_SETTINGS_DOCUMENT.runtime, defaultModel: null }
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.runtime.defaultModel).toBeNull()
+  })
+
+  it("reads an empty stored default model's key as no model while a provider is on", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        providers: { ...STORED_PROVIDERS_SETTINGS, enabled: ["lmStudio"] },
+        runtime: { ...STORED_SETTINGS_DOCUMENT.runtime, defaultModel: "" }
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.runtime.defaultModel).toBeNull()
+  })
+
+  it("reads the providers that are on with their addresses", async () => {
     startNativeHostFake({ load_settings: () => STORED_SETTINGS_DOCUMENT })
 
     const settings = await loadSettings()
@@ -203,16 +241,16 @@ describe("loadSettings", () => {
     expect(settings.providers).toEqual(STORED_PROVIDERS_SETTINGS)
   })
 
-  it("rejects a provider choice that fails the provider rules", async () => {
+  it("rejects a providers group that fails the provider rules", async () => {
     startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
-        providers: { ...STORED_PROVIDERS_SETTINGS, active: "openai" }
+        providers: { ...STORED_PROVIDERS_SETTINGS, enabled: ["openai"] }
       })
     })
 
     await expect(loadSettings()).rejects.toThrow(
-      "The settings file holds an invalid provider choice."
+      "The settings file holds an invalid providers group."
     )
   })
 
@@ -490,57 +528,6 @@ describe("loadSettings", () => {
   })
 })
 
-describe("saveSettings", () => {
-  it("sends the settings as the command's newSettings document, the per-model load settings as one object keyed by model key", async () => {
-    const host = startNativeHostFake({ save_settings: () => null })
-
-    await saveSettings(STORED_SETTINGS)
-
-    expect(host.commands).toEqual([
-      {
-        command: "save_settings",
-        args: { newSettings: STORED_SETTINGS_DOCUMENT }
-      }
-    ])
-  })
-
-  it("sends a model key and a switched tool's name that name an object-prototype member as properties of their own", async () => {
-    const host = startNativeHostFake({ save_settings: () => null })
-
-    await saveSettings(PROTOTYPE_KEY_SETTINGS)
-
-    expect(host.commands).toEqual([
-      {
-        command: "save_settings",
-        args: { newSettings: PROTOTYPE_KEY_SETTINGS_DOCUMENT }
-      }
-    ])
-  })
-
-  it("resolves only after the host finishes writing", async () => {
-    const write = createControlledPromise<null>()
-    startNativeHostFake({ save_settings: () => write.promise })
-
-    const getSettlement = createSettlementReader(saveSettings(STORED_SETTINGS))
-    await waitForMicrotasks()
-    const beforeWrite = getSettlement()
-    write.resolve(null)
-    await waitForMicrotasks()
-
-    expect([beforeWrite, getSettlement()]).toEqual(["pending", "fulfilled"])
-  })
-
-  it("rejects with the host's rejection", async () => {
-    startNativeHostFake({
-      save_settings: () => Promise.reject("Failed to write settings.json")
-    })
-
-    await expect(saveSettings(STORED_SETTINGS)).rejects.toBe(
-      "Failed to write settings.json"
-    )
-  })
-})
-
 describe("saveGenerationSettings", () => {
   it("replaces only the generation group of the document on disk", async () => {
     const host = startNativeHostFake({
@@ -576,6 +563,24 @@ describe("saveGenerationSettings", () => {
     expect(host.commands.map((invoked) => invoked.command)).toEqual([
       "load_settings"
     ])
+  })
+
+  it("resolves only after the host finishes writing", async () => {
+    const write = createControlledPromise<null>()
+    startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => write.promise
+    })
+
+    const getSettlement = createSettlementReader(
+      saveGenerationSettings({ temperature: 0.9, replyCeiling: 0 })
+    )
+    await waitForMicrotasks()
+    const beforeWrite = getSettlement()
+    write.resolve(null)
+    await waitForMicrotasks()
+
+    expect([beforeWrite, getSettlement()]).toEqual(["pending", "fulfilled"])
   })
 
   it("rejects when the merged document cannot be written", async () => {
@@ -614,6 +619,28 @@ describe("saveLoadConfigurationSettings", () => {
         }
       }
     ])
+  })
+
+  it("writes a model key that names an object-prototype member as a property of its own", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveLoadConfigurationSettings({
+      default: STORED_SETTINGS.loadConfiguration.default,
+      models: new Map([["__proto__", PROTOTYPE_KEY_LOAD_CONFIGURATION]])
+    })
+
+    expect(host.commands[1]).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          loadConfiguration: PROTOTYPE_KEY_SETTINGS_DOCUMENT.loadConfiguration
+        }
+      }
+    })
   })
 
   it("writes nothing when the document cannot be loaded", async () => {
@@ -721,7 +748,7 @@ describe("saveProviderSettings", () => {
       save_settings: () => null
     })
     const providers = llmProviderSettingsSchema.parse({
-      active: "ollamaCloud",
+      enabled: ["lmStudio", "ollamaCloud"],
       lmStudio: { address: "10.0.0.5:1234" },
       ollama: { address: null }
     })
@@ -1045,6 +1072,29 @@ describe("saveToolSettings", () => {
     })
   })
 
+  it("writes a switched tool's name that names an object-prototype member as a property of its own", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveToolSettings({
+      approvedFolderPaths: [],
+      justRunToolNames: STORED_SETTINGS.tools.justRunToolNames,
+      switches: new Map([["__proto__", false]])
+    })
+
+    expect(host.commands[1]).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          tools: PROTOTYPE_KEY_SETTINGS_DOCUMENT.tools
+        }
+      }
+    })
+  })
+
   it("writes the approved folders in the list's order", async () => {
     const host = startNativeHostFake({
       load_settings: () => STORED_SETTINGS_DOCUMENT,
@@ -1133,6 +1183,36 @@ describe("saveRuntimeAutoStartSettings", () => {
       { command: "load_settings", args: NO_NATIVE_COMMAND_ARGS },
       { command: "save_settings", args: saveSettingsArgs }
     ])
+  })
+
+  it("keeps the stored default model's key while no provider is on, though the renderer reads no default model then", async () => {
+    const noProviderOn: SettingsDocument = {
+      ...STORED_SETTINGS_DOCUMENT,
+      providers: { ...STORED_PROVIDERS_SETTINGS, enabled: [] }
+    }
+    const host = startNativeHostFake({
+      load_settings: () => noProviderOn,
+      save_settings: () => null
+    })
+
+    await saveRuntimeAutoStartSettings({
+      autoStartBackend: true,
+      autoStartVmo: false
+    })
+
+    expect(host.commands[1]).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: {
+          ...noProviderOn,
+          runtime: {
+            ...STORED_SETTINGS_DOCUMENT.runtime,
+            autoStartBackend: true,
+            autoStartVmo: false
+          }
+        }
+      }
+    })
   })
 
   it("writes nothing when the document cannot be loaded", async () => {

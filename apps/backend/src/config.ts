@@ -70,8 +70,8 @@ export const backendConfigSchema = z
       .refine(isAbsolute, "Database file path must be absolute."),
     /**
      * Absolute filesystem path of the desktop's settings file, which the
-     * backend reads for the active model provider, its address or API key,
-     * and the Tavily API key of `web_search`.
+     * backend reads for whether each model provider is on, its address or
+     * API key, and the Tavily API key of `web_search`.
      *
      * @remarks The desktop host is the file's only writer; the backend only
      * reads it, on demand, and never caches what it read.

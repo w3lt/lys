@@ -221,11 +221,11 @@ seconds, and the row shows `Starting` until then.
 Each MCP tool appears in its server's details in Settings → MCP, with a
 choice of Ask, Run, or Off, and starts on, asking before each call until you
 choose Run for it. A search field above the tools finds one by its name or
-description. The details also say what the tools that are on cost per
-request, and set Ask me or Just run for all of the server's tools at once.
-Every tool that is not off is described to the model with each request, so
-set the ones you do not need to Off. Settings → Tools lists only Lys's own
-tools.
+description. The details also say what the tools that are on cost at most
+per request, and set Ask me or Just run for all of the server's tools at
+once. A request carries the description of a tool that is not off once
+Armitage finds that tool for it, and a tool that is Off is never offered.
+Settings → Tools lists only Lys's own tools.
 
 Environment values, the token, header values, URLs, and arguments are saved as
 plain text in `settings.json`, readable only by your user account; the editor

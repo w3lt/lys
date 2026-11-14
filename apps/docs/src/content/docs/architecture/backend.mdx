@@ -379,6 +379,10 @@ For each call, in order:
 
 1. A call of a tool its round did not offer, such as a routed turn's tool
    Armitage has not found, is stored as failed with a result the model reads.
+   So is a call of an MCP tool only Lys may use, the tools of
+   [her mailbox](#the-email-server), by an agent other than Caliginia and
+   Lysiptera: the gateway leaves those tools out of what that agent can call
+   before the round's calls are handled.
 2. `AgentTool` checks the arguments against the tool's definition, only
    their shape for an MCP tool, and a backend tool's `parseToolCall` checks
    them for what it can run; a call either refuses is stored as failed.
@@ -1440,10 +1444,11 @@ It then serves MCP over stdio with ten tools for each mailbox it was given:
 and `delete_draft` for the person's, and the same ten with `lys_` before
 their names, such as `lys_send_email`, for Lys's. Both copies of a tool come
 from its one definition, with the same arguments and annotations; each
-description begins with the mailbox it works on, and those of the two send
-tools end with that mailbox's address, so the model can give it as their
-required `from`. Ids of Lys's mailbox begin with `lys.`, and each tool
-refuses an id of the other mailbox, saying which tools take it; the [API
+description begins with the mailbox it works on and names no address. A send
+tool takes no sender: it sends only from its own mailbox's address. Ids of
+Lys's mailbox begin with `lys.`. Lys's tools refuse an id of the person's
+mailbox, saying which tools take it; the person's tools refuse an id of Lys's
+as no id, so nothing they answer names her mailbox. The [API
 reference](/reference/api/#the-email-servers-tools) says what each tool does.
 Every call opens at most one IMAP and one SMTP connection of its own and
 closes them before answering. A reply, a forward, and `send_draft` keep their
@@ -1474,6 +1479,19 @@ gives the address of her account. A turn of Caliginia or Lysiptera passes it
 to `read_my_state`, which says "Your email address is …", or "You have no
 email address in use." while there is none; another agent's state never names
 it, so no other agent takes Lys's address for its own.
+
+Lys's mailbox is hers alone: only Caliginia and Lysiptera may use its tools.
+`EmailMcpServer.isLysOnlyTool` tells them by name, `mcp__email__lys_…`, and
+the registry marks each such tool it finds for a turn as `isLysOnly`, only
+while the built-in server is applied under the name, never for an added
+server that takes it. The chat route leaves those tools out of the turn of
+any other agent, and the chat-context route out of its measurement, so that
+agent is never offered them, Armitage never searches them for it, and no
+routing note counts them. The [tool execution gateway](#tool-call-policy)
+refuses such an agent's call of one anyway, as a call of a tool its round did
+not offer: stored as failed, never asked about, never run, and answered
+without naming it among the tools the agent can call. The person's tools stay
+offered to every agent, and Settings lists both mailboxes' tools.
 
 ### Email account check
 

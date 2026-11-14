@@ -272,9 +272,11 @@ card says so otherwise. To add an account:
    you choose Just run, unless a Just run choice saved for a tool of the same
    name of an earlier server named `email` was kept; see
    [Choices kept by name](/architecture/security/#mcp-servers). Every send
-   from either mailbox asks first, even on Just run, and shows the address
-   it leaves from. While her mailbox is on, Lys's agents, Caliginia and
-   Lysiptera, learn her address when they read their own state.
+   from either mailbox asks first, even on Just run, and the approval card
+   names the tool, `send_email` or `lys_send_email`, which tells the mailbox
+   it leaves from. Lys's mailbox is hers: only her agents, Caliginia and
+   Lysiptera, are offered its tools, and only they learn her address when
+   they read their own state. Every agent can use your mailbox's tools.
 6. To stop using an account, press **Remove account** on its card and
    confirm: Lys switches that mailbox off and removes the account and the
    password, keeping the other card's.

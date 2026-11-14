@@ -1,4 +1,3 @@
-import type { TurnDelegationHooks } from "../chat/turnStart"
 import type { DelegationDependencies, DelegationRuntime } from "./dependencies"
 import { handleReplyEnded } from "./replyEnds"
 import { createTurnDelegation, handleTurnStarted } from "./turnDelegations"
@@ -10,8 +9,8 @@ import { createTurnDelegation, handleTurnStarted } from "./turnDelegations"
  *
  * @param dependencies - Collaborators borrowed from the composition root,
  * for as long as turns are started and their generations run.
- * @returns The frozen runtime: the dependencies, and hooks that call
- * {@link handleTurnStarted}, {@link createTurnDelegation}, and
+ * @returns The frozen runtime: the dependencies, and the three hooks, which
+ * call {@link handleTurnStarted}, {@link createTurnDelegation}, and
  * {@link handleReplyEnded} with the runtime itself. A turn started with the
  * hooks takes part in delegation through the same policies, a job's turn
  * included.
@@ -22,7 +21,8 @@ import { createTurnDelegation, handleTurnStarted } from "./turnDelegations"
 export function createDelegationRuntime(
   dependencies: DelegationDependencies
 ): DelegationRuntime {
-  const hooks: TurnDelegationHooks = Object.freeze({
+  const runtime: DelegationRuntime = Object.freeze({
+    ...dependencies,
     handleTurnStarted: (context) => {
       handleTurnStarted(runtime, context)
     },
@@ -31,6 +31,5 @@ export function createDelegationRuntime(
       handleReplyEnded(runtime, reply)
     }
   })
-  const runtime: DelegationRuntime = Object.freeze({ ...dependencies, hooks })
   return runtime
 }

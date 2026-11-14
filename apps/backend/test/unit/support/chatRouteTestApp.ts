@@ -25,10 +25,7 @@ import { buildBuiltInAgents } from "../../../src/modules/agent/builtInAgents"
 import ChatService from "../../../src/modules/chat/chatService"
 import LlmReplyContextMeter from "../../../src/modules/chat/llmReplyContextMeter"
 import OpenAiReplyModel from "../../../src/modules/chat/openAiReplyModel"
-import type {
-  ConversationDeletionActivity,
-  ConversationReader
-} from "../../../src/modules/conversation/capabilities"
+import type { ConversationReader } from "../../../src/modules/conversation/capabilities"
 import type StoredConversationTurns from "../../../src/modules/conversation/turns"
 import ReplyGenerationRegistry from "../../../src/modules/chat/replyGenerationRegistry"
 import {
@@ -314,11 +311,12 @@ export type AgentConversationTestServices = Readonly<{
  * decorated turn start is the real one, as {@link registerTestTurnStart}
  * binds it to the decorated services and to the decorated reply generation
  * registry, which is the returned one. The decorated delegation hooks, the
- * person's stops, and the deletion's activity are the real ones, as
+ * person's stops, and the listing and cancellation of a deleted
+ * conversation's work are the real ones, as
  * {@link registerTestTurnDelegations} builds them over the decorated
  * services and the same database. When the
- * test finishes, the activity hub of the delegation hooks is closed and the
- * generation registry is disposed first, so every generation it holds has
+ * test finishes, the activity hub of the delegation hooks is disposed of and
+ * the generation registry is disposed first, so every generation it holds has
  * stored its final state before the in-memory conversation database is
  * closed; the directory is removed last.
  */
@@ -400,21 +398,23 @@ function registerTestTurnStart(
 }
 
 /**
- * Registers the delegation hooks, the person's stops, and the deletion's
- * activity with the chat route test app, over a delegation runtime built as
- * the backend's composition root builds its own.
+ * Registers the delegation hooks, the person's stops, and the listing and
+ * cancellation of a deleted conversation's work with the chat route test
+ * app, over a delegation runtime built as the backend's composition root
+ * builds its own.
  *
  * @param app - Application with the agent services, the conversation
  * services, the turn start, and the reply generation registry registered;
  * the runtime borrows them for the test.
  * @param database - Database the job records read and write; the caller
  * closes it.
- * @throws If the application already has delegation hooks, either of the
- * person's stops, or the deletion's activity.
+ * @throws If the application already has one of the delegation hooks,
+ * either of the person's stops, or the listing or cancellation of a deleted
+ * conversation's work.
  * @remarks The runtime's job records are the Sqlite ones over the database,
  * and it stores job turns through `app.conversationTurns`, whose turn
  * creation throws until a case configures it. Its hub is a real activity
- * hub of its own, closed when the test finishes, before the generation
+ * hub of its own, disposed of when the test finishes, before the generation
  * registry is disposed. It remembers wake settings and stop requests in
  * instances of its own, allows the job messages of
  * {@link TEST_BACKEND_CONFIG}, and logs its events and the turns it starts
@@ -426,7 +426,7 @@ function registerTestTurnDelegations(
 ): void {
   const activityHub = new ActivityHub()
   onTestFinished(() => {
-    activityHub.close()
+    activityHub[Symbol.dispose]()
   })
   const wakeSettings = new ConversationWakeSettings()
   const stopRequests = new ReplyStopRequests()
@@ -454,18 +454,19 @@ function registerTestTurnDelegations(
     },
     logger: app.log
   })
-  app.decorate("turnDelegations", runtime.hooks)
+  app.decorate("handleTurnStarted", runtime.handleTurnStarted)
+  app.decorate("createTurnDelegation", runtime.createTurnDelegation)
+  app.decorate("handleReplyEnded", runtime.handleReplyEnded)
   app.decorate("stopReply", (target) => stopReplyForPerson(runtime, target))
   app.decorate("stopConversationJobs", (conversationId) =>
     stopConversationJobs(runtime, conversationId)
   )
-  const deletionActivity: ConversationDeletionActivity = Object.freeze({
-    listWorkingReplies: (conversationId) =>
-      listWorkingReplies(runtime, conversationId),
-    stopDeletedReplies: (conversationId, replies) =>
-      stopDeletedReplies(runtime, conversationId, replies)
-  })
-  app.decorate("conversationDeletionActivity", deletionActivity)
+  app.decorate("listWorkingReplies", (conversationId) =>
+    listWorkingReplies(runtime, conversationId)
+  )
+  app.decorate("stopDeletedReplies", (conversationId, replies) =>
+    stopDeletedReplies(runtime, conversationId, replies)
+  )
 }
 
 /**

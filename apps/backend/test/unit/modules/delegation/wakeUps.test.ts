@@ -13,6 +13,7 @@ import {
   DELEGATING_TURN_SETTINGS,
   DELETED_MEMBER,
   FIRST_MEMBER,
+  listTurnHooks,
   MOTHS_REQUEST,
   openDelegationTestServices,
   SECOND_MEMBER,
@@ -222,7 +223,7 @@ describe("startDueWakeUpTurn", () => {
     expect(options.agent.code).toBe(CALIGINIA_AGENT_CODE)
     expect(options.settings).toBe(DELEGATING_TURN_SETTINGS)
     expect(options.startedBy).toBe("backend")
-    expect(options.delegation).toBe(services.runtime.hooks)
+    expect(listTurnHooks(options)).toEqual(listTurnHooks(services.runtime))
     expect(services.hub.addReply).toHaveBeenLastCalledWith(
       { conversationId, parentConversationId: null, assistantMessageId },
       generation

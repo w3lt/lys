@@ -67,8 +67,11 @@ type ActivityHubState =
       followedReplies: Map<string, FollowedReply>
     }>
   | Readonly<{
-      /** Every stream and follower was closed, and nothing is sent again. */
-      status: "closed"
+      /**
+       * The hub was disposed: every stream and follower was closed, and
+       * nothing is sent again.
+       */
+      status: "disposed"
     }>
 
 /**
@@ -77,9 +80,9 @@ type ActivityHubState =
  * followed reply is in a new stream's snapshot until it is removed.
  *
  * @remarks The invariant is that a reply is followed from its `addReply`
- * until its `removeReply` or `close`, and that every open stream receives
- * the hub's events in the order the hub sent them, after the snapshot the
- * stream started with.
+ * until its `removeReply` or the hub's disposal, and that every open stream
+ * receives the hub's events in the order the hub sent them, after the
+ * snapshot the stream started with.
  *
  * Delivery: each event is offered once to every stream open when it is
  * sent, and is never sent again; a stream that connects later learns the
@@ -96,19 +99,25 @@ type ActivityHubState =
  * reply. The connection behind a stream stays with the route that opened
  * the stream.
  *
- * Lifecycle: `close` is final. A closed hub still accepts every call and
- * sends nothing, because replies still end and jobs still change while the
- * backend shuts down after the hub closed.
+ * Lifecycle: `[Symbol.dispose]` is the cleanup, and it is final. After
+ * disposal, `addReply`, `removeReply`, and `sendJobUpdate` do nothing and
+ * `openStream` returns a closed subscription, rather than failing, because
+ * shutdown ends the streams in `preClose` while in-flight requests may
+ * still reach the hub: replies still end and jobs still change while the
+ * backend shuts down.
  *
  * Concurrency model: single-owner, on the backend's event loop. Every
  * operation is synchronous.
  */
 export default class ActivityHub {
-  /** Authoritative state, replaced only by `close`. */
-  #state: ActivityHubState = {
-    status: "open",
-    streams: new Set(),
-    followedReplies: new Map()
+  /** Authoritative state, replaced only by the hub's disposal. */
+  #state: ActivityHubState
+
+  /** Creates an open hub that follows no reply and has no stream. */
+  public constructor() {
+    const streams = new Set<ReplyEventSubscription<ActivityEvent>>()
+    const followedReplies = new Map<string, FollowedReply>()
+    this.#state = { status: "open", streams, followedReplies }
   }
 
   /**
@@ -120,19 +129,19 @@ export default class ActivityHub {
    * the three, so nothing else the object carries, and no later change of
    * it, reaches an event.
    * @param generation - The reply's running generation, borrowed until the
-   * reply is removed or the hub closes.
+   * reply is removed or the hub is disposed.
    * @throws If the hub already follows a reply with that identity; nothing
    * changes.
    * @remarks Call it in the synchronous step that started the generation,
    * so every prompt and tool call of the reply is forwarded. A call the
    * reply already waits on is not sent as an event; it appears only in the
-   * snapshots of later streams. Does nothing once the hub is closed.
+   * snapshots of later streams. Does nothing once the hub is disposed.
    */
   public addReply(
     target: ActivityReplyTarget,
     generation: ActivityGeneration
   ): void {
-    if (this.#state.status === "closed") return
+    if (this.#state.status === "disposed") return
     const { followedReplies } = this.#state
     if (followedReplies.has(target.assistantMessageId))
       throw new Error("This reply is already followed")
@@ -164,7 +173,7 @@ export default class ActivityHub {
    * @param status - Stored final state of the reply; null when the reply is
    * no longer stored or could not be read.
    * @remarks Does nothing for a reply the hub does not follow, and nothing
-   * once the hub is closed. No prompt or tool call of the reply is sent
+   * once the hub is disposed. No prompt or tool call of the reply is sent
    * after its `reply-ended`, not even one the reply sent before this call.
    * The generation is left as it is.
    */
@@ -172,7 +181,7 @@ export default class ActivityHub {
     assistantMessageId: string,
     status: EndedActivityStatus | null
   ): void {
-    if (this.#state.status === "closed") return
+    if (this.#state.status === "disposed") return
     const followedReply = this.#state.followedReplies.get(assistantMessageId)
     if (followedReply === undefined) return
 
@@ -188,7 +197,7 @@ export default class ActivityHub {
    * started from.
    * @param job - The job as it is now; an immutable value, written to each
    * stream after this call returns.
-   * @remarks Sends nothing once the hub is closed.
+   * @remarks Sends nothing once the hub is disposed.
    */
   public sendJobUpdate(parentConversationId: string, job: Job): void {
     this.#sendEvent({ type: "job-updated", parentConversationId, job })
@@ -203,10 +212,10 @@ export default class ActivityHub {
    * the connection has closed; a write pending when the connection closes
    * may never settle.
    * @returns The stream's subscription. Its `closed` settles once the
-   * stream ended, because the hub closed, a write failed, or its queue was
-   * full, and its accepted writes settled. The caller closes it when the
-   * connection ends. After `close`, the returned subscription is already
-   * closed and nothing is written to it.
+   * stream ended, because the hub was disposed, a write failed, or its queue
+   * was full, and its accepted writes settled. The caller closes it when the
+   * connection ends. After the hub's disposal, the returned subscription is
+   * already closed and nothing is written to it.
    * @remarks The snapshot lists every followed reply, in the order the
    * replies were added, with the prompts and desktop tool calls each one
    * waits on at this moment. Because the snapshot is queued in the step
@@ -218,7 +227,7 @@ export default class ActivityHub {
     sendEvent: (event: ActivityEvent) => Promise<void>
   ): ReplyEventSubscription<ActivityEvent> {
     const stream = new ReplyEventSubscription<ActivityEvent>(sendEvent)
-    if (this.#state.status === "closed") {
+    if (this.#state.status === "disposed") {
       stream.close()
       return stream
     }
@@ -235,17 +244,17 @@ export default class ActivityHub {
   }
 
   /**
-   * Closes every stream; later events go nowhere.
+   * Disposes of the hub: closes every stream; later events go nowhere.
    *
-   * @remarks Idempotent and final. It also closes the hub's follower on
-   * every followed generation and leaves the generations running. Events
-   * a stream accepted before the close are still written, then the
-   * stream's `closed` settles and its route ends the response.
+   * @remarks Idempotent, final, and infallible. It also closes the hub's
+   * follower on every followed generation and leaves the generations
+   * running. Events a stream accepted before the disposal are still written,
+   * then the stream's `closed` settles and its route ends the response.
    */
-  public close(): void {
-    if (this.#state.status === "closed") return
+  public [Symbol.dispose](): void {
+    if (this.#state.status === "disposed") return
     const { streams, followedReplies } = this.#state
-    this.#state = { status: "closed" }
+    this.#state = { status: "disposed" }
 
     for (const followedReply of followedReplies.values())
       followedReply.subscription.close()
@@ -260,15 +269,15 @@ export default class ActivityHub {
    * generation sent the event.
    * @param event - Event the hub's follower on that generation delivered.
    * @throws {TypeError} If the event is of a kind this module does not know.
-   * @remarks An event delivered after the hub closed, or after its reply
-   * was removed, is dropped, so nothing of a reply follows its
+   * @remarks An event delivered after the hub was disposed, or after its
+   * reply was removed, is dropped, so nothing of a reply follows its
    * `reply-ended`.
    */
   #handleFollowedReplyEvent(
     target: ActivityReplyTarget,
     event: ChatGenerationEvent
   ): void {
-    if (this.#state.status === "closed") return
+    if (this.#state.status === "disposed") return
     const followedReply = this.#state.followedReplies.get(
       target.assistantMessageId
     )
@@ -284,10 +293,10 @@ export default class ActivityHub {
    *
    * @param event - Immutable event; each stream writes it after its earlier
    * events.
-   * @remarks Sends nothing once the hub is closed.
+   * @remarks Sends nothing once the hub is disposed.
    */
   #sendEvent(event: ActivityEvent): void {
-    if (this.#state.status === "closed") return
+    if (this.#state.status === "disposed") return
     const { streams } = this.#state
     for (const stream of streams) {
       if (!stream.handleStreamEvent(event)) streams.delete(stream)

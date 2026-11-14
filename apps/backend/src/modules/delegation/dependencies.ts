@@ -4,7 +4,7 @@ import type Agent from "../agent/agent"
 import type { FoundAgent } from "../agent/capabilities"
 import type { ConversationTurnWriter } from "../chat/persistence"
 import type ReplyGenerationRegistry from "../chat/replyGenerationRegistry"
-import type { StartTurn, TurnDelegationHooks } from "../chat/turnStart"
+import type { StartTurn, StartTurnOptions } from "../chat/turnStart"
 import type ConversationWakeSettings from "./conversationWakeSettings"
 import type { DelegationEvent } from "./delegationEvent"
 import type { JobActivityReader, JobReader, JobReportWriter } from "./records"
@@ -69,13 +69,24 @@ export type DelegationDependencies = DelegationAgentLookups &
 
 /**
  * What every delegation policy runs with: the collaborators, and the hooks
- * handed to each turn delegation starts.
+ * handed to each turn delegation starts, which call the delegation policies
+ * with this runtime.
  */
 export type DelegationRuntime = DelegationDependencies &
   Readonly<{
     /**
-     * Hooks of every turn delegation starts, which call the delegation
-     * policies with this runtime.
+     * Handles the start of every turn delegation starts, as
+     * {@link StartTurnOptions} describes the hook.
      */
-    hooks: TurnDelegationHooks
+    handleTurnStarted: StartTurnOptions["handleTurnStarted"]
+    /**
+     * Creates the part in delegation of every turn delegation starts, as
+     * {@link StartTurnOptions} describes the hook.
+     */
+    createTurnDelegation: StartTurnOptions["createTurnDelegation"]
+    /**
+     * Handles the end of the reply of every turn delegation starts, as
+     * {@link StartTurnOptions} describes the hook.
+     */
+    handleReplyEnded: StartTurnOptions["handleReplyEnded"]
   }>

@@ -25,14 +25,17 @@ import type { StopReply } from "../modules/chat/replyStop"
 import {
   startTurn,
   type StartTurn,
-  type TurnDelegationHooks,
+  type StartTurnOptions,
   type TurnStartDependencies
 } from "../modules/chat/turnStart"
 import SqliteConversationRecordEditor from "../infrastructure/database/conversations/sqliteConversationRecordEditor"
 import SqliteConversationRecordReader from "../infrastructure/database/conversations/sqliteConversationRecordReader"
 import SqliteConversationTurnRecordWriter from "../infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
 import SqliteReplyPartRecordWriter from "../infrastructure/database/conversations/sqliteReplyPartRecordWriter"
-import type { ConversationDeletionActivity } from "../modules/conversation/capabilities"
+import type {
+  ListWorkingReplies,
+  StopDeletedReplies
+} from "../modules/conversation/capabilities"
 import StoredConversationHistoryEditor from "../modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../modules/conversation/historyReader"
 import StoredReplyParts from "../modules/conversation/replyParts"
@@ -44,7 +47,6 @@ import {
 import ConversationWakeSettings from "../modules/delegation/conversationWakeSettings"
 import type { DelegationEvent } from "../modules/delegation/delegationEvent"
 import { createDelegationRuntime } from "../modules/delegation/delegationRuntime"
-import type { DelegationRuntime } from "../modules/delegation/dependencies"
 import {
   stopConversationJobs,
   stopReplyForPerson
@@ -239,8 +241,8 @@ export type SingletonServices = Readonly<{
   attachmentFileStore: AttachmentFileStore
   /**
    * Every running reply generation, registered by the turn start; the
-   * bundle's cleanup disposes it right after it closed the activity hub,
-   * which ends every generation.
+   * bundle's cleanup disposes it right after it disposed of the activity
+   * hub, which ends every generation.
    */
   replyGenerations: ReplyGenerationRegistry
   /**
@@ -251,7 +253,7 @@ export type SingletonServices = Readonly<{
   startTurn: StartTurn
   /**
    * The open activity streams and the backend-started replies they follow;
-   * the bundle's cleanup closes it right after the wake settings, which
+   * the bundle's cleanup disposes of it right after the wake settings, which
    * ends every activity stream before the generations end.
    */
   activityHub: ActivityHub
@@ -263,11 +265,22 @@ export type SingletonServices = Readonly<{
    */
   conversationWakeSettings: ConversationWakeSettings
   /**
-   * Hooks through which each person's turn takes part in delegation, over
-   * the job records on the shared database, the agent services, the turn
-   * start, and the activity hub; they own nothing to release.
+   * Hook through which each person's turn takes part in delegation, told
+   * that the turn starts, over the job records on the shared database, the
+   * agent services, the turn start, and the activity hub; it owns nothing
+   * to release.
    */
-  turnDelegations: TurnDelegationHooks
+  handleTurnStarted: StartTurnOptions["handleTurnStarted"]
+  /**
+   * Hook that creates each person's turn's part in delegation, over the
+   * same services; it owns nothing to release.
+   */
+  createTurnDelegation: StartTurnOptions["createTurnDelegation"]
+  /**
+   * Hook told that the reply of each person's turn ended, over the same
+   * services; it owns nothing to release.
+   */
+  handleReplyEnded: StartTurnOptions["handleReplyEnded"]
   /**
    * Stops a reply for the person, with every working job below its
    * conversation, as delegation's runtime stops replies; it owns nothing to
@@ -282,11 +295,16 @@ export type SingletonServices = Readonly<{
   stopConversationJobs: (conversationId: string) => Promise<void>
   /**
    * Lists the working replies of a conversation and of its jobs before the
-   * conversation is deleted, and cancels their work once the delete
-   * succeeded, as delegation's runtime finds and ends generations; it owns
+   * conversation is deleted, as delegation's runtime finds them; it owns
    * nothing to release.
    */
-  conversationDeletionActivity: ConversationDeletionActivity
+  listWorkingReplies: ListWorkingReplies
+  /**
+   * Cancels the work listed before a conversation was deleted, once the
+   * delete succeeded, as delegation's runtime ends generations; it owns
+   * nothing to release.
+   */
+  stopDeletedReplies: StopDeletedReplies
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
@@ -302,15 +320,18 @@ type TurnStartServices = Pick<
 
 /**
  * What delegation adds to a bundle: its wake settings, its hooks, the
- * person's stops, and what a deletion cancels.
+ * person's stops, and what a deletion lists and cancels.
  */
 type DelegationServices = Pick<
   SingletonServices,
   | "conversationWakeSettings"
-  | "turnDelegations"
+  | "handleTurnStarted"
+  | "createTurnDelegation"
+  | "handleReplyEnded"
   | "stopReply"
   | "stopConversationJobs"
-  | "conversationDeletionActivity"
+  | "listWorkingReplies"
+  | "stopDeletedReplies"
 >
 
 /**
@@ -346,9 +367,9 @@ type SingletonBundleContext = Readonly<{
   >
   /**
    * Owner of every service the bundle acquired; it takes over the disposal
-   * of the reply generation registry, then the close of the activity hub,
-   * then the close of delegation's wake settings, so it closes the wake
-   * settings first, then the hub, then disposes the registry, before
+   * of the reply generation registry, then that of the activity hub, then
+   * the close of delegation's wake settings, so it closes the wake settings
+   * first, then disposes of the hub, then of the registry, before
    * everything it took over earlier.
    */
   serviceLifetime: AsyncDisposableStack
@@ -432,10 +453,10 @@ type DatabaseServices = Pick<
  * connections and the check process the first two open later, the
  * generations the turn start starts later, and the activity streams clients
  * open later. The bundle's cleanup closes delegation's wake settings first,
- * so no wake-up turn starts any more, then the activity hub, which ends
- * every activity stream, then disposes the reply generation registry, which
- * ends every generation, then closes the email account checker, then the
- * MCP server registry. Creation stops at the first failure. The database is
+ * so no wake-up turn starts any more, then disposes of the activity hub,
+ * which ends every activity stream, then of the reply generation registry,
+ * which ends every generation, then closes the email account checker, then
+ * the MCP server registry. Creation stops at the first failure. The database is
  * not part of the returned bundle: the bundle's cleanup closes it last,
  * after the chat service and the LLM runtime service.
  */
@@ -520,9 +541,7 @@ function createSingletonServiceBundle(
   const turnStartServices = createTurnStartServices(config, coreServices)
   serviceLifetime.use(turnStartServices.replyGenerations)
   const activityHub = new ActivityHub()
-  serviceLifetime.defer(() => {
-    activityHub.close()
-  })
+  serviceLifetime.use(activityHub)
   const delegationServices = createDelegationServices(context, {
     ...coreServices,
     ...turnStartServices,
@@ -543,7 +562,7 @@ function createSingletonServiceBundle(
 
 /**
  * Creates what delegation remembers, its job records, the hooks of its
- * runtime, the person's stops, and what a deletion cancels.
+ * runtime, the person's stops, and what a deletion lists and cancels.
  *
  * @param context - The job message limit, delegation's log reporters, and
  * the shared database the job records read and write.
@@ -552,9 +571,10 @@ function createSingletonServiceBundle(
  * agents, the history reader and turn persistence, the turn start and its
  * registry, and the activity hub.
  * @returns The wake settings, the runtime's hooks, the person's stop of a
- * reply and of a conversation's jobs, and the deletion's activity, bound to
- * the runtime; they read and contact nothing at creation and own nothing to
- * release.
+ * reply and of a conversation's jobs, and the listing and cancellation of a
+ * deleted conversation's work, which call {@link listWorkingReplies} and
+ * {@link stopDeletedReplies} with the runtime; they read and contact
+ * nothing at creation and own nothing to release.
  */
 function createDelegationServices(
   context: Pick<SingletonBundleContext, "config" | "logReporters" | "database">,
@@ -598,34 +618,17 @@ function createDelegationServices(
   })
   return {
     conversationWakeSettings,
-    turnDelegations: runtime.hooks,
+    handleTurnStarted: runtime.handleTurnStarted,
+    createTurnDelegation: runtime.createTurnDelegation,
+    handleReplyEnded: runtime.handleReplyEnded,
     stopReply: (target) => stopReplyForPerson(runtime, target),
     stopConversationJobs: (conversationId) =>
       stopConversationJobs(runtime, conversationId),
-    conversationDeletionActivity: buildConversationDeletionActivity(runtime)
-  }
-}
-
-/**
- * Builds what deleting a conversation does about the work running in it,
- * bound to delegation's runtime.
- *
- * @param runtime - The runtime whose reply reader lists the working replies
- * and whose generation registry, wake settings, and event reporter end
- * them.
- * @returns The frozen activity, whose callbacks call
- * {@link listWorkingReplies} and {@link stopDeletedReplies} with the
- * runtime; it reads nothing at creation and owns nothing to release.
- */
-function buildConversationDeletionActivity(
-  runtime: DelegationRuntime
-): ConversationDeletionActivity {
-  return Object.freeze({
     listWorkingReplies: (conversationId) =>
       listWorkingReplies(runtime, conversationId),
     stopDeletedReplies: (conversationId, replies) =>
       stopDeletedReplies(runtime, conversationId, replies)
-  })
+  }
 }
 
 /**

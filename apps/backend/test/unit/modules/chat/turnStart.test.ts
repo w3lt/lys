@@ -31,7 +31,6 @@ import {
   type EndedReply,
   type StartTurnOptions,
   type TurnDelegationContext,
-  type TurnDelegationHooks,
   type TurnSettings,
   type TurnStartDependencies
 } from "../../../../src/modules/chat/turnStart"
@@ -167,11 +166,11 @@ type RequestedSettings = Readonly<{
 /** Spies over the hooks a case starts a turn with. */
 type TurnDelegationHookSpies = Readonly<{
   /** Records each turn the starter was told started. */
-  handleTurnStarted: Mock<TurnDelegationHooks["handleTurnStarted"]>
+  handleTurnStarted: Mock<StartTurnOptions["handleTurnStarted"]>
   /** Records each turn the starter was asked to create the delegation of. */
-  createTurnDelegation: Mock<TurnDelegationHooks["createTurnDelegation"]>
+  createTurnDelegation: Mock<StartTurnOptions["createTurnDelegation"]>
   /** Records each reply the starter was told ended. */
-  handleReplyEnded: Mock<TurnDelegationHooks["handleReplyEnded"]>
+  handleReplyEnded: Mock<StartTurnOptions["handleReplyEnded"]>
 }>
 
 /** The hooks of a case that reads how its turn's reply is stored at its end. */
@@ -415,11 +414,11 @@ function createDelegationHooks(
   delegation: TurnDelegation = NO_TURN_DELEGATION
 ): TurnDelegationHookSpies {
   return {
-    handleTurnStarted: vi.fn<TurnDelegationHooks["handleTurnStarted"]>(),
-    createTurnDelegation: vi.fn<TurnDelegationHooks["createTurnDelegation"]>(
+    handleTurnStarted: vi.fn<StartTurnOptions["handleTurnStarted"]>(),
+    createTurnDelegation: vi.fn<StartTurnOptions["createTurnDelegation"]>(
       () => delegation
     ),
-    handleReplyEnded: vi.fn<TurnDelegationHooks["handleReplyEnded"]>()
+    handleReplyEnded: vi.fn<StartTurnOptions["handleReplyEnded"]>()
   }
 }
 
@@ -489,7 +488,7 @@ describe("startTurn", () => {
       agent: createTestAgent(openReplyStream),
       settings: buildTurnSettings(true),
       startedBy: "backend",
-      delegation: NO_TURN_DELEGATION_HOOKS,
+      ...NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     const registered = harness.generations.findReplyGeneration({
@@ -525,7 +524,7 @@ describe("startTurn", () => {
       agent,
       settings,
       startedBy: "backend",
-      delegation: NO_TURN_DELEGATION_HOOKS,
+      ...NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await first.settled
@@ -534,7 +533,7 @@ describe("startTurn", () => {
       agent,
       settings,
       startedBy: "backend",
-      delegation: NO_TURN_DELEGATION_HOOKS,
+      ...NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await second.settled
@@ -555,7 +554,7 @@ describe("startTurn", () => {
       agent: createTestAgent(openReplyStream),
       settings: buildTurnSettings(true),
       startedBy: "backend",
-      delegation: NO_TURN_DELEGATION_HOOKS,
+      ...NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -578,7 +577,7 @@ describe("startTurn", () => {
       agent: createTestAgent(openReplyStream),
       settings: buildTurnSettings(true),
       startedBy: "backend",
-      delegation: NO_TURN_DELEGATION_HOOKS,
+      ...NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -631,7 +630,7 @@ describe("startTurn", () => {
         agent: createTestAgent(openReplyStream),
         settings: buildTurnSettings(trainedForToolUse),
         startedBy: "backend",
-        delegation: NO_TURN_DELEGATION_HOOKS,
+        ...NO_TURN_DELEGATION_HOOKS,
         logger: harness.logger
       })
       await generation.settled
@@ -652,7 +651,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "person",
-      delegation: NO_TURN_DELEGATION_HOOKS,
+      ...NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -675,7 +674,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "backend",
-      delegation: NO_TURN_DELEGATION_HOOKS,
+      ...NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -703,7 +702,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "person",
-      delegation: NO_TURN_DELEGATION_HOOKS,
+      ...NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -735,7 +734,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "backend",
-      delegation: NO_TURN_DELEGATION_HOOKS,
+      ...NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -768,7 +767,7 @@ describe("startTurn", () => {
       agent: createTestAgent(openReplyStream),
       settings: buildTurnSettings(false),
       startedBy: "backend",
-      delegation: NO_TURN_DELEGATION_HOOKS,
+      ...NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await vi.waitFor(() => {
@@ -797,7 +796,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "backend",
-      delegation: NO_TURN_DELEGATION_HOOKS,
+      ...NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -821,7 +820,7 @@ describe("startTurn", () => {
       agent: createTestAgent(openReplyStream),
       settings: buildTurnSettings(false),
       startedBy: "person",
-      delegation: NO_TURN_DELEGATION_HOOKS,
+      ...NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     }
     await harness.generations[Symbol.asyncDispose]()
@@ -852,7 +851,7 @@ describe("startTurn", () => {
       agent: createTestAgent(openReplyStream),
       settings,
       startedBy: "backend",
-      delegation: hooks,
+      ...hooks,
       logger: harness.logger
     })
     await generation.settled
@@ -881,7 +880,7 @@ describe("startTurn", () => {
       agent,
       settings: buildTurnSettings(true),
       startedBy: "backend",
-      delegation: createDelegationHooks(delegation),
+      ...createDelegationHooks(delegation),
       logger: harness.logger
     })
     await generation.settled
@@ -908,7 +907,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "backend",
-      delegation: hooks,
+      ...hooks,
       logger: harness.logger
     })
     await generation.settled
@@ -941,7 +940,7 @@ describe("startTurn", () => {
       agent: createTestAgent(openReplyStream),
       settings: buildTurnSettings(false),
       startedBy: "backend",
-      delegation: hooks,
+      ...hooks,
       logger: harness.logger
     })
     generation.openSubscription(follower)
@@ -971,7 +970,7 @@ describe("startTurn", () => {
       agent: createTestAgent(openReplyStream),
       settings: buildTurnSettings(false),
       startedBy: "backend",
-      delegation: hooks,
+      ...hooks,
       logger: harness.logger
     })
     await vi.waitFor(() => {
@@ -1007,7 +1006,7 @@ describe("startTurn", () => {
         agent: createTestAgent(openReplyStream),
         settings: buildTurnSettings(false),
         startedBy: "backend",
-        delegation: hooks,
+        ...hooks,
         logger: harness.logger
       }
 
@@ -1042,7 +1041,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "backend",
-      delegation: hooks,
+      ...hooks,
       logger: harness.logger
     })
     await generation.settled
@@ -1068,7 +1067,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "backend",
-      delegation: hooks,
+      ...hooks,
       logger: harness.logger
     }
     await harness.generations[Symbol.asyncDispose]()
@@ -1094,7 +1093,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "backend",
-      delegation: hooks,
+      ...hooks,
       logger: harness.logger
     }
     await harness.generations[Symbol.asyncDispose]()
@@ -1132,7 +1131,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "backend",
-      delegation: hooks,
+      ...hooks,
       logger: harness.logger
     }
 

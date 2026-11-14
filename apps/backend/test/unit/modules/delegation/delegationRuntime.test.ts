@@ -3,6 +3,7 @@ import { buildDelegationDefinitions } from "../../../../src/modules/agent/delega
 import {
   createJobMessageDraft,
   createPersonTurn,
+  listTurnHooks,
   MOTHS_REQUEST,
   openDelegationTestServices
 } from "../../support/delegationTestServices"
@@ -17,7 +18,7 @@ describe("createDelegationRuntime", () => {
       delegating,
       MOTHS_REQUEST
     )
-    const delegation = services.runtime.hooks.createTurnDelegation(delegating)
+    const delegation = services.runtime.createTurnDelegation(delegating)
 
     const outcome = delegation.createJobMessage(draft)
     const job = services.runtime.jobs.findJobByNumber(conversationId, 1)
@@ -26,7 +27,9 @@ describe("createDelegationRuntime", () => {
     await services.resolveReply(job.replyId, "completed")
 
     expect(outcome).toMatchObject({ status: "sent", jobNumber: 1 })
-    expect(jobTurn.options.delegation).toBe(services.runtime.hooks)
+    expect(listTurnHooks(jobTurn.options)).toEqual(
+      listTurnHooks(services.runtime)
+    )
     expect(
       buildDelegationDefinitions("member", jobTurn.delegation.offer).map(
         (definition) => definition.name

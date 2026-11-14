@@ -21,7 +21,9 @@ export type WakeUpRuntime = Pick<
   | "loadChatAgent"
   | "turns"
   | "startTurn"
-  | "hooks"
+  | "handleTurnStarted"
+  | "createTurnDelegation"
+  | "handleReplyEnded"
   | "logger"
   | "hub"
   | "reportEvent"
@@ -174,7 +176,15 @@ function findWakeUpStart(
 function startWakeUpTurn(
   runtime: Pick<
     WakeUpRuntime,
-    "turns" | "jobs" | "startTurn" | "hooks" | "logger" | "hub" | "reportEvent"
+    | "turns"
+    | "jobs"
+    | "startTurn"
+    | "handleTurnStarted"
+    | "createTurnDelegation"
+    | "handleReplyEnded"
+    | "logger"
+    | "hub"
+    | "reportEvent"
   >,
   conversationId: string,
   wakeUp: ReadyWakeUp
@@ -188,7 +198,9 @@ function startWakeUpTurn(
     agent,
     settings,
     startedBy: "backend",
-    delegation: runtime.hooks,
+    handleTurnStarted: runtime.handleTurnStarted,
+    createTurnDelegation: runtime.createTurnDelegation,
+    handleReplyEnded: runtime.handleReplyEnded,
     logger: runtime.logger
   })
   const assistantMessageId = turn.assistantMessage.id

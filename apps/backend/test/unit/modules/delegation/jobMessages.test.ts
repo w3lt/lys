@@ -13,6 +13,7 @@ import {
   DELETED_MEMBER,
   FIRST_MEMBER,
   FIRST_MEMBER_NAME,
+  listTurnHooks,
   MOTHS_REQUEST,
   openDelegationTestServices,
   SECOND_MEMBER,
@@ -118,7 +119,7 @@ describe("createJobMessage", () => {
     expect(options.settings).toEqual(GPT_OSS_SETTINGS)
     expect(options.startedBy).toBe("backend")
     expect(options.agent.code).toBe(FIRST_MEMBER)
-    expect(options.delegation).toBe(services.runtime.hooks)
+    expect(listTurnHooks(options)).toEqual(listTurnHooks(services.runtime))
     expect(options.logger).toBe(services.runtime.logger)
   })
 

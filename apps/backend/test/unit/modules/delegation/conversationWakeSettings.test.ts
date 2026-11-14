@@ -20,9 +20,12 @@ const OTHER_CONVERSATION_ID = createFixtureUuidV7(2)
  * images and is trained for tool use.
  */
 function buildTurnSettings(model: string): TurnSettings {
+  const generationOptions: TurnSettings["generationOptions"] = Object.freeze({
+    temperature: 0.4
+  })
   return Object.freeze({
     model,
-    generationOptions: Object.freeze({ temperature: 0.4 }),
+    generationOptions,
     clientTools: Object.freeze([]),
     builtInTools: Object.freeze([]),
     mcpTools: Object.freeze([]),

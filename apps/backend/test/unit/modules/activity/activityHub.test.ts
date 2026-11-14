@@ -688,8 +688,8 @@ describe("ActivityHub", () => {
     })
   })
 
-  describe("close", () => {
-    it("closes every stream on close, and gives a closed subscription to a later openStream", async () => {
+  describe("Symbol.dispose", () => {
+    it("closes every stream on disposal, and gives a closed subscription to a later openStream", async () => {
       const hub = new ActivityHub()
       const firstStream = openRecordingStream(hub)
       const secondStream = openRecordingStream(hub)
@@ -700,8 +700,8 @@ describe("ActivityHub", () => {
         secondStream.subscription.closed
       )
 
-      hub.close()
-      hub.close()
+      hub[Symbol.dispose]()
+      hub[Symbol.dispose]()
       const lateStream = openRecordingStream(hub)
       const lateClosure = createSettlementReader(lateStream.subscription.closed)
       await waitForMicrotasks()
@@ -728,7 +728,7 @@ describe("ActivityHub", () => {
       await waitForMicrotasks()
       const closuresWhileOpen = readClosures.map((read) => read())
 
-      hub.close()
+      hub[Symbol.dispose]()
       await waitForMicrotasks()
 
       expect(closuresWhileOpen).toEqual(["pending", "pending"])
@@ -740,7 +740,7 @@ describe("ActivityHub", () => {
       expect(wakeUp.replyTask.context.abortSignal.aborted).toBe(false)
     })
 
-    it("accepts every call after close, sends nothing, and follows no generation", async () => {
+    it("accepts every call after disposal, sends nothing, and follows no generation", async () => {
       const hub = new ActivityHub()
       const job = startControlledGeneration()
       const wakeUp = startControlledGeneration()
@@ -749,9 +749,9 @@ describe("ActivityHub", () => {
       const stream = openRecordingStream(hub)
       await waitForMicrotasks()
 
-      // The prompt is still on its way to the hub when the hub closes.
+      // The prompt is still on its way to the hub when the hub is disposed of.
       void job.replyTask.context.sendToolApprovalPrompt(APPROVAL_CALL)
-      hub.close()
+      hub[Symbol.dispose]()
       hub.sendJobUpdate(MAIN_CONVERSATION_ID, WORKING_JOB)
       hub.removeReply(JOB_REPLY.assistantMessageId, "interrupted")
       hub.addReply(WAKE_UP_REPLY, wakeUp.generation)

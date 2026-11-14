@@ -27,7 +27,9 @@ export type JobMessageRuntime = JobMessageCheckRuntime &
     DelegationRuntime,
     | "turns"
     | "startTurn"
-    | "hooks"
+    | "handleTurnStarted"
+    | "createTurnDelegation"
+    | "handleReplyEnded"
     | "logger"
     | "wakeSettings"
     | "hub"
@@ -122,7 +124,9 @@ function sendJobMessage(
     | "turns"
     | "jobs"
     | "startTurn"
-    | "hooks"
+    | "handleTurnStarted"
+    | "createTurnDelegation"
+    | "handleReplyEnded"
     | "logger"
     | "wakeSettings"
     | "hub"
@@ -151,7 +155,9 @@ function sendJobMessage(
     agent: target.agent,
     settings: context.settings,
     startedBy: "backend",
-    delegation: runtime.hooks,
+    handleTurnStarted: runtime.handleTurnStarted,
+    createTurnDelegation: runtime.createTurnDelegation,
+    handleReplyEnded: runtime.handleReplyEnded,
     logger: runtime.logger
   })
   runtime.wakeSettings.addWakeSettings(parentConversationId, context.settings)

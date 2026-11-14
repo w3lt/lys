@@ -7,8 +7,11 @@ import type AttachmentFileStore from "./modules/attachment/attachmentFileStore"
 import type ChatService from "./modules/chat/chatService"
 import type ReplyGenerationRegistry from "./modules/chat/replyGenerationRegistry"
 import type { StopReply } from "./modules/chat/replyStop"
-import type { StartTurn, TurnDelegationHooks } from "./modules/chat/turnStart"
-import type { ConversationDeletionActivity } from "./modules/conversation/capabilities"
+import type { StartTurn, StartTurnOptions } from "./modules/chat/turnStart"
+import type {
+  ListWorkingReplies,
+  StopDeletedReplies
+} from "./modules/conversation/capabilities"
 import type StoredConversationHistoryEditor from "./modules/conversation/historyEditor"
 import type StoredConversationHistoryReader from "./modules/conversation/historyReader"
 import type StoredReplyParts from "./modules/conversation/replyParts"
@@ -90,15 +93,26 @@ declare module "fastify" {
     startTurn: StartTurn
     /**
      * Application-scoped hub of the activity streams, which tells every
-     * stream what the backend started; the application closes it before it
-     * disposes the reply generation registry.
+     * stream what the backend started; the application disposes of it
+     * before it disposes the reply generation registry.
      */
     activityHub: ActivityHub
     /**
-     * Hooks through which each turn a person starts takes part in
-     * delegation, as the application's delegation runtime handles it.
+     * Hook through which each turn a person starts takes part in
+     * delegation, told that the turn starts, as the application's
+     * delegation runtime handles it.
      */
-    turnDelegations: TurnDelegationHooks
+    handleTurnStarted: StartTurnOptions["handleTurnStarted"]
+    /**
+     * Hook that creates the part in delegation of each turn a person
+     * starts, as the application's delegation runtime creates it.
+     */
+    createTurnDelegation: StartTurnOptions["createTurnDelegation"]
+    /**
+     * Hook told that the reply of each turn a person starts ended, as the
+     * application's delegation runtime handles it.
+     */
+    handleReplyEnded: StartTurnOptions["handleReplyEnded"]
     /**
      * Stops a reply for the person, with every working job below its
      * conversation, as the application's delegation runtime stops replies.
@@ -112,9 +126,15 @@ declare module "fastify" {
     stopConversationJobs: (conversationId: string) => Promise<void>
     /**
      * Lists the working replies of a conversation and of its jobs before the
-     * delete route deletes it, and cancels their work once the delete
-     * succeeded, as the application's delegation runtime ends generations.
+     * delete route deletes it, as the application's delegation runtime
+     * finds them.
      */
-    conversationDeletionActivity: ConversationDeletionActivity
+    listWorkingReplies: ListWorkingReplies
+    /**
+     * Cancels the work listed before a conversation was deleted, once the
+     * delete succeeded, as the application's delegation runtime ends
+     * generations.
+     */
+    stopDeletedReplies: StopDeletedReplies
   }
 }

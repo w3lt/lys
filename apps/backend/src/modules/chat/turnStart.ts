@@ -108,33 +108,6 @@ export type EndedReply = Readonly<{
   errorMessage: string | undefined
 }>
 
-/** What the starter of a turn supplies so the turn takes part in delegation. */
-export type TurnDelegationHooks = Readonly<{
-  /**
-   * Called once per turn, before its delegation is created. A throw keeps
-   * the turn's generation from starting: its delegation is not created, and
-   * {@link startTurn} throws the failure.
-   */
-  handleTurnStarted: (context: TurnDelegationContext) => void
-  /**
-   * Called once per turn, before its reply task starts. The turn's agent is
-   * handed the returned delegation unchanged. A throw keeps the turn's
-   * generation from starting, and {@link startTurn} throws the failure.
-   */
-  createTurnDelegation: (context: TurnDelegationContext) => TurnDelegation
-  /**
-   * Called once per reply, after its final state is stored, also when its
-   * generation could not start, which stores the reply as `interrupted`. For
-   * a started generation the call is made inside the reply task, so
-   * `stopReply` of the generation resolves only after the hook returned; for
-   * one that could not start, it is made before {@link startTurn} throws.
-   * When the final state could not be stored, the hook is called all the
-   * same, and the reply is still stored as `streaming`. A throw is logged as
-   * an error with the turn's logger and changes nothing else.
-   */
-  handleReplyEnded: (reply: EndedReply) => void
-}>
-
 /** One stored turn to start, with who answers it and what with. */
 export type StartTurnOptions = Readonly<{
   /** Stored turn and the snapshot of its conversation before it. */
@@ -149,10 +122,33 @@ export type StartTurnOptions = Readonly<{
    */
   startedBy: TurnStarter
   /**
-   * Hooks of whoever starts the turn, through which the turn takes part in
-   * delegation; called as {@link TurnDelegationHooks} describes.
+   * Hook of whoever starts the turn, through which the turn takes part in
+   * delegation, told that the turn starts. Called once per turn, before its
+   * delegation is created. A throw keeps the turn's generation from
+   * starting: its delegation is not created, and {@link startTurn} throws
+   * the failure.
    */
-  delegation: TurnDelegationHooks
+  handleTurnStarted: (context: TurnDelegationContext) => void
+  /**
+   * Hook of whoever starts the turn, which creates the turn's part in
+   * delegation. Called once per turn, before its reply task starts. The
+   * turn's agent is handed the returned delegation unchanged. A throw keeps
+   * the turn's generation from starting, and {@link startTurn} throws the
+   * failure.
+   */
+  createTurnDelegation: (context: TurnDelegationContext) => TurnDelegation
+  /**
+   * Hook of whoever starts the turn, told that the turn's reply ended.
+   * Called once per reply, after its final state is stored, also when its
+   * generation could not start, which stores the reply as `interrupted`. For
+   * a started generation the call is made inside the reply task, so
+   * `stopReply` of the generation resolves only after the hook returned; for
+   * one that could not start, it is made before {@link startTurn} throws.
+   * When the final state could not be stored, the hook is called all the
+   * same, and the reply is still stored as `streaming`. A throw is logged as
+   * an error with the turn's logger and changes nothing else.
+   */
+  handleReplyEnded: (reply: EndedReply) => void
   /** Logger the turn's tasks log to, kept until the generation settles. */
   logger: FastifyBaseLogger
 }>
@@ -259,7 +255,7 @@ type ReplyRefusal = Parameters<AgentTurn["reportReplyRefusal"]>[0]
  * starter is told that the reply ended. If that state cannot be stored, an
  * `AggregateError` of the failure and the storage failure is thrown instead,
  * after the starter was told.
- * @remarks The starter's hooks are called as {@link TurnDelegationHooks}
+ * @remarks The starter's hooks are called as {@link StartTurnOptions}
  * describes, and the turn's agent is handed the delegation they create. The
  * backend tools of the turn are the settings' tools, followed by the
  * attachment reader as {@link buildTurnBuiltInTools} adds it for a model
@@ -271,7 +267,7 @@ export function startTurn(
   dependencies: TurnStartDependencies,
   options: StartTurnOptions
 ): ReplyGeneration {
-  const { turn, settings, startedBy, delegation, logger } = options
+  const { turn, settings, startedBy, logger } = options
   const delegationContext: TurnDelegationContext = Object.freeze({
     turn,
     settings,
@@ -282,8 +278,8 @@ export function startTurn(
     assistantMessageId: turn.assistantMessage.id
   }
   try {
-    delegation.handleTurnStarted(delegationContext)
-    const turnDelegation = delegation.createTurnDelegation(delegationContext)
+    options.handleTurnStarted(delegationContext)
+    const turnDelegation = options.createTurnDelegation(delegationContext)
     const input = buildTurnReplyInput(options, dependencies, turnDelegation)
     return dependencies.generations.startReplyGeneration(target, {
       startReplyTask: (context) =>
@@ -315,7 +311,7 @@ export function startTurn(
  */
 function handleTurnStartFailure(
   turns: TurnStartDependencies["turns"],
-  options: Pick<StartTurnOptions, "turn" | "delegation" | "logger">,
+  options: Pick<StartTurnOptions, "turn" | "handleReplyEnded" | "logger">,
   startFailure: unknown
 ): void {
   try {
@@ -346,9 +342,9 @@ function handleTurnStartFailure(
 function handleTurnReplyEnded(
   {
     turn,
-    delegation,
+    handleReplyEnded,
     logger
-  }: Pick<StartTurnOptions, "turn" | "delegation" | "logger">,
+  }: Pick<StartTurnOptions, "turn" | "handleReplyEnded" | "logger">,
   errorMessage: string | undefined
 ): void {
   const reply: EndedReply = Object.freeze({
@@ -357,7 +353,7 @@ function handleTurnReplyEnded(
     errorMessage
   })
   try {
-    delegation.handleReplyEnded(reply)
+    handleReplyEnded(reply)
   } catch (failure) {
     handleTaskFailure(logger, failure)
   }

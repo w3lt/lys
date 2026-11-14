@@ -120,9 +120,9 @@ const openSingletonServices: FastifyPluginAsync<
  * @returns A promise that resolves once every running generation stored its
  * final state; it never rejects.
  * @remarks Closes the wake settings first, so a reply that ends while the
- * generations end starts no wake-up turn; then the activity hub, which ends
- * every activity stream; then disposes the registry, which ends every
- * generation.
+ * generations end starts no wake-up turn; then disposes of the activity
+ * hub, which ends every activity stream; then disposes the registry, which
+ * ends every generation.
  */
 async function closeTurnActivity(
   services: Pick<
@@ -131,7 +131,7 @@ async function closeTurnActivity(
   >
 ): Promise<void> {
   services.conversationWakeSettings.close()
-  services.activityHub.close()
+  services.activityHub[Symbol.dispose]()
   await services.replyGenerations[Symbol.asyncDispose]()
 }
 
@@ -175,13 +175,13 @@ function registerSingletonServices(
   app.decorate("replyGenerations", singletonServices.replyGenerations)
   app.decorate("startTurn", singletonServices.startTurn)
   app.decorate("activityHub", singletonServices.activityHub)
-  app.decorate("turnDelegations", singletonServices.turnDelegations)
+  app.decorate("handleTurnStarted", singletonServices.handleTurnStarted)
+  app.decorate("createTurnDelegation", singletonServices.createTurnDelegation)
+  app.decorate("handleReplyEnded", singletonServices.handleReplyEnded)
   app.decorate("stopReply", singletonServices.stopReply)
   app.decorate("stopConversationJobs", singletonServices.stopConversationJobs)
-  app.decorate(
-    "conversationDeletionActivity",
-    singletonServices.conversationDeletionActivity
-  )
+  app.decorate("listWorkingReplies", singletonServices.listWorkingReplies)
+  app.decorate("stopDeletedReplies", singletonServices.stopDeletedReplies)
 }
 
 /** Fastify plugin that opens the application-scoped singleton services. */

@@ -105,7 +105,7 @@ type RecordedStream = Mock<(event: ActivityEvent) => Promise<void>>
 type FollowedJobReply = Readonly<{
   /** The case's runtime, telling the real hub instead of the recording one. */
   runtime: DelegationRuntime
-  /** Hub that follows the reply; closed when the test finishes. */
+  /** Hub that follows the reply; disposed of when the test finishes. */
   hub: ActivityHub
   /** The stream opened on the hub once it followed the reply. */
   stream: RecordedStream
@@ -140,7 +140,7 @@ function followJobReply(
 ): FollowedJobReply {
   const hub = new ActivityHub()
   onTestFinished(() => {
-    hub.close()
+    hub[Symbol.dispose]()
   })
   const target: ActivityReplyTarget = Object.freeze({
     conversationId: job.id,

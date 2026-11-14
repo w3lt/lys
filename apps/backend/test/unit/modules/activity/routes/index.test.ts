@@ -31,14 +31,14 @@ const EMPTY_SNAPSHOT = Object.freeze({
  * @returns The application, the destination of its log, the hub the routes
  * read, and a promise that settles once a request has opened its stream on
  * the hub, so an event the case sends afterwards reaches that stream.
- * @remarks When the test finishes, the hub is closed first, which ends every
- * stream still open, then the application.
+ * @remarks When the test finishes, the hub is disposed of first, which ends
+ * every stream still open, then the application.
  */
 async function createActivityRouteApp() {
   const testFastify = createTestFastify()
   const hub = new ActivityHub()
   onTestFinished(() => {
-    hub.close()
+    hub[Symbol.dispose]()
   })
   const openStream = hub.openStream.bind(hub)
   const streamOpening = Promise.withResolvers<void>()
@@ -68,7 +68,7 @@ function listActivityLogLines(log: CapturedLogDestination) {
 }
 
 describe("registerActivityRoutes", () => {
-  it("answers the published activity path with an event stream that starts with activity-snapshot and no reply, and ends it when the hub closes", async () => {
+  it("answers the published activity path with an event stream that starts with activity-snapshot and no reply, and ends it when the hub is disposed of", async () => {
     const { app, hub, streamOpened } = await createActivityRouteApp()
 
     const responsePromise = app.inject({
@@ -77,7 +77,7 @@ describe("registerActivityRoutes", () => {
       headers: { accept: "text/event-stream" }
     })
     await streamOpened
-    hub.close()
+    hub[Symbol.dispose]()
     const response = await responsePromise
 
     expect(response.statusCode).toBe(200)
@@ -117,7 +117,7 @@ describe("registerActivityRoutes", () => {
     // a full turn of the event loop after the client connected.
     await waitForMicrotasks()
     hub.sendJobUpdate(mainConversationId, workingJob)
-    hub.close()
+    hub[Symbol.dispose]()
     const response = await responsePromise
 
     const events = parseSseEvents(response.body)
@@ -146,7 +146,7 @@ describe("registerActivityRoutes", () => {
     })
     await streamOpened
     const linesWhileConnected = listActivityLogLines(log)
-    hub.close()
+    hub[Symbol.dispose]()
     await responsePromise
 
     expect(linesWhileConnected).toEqual([
@@ -164,9 +164,9 @@ describe("registerActivityRoutes", () => {
     ])
   })
 
-  it("ends the response without an event when the hub is already closed", async () => {
+  it("ends the response without an event when the hub is already disposed of", async () => {
     const { app, hub } = await createActivityRouteApp()
-    hub.close()
+    hub[Symbol.dispose]()
 
     const response = await app.inject({
       method: "GET",

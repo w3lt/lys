@@ -217,7 +217,7 @@ async function startWorkingJob(app: FastifyInstance): Promise<WorkingJob> {
   const delegating = createPersonTurn(app.conversationTurns)
   const conversationId = delegating.turn.conversation.id
   const draft = createJobMessageDraft(app.replyParts, delegating, MOTHS_REQUEST)
-  app.turnDelegations.createTurnDelegation(delegating).createJobMessage(draft)
+  app.createTurnDelegation(delegating).createJobMessage(draft)
   await vi.waitFor(() => {
     expect(completeChatStream).toHaveBeenCalledOnce()
   })
@@ -411,7 +411,7 @@ describe("buildApp", () => {
       delegating,
       MOTHS_REQUEST
     )
-    const delegation = app.turnDelegations.createTurnDelegation(delegating)
+    const delegation = app.createTurnDelegation(delegating)
 
     const outcome = delegation.createJobMessage(draft)
     const job = await waitForFirstJobReplyEnd(app, conversationId)
@@ -501,7 +501,7 @@ describe("buildApp", () => {
     ])
   })
 
-  it("decorates the deletion's activity, which the delete route uses to cancel a deleted conversation's reply and title request, and logs the cancellation with its logger", async () => {
+  it("decorates the listing and cancellation of a deleted conversation's work, which the delete route uses to cancel its reply and title request, and logs the cancellation with its logger", async () => {
     const log = new CapturedLogDestination()
     const app = await buildApp({
       config: createOwnedBackendConfig(),
@@ -610,7 +610,7 @@ describe("buildApp", () => {
       delegating,
       MOTHS_REQUEST
     )
-    app.turnDelegations.createTurnDelegation(delegating).createJobMessage(draft)
+    app.createTurnDelegation(delegating).createJobMessage(draft)
     // The job's result now waits for the lead's reply, which still streams.
     await waitForFirstJobReplyEnd(app, conversationId)
     const replyTask = new ControlledReplyTask()
@@ -637,7 +637,7 @@ describe("buildApp", () => {
       status: "completed",
       finishReason: "stop"
     })
-    app.turnDelegations.handleReplyEnded({
+    app.handleReplyEnded({
       conversationId,
       assistantMessageId: leadReplyId,
       errorMessage: undefined

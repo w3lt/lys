@@ -259,8 +259,8 @@ type ScriptedTurnStart = Readonly<{
 type ScriptedReplyTask = Readonly<{
   /** Stores the reply's final state. */
   turns: ScriptedTurnStart["turns"]
-  /** The stored turn, and the hooks told that its reply ended. */
-  options: Pick<StartTurnOptions, "turn" | "delegation">
+  /** The stored turn, and the hook told that its reply ended. */
+  options: Pick<StartTurnOptions, "turn" | "handleReplyEnded">
   /** Resolves with the case's ending once the case ends the reply. */
   ending: Promise<ScriptedReplyEnding>
 }>
@@ -566,8 +566,8 @@ function startScriptedTurn(
     startedBy
   })
   try {
-    options.delegation.handleTurnStarted(context)
-    const delegation = options.delegation.createTurnDelegation(context)
+    options.handleTurnStarted(context)
+    const delegation = options.createTurnDelegation(context)
     const ending = Promise.withResolvers<ScriptedReplyEnding>()
     const task: ScriptedReplyTask = Object.freeze({
       turns: start.turns,
@@ -607,7 +607,7 @@ function startScriptedTurn(
  *
  * @param start - Stores the reply's final state, and keeps a throw of
  * `handleReplyEnded`.
- * @param options - The stored turn, and the hooks told that its reply
+ * @param options - The stored turn, and the hook told that its reply
  * ended.
  * @param startFailure - What kept the generation from starting.
  * @throws An `AggregateError` holding `startFailure` followed by the
@@ -619,7 +619,7 @@ function startScriptedTurn(
  */
 function handleScriptedTurnStartFailure(
   start: Pick<ScriptedTurnStart, "turns" | "taskFailures">,
-  options: Pick<StartTurnOptions, "turn" | "delegation">,
+  options: Pick<StartTurnOptions, "turn" | "handleReplyEnded">,
   startFailure: unknown
 ): void {
   const { conversation, assistantMessage } = options.turn
@@ -640,7 +640,7 @@ function handleScriptedTurnStartFailure(
     )
   } finally {
     try {
-      options.delegation.handleReplyEnded(reply)
+      options.handleReplyEnded(reply)
     } catch (failure) {
       start.taskFailures.push(failure)
     }
@@ -710,7 +710,7 @@ async function runScriptedReply(
       buildReplyCompletion(ending.status)
     )
   } finally {
-    task.options.delegation.handleReplyEnded(reply)
+    task.options.handleReplyEnded(reply)
   }
 }
 
@@ -838,7 +838,9 @@ export function startPersonTurn(
     agent,
     settings,
     startedBy: "person",
-    delegation: runtime.hooks,
+    handleTurnStarted: runtime.handleTurnStarted,
+    createTurnDelegation: runtime.createTurnDelegation,
+    handleReplyEnded: runtime.handleReplyEnded,
     logger: runtime.logger
   })
   return context
@@ -861,8 +863,12 @@ export function createWakeUpTurn(
   settings: TurnSettings
 ): TurnDelegationContext {
   const userMessage = createTurnUserMessage("Reports of your jobs arrived.")
+  const conversation: ConversationTurnTarget = Object.freeze({
+    kind: "wake-up",
+    id: conversationId
+  })
   const turn = turns.createConversationTurn({
-    conversation: { kind: "wake-up", id: conversationId },
+    conversation,
     userMessage,
     model: settings.model
   })
@@ -934,6 +940,29 @@ export function sendJobMessage(
   )
   if (job === undefined) throw new Error("The sent job is not stored")
   return job
+}
+
+/**
+ * Lists the three delegation hooks of a turn start's options or of a
+ * runtime, so a case can tell whether a turn was started with a runtime's
+ * own hooks.
+ *
+ * @param hooks - The options or the runtime.
+ * @returns `handleTurnStarted`, `createTurnDelegation`, and
+ * `handleReplyEnded`, in that order; comparing two lists compares each hook
+ * by identity.
+ */
+export function listTurnHooks(
+  hooks: Pick<
+    StartTurnOptions,
+    "handleTurnStarted" | "createTurnDelegation" | "handleReplyEnded"
+  >
+): readonly unknown[] {
+  return [
+    hooks.handleTurnStarted,
+    hooks.createTurnDelegation,
+    hooks.handleReplyEnded
+  ]
 }
 
 /**

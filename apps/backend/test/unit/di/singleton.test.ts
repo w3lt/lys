@@ -11,7 +11,10 @@ import AgentRuntimeService from "../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../src/modules/agent/agentService"
 import { NO_UNOFFERED_TOOLS } from "../../../src/modules/agent/unofferedTools"
 import ChatService from "../../../src/modules/chat/chatService"
-import type { ConversationTurn } from "../../../src/modules/chat/persistence"
+import type {
+  ConversationTurn,
+  ConversationTurnUserMessage
+} from "../../../src/modules/chat/persistence"
 import type ReplyGeneration from "../../../src/modules/chat/replyGeneration"
 import ReplyGenerationRegistry, {
   type ReplyTarget
@@ -80,13 +83,17 @@ type AcquisitionName = "chat" | "database" | "llm-runtime"
 /** Model that every turn a case starts through a bundle names. */
 const TURN_MODEL = "qwen/qwen3-8b"
 
+/** Sampling of the turn a case starts through a bundle. */
+const PLAIN_GENERATION_OPTIONS: TurnSettings["generationOptions"] =
+  Object.freeze({ temperature: 0.4 })
+
 /**
  * Settings of a turn that offers no tools, for a model that sees no images
  * and is not trained for tool use.
  */
 const PLAIN_TURN_SETTINGS: TurnSettings = Object.freeze({
   model: TURN_MODEL,
-  generationOptions: Object.freeze({ temperature: 0.4 }),
+  generationOptions: PLAIN_GENERATION_OPTIONS,
   clientTools: Object.freeze([]),
   builtInTools: Object.freeze([]),
   mcpTools: Object.freeze([]),
@@ -399,9 +406,13 @@ function startHelloTurn(
 ): StartedTurn {
   const agent = services.agentRuntimeService.loadChatAgent("caliginia")
   if (agent === undefined) throw new Error("Caliginia is not live")
+  const userMessage: ConversationTurnUserMessage = {
+    ...createTurnUserMessage("Hello"),
+    attachments
+  }
   const turn = services.conversationTurns.createConversationTurn({
     conversation: createNewConversationTarget("caliginia"),
-    userMessage: { ...createTurnUserMessage("Hello"), attachments },
+    userMessage,
     model: TURN_MODEL
   })
   const generation = services.startTurn({
@@ -409,7 +420,7 @@ function startHelloTurn(
     agent,
     settings,
     startedBy: "person",
-    delegation: NO_TURN_DELEGATION_HOOKS,
+    ...NO_TURN_DELEGATION_HOOKS,
     logger: createBackendLogger(new CapturedLogDestination())
   })
   return { turn, generation }
@@ -584,18 +595,13 @@ describe("createSingletonServices", () => {
     expect(services.conversationWakeSettings).toBeInstanceOf(
       ConversationWakeSettings
     )
-    expect(services.turnDelegations).toEqual({
-      handleTurnStarted: expect.any(Function),
-      createTurnDelegation: expect.any(Function),
-      handleReplyEnded: expect.any(Function)
-    })
+    expect(services.handleTurnStarted).toEqual(expect.any(Function))
+    expect(services.createTurnDelegation).toEqual(expect.any(Function))
+    expect(services.handleReplyEnded).toEqual(expect.any(Function))
     expect(services.stopReply).toEqual(expect.any(Function))
     expect(services.stopConversationJobs).toEqual(expect.any(Function))
-    expect(services.conversationDeletionActivity).toEqual({
-      listWorkingReplies: expect.any(Function),
-      stopDeletedReplies: expect.any(Function)
-    })
-    expect(Object.isFrozen(services.conversationDeletionActivity)).toBe(true)
+    expect(services.listWorkingReplies).toEqual(expect.any(Function))
+    expect(services.stopDeletedReplies).toEqual(expect.any(Function))
   })
 
   it("gives a member work through the bundle's delegation hooks: the job's turn is stored and answered by the member, and its result waits while the lead's reply streams", async () => {
@@ -616,7 +622,7 @@ describe("createSingletonServices", () => {
       delegating,
       MOTHS_REQUEST
     )
-    const delegation = services.turnDelegations.createTurnDelegation(delegating)
+    const delegation = services.createTurnDelegation(delegating)
 
     const outcome = delegation.createJobMessage(draft)
     const job = await waitForFirstJobReplyEnd(services, conversationId)
@@ -1212,6 +1218,33 @@ describe("closeSingletonServices", () => {
     return { services, ...recorded }
   }
 
+  /**
+   * Creates a bundle from recorded factories, whose activity hub's disposal
+   * the cleanup log records as `activity-hub` before the hub is disposed
+   * of.
+   *
+   * @returns The bundle and the recorded acquisitions and cleanup log.
+   * @remarks The bundle takes its hub's disposal method when it creates the
+   * hub, so the method is spied on the hub's class before the bundle is
+   * created; the spy is restored when the test finishes.
+   */
+  async function createServicesRecordingHubDisposal() {
+    const recorded = createRecordedFactories()
+    const dispose = ActivityHub.prototype[Symbol.dispose]
+    vi.spyOn(ActivityHub.prototype, Symbol.dispose).mockImplementation(
+      function (this: ActivityHub) {
+        recorded.closeLog.push("activity-hub")
+        dispose.call(this)
+      }
+    )
+    const services: SingletonServices = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      recorded.factories
+    )
+    return { services, ...recorded }
+  }
+
   it("releases every acquisition in reverse acquisition order", async () => {
     const { services, closeLog } = await createRecordedServices()
 
@@ -1220,14 +1253,13 @@ describe("closeSingletonServices", () => {
     expect(closeLog).toEqual(["chat", "llm-runtime", "database"])
   })
 
-  it("closes the wake settings, then the activity hub, then ends every running reply generation, before it closes the MCP server registry or releases an acquisition, and leaves the reply generation registry closed", async () => {
-    const { services, closeLog } = await createRecordedServices()
+  it("closes the wake settings, then disposes of the activity hub, then ends every running reply generation, before it closes the MCP server registry or releases an acquisition, and leaves the reply generation registry closed", async () => {
+    const { services, closeLog } = await createServicesRecordingHubDisposal()
     updateServiceClose(
       services.conversationWakeSettings,
       "wake-settings",
       closeLog
     )
-    updateServiceClose(services.activityHub, "activity-hub", closeLog)
     const closeMcpServerRegistry = vi.spyOn(services.mcpServerRegistry, "close")
     const replyTask = startControlledGeneration(services.replyGenerations)
     // The reply task starts here, so the case can observe what was closed
@@ -1292,9 +1324,8 @@ describe("closeSingletonServices", () => {
     expect(written).toEqual([{ type: "activity-snapshot", replies: [] }])
   })
 
-  it("closes the activity hub, then the email account checker, then the MCP server registry, before every acquisition", async () => {
-    const { services, closeLog } = await createRecordedServices()
-    updateServiceClose(services.activityHub, "activity-hub", closeLog)
+  it("disposes of the activity hub, then closes the email account checker, then the MCP server registry, before every acquisition", async () => {
+    const { services, closeLog } = await createServicesRecordingHubDisposal()
     updateServiceClose(
       services.emailAccountChecker,
       "email-account-checker",

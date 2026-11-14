@@ -17,7 +17,8 @@ import type {
   ConversationMetadataReader,
   ConversationTitleEditor,
   ConversationDeleter,
-  ConversationDeletionActivity
+  ListWorkingReplies,
+  StopDeletedReplies
 } from "../capabilities"
 import { parseConversationListOptions } from "../listOptions"
 import { createConversationIsJobProblem } from "./jobProblem"
@@ -50,10 +51,12 @@ type ConversationDeletion = Readonly<{
   /** Borrowed history deletion access. */
   history: ConversationDeleter
   /**
-   * Borrowed listing and cancellation of the work running in the
-   * conversation and in its jobs.
+   * Borrowed listing of the working replies of the conversation and of its
+   * jobs.
    */
-  activity: ConversationDeletionActivity
+  listWorkingReplies: ListWorkingReplies
+  /** Borrowed cancellation of the work listed before the delete. */
+  stopDeletedReplies: StopDeletedReplies
   /** Borrowed deletion of the conversation's files. */
   attachmentFiles: AttachmentFileDeleter
 }>
@@ -61,7 +64,8 @@ type ConversationDeletion = Readonly<{
 /**
  * Installs all protocol-defined history endpoints on a configured backend.
  * @param app - Application with validation, conversation persistence, the
- * deletion's activity, and the attachment file store installed.
+ * listing and cancellation of a deleted conversation's work, and the
+ * attachment file store installed.
  * @returns A promise resolving after route registration.
  * @throws If route registration fails. The failure rejects the promise, so
  * `app.register` reports it rather than an uncaught exception.
@@ -144,15 +148,16 @@ function registerUpdateConversationTitleRoute(app: FastifyInstance): void {
 /**
  * Registers the delete endpoint.
  * @param app - Application with validation, the response serializer,
- * conversation persistence, the deletion's activity, and the attachment
- * file store installed.
+ * conversation persistence, the listing and cancellation of a deleted
+ * conversation's work, and the attachment file store installed.
  * @throws If route registration fails.
  */
 function registerDeleteConversationRoute(app: FastifyInstance): void {
   const deletion: ConversationDeletion = Object.freeze({
     reader: app.conversationHistoryReader,
     history: app.conversationHistoryEditor,
-    activity: app.conversationDeletionActivity,
+    listWorkingReplies: app.listWorkingReplies,
+    stopDeletedReplies: app.stopDeletedReplies,
     attachmentFiles: app.attachmentFileStore
   })
   app.route<DeleteConversationApiRoute>({
@@ -303,7 +308,7 @@ async function handleDeleteConversation(
     reply.type("application/problem+json").code(409).send(jobProblem)
     return
   }
-  const workingReplies = deletion.activity.listWorkingReplies(conversationId)
+  const workingReplies = deletion.listWorkingReplies(conversationId)
   if (!deletion.history.deleteConversation(conversationId)) {
     reply
       .type("application/problem+json")
@@ -311,7 +316,7 @@ async function handleDeleteConversation(
       .send(createConversationNotFoundProblem(conversationId, request.url))
     return
   }
-  await deletion.activity.stopDeletedReplies(conversationId, workingReplies)
+  await deletion.stopDeletedReplies(conversationId, workingReplies)
   try {
     await deletion.attachmentFiles.deleteConversationAttachments(conversationId)
   } catch (error) {

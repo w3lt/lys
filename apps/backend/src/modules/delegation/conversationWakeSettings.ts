@@ -64,7 +64,13 @@ type WakeSettingsState =
  */
 export default class ConversationWakeSettings {
   /** Authoritative state, replaced only by `close`. */
-  #state: WakeSettingsState = { status: "open", wakeSettings: new Map() }
+  #state: WakeSettingsState
+
+  /** Creates open wake settings that remember none. */
+  public constructor() {
+    const wakeSettings = new Map<string, TurnSettings>()
+    this.#state = { status: "open", wakeSettings }
+  }
 
   /**
    * Remembers the settings of a conversation's wake-up turns, replacing

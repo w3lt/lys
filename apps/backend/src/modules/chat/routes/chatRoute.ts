@@ -39,7 +39,7 @@ import type {
   CreateConversationTurnOptions
 } from "../persistence"
 import ReplyEventSubscription from "../replyEventSubscription"
-import type { StartTurn, TurnDelegationHooks, TurnSettings } from "../turnStart"
+import type { StartTurn, StartTurnOptions, TurnSettings } from "../turnStart"
 import {
   findListedModelCapabilities,
   type FindModelCapabilities,
@@ -108,8 +108,15 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      * every running generation.
      */
     startTurn: StartTurn
-    /** Hooks through which each person's turn takes part in delegation. */
-    turnDelegations: TurnDelegationHooks
+    /**
+     * Hook through which each person's turn takes part in delegation, told
+     * that the turn starts.
+     */
+    handleTurnStarted: StartTurnOptions["handleTurnStarted"]
+    /** Hook that creates each person's turn's part in delegation. */
+    createTurnDelegation: StartTurnOptions["createTurnDelegation"]
+    /** Hook told that the reply of each person's turn ended. */
+    handleReplyEnded: StartTurnOptions["handleReplyEnded"]
   }>
 
 /** Problems the chat route sends before the stream starts. */
@@ -208,7 +215,9 @@ export default function updateFastifyWithChatRoute(
     findMcpTool: (toolName: string) =>
       app.mcpServerRegistry.findTurnTool(toolName),
     startTurn: app.startTurn,
-    turnDelegations: app.turnDelegations
+    handleTurnStarted: app.handleTurnStarted,
+    createTurnDelegation: app.createTurnDelegation,
+    handleReplyEnded: app.handleReplyEnded
   }
   app.route<ChatApiRoute>({
     method: chatApi.method,
@@ -274,7 +283,9 @@ async function handleChatRequest(
     agent: saved.agent,
     settings: buildTurnSettings(request.body, accepted),
     startedBy: "person",
-    delegation: dependencies.turnDelegations,
+    handleTurnStarted: dependencies.handleTurnStarted,
+    createTurnDelegation: dependencies.createTurnDelegation,
+    handleReplyEnded: dependencies.handleReplyEnded,
     logger: request.log
   })
   const subscription = new ReplyEventSubscription<ChatApiStreamEvent>(

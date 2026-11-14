@@ -19,7 +19,10 @@ import AttachmentFileStore from "../../../../../src/modules/attachment/attachmen
 import type { ReplyTarget } from "../../../../../src/modules/chat/replyGenerationRegistry"
 import updateFastifyWithChatRoute from "../../../../../src/modules/chat/routes/chatRoute"
 import type { TurnDelegationContext } from "../../../../../src/modules/chat/turnStart"
-import type { ConversationDeletionActivity } from "../../../../../src/modules/conversation/capabilities"
+import type {
+  ListWorkingReplies,
+  StopDeletedReplies
+} from "../../../../../src/modules/conversation/capabilities"
 import updateFastifyWithConversationRoutes from "../../../../../src/modules/conversation/routes"
 import {
   listWorkingReplies,
@@ -43,7 +46,8 @@ import {
 } from "../../../support/conversationFixtures"
 import {
   listJobReportRows,
-  openConversationTestServices
+  openConversationTestServices,
+  type ConversationTestServices
 } from "../../../support/conversationDatabase"
 import {
   createPersonTurn,
@@ -137,36 +141,18 @@ function createTestAttachmentFileStore() {
 }
 
 /**
- * Creates an application with the HTTP transport and the conversation routes
- * registered over a stubbed history reader and editor, a recording
- * deletion's activity, and a real attachment file store.
+ * Replaces each history operation the conversation routes can call with a
+ * spy that throws until the case configures it.
  *
- * @returns The application, the destination of its log, a spy for each
- * history operation the routes can call, the deletion's activity, and the
- * attachment file store with its directory.
- * @remarks The routes read the decorated history reader and editor at
- * registration, so the returned spies control every outcome. Each spy throws
- * until the case configures it; no database row is read or written. The
- * deletion's activity lists no working reply and stops at once until the
- * case configures it. The in-memory database behind the decorated adapters
- * is closed when the test finishes, and the attachments directory, created
- * for the test, is removed.
+ * @param historyReader - History reader the routes read.
+ * @param historyEditor - History editor the routes read.
+ * @returns A spy for each of those operations, by operation name.
  */
-async function createConversationRouteApp() {
-  const testFastify = createTestFastify()
-  const { history: historyReader, editor: historyEditor } =
-    openConversationTestServices()
-  const { attachmentFileStore, attachmentsDirectoryPath } =
-    createTestAttachmentFileStore()
-  const deletionActivity = {
-    listWorkingReplies: vi.fn<
-      ConversationDeletionActivity["listWorkingReplies"]
-    >(() => []),
-    stopDeletedReplies: vi.fn<
-      ConversationDeletionActivity["stopDeletedReplies"]
-    >(() => Promise.resolve())
-  }
-  const historyCalls = {
+function spyOnHistoryCalls(
+  historyReader: ConversationTestServices["history"],
+  historyEditor: ConversationTestServices["editor"]
+) {
+  return {
     listConversations: vi
       .spyOn(historyReader, "listConversations")
       .mockImplementation(() =>
@@ -191,16 +177,54 @@ async function createConversationRouteApp() {
         handleUnexpectedHistoryCall("deleteConversation")
       )
   }
+}
+
+/**
+ * Creates an application with the HTTP transport and the conversation routes
+ * registered over a stubbed history reader and editor, a recording listing
+ * and cancellation of a deleted conversation's work, and a real attachment
+ * file store.
+ *
+ * @returns The application, the destination of its log, a spy for each
+ * history operation the routes can call, a spy for the listing and one for
+ * the cancellation of a deleted conversation's work, and the attachment
+ * file store with its directory.
+ * @remarks The routes read the decorated history reader and editor at
+ * registration, so the returned spies control every outcome. Each spy throws
+ * until the case configures it; no database row is read or written. The
+ * listing finds no working reply, and the cancellation ends at once, until
+ * the case configures them. The in-memory database behind the decorated adapters
+ * is closed when the test finishes, and the attachments directory, created
+ * for the test, is removed.
+ */
+async function createConversationRouteApp() {
+  const testFastify = createTestFastify()
+  const { history: historyReader, editor: historyEditor } =
+    openConversationTestServices()
+  const { attachmentFileStore, attachmentsDirectoryPath } =
+    createTestAttachmentFileStore()
+  const deletionCalls = {
+    listWorkingReplies: vi.fn<ListWorkingReplies>(() => []),
+    stopDeletedReplies: vi.fn<StopDeletedReplies>(() => Promise.resolve())
+  }
+  const historyCalls = spyOnHistoryCalls(historyReader, historyEditor)
   await updateFastifyWithHttpTransport(testFastify.app)
   testFastify.app.decorate("conversationHistoryReader", historyReader)
   testFastify.app.decorate("conversationHistoryEditor", historyEditor)
-  testFastify.app.decorate("conversationDeletionActivity", deletionActivity)
+  testFastify.app.decorate(
+    "listWorkingReplies",
+    deletionCalls.listWorkingReplies
+  )
+  testFastify.app.decorate(
+    "stopDeletedReplies",
+    deletionCalls.stopDeletedReplies
+  )
   testFastify.app.decorate("attachmentFileStore", attachmentFileStore)
   await updateFastifyWithConversationRoutes(testFastify.app)
   return {
     ...testFastify,
     historyCalls,
-    deletionActivity,
+    deletionCalls,
     attachmentFileStore,
     attachmentsDirectoryPath
   }
@@ -214,9 +238,9 @@ async function createConversationRouteApp() {
  * @returns The application, the destination of its log, and the case's
  * delegation test services.
  * @remarks The decorated history reader and editor are the services' own,
- * on the database the runtime's job records read and write. The deletion's
- * activity is bound to the runtime as the composition root binds the
- * backend's own, so a delete cancels the generations the services' turn
+ * on the database the runtime's job records read and write. The listing and
+ * cancellation of a deleted conversation's work are bound to the runtime as
+ * the composition root binds the backend's own, so a delete cancels the generations the services' turn
  * start, or the case, registered. The attachments directory, created for
  * the test, is removed when it finishes.
  */
@@ -224,17 +248,16 @@ async function createDelegationRouteApp() {
   const testFastify = createTestFastify()
   const services = openDelegationTestServices()
   const { attachmentFileStore } = createTestAttachmentFileStore()
-  const deletionActivity: ConversationDeletionActivity = Object.freeze({
-    listWorkingReplies: (conversationId) =>
-      listWorkingReplies(services.runtime, conversationId),
-    stopDeletedReplies: (conversationId, replies) =>
-      stopDeletedReplies(services.runtime, conversationId, replies)
-  })
   await updateFastifyWithHttpTransport(testFastify.app)
   const { app } = testFastify
   app.decorate("conversationHistoryReader", services.conversation.history)
   app.decorate("conversationHistoryEditor", services.conversation.editor)
-  app.decorate("conversationDeletionActivity", deletionActivity)
+  app.decorate("listWorkingReplies", (conversationId) =>
+    listWorkingReplies(services.runtime, conversationId)
+  )
+  app.decorate("stopDeletedReplies", (conversationId, replies) =>
+    stopDeletedReplies(services.runtime, conversationId, replies)
+  )
   app.decorate("attachmentFileStore", attachmentFileStore)
   await updateFastifyWithConversationRoutes(app)
   return { ...testFastify, services }
@@ -775,7 +798,7 @@ describe("updateFastifyWithConversationRoutes", () => {
     })
 
     it("lists the working replies before the delete, and cancels them once it succeeded, before it removes the attachment files", async () => {
-      const { app, historyCalls, deletionActivity, attachmentFileStore } =
+      const { app, historyCalls, deletionCalls, attachmentFileStore } =
         await createConversationRouteApp()
       const workingReplies: readonly ReplyTarget[] = [
         {
@@ -788,7 +811,7 @@ describe("updateFastifyWithConversationRoutes", () => {
       historyCalls.getConversationMetadata.mockReturnValue(
         CONVERSATION_METADATA
       )
-      deletionActivity.listWorkingReplies.mockImplementation(() => {
+      deletionCalls.listWorkingReplies.mockImplementation(() => {
         steps.push("list the working replies")
         return workingReplies
       })
@@ -796,7 +819,7 @@ describe("updateFastifyWithConversationRoutes", () => {
         steps.push("delete the rows")
         return true
       })
-      deletionActivity.stopDeletedReplies.mockImplementation(async () => {
+      deletionCalls.stopDeletedReplies.mockImplementation(async () => {
         steps.push("cancel the work")
         await waitForMicrotasks()
         steps.push("the work has ended")
@@ -822,10 +845,10 @@ describe("updateFastifyWithConversationRoutes", () => {
         "the work has ended",
         "remove the files"
       ])
-      expect(deletionActivity.listWorkingReplies).toHaveBeenCalledWith(
+      expect(deletionCalls.listWorkingReplies).toHaveBeenCalledWith(
         CONVERSATION_ID
       )
-      expect(deletionActivity.stopDeletedReplies).toHaveBeenCalledWith(
+      expect(deletionCalls.stopDeletedReplies).toHaveBeenCalledWith(
         CONVERSATION_ID,
         workingReplies
       )
@@ -1069,7 +1092,7 @@ describe("updateFastifyWithConversationRoutes", () => {
     })
 
     it("answers 409 with the is-job problem when a job is deleted, and deletes nothing", async () => {
-      const { app, historyCalls, deletionActivity, attachmentFileStore } =
+      const { app, historyCalls, deletionCalls, attachmentFileStore } =
         await createConversationRouteApp()
       historyCalls.getConversationMetadata.mockReturnValue(JOB_METADATA)
       const deleteConversationAttachments = vi.spyOn(
@@ -1092,7 +1115,7 @@ describe("updateFastifyWithConversationRoutes", () => {
       })
       expect(historyCalls.getConversationMetadata).toHaveBeenCalledWith(JOB_ID)
       expect(historyCalls.deleteConversation).not.toHaveBeenCalled()
-      expect(deletionActivity.stopDeletedReplies).not.toHaveBeenCalled()
+      expect(deletionCalls.stopDeletedReplies).not.toHaveBeenCalled()
       expect(deleteConversationAttachments).not.toHaveBeenCalled()
     })
 

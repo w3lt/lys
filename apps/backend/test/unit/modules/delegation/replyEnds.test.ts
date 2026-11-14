@@ -1,8 +1,13 @@
-import type { JobReportKind, JobState } from "@lys/share"
-import { describe, expect, it } from "vitest"
-import type { EndedActivityStatus } from "../../../../src/modules/activity/activityHub"
+import type { ActivityEvent } from "@lys/protocol"
+import type { Job, JobReportKind, JobState } from "@lys/share"
+import { describe, expect, it, onTestFinished, vi, type Mock } from "vitest"
+import ActivityHub, {
+  type ActivityReplyTarget,
+  type EndedActivityStatus
+} from "../../../../src/modules/activity/activityHub"
 import type { AssistantMessageCompletion } from "../../../../src/modules/agent/agent"
 import type { EndedReply } from "../../../../src/modules/chat/turnStart"
+import type { DelegationRuntime } from "../../../../src/modules/delegation/dependencies"
 import { handleReplyEnded } from "../../../../src/modules/delegation/replyEnds"
 import type { StopRequester } from "../../../../src/modules/delegation/replyStopRequests"
 import {
@@ -16,9 +21,16 @@ import {
   type DelegationTestServices,
   type JobMessageRequest
 } from "../../support/delegationTestServices"
+import { waitForMicrotasks } from "../../support/microtasks"
 
 /** Text the job replies of the cases write in their last round. */
 const LAST_ROUND_TEXT = "Most moths drink nectar."
+
+/** Snapshot of a hub that follows no reply. */
+const EMPTY_ACTIVITY_SNAPSHOT: ActivityEvent = Object.freeze({
+  type: "activity-snapshot",
+  replies: []
+})
 
 /** What a stored end report is expected to say. */
 type ExpectedEndReport = Readonly<{
@@ -84,6 +96,64 @@ function createReplyText(
     content
   })
   if (part === undefined) throw new Error("The reply took no text")
+}
+
+/** Records each event written to one activity stream's connection. */
+type RecordedStream = Mock<(event: ActivityEvent) => Promise<void>>
+
+/** A job's reply that a real hub follows, with the runtime that tells it. */
+type FollowedJobReply = Readonly<{
+  /** The case's runtime, telling the real hub instead of the recording one. */
+  runtime: DelegationRuntime
+  /** Hub that follows the reply; closed when the test finishes. */
+  hub: ActivityHub
+  /** The stream opened on the hub once it followed the reply. */
+  stream: RecordedStream
+}>
+
+/**
+ * Opens a stream on a hub whose connection accepts every write at once.
+ *
+ * @param hub - Hub the stream follows.
+ * @returns The stream's writer, which records each written event.
+ */
+function openRecordedStream(hub: ActivityHub): RecordedStream {
+  const sendEvent: RecordedStream = vi.fn(() => Promise.resolve())
+  hub.openStream(sendEvent)
+  return sendEvent
+}
+
+/**
+ * Follows a job's running reply with a real hub, as the job message that
+ * started it does, and opens a stream on that hub.
+ *
+ * @param services - The case's runtime and the turns it started.
+ * @param job - The working job.
+ * @param parentConversationId - UUIDv7 of the conversation the job was
+ * started from.
+ * @returns The case's runtime over the real hub, the hub, and its stream.
+ */
+function followJobReply(
+  services: Pick<DelegationTestServices, "runtime" | "findStartedTurn">,
+  job: Job,
+  parentConversationId: string
+): FollowedJobReply {
+  const hub = new ActivityHub()
+  onTestFinished(() => {
+    hub.close()
+  })
+  const target: ActivityReplyTarget = Object.freeze({
+    conversationId: job.id,
+    parentConversationId,
+    assistantMessageId: job.replyId
+  })
+  hub.addReply(target, services.findStartedTurn(job.replyId).generation)
+  const stream = openRecordedStream(hub)
+  const runtime: DelegationRuntime = Object.freeze({
+    ...services.runtime,
+    hub
+  })
+  return Object.freeze({ runtime, hub, stream })
 }
 
 describe("handleReplyEnded", () => {
@@ -476,5 +546,72 @@ describe("handleReplyEnded", () => {
       conversationId,
       reason: "reply-streaming"
     })
+  })
+
+  it("ends a job's reply in the hub with null, and throws, when the reply cannot be read", async () => {
+    const services = openDelegationTestServices()
+    const delegating = createPersonTurn(services.conversation.turns)
+    const conversationId = delegating.turn.conversation.id
+    const job = sendJobMessage(services, delegating, MOTHS_REQUEST)
+    const followed = followJobReply(services, job, conversationId)
+    const readFailure = new Error("The database file is locked")
+    vi.spyOn(
+      services.runtime.jobActivity,
+      "findEndedReply"
+    ).mockImplementationOnce(() => {
+      throw readFailure
+    })
+
+    expect(() =>
+      handleReplyEnded(followed.runtime, buildEndedReply(job.id, job.replyId))
+    ).toThrow(readFailure)
+
+    const laterStream = openRecordedStream(followed.hub)
+    await waitForMicrotasks()
+    expect(followed.stream).toHaveBeenLastCalledWith({
+      type: "reply-ended",
+      conversationId: job.id,
+      parentConversationId: conversationId,
+      assistantMessageId: job.replyId,
+      status: null
+    })
+    expect(laterStream).toHaveBeenCalledExactlyOnceWith(EMPTY_ACTIVITY_SNAPSHOT)
+  })
+
+  it("ends a job's reply in the hub with its stored status, sends no job update, and throws, when its end report cannot be stored", async () => {
+    const services = openDelegationTestServices()
+    const delegating = createPersonTurn(services.conversation.turns)
+    const conversationId = delegating.turn.conversation.id
+    const job = sendJobMessage(services, delegating, MOTHS_REQUEST)
+    const followed = followJobReply(services, job, conversationId)
+    services.conversation.turns.updateAssistantMessageState(job.replyId, {
+      status: "completed",
+      finishReason: "stop"
+    })
+    const writeFailure = new Error("The disk is full")
+    vi.spyOn(
+      services.runtime.reports,
+      "createEndReport"
+    ).mockImplementationOnce(() => {
+      throw writeFailure
+    })
+
+    expect(() =>
+      handleReplyEnded(followed.runtime, buildEndedReply(job.id, job.replyId))
+    ).toThrow(writeFailure)
+
+    const laterStream = openRecordedStream(followed.hub)
+    await waitForMicrotasks()
+    expect(followed.stream).toHaveBeenLastCalledWith({
+      type: "reply-ended",
+      conversationId: job.id,
+      parentConversationId: conversationId,
+      assistantMessageId: job.replyId,
+      status: "completed"
+    })
+    expect(followed.stream).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "job-updated" })
+    )
+    expect(laterStream).toHaveBeenCalledExactlyOnceWith(EMPTY_ACTIVITY_SNAPSHOT)
   })
 })

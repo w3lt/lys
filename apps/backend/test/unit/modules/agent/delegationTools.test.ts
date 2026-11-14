@@ -371,7 +371,7 @@ describe("buildDelegationDefinitions", () => {
       "a leader that may delegate",
       "leader",
       DELEGATING_OFFER,
-      ["delegate_work"]
+      ["delegate_work", "stop_job"]
     ],
     ["a member whose turn may delegate", "member", DELEGATING_OFFER, []],
     [
@@ -501,9 +501,11 @@ describe("buildListedDelegationDefinitions", () => {
     ])
   })
 
-  it("lists the definition a leader that may delegate is offered", () => {
+  it("lists only the delegate_work definition a leader that may delegate is offered", () => {
+    const offered = buildDelegationDefinitions("leader", DELEGATING_OFFER)
+
     expect(buildListedDelegationDefinitions()).toEqual(
-      buildDelegationDefinitions("leader", DELEGATING_OFFER)
+      offered.filter((definition) => definition.name === "delegate_work")
     )
   })
 })

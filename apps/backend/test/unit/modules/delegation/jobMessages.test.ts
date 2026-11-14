@@ -1,6 +1,7 @@
 import { CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { JobMessageRefusal } from "../../../../src/modules/agent/turnDelegation"
+import { ReplyGenerationRegistryClosedError } from "../../../../src/modules/chat/replyGenerationRegistry"
 import type { TurnSettings } from "../../../../src/modules/chat/turnStart"
 import { createJobMessage } from "../../../../src/modules/delegation/jobMessages"
 import { createNewConversationTarget } from "../../support/conversationFixtures"
@@ -493,5 +494,50 @@ describe("createJobMessage", () => {
       jobNumber: undefined,
       reason: "conversation-missing"
     })
+  })
+
+  it("keeps the job turn stored with an interrupted reply whose end was handled, and throws, when the job's reply cannot start", async () => {
+    const services = openDelegationTestServices()
+    const delegating = createPersonTurn(services.conversation.turns)
+    const conversationId = delegating.turn.conversation.id
+    const draft = createJobMessageDraft(
+      services.conversation.replyParts,
+      delegating,
+      MOTHS_REQUEST
+    )
+    await services.generations[Symbol.asyncDispose]()
+
+    expect(() => createJobMessage(services.runtime, delegating, draft)).toThrow(
+      ReplyGenerationRegistryClosedError
+    )
+
+    const job = services.runtime.jobs.findJobByNumber(conversationId, 1)
+    if (job === undefined) throw new Error("No job was stored")
+    expect(job).toMatchObject({
+      state: "interrupted",
+      jobCallIds: [draft.toolCallId]
+    })
+    expect(
+      services.conversation.history.getConversation(job.id)?.messages
+    ).toMatchObject([
+      { role: "user", origin: "delegator" },
+      { role: "assistant", id: job.replyId, status: "interrupted" }
+    ])
+    vi.setSystemTime(new Date(LATER))
+    const next = createPersonTurn(services.conversation.turns, {
+      kind: "existing",
+      id: conversationId
+    })
+    expect(next.turn.userMessage.reports).toMatchObject([
+      { jobId: job.id, kind: "interrupted", content: "" }
+    ])
+    expect(services.hub.addReply).not.toHaveBeenCalled()
+    expect(services.hub.sendJobUpdate).toHaveBeenCalledExactlyOnceWith(
+      conversationId,
+      job
+    )
+    expect(
+      services.runtime.wakeSettings.findWakeSettings(conversationId)
+    ).toEqual({ status: "none" })
   })
 })

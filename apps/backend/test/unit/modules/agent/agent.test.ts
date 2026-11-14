@@ -46,6 +46,7 @@ import type {
   DelegationOffer,
   JobMessageDraft,
   JobMessageOutcome,
+  JobMessageRefusal,
   JobTurn,
   TurnDelegation
 } from "../../../../src/modules/agent/turnDelegation"
@@ -110,6 +111,7 @@ import {
 } from "../../support/toolFixtures"
 import {
   buildTurnDelegation,
+  handleUnexpectedDelegationCall,
   NO_TURN_DELEGATION
 } from "../../support/turnDelegationFakes"
 
@@ -4560,7 +4562,7 @@ describe("Agent", () => {
   })
 
   describe("delegation tools", () => {
-    it("offers delegate_work to a leader whose turn may delegate, after its state tools", async () => {
+    it("offers delegate_work and stop_job to a leader whose turn may delegate, after its state tools", async () => {
       const openReplyStream = createRoundStreams(FINISH_ROUND)
 
       await getAgentReplyOutcome({
@@ -4571,7 +4573,8 @@ describe("Agent", () => {
 
       expect(listOfferedToolNames(openReplyStream)).toEqual([
         ...LEADER_STATE_TOOL_NAMES,
-        "delegate_work"
+        "delegate_work",
+        "stop_job"
       ])
     })
 
@@ -4806,6 +4809,73 @@ describe("Agent", () => {
         status: "succeeded",
         result: "Job 2 was stopped. No result comes back for it."
       })
+    })
+
+    it("lets the turn that started its conversation's first job stop that job when a later message to it is refused because it still works", async () => {
+      /** Round in which the model sends job 1 more work while it works. */
+      const continueJobRound: readonly ReplyStreamEvent[] = Object.freeze([
+        {
+          type: "tool-calls",
+          toolCalls: [
+            {
+              toolName: "delegate_work",
+              argumentText:
+                '{"agent":"researcher","title":"Hologram news","instructions":"Add last week\'s news too.","job":1}'
+            }
+          ]
+        }
+      ])
+
+      /** Round in which the model stops job 1, as the refusal says. */
+      const stopFirstJobRound: readonly ReplyStreamEvent[] = Object.freeze([
+        {
+          type: "tool-calls",
+          toolCalls: [{ toolName: "stop_job", argumentText: '{"job":1}' }]
+        }
+      ])
+
+      const workingJobRefusal: JobMessageRefusal = Object.freeze({
+        kind: "job-is-working",
+        jobNumber: 1
+      })
+      const createJobMessage = vi
+        .fn<TurnDelegation["createJobMessage"]>(handleUnexpectedDelegationCall)
+        .mockImplementationOnce(startResearcherJob)
+        .mockReturnValueOnce({ status: "refused", refusal: workingJobRefusal })
+      const stopJob = vi.fn<TurnDelegation["stopJob"]>((jobNumber) =>
+        Promise.resolve({ status: "stopped", jobNumber })
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          DELEGATE_WORK_ROUND,
+          continueJobRound,
+          stopFirstJobRound,
+          FINISH_ROUND
+        ),
+        trainedForToolUse: true,
+        delegation: buildTurnDelegation(DELEGATING_OFFER, {
+          createJobMessage,
+          stopJob
+        }),
+        justRunToolNames: ["delegate_work"]
+      })
+
+      expect(run.parts).toMatchObject([
+        { toolName: "delegate_work", status: "succeeded" },
+        {
+          toolName: "delegate_work",
+          status: "failed",
+          result:
+            "Job 1 is still working. Wait for its report, or stop it with stop_job before you send it a new message."
+        },
+        {
+          toolName: "stop_job",
+          status: "succeeded",
+          result: "Job 1 was stopped. No result comes back for it."
+        }
+      ])
+      expect(stopJob.mock.calls.map(([jobNumber]) => jobNumber)).toEqual([1])
     })
 
     it("removes invisible characters from a delegation tool's result and says how many", async () => {

@@ -2992,7 +2992,7 @@ describe("updateFastifyWithChatRoute", () => {
       return Object.freeze({ prompt, conversationId, job })
     }
 
-    it("offers Caliginia's model delegate_work after the leader's state tools when the request offers it in a new conversation", async () => {
+    it("offers Caliginia's model delegate_work and stop_job after the leader's state tools when the request offers delegate_work in a new conversation", async () => {
       const testApp = await createStateToolApp()
 
       const response = await sendChatRequest(testApp.app, DELEGATING_REQUEST)
@@ -3000,7 +3000,8 @@ describe("updateFastifyWithChatRoute", () => {
       expect(response.statusCode).toBe(200)
       expect(listOfferedToolNames(testApp, 0)).toEqual([
         ...LEADER_STATE_TOOL_NAMES,
-        "delegate_work"
+        "delegate_work",
+        "stop_job"
       ])
     })
 

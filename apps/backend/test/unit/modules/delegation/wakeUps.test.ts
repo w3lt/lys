@@ -1,9 +1,11 @@
 import { CALIGINIA_AGENT_CODE, type Job, type JobState } from "@lys/share"
 import { describe, expect, it } from "vitest"
+import { ReplyGenerationRegistryClosedError } from "../../../../src/modules/chat/replyGenerationRegistry"
 import type { TurnSettings } from "../../../../src/modules/chat/turnStart"
 import type { DelegationEvent } from "../../../../src/modules/delegation/delegationEvent"
 import { createJobMessage } from "../../../../src/modules/delegation/jobMessages"
 import { stopJob } from "../../../../src/modules/delegation/jobStops"
+import { startDueWakeUpTurn } from "../../../../src/modules/delegation/wakeUps"
 import { createNewConversationTarget } from "../../support/conversationFixtures"
 import {
   createJobMessageDraft,
@@ -578,5 +580,52 @@ describe("startDueWakeUpTurn", () => {
       { jobId: job.id, kind: "result" }
     ])
     expect(next.turn.userMessage.reports).toEqual([])
+  })
+
+  it("keeps the wake-up turn and the reports it delivered stored with an interrupted reply whose end was handled, and throws, when the wake-up reply cannot start", async () => {
+    const services = openDelegationTestServices()
+    const delegating = createPersonTurn(services.conversation.turns)
+    const conversationId = delegating.turn.conversation.id
+    const job = sendJobMessage(services, delegating, MOTHS_REQUEST)
+    await services.resolveReply(job.replyId, "completed")
+    services.conversation.turns.updateAssistantMessageState(
+      delegating.turn.assistantMessage.id,
+      { status: "completed", finishReason: "stop" }
+    )
+    await services.generations[Symbol.asyncDispose]()
+
+    expect(() => startDueWakeUpTurn(services.runtime, conversationId)).toThrow(
+      ReplyGenerationRegistryClosedError
+    )
+
+    const messages =
+      services.conversation.history.getConversation(conversationId)?.messages
+    expect(messages).toMatchObject([
+      { role: "user", origin: "person" },
+      { role: "assistant", status: "completed" },
+      {
+        role: "user",
+        origin: "wake-up",
+        reports: [{ jobId: job.id, kind: "result" }]
+      },
+      { role: "assistant", status: "interrupted" }
+    ])
+    const wakeUpReplyId = messages?.at(-1)?.id
+    const next = createPersonTurn(services.conversation.turns, {
+      kind: "existing",
+      id: conversationId
+    })
+    expect(next.turn.userMessage.reports).toEqual([])
+    expect(services.hub.addReply).toHaveBeenCalledOnce()
+    expect(services.hub.removeReply).toHaveBeenLastCalledWith(
+      wakeUpReplyId,
+      "interrupted"
+    )
+    expect(
+      services.runtime.wakeSettings.findWakeSettings(conversationId)
+    ).toEqual({ status: "none" })
+    expect(listWakeUpEvents(services)).toEqual([
+      { kind: "wake-up-skipped", conversationId, reason: "reply-streaming" }
+    ])
   })
 })

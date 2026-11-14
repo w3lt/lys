@@ -192,8 +192,9 @@ export default function registerChatContextRoute(
  * delegation tools and the note about a job are counted as a turn would
  * offer them, from the offer {@link buildDelegationOffer} builds:
  * `delegate_work` for a new or main conversation whose request names it,
- * `stop_job` once the stored conversation has a job, and, for a stored job,
- * `report_progress` and the note with its delegator's display name.
+ * `stop_job` with `delegate_work` or once the stored conversation has a
+ * job, and, for a stored job, `report_progress` and the note with its
+ * delegator's display name.
  */
 async function handleChatContextRequest(
   request: FastifyRequest<ChatContextApiRoute>,

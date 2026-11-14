@@ -248,7 +248,10 @@ type ScriptedTurnStart = Readonly<{
   turns: Pick<ConversationTurnWriter, "updateAssistantMessageState">
   /** Started replies by their identity, in start order. */
   replies: Map<string, ScriptedReply>
-  /** Failures of the reply tasks, which fail the case when it finishes. */
+  /**
+   * Failures of the reply tasks, and throws of `handleReplyEnded` for a
+   * reply that could not start, which fail the case when it finishes.
+   */
   taskFailures: unknown[]
 }>
 
@@ -539,7 +542,9 @@ function createTestAgentRuntimeService(
  * @returns The registered generation, which runs no title task.
  * @throws What the options' `handleTurnStarted` or `createTurnDelegation`
  * throws, or the registry when it no longer admits generations; nothing is
- * registered then.
+ * registered then, and the reply is ended first, as
+ * {@link handleScriptedTurnStartFailure} describes, which throws an
+ * `AggregateError` instead when the reply's state cannot be stored.
  * @remarks Calls the options' `handleTurnStarted`, then their
  * `createTurnDelegation`, with the turn's context. The reply's task waits
  * until the case ends the reply with {@link DelegationTestServices.resolveReply},
@@ -560,34 +565,86 @@ function startScriptedTurn(
     settings,
     startedBy
   })
-  options.delegation.handleTurnStarted(context)
-  const delegation = options.delegation.createTurnDelegation(context)
-  const ending = Promise.withResolvers<ScriptedReplyEnding>()
-  const task: ScriptedReplyTask = Object.freeze({
-    turns: start.turns,
-    options,
-    ending: ending.promise
+  try {
+    options.delegation.handleTurnStarted(context)
+    const delegation = options.delegation.createTurnDelegation(context)
+    const ending = Promise.withResolvers<ScriptedReplyEnding>()
+    const task: ScriptedReplyTask = Object.freeze({
+      turns: start.turns,
+      options,
+      ending: ending.promise
+    })
+    const target: ReplyTarget = Object.freeze({
+      conversationId: turn.conversation.id,
+      assistantMessageId: turn.assistantMessage.id
+    })
+    const generation = start.generations.startReplyGeneration(target, {
+      startReplyTask: ({ abortSignal }) => runScriptedReply(task, abortSignal),
+      startTitleTask: undefined,
+      reportTaskFailure: (failure) => {
+        start.taskFailures.push(failure)
+      }
+    })
+    const started: ScriptedTurn = Object.freeze({
+      options,
+      context,
+      delegation,
+      generation
+    })
+    const reply: ScriptedReply = Object.freeze({ started, ending })
+    start.replies.set(turn.assistantMessage.id, reply)
+    return generation
+  } catch (error) {
+    handleScriptedTurnStartFailure(start, options, error)
+    throw error
+  }
+}
+
+/**
+ * Ends the stored reply of a scripted turn whose generation could not
+ * start, as the real turn start does: stores it as interrupted, then tells
+ * the options' `handleReplyEnded` that it ended.
+ *
+ * @param start - Stores the reply's final state, and keeps a throw of
+ * `handleReplyEnded`.
+ * @param options - The stored turn, and the hooks told that its reply
+ * ended.
+ * @param startFailure - What kept the generation from starting.
+ * @throws An `AggregateError` holding `startFailure` followed by the
+ * persistence failure when the state cannot be stored; the hook is told all
+ * the same, before it is thrown.
+ * @remarks The reply ends without an error sentence. A throw of
+ * `handleReplyEnded`, which the real turn start logs, is kept with the reply
+ * tasks' failures, which fail the case when it finishes.
+ */
+function handleScriptedTurnStartFailure(
+  start: Pick<ScriptedTurnStart, "turns" | "taskFailures">,
+  options: Pick<StartTurnOptions, "turn" | "delegation">,
+  startFailure: unknown
+): void {
+  const { conversation, assistantMessage } = options.turn
+  const reply: EndedReply = Object.freeze({
+    conversationId: conversation.id,
+    assistantMessageId: assistantMessage.id,
+    errorMessage: undefined
   })
-  const target: ReplyTarget = Object.freeze({
-    conversationId: turn.conversation.id,
-    assistantMessageId: turn.assistantMessage.id
-  })
-  const generation = start.generations.startReplyGeneration(target, {
-    startReplyTask: ({ abortSignal }) => runScriptedReply(task, abortSignal),
-    startTitleTask: undefined,
-    reportTaskFailure: (failure) => {
+  try {
+    start.turns.updateAssistantMessageState(assistantMessage.id, {
+      status: "interrupted"
+    })
+  } catch (persistenceError) {
+    throw new AggregateError(
+      [startFailure, persistenceError],
+      "Turn start failure could not be finalized",
+      { cause: persistenceError }
+    )
+  } finally {
+    try {
+      options.delegation.handleReplyEnded(reply)
+    } catch (failure) {
       start.taskFailures.push(failure)
     }
-  })
-  const started: ScriptedTurn = Object.freeze({
-    options,
-    context,
-    delegation,
-    generation
-  })
-  const reply: ScriptedReply = Object.freeze({ started, ending })
-  start.replies.set(turn.assistantMessage.id, reply)
-  return generation
+  }
 }
 
 /**

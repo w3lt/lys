@@ -254,8 +254,8 @@ export default function updateFastifyWithChatRoute(
  * the tool. The turn is started with the application's delegation hooks,
  * so it takes part in delegation: for a model trained for tool use, its
  * agent is offered `delegate_work` when the request offers it in a main
- * conversation and the agent's role may delegate, and `stop_job` once the
- * conversation has a job.
+ * conversation and the agent's role may delegate, and `stop_job` with
+ * `delegate_work` or once the conversation has a job.
  */
 async function handleChatRequest(
   request: ChatRouteRequest,

@@ -890,7 +890,8 @@ describe("startTurn", () => {
     expect(listRequestedSettings(openReplyStream)[0]?.toolNames).toEqual([
       ...SETTINGS_TOOL_NAMES,
       ...LEADER_STATE_TOOL_NAMES,
-      "delegate_work"
+      "delegate_work",
+      "stop_job"
     ])
   })
 

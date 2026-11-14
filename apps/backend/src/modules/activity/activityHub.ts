@@ -162,7 +162,7 @@ export default class ActivityHub {
    *
    * @param assistantMessageId - Identity of the reply that ended.
    * @param status - Stored final state of the reply; null when the reply is
-   * no longer stored.
+   * no longer stored or could not be read.
    * @remarks Does nothing for a reply the hub does not follow, and nothing
    * once the hub is closed. No prompt or tool call of the reply is sent
    * after its `reply-ended`, not even one the reply sent before this call.

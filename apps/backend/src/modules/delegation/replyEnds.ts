@@ -21,6 +21,19 @@ type JobReplyEnding = Readonly<{
   requester: StopRequester | undefined
 }>
 
+/** The end of a reply once it was saved and the reply left the hub. */
+type SavedReplyEnd = Readonly<{
+  /** The reply as stored once its end is reported. */
+  record: EndedReplyRecord
+  /** The final state the activity streams were told. */
+  status: EndedActivityStatus
+  /**
+   * Kind of the end report stored for a job's reply; undefined for a reply
+   * of a main conversation, or when no report was stored.
+   */
+  reportKind: EndReportKind | undefined
+}>
+
 /**
  * Handles the end of a reply of a turn started with the delegation hooks:
  * a person's turn, a job's turn, or a wake-up turn.
@@ -31,18 +44,18 @@ type JobReplyEnding = Readonly<{
  * @param reply - The reply that ended, after its final state was stored.
  * @throws If a store is closed or fails, or a stored value violates its
  * contract; or what the turn start throws when a wake-up reply cannot
- * start, as {@link startDueWakeUpTurn} describes.
- * @remarks Forgets who asked the reply to stop first. A reply that is no
- * longer stored, because its conversation was deleted, is removed from the
- * hub with `null`, and nothing else happens. A reply still stored as
- * `streaming`, because its final state could not be written, is removed
- * from the hub as `interrupted`, the state startup recovery stores for it,
- * and gets no end report. Otherwise the end is handled as
- * {@link handleMainReplyEnded} describes for a reply of a main
- * conversation, and as {@link handleJobReplyEnded} describes for a reply of
- * a job. Last, the wake settings of the main conversation the reply belongs
- * or reports to are removed when {@link removeIdleWakeSettings} finds them
- * idle.
+ * start, as {@link startDueWakeUpTurn} describes. The reply has left the
+ * hub all the same, as {@link saveReplyEnd} describes; when the reply could
+ * not be read or its end report could not be stored, no job update is sent,
+ * no wake-up starts, and the wake settings stay as they are.
+ * @remarks Forgets who asked the reply to stop first, then saves the end
+ * as {@link saveReplyEnd} does. A reply that is no longer stored, because
+ * its conversation was deleted, has nothing else happen. Otherwise the end
+ * is handled as {@link handleMainReplyEnded} describes for a reply of a
+ * main conversation, and as {@link handleJobReplyEnded} describes for a
+ * reply of a job. Last, the wake settings of the main conversation the
+ * reply belongs or reports to are removed when
+ * {@link removeIdleWakeSettings} finds them idle.
  */
 export function handleReplyEnded(
   runtime: ReplyEndRuntime,
@@ -51,14 +64,11 @@ export function handleReplyEnded(
   const requester = runtime.stopRequests.removeStopRequest(
     reply.assistantMessageId
   )
-  const record = runtime.jobActivity.findEndedReply(reply.assistantMessageId)
-  if (record === undefined) {
-    runtime.hub.removeReply(reply.assistantMessageId, null)
-    return
-  }
-  if (record.parentConversationId === null)
-    handleMainReplyEnded(runtime, reply, record)
-  else handleJobReplyEnded(runtime, Object.freeze({ reply, record, requester }))
+  const saved = saveReplyEnd(runtime, reply, requester)
+  if (saved === undefined) return
+  const { record } = saved
+  if (record.parentConversationId === null) handleMainReplyEnded(runtime, saved)
+  else handleJobReplyEnded(runtime, saved)
   removeIdleWakeSettings(
     runtime,
     record.parentConversationId ?? record.conversationId
@@ -66,61 +76,93 @@ export function handleReplyEnded(
 }
 
 /**
- * Handles the end of a reply of a main conversation: the person's reply, or
- * that of a wake-up turn.
+ * Saves the end of a reply: reads the reply as stored, stores the end
+ * report of a job's reply, and takes the reply out of the hub.
  *
- * @param runtime - The hub, and what a wake-up turn is started with.
+ * @param runtime - The reply reader, the job reader, the report writer, the
+ * hub, and the event reporter.
  * @param reply - The reply that ended.
- * @param record - The reply as stored once its end is reported.
+ * @param requester - Who asked the reply to stop; undefined when nobody
+ * did.
+ * @returns The stored reply, the status the hub was told, and the kind of
+ * the stored end report; undefined when the reply is no longer stored.
+ * @throws If the reply cannot be read, or the job or report store is closed
+ * or the write fails. The reply has left the hub then all the same.
+ * @remarks The report is stored as {@link saveEndReport} stores it, before
+ * the reply leaves the hub. The reply leaves the hub in every case, so no
+ * stream lists it after its end: with its stored final state once it was
+ * read, and `null` when it is no longer stored or could not be read. A
+ * reply still stored as `streaming`, because its final state could not be
+ * written, leaves as `interrupted`, the state startup recovery stores for
+ * it, and gets no end report. The hub ignores a reply it does not follow,
+ * such as the person's own.
+ */
+function saveReplyEnd(
+  runtime: Pick<
+    ReplyEndRuntime,
+    "jobActivity" | "jobs" | "reports" | "reportEvent" | "hub"
+  >,
+  reply: EndedReply,
+  requester: StopRequester | undefined
+): SavedReplyEnd | undefined {
+  let endedStatus: EndedActivityStatus | null = null
+  try {
+    const record = runtime.jobActivity.findEndedReply(reply.assistantMessageId)
+    if (record === undefined) return undefined
+    endedStatus = calculateEndedActivityStatus(record)
+    const reportKind =
+      record.parentConversationId === null
+        ? undefined
+        : saveEndReport(runtime, Object.freeze({ reply, record, requester }))
+    return Object.freeze({ record, status: endedStatus, reportKind })
+  } finally {
+    runtime.hub.removeReply(reply.assistantMessageId, endedStatus)
+  }
+}
+
+/**
+ * Handles the end of a reply of a main conversation, the person's reply or
+ * that of a wake-up turn, once the reply left the hub.
+ *
+ * @param runtime - What a wake-up turn is started with.
+ * @param saved - The stored reply and the status the hub was told.
  * @throws As {@link handleReplyEnded} does.
- * @remarks The reply is removed from the hub with its stored final state;
- * the hub ignores a reply it does not follow, such as the person's own. A
- * reply that completed or failed then starts the wake-up turn its
+ * @remarks A reply that completed or failed starts the wake-up turn its
  * conversation is due, as {@link startDueWakeUpTurn} decides, so the
  * reports that arrived while it streamed reach the agent. A reply that was
  * interrupted starts nothing: whoever stopped it decides what comes next.
  */
 function handleMainReplyEnded(
   runtime: ReplyEndRuntime,
-  reply: EndedReply,
-  record: EndedReplyRecord
+  saved: SavedReplyEnd
 ): void {
-  const status = calculateEndedActivityStatus(record)
-  runtime.hub.removeReply(reply.assistantMessageId, status)
-  if (status === "completed" || status === "failed")
-    startDueWakeUpTurn(runtime, record.conversationId)
+  if (saved.status === "completed" || saved.status === "failed")
+    startDueWakeUpTurn(runtime, saved.record.conversationId)
 }
 
 /**
- * Handles the end of a reply of a job: stores the report its delegator
- * reads, tells the hub, and wakes the delegator when the report calls for
- * it.
+ * Handles the end of a reply of a job once its report was stored and the
+ * reply left the hub: tells the hub how the job changed, and wakes the
+ * delegator when the report calls for it.
  *
- * @param runtime - The job reader, the report writer, the hub, the event
- * reporter, and what a wake-up turn is started with.
- * @param ending - The reply, its stored record, and who asked it to stop.
+ * @param runtime - The job reader, the hub, and what a wake-up turn is
+ * started with.
+ * @param saved - The stored reply and the kind of its stored end report.
  * @throws As {@link handleReplyEnded} does.
- * @remarks The report is stored as {@link saveEndReport} stores it. Then
- * the reply is removed from the hub with its stored final state, and the
- * job's update, read once the report is stored, is sent. A `result` or a
- * `failed` report stored here then starts the wake-up turn the delegator's
- * conversation is due, as {@link startDueWakeUpTurn} decides; no other
- * report does. A job that is no longer stored gets no report and no update.
+ * @remarks The job's update, read once the report is stored, is sent. A
+ * `result` or a `failed` report stored for the reply then starts the
+ * wake-up turn the delegator's conversation is due, as
+ * {@link startDueWakeUpTurn} decides; no other report does. A job that is
+ * no longer stored gets no update.
  */
 function handleJobReplyEnded(
   runtime: ReplyEndRuntime,
-  ending: JobReplyEnding
+  saved: SavedReplyEnd
 ): void {
-  const { reply, record } = ending
-  const reportKind = saveEndReport(runtime, ending)
-  runtime.hub.removeReply(
-    reply.assistantMessageId,
-    calculateEndedActivityStatus(record)
-  )
-  const ended = runtime.jobs.findJob(record.conversationId)
+  const ended = runtime.jobs.findJob(saved.record.conversationId)
   if (ended === undefined) return
   runtime.hub.sendJobUpdate(ended.parentConversationId, ended.job)
-  if (reportKind === "result" || reportKind === "failed")
+  if (saved.reportKind === "result" || saved.reportKind === "failed")
     startDueWakeUpTurn(runtime, ended.parentConversationId)
 }
 

@@ -39,17 +39,21 @@ export const DEFAULT_SETTINGS_DOCUMENT = Object.freeze({
     tavilyApiKey: null,
     ollamaApiKey: null,
     groqApiKey: null,
-    emailPassword: null
+    emailPassword: null,
+    lysEmailPassword: null
   },
   tools: { justRun: [], switches: {} },
   location: { city: null, region: null, country: null },
-  mcp: { servers: [], builtIn: { email: { enabled: false } } },
+  mcp: {
+    servers: [],
+    builtIn: { email: { enabled: false, lysEnabled: false } }
+  },
   providers: {
     enabled: ["lmStudio"],
     lmStudio: { address: null },
     ollama: { address: null }
   },
-  email: { account: null }
+  email: { account: null, lysAccount: null }
 })
 
 /**

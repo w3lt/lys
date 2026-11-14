@@ -8,6 +8,7 @@ import {
   type ChatToolResult
 } from "@lys/protocol"
 import {
+  CALIGINIA_AGENT_CODE,
   calculateImageTokens,
   toolDefinitionSchema,
   type ConversationAssistantMessage,
@@ -29,6 +30,7 @@ import {
 } from "vitest"
 import Agent, {
   type AgentContextInput,
+  type AgentDependencies,
   type AgentProfile,
   type AgentTurn,
   type AssistantMessageCompletion
@@ -674,7 +676,7 @@ const ECHO_MOTH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
 
 /** What a case's MCP server marks its echo tool as. */
 type McpToolMarks = Partial<
-  Pick<TurnMcpTool, "isDestructive" | "isOpenWorldWrite">
+  Pick<TurnMcpTool, "isDestructive" | "isOpenWorldWrite" | "isLysOnly">
 >
 
 /** Marks of an echo tool its server calls an open-world write. */
@@ -685,6 +687,11 @@ const OPEN_WORLD_WRITE_MARKS = Object.freeze({
 /** Marks of an echo tool its server calls destructive. */
 const DESTRUCTIVE_MARKS = Object.freeze({
   isDestructive: true
+} satisfies McpToolMarks)
+
+/** Marks of an echo tool only Lys herself may use. */
+const LYS_ONLY_MARKS = Object.freeze({
+  isLysOnly: true
 } satisfies McpToolMarks)
 
 /**
@@ -706,6 +713,7 @@ function createMcpEchoTool(
     definition: MCP_ECHO_DEFINITION,
     isDestructive: marks.isDestructive ?? false,
     isOpenWorldWrite: marks.isOpenWorldWrite ?? false,
+    isLysOnly: marks.isLysOnly ?? false,
     sendToolCall: call
   })
   return { tool, call }
@@ -833,6 +841,39 @@ const UNEXPECTED_STATE_READER: AgentStateReader = Object.freeze({
   findAgentState: handleUnexpectedToolCall
 })
 
+/**
+ * Reads the email address of an agent whose case gives it none.
+ *
+ * @returns Null.
+ */
+function readNoEmailAddress(): null {
+  return null
+}
+
+/** What a case's agent reads its own state with. */
+type StateDependencies = Pick<
+  AgentDependencies,
+  "stateReader" | "readEmailAddress"
+>
+
+/** State of an agent whose case reads none: any read fails it, no address. */
+const UNEXPECTED_STATE: StateDependencies = Object.freeze({
+  stateReader: UNEXPECTED_STATE_READER,
+  readEmailAddress: readNoEmailAddress
+})
+
+/**
+ * What `read_my_state` tells the leader of the read_my_state cases, whose
+ * address is `lys@example.net`, while the call runs in its only request.
+ */
+const OWN_STATE_RESULT = [
+  "You are Lys (code lys), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state. Your email address is lys@example.net.",
+  `Now: ${NOW}.`,
+  "Request slots: 1 of 2 in use.",
+  `1. This reply, in this conversation: started ${NOW} (less than a minute ago) with qwen/qwen3-8b on LM Studio; using tools: read_my_state running.`,
+  "Nothing else is in progress."
+].join("\n")
+
 /** Keeper of an agent whose case searches no tool; any search fails it. */
 const UNEXPECTED_TOOL_KEEPER: ToolKeeper = Object.freeze({
   findTools: handleUnexpectedToolCall
@@ -844,19 +885,19 @@ const UNEXPECTED_TOOL_KEEPER: ToolKeeper = Object.freeze({
  *
  * @param replyModel - Model access of the case.
  * @param replyContextMeter - Context meter of the same model.
- * @param stateReader - Reader of the state tools; any read fails the case by
- * default.
+ * @param state - Reader of the state tools and of the agent's email
+ * address; by default any state read fails the case, and it has no address.
  * @returns The ready agent.
  */
 function createTestAgent(
   replyModel: ReplyModel,
   replyContextMeter: ReplyContextMeter,
-  stateReader: AgentStateReader = UNEXPECTED_STATE_READER
+  state: StateDependencies = UNEXPECTED_STATE
 ): Agent {
   return new Agent(AGENT_PROFILE, {
     replyModel,
     replyContextMeter,
-    stateReader,
+    ...state,
     toolKeeper: UNEXPECTED_TOOL_KEEPER
   })
 }
@@ -875,7 +916,8 @@ function createScenarioAgent(scenario: AgentModelScenario): Agent {
     replyContextMeter:
       scenario.replyContextMeter ?? createRoomyReplyContextMeter(),
     stateReader: UNEXPECTED_STATE_READER,
-    toolKeeper: scenario.toolKeeper ?? UNEXPECTED_TOOL_KEEPER
+    toolKeeper: scenario.toolKeeper ?? UNEXPECTED_TOOL_KEEPER,
+    readEmailAddress: readNoEmailAddress
   })
 }
 
@@ -3380,6 +3422,57 @@ describe("Agent", () => {
       ])
     })
 
+    it("answers another agent's call of an MCP tool only Lys may use as a call of a tool it was not offered, without prompting the person or calling the server", async () => {
+      const { tool, call } = createMcpEchoTool(undefined, LYS_ONLY_MARKS)
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND),
+        clientTools: [READ_TEXT_FILE_TOOL],
+        mcpTools: [tool],
+        justRunToolNames: ["mcp__files__echo"],
+        sendToolApprovalPrompt
+      })
+
+      expect(call).not.toHaveBeenCalled()
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          toolName: "mcp__files__echo",
+          status: "failed",
+          result:
+            'No tool is named "mcp__files__echo". The tools you can call are: read_text_file.'
+        })
+      ])
+    })
+
+    it("runs Caliginia's call of an MCP tool only Lys may use", async () => {
+      const { tool, call } = createMcpEchoTool(undefined, LYS_ONLY_MARKS)
+      const agent = new Agent(
+        { ...AGENT_PROFILE, code: CALIGINIA_AGENT_CODE },
+        {
+          replyModel: {
+            openReplyStream: createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND)
+          },
+          replyContextMeter: createRoomyReplyContextMeter(),
+          stateReader: UNEXPECTED_STATE_READER,
+          toolKeeper: UNEXPECTED_TOOL_KEEPER,
+          readEmailAddress: readNoEmailAddress
+        }
+      )
+
+      const run = await getAgentReplyOutcome({
+        agent,
+        mcpTools: [tool],
+        justRunToolNames: ["mcp__files__echo"]
+      })
+
+      expect(call).toHaveBeenCalledOnce()
+      expect(run.parts).toEqual([
+        expect.objectContaining({ status: "succeeded" })
+      ])
+    })
+
     it("answers arguments without a name the tool requires without prompting the person or calling the server", async () => {
       const { tool, call } = createMcpEchoTool()
       const sendToolApprovalPrompt = createAllowingPromptSender()
@@ -4848,7 +4941,8 @@ describe("Agent", () => {
           replyModel: { openReplyStream },
           replyContextMeter,
           stateReader: UNEXPECTED_STATE_READER,
-          toolKeeper: UNEXPECTED_TOOL_KEEPER
+          toolKeeper: UNEXPECTED_TOOL_KEEPER,
+          readEmailAddress: readNoEmailAddress
         }
       )
       return {
@@ -5178,7 +5272,8 @@ describe("Agent", () => {
           replyModel: { openReplyStream },
           replyContextMeter: createRoomyReplyContextMeter(),
           stateReader: UNEXPECTED_STATE_READER,
-          toolKeeper: UNEXPECTED_TOOL_KEEPER
+          toolKeeper: UNEXPECTED_TOOL_KEEPER,
+          readEmailAddress: readNoEmailAddress
         }
       )
 
@@ -5216,7 +5311,7 @@ describe("Agent", () => {
       ["on", NO_UNOFFERED_TOOLS],
       ["off", TOOL_CALLS_OFF]
     ])(
-      "runs a read_my_state call at once while tool calls are %s, telling the agent the reply it writes",
+      "runs a read_my_state call at once while tool calls are %s, telling the agent the reply it writes and the email address it read for the turn",
       async (_label, unofferedTools) => {
         const store = openAgentTurnStore()
         const findAgentState = vi.fn<AgentStateReader["findAgentState"]>(
@@ -5244,10 +5339,14 @@ describe("Agent", () => {
           ],
           FINISH_ROUND
         )
+        const readEmailAddress = vi.fn(() => "lys@example.net")
         const agent = createTestAgent(
           { openReplyStream },
           createRoomyReplyContextMeter(),
-          { listAgentMatches: handleUnexpectedToolCall, findAgentState }
+          {
+            stateReader: { ...UNEXPECTED_STATE_READER, findAgentState },
+            readEmailAddress
+          }
         )
         const createToolCallGate = vi.fn(handleUnexpectedToolCall)
 
@@ -5259,14 +5358,8 @@ describe("Agent", () => {
           createToolCallGate
         })
 
-        const result = [
-          "You are Lys (code lys), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state.",
-          `Now: ${NOW}.`,
-          "Request slots: 1 of 2 in use.",
-          `1. This reply, in this conversation: started ${NOW} (less than a minute ago) with qwen/qwen3-8b on LM Studio; using tools: read_my_state running.`,
-          "Nothing else is in progress."
-        ].join("\n")
         expect(createToolCallGate).not.toHaveBeenCalled()
+        expect(readEmailAddress).toHaveBeenCalledOnce()
         expect(findAgentState).toHaveBeenCalledExactlyOnceWith(
           { code: AGENT_PROFILE.code, role: "leader" },
           AGENT_PROFILE.code
@@ -5275,12 +5368,12 @@ describe("Agent", () => {
           kind: "tool-call",
           toolName: "read_my_state",
           status: "succeeded",
-          result
+          result: OWN_STATE_RESULT
         })
         expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toEqual({
           role: "tool",
           toolCallId: run.parts[0]?.id,
-          content: result
+          content: OWN_STATE_RESULT
         })
         expect(run.events.at(-1)).toEqual({
           type: "done",
@@ -5336,7 +5429,8 @@ describe("Agent", () => {
           replyModel: { openReplyStream: createEventStream() },
           replyContextMeter,
           stateReader: UNEXPECTED_STATE_READER,
-          toolKeeper: UNEXPECTED_TOOL_KEEPER
+          toolKeeper: UNEXPECTED_TOOL_KEEPER,
+          readEmailAddress: readNoEmailAddress
         }
       )
 

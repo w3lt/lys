@@ -135,7 +135,8 @@ function createArmitage(
     replyModel,
     replyContextMeter,
     stateReader,
-    toolKeeper
+    toolKeeper,
+    readEmailAddress: () => null
   })
 }
 

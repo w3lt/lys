@@ -364,6 +364,19 @@ for [PR #308](https://github.com/w3lt/lys/pull/308), to the `enabled` and
 `builtIn` switches of the `mcp` group, the `email` group, and `emailPassword`
 in `secrets`.
 
+On 2026-11-13 the maintainer extended it again, for
+[PR #372](https://github.com/w3lt/lys/pull/372) and
+[issue #361](https://github.com/w3lt/lys/issues/361), in the same scope and
+with the same alternatives and removal condition, to the three fields of
+Lys's own mailbox: `lysEnabled` in `mcp.builtIn.email`, `lysAccount` in the
+`email` group, and `lysEmailPassword` in `secrets`. Each is optional and read
+as its default when absent, `false` or `null`, so a file written before them
+loads with the same meaning. The added risk: a build from before them knows
+`builtIn` and the `email` group but refuses `lysEnabled` and `lysAccount`,
+which this build writes on every save, so the file fails to load in it, every
+setting with it, until both are removed by hand; it ignores
+`lysEmailPassword` and drops it on its next save.
+
 - **Scope:** only `$LYS_HOME/settings.json`, which the
   [native settings module](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/settings.rs)
   reads and writes, and whose `secrets` group the backend reads for the

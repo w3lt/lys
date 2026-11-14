@@ -84,6 +84,7 @@ const MCP_TOOL: TurnMcpTool = Object.freeze({
   definition: MCP_DEFINITION,
   isDestructive: false,
   isOpenWorldWrite: false,
+  isLysOnly: false,
   sendToolCall: async () => ({ status: "succeeded" as const, content: "echo" })
 })
 

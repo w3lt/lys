@@ -23,6 +23,9 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.6",
+    "@typescript-eslint/rule-tester": "^8.72.2",
+    "@typescript-eslint/utils": "^8.72.2",
     "eslint": "^10.13.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-dom": "^5.28.4",
@@ -33,6 +36,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
     "prettier": "^3.9.10",
+    "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.0"
   },
   "lint-staged": {

@@ -11,6 +11,7 @@ import type {
 } from "@lys/share"
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import type { GetAttachmentImageFileStatus } from "../../agent/agentContext"
+import { listAgentMcpTools } from "../../agent/builtInAgents"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
 import type { AttachmentFileStatus } from "../../attachment/attachmentFileStore"
 import { buildAttachmentImageFileStatusLookup } from "../../attachment/attachmentImageReader"
@@ -166,7 +167,9 @@ export default function registerChatContextRoute(
  * inventory does not list sees no image and is offered no reader. Image
  * files are looked up, never read: an image counts from its stored sides.
  * An offered MCP tool whose server is not connected is left out, because
- * its definition is known only while the server is connected.
+ * its definition is known only while the server is connected, and so is a
+ * tool only Lys may use when the agent is neither Caliginia nor Lysiptera,
+ * as its turn would not offer it.
  */
 async function handleChatContextRequest(
   request: FastifyRequest<ChatContextApiRoute>,
@@ -192,6 +195,7 @@ async function handleChatContextRequest(
     sendUnansweredTurnProblem(reply, requestedAgent, request.url)
     return
   }
+  const { agent } = requestedAgent
   const measured = buildMeasuredHistory(
     storedConversation,
     dependencies.attachmentFiles
@@ -204,8 +208,8 @@ async function handleChatContextRequest(
     capabilities.trainedForToolUse,
     measured.attachments
   )
-  const tools = buildOfferedDefinitions(body, requestedTools)
-  const measurement = await requestedAgent.agent.findContextMeasurement({
+  const tools = buildOfferedDefinitions(body, requestedTools, agent.code)
+  const measurement = await agent.findContextMeasurement({
     history: measured.history,
     model: body.model,
     canSeeImages: capabilities.vision,
@@ -290,21 +294,25 @@ function buildMeasuredHistory(
 }
 
 /**
- * Builds the definitions of the tools the request offers, as a turn orders
- * them.
+ * Builds the definitions of the tools the request offers, as the agent's
+ * turn orders and offers them.
  *
  * @param body - Validated chat-context input.
  * @param requestedTools - The offered backend tools, in offer order.
+ * @param agentCode - Code of the agent the turn would run.
  * @returns The client definitions first, then the built-in tools', then the
- * connected MCP tools'.
+ * connected MCP tools' the agent may use: a tool only Lys may use is left
+ * out unless the agent is Caliginia or Lysiptera.
  */
 function buildOfferedDefinitions(
   body: ChatContextApiRequestBody,
-  requestedTools: RequestedBackendTools
+  requestedTools: RequestedBackendTools,
+  agentCode: string
 ): readonly ToolDefinition[] {
+  const mcpTools = listAgentMcpTools(agentCode, requestedTools.mcpTools)
   return [
     ...(body.tools?.definitions ?? []),
     ...requestedTools.builtInTools.map((entry) => entry.definition),
-    ...requestedTools.mcpTools.map((tool) => tool.definition)
+    ...mcpTools.map((tool) => tool.definition)
   ]
 }

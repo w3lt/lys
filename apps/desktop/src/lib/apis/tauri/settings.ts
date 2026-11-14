@@ -18,6 +18,10 @@ import {
   type ModelLoadConfiguration
 } from "@lys/share"
 
+import {
+  buildEmailMailboxAccountSettings,
+  type EmailMailbox
+} from "@/lib/models/email-mailbox"
 import type {
   GenerationSettings,
   LoadConfigurationSettings,
@@ -77,8 +81,10 @@ type SettingsDocumentSecrets = {
   readonly ollamaApiKey: string | null
   /** Saved Groq key, or null. */
   readonly groqApiKey: string | null
-  /** Saved password of the email account, or null. */
+  /** Saved password of the person's email account, or null. */
   readonly emailPassword: string | null
+  /** Saved password of Lys's own email account, or null. */
+  readonly lysEmailPassword: string | null
 }
 
 /**
@@ -150,8 +156,10 @@ type SettingsDocumentMcp = McpSettingsCandidate
  * parses it.
  */
 type SettingsDocumentEmail = {
-  /** The saved account, or null. */
+  /** The person's saved account, or null. */
   readonly account: EmailAccountCandidate | null
+  /** Lys's own saved account, or null. */
+  readonly lysAccount: EmailAccountCandidate | null
 }
 
 /**
@@ -246,7 +254,8 @@ function buildSecretsSettings(
       "Ollama"
     ),
     groqApiKey: buildApiKey(groqApiKeySchema, secrets.groqApiKey, "Groq"),
-    emailPassword: buildEmailPassword(secrets.emailPassword)
+    emailPassword: buildEmailPassword(secrets.emailPassword),
+    lysEmailPassword: buildEmailPassword(secrets.lysEmailPassword)
   }
 }
 
@@ -655,8 +664,12 @@ export async function saveRuntimeAutoStartSettings(
 }
 
 /**
- * Persists the email account and its password together while preserving
- * everything else already on disk.
+ * Persists one mailbox's email account and its password together while
+ * preserving everything else already on disk, the other mailbox's account
+ * included.
+ * @param mailbox - Whose account it is: the person's, kept in `account`
+ * and `emailPassword`, or Lys's own, kept in `lysAccount` and
+ * `lysEmailPassword`.
  * @param account - Account to save, or null to remove the saved one.
  * @param password - Password of the account, or null to remove the saved
  * one; a secret.
@@ -664,24 +677,28 @@ export async function saveRuntimeAutoStartSettings(
  * which validates both groups and replaces the file atomically and
  * owner-only.
  * @throws The native load or save rejection, including Rust's refusal of a
- * group that breaks its rules; no replacement is written if loading fails.
- * @remarks One write replaces the `email` group's account and the secrets
- * group's `emailPassword`, so the file never holds an account without its
- * password, which the backend would refuse. The application store
+ * group that breaks its rules, or an `Error` when a group read from disk
+ * fails its shared schema; no replacement is written if loading fails.
+ * @remarks One write replaces the mailbox's account in the `email` group and
+ * its password in the secrets group, so the file never holds an account
+ * without its password, which the backend would refuse. Every other group is
+ * written as read, so the stored default model's key is never rewritten. The
+ * application store
  * serializes this read-modify-write operation with the other settings-group
  * saves, so that overlapping saves cannot write back each other's stale
  * group or each other's stale key.
  */
 export async function saveEmailAccountSettings(
+  mailbox: EmailMailbox,
   account: EmailAccount | null,
   password: EmailPassword | null
 ): Promise<void> {
   const persistedDocument = await readSettingsDocument()
-  const secrets: SettingsDocumentSecrets = {
-    ...persistedDocument.secrets,
-    emailPassword: password
-  }
-  const email: SettingsDocumentEmail = { account }
+  const { secrets, email } = buildEmailMailboxAccountSettings(
+    buildLysSettings(persistedDocument),
+    mailbox,
+    { account, password }
+  )
   await writeSettingsDocument({ ...persistedDocument, secrets, email })
 }
 

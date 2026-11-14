@@ -431,6 +431,7 @@ async fn reports_a_refused_recipient_and_a_refused_sign_in_without_a_sent_copy()
     let stack = start_with_originals(false).await;
     stack.smtp.add_refused_recipient("nobody@example.com");
     let wrong_password = ToolContext::new(
+        email::mailbox::Mailbox::Person,
         email::account::parse_account_variable(
             &crate::support::build_account_json(
                 crate::support::TestServers {
@@ -444,7 +445,9 @@ async fn reports_a_refused_recipient_and_a_refused_sign_in_without_a_sent_copy()
             .replace(crate::support::PASSWORD, "another-synthetic-value"),
         )
         .expect("account"),
-        Trust::create_with_extra_roots(vec![stack.authority.root.clone()]),
+        email::tools::SharedCalls::new(Trust::create_with_extra_roots(vec![
+            stack.authority.root.clone(),
+        ])),
     );
 
     let refused = run_send_email(

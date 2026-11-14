@@ -236,7 +236,8 @@ function createTestAgentRuntimeService(
     requestLimits: REQUEST_LIMITS,
     toolSearchCallRecords: new SqliteToolSearchCallRecordWriter(
       conversation.database
-    )
+    ),
+    readLysEmailAddress: () => null
   })
 }
 

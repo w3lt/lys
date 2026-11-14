@@ -4,7 +4,8 @@
     "group": {},
     "accepted": true,
     "written": {
-      "account": null
+      "account": null,
+      "lysAccount": null
     }
   },
   {
@@ -14,7 +15,8 @@
     },
     "accepted": true,
     "written": {
-      "account": null
+      "account": null,
+      "lysAccount": null
     }
   },
   {
@@ -54,7 +56,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -94,7 +97,8 @@
           "security": "starttls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -134,7 +138,8 @@
           "security": "plain"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -174,7 +179,8 @@
           "security": "plain"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -214,7 +220,8 @@
           "security": "plain"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -254,7 +261,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -294,7 +302,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -334,7 +343,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -374,7 +384,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -414,7 +425,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -454,7 +466,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -494,7 +507,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -534,7 +548,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -574,7 +589,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -614,7 +630,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -654,7 +671,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -694,7 +712,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -734,7 +753,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -774,7 +794,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -814,7 +835,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -826,7 +848,7 @@
         "userName": "person@example.com",
         "imap": {
           "host": "imap.example.com",
-          "port": 993.0,
+          "port": 993,
           "security": "tls"
         },
         "smtp": {
@@ -854,7 +876,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -866,7 +889,7 @@
         "userName": "person@example.com",
         "imap": {
           "host": "imap.example.com",
-          "port": 9.93e2,
+          "port": 993,
           "security": "tls"
         },
         "smtp": {
@@ -894,7 +917,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -911,7 +935,7 @@
         },
         "smtp": {
           "host": "smtp.example.com",
-          "port": 587.00000000000005,
+          "port": 587,
           "security": "tls"
         },
         "serverKeepsSentCopy": true
@@ -934,7 +958,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -974,7 +999,8 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": false
-      }
+      },
+      "lysAccount": null
     }
   },
   {
@@ -2632,7 +2658,7 @@
         },
         "smtp": {
           "host": "smtp.example.com",
-          "port": 465.00000000000004,
+          "port": 465.00000000000006,
           "security": "tls"
         },
         "serverKeepsSentCopy": true
@@ -2857,6 +2883,486 @@
         },
         "serverKeepsSentCopy": true
       }
+    },
+    "accepted": false
+  },
+  {
+    "case": "Lys's account alone",
+    "group": {
+      "lysAccount": {
+        "address": "lys@example.net",
+        "displayName": "Lys",
+        "userName": "lys@example.net",
+        "imap": {
+          "host": "imap.example.net",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": null,
+      "lysAccount": {
+        "address": "lys@example.net",
+        "displayName": "Lys",
+        "userName": "lys@example.net",
+        "imap": {
+          "host": "imap.example.net",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    }
+  },
+  {
+    "case": "a null Lys account",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      },
+      "lysAccount": null
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      },
+      "lysAccount": null
+    }
+  },
+  {
+    "case": "Lys's account next to the person's",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      },
+      "lysAccount": {
+        "address": "lys@example.net",
+        "displayName": "Lys",
+        "userName": "lys@example.net",
+        "imap": {
+          "host": "imap.example.net",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      },
+      "lysAccount": {
+        "address": "lys@example.net",
+        "displayName": "Lys",
+        "userName": "lys@example.net",
+        "imap": {
+          "host": "imap.example.net",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    }
+  },
+  {
+    "case": "Lys's account with the person's user name on another IMAP host",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      },
+      "lysAccount": {
+        "address": "lys@example.net",
+        "displayName": "Lys",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.net",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      },
+      "lysAccount": {
+        "address": "lys@example.net",
+        "displayName": "Lys",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.net",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    }
+  },
+  {
+    "case": "Lys's account with the person's user name and IMAP host on another port",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      },
+      "lysAccount": {
+        "address": "lys@example.net",
+        "displayName": "Lys",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 143,
+          "security": "starttls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      },
+      "lysAccount": {
+        "address": "lys@example.net",
+        "displayName": "Lys",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 143,
+          "security": "starttls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    }
+  },
+  {
+    "case": "Lys's account with the person's address",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      },
+      "lysAccount": {
+        "address": "person@example.com",
+        "displayName": "Lys",
+        "userName": "lys@example.net",
+        "imap": {
+          "host": "imap.example.net",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "Lys's account with the person's address in another letter case",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      },
+      "lysAccount": {
+        "address": "Person@EXAMPLE.com",
+        "displayName": "Lys",
+        "userName": "lys@example.net",
+        "imap": {
+          "host": "imap.example.net",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "Lys's account with the person's user name on the same IMAP host and port",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      },
+      "lysAccount": {
+        "address": "lys@example.net",
+        "displayName": "Lys",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "Lys's account with the person's user name and IMAP host in another letter case",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      },
+      "lysAccount": {
+        "address": "lys@example.net",
+        "displayName": "Lys",
+        "userName": "PERSON@example.com",
+        "imap": {
+          "host": "IMAP.Example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "Lys's account that breaks an account rule",
+    "group": {
+      "lysAccount": {
+        "address": "lys@example.net",
+        "displayName": "Lys",
+        "userName": "lys@example.net",
+        "imap": {
+          "host": "imap.example.net",
+          "port": 143,
+          "security": "plain"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "Lys's account that is text",
+    "group": {
+      "lysAccount": "lys@example.net"
     },
     "accepted": false
   }

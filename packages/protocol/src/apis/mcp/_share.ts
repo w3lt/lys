@@ -31,10 +31,12 @@ export const MAXIMUM_MCP_SERVER_TOOL_COUNT = 128
  * Lys refuses. `protocol-error`: the server's answers are not valid MCP or
  * longer than the backend reads, or it answered the connection or the tool
  * list with an error. `account-missing` and `account-invalid`, for the
- * built-in email server only: it was not started because no email account
- * is saved, or because the saved account or its password fails its rules
- * or could not be read. Adding a reason is a compatibility change for every
- * consumer that branches on it.
+ * built-in email server only: it was not started, for either of its
+ * mailboxes, because a mailbox that is on, the person's or Lys's own, has
+ * no saved email account, or because such an account or its password fails
+ * its rules or could not be read, or the two accounts are one mailbox.
+ * Adding a reason is a compatibility change for every consumer that
+ * branches on it.
  */
 export const mcpServerFailureSchema = z.enum([
   "start-failed",

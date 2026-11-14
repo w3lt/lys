@@ -114,9 +114,15 @@ Terms that mean something specific inside Lys.
   Streamable HTTP. The backend owns every connection.
 - **Built-in MCP server**: an MCP server Lys ships and the backend starts
   itself, listed first in Settings → MCP and marked `built-in`, off until the
-  person switches it on. Today the only one is the email server, which needs
-  the saved email account; its switch is `mcp.builtIn.email.enabled` in
-  `settings.json`.
+  person switches it on. Today the only one is the email server, which serves
+  up to two mailboxes, each needing its saved email account: the person's,
+  switched by `mcp.builtIn.email.enabled` in `settings.json`, and Lys's own,
+  switched by `mcp.builtIn.email.lysEnabled`.
+- **Mailbox**: one email account the built-in email server serves: the
+  person's own, or Lys's own, an address of hers that she reads and sends
+  from as an agent of her own. Each has its account card and switch in
+  Settings → MCP, and its own ten tools, Lys's named with `lys_` and offered
+  only to Caliginia and Lysiptera.
 - **MCP tool**: a tool of a connected MCP server. The model calls it as
   `mcp__<server>__<tool>`; the backend applies the tool call policy, asks the
   person first unless the tool is on Just run and its server marks it neither

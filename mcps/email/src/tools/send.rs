@@ -112,7 +112,10 @@ impl SentCopy {
 /// forward without its own recipients or subject, or a message that
 /// cannot be built from the fields, such as one without a recipient;
 /// `InvalidId` for a `reply_to_id` or `forward_id` that is not one a tool
-/// gives; `StaleId` when that id no longer names a message; `SignIn` when
+/// gives, or one of Lys's mailbox given to the person's tools;
+/// `OtherMailboxId` for one of the person's mailbox given to Lys's
+/// tools; `StaleId` when
+/// that id no longer names a message; `SignIn` when
 /// signing in to the SMTP server failed, or to the IMAP server for a reply
 /// or a forward; the IMAP server's refusal (`ImapRefused`) or a failure of
 /// either connection (`Connection`); `SmtpRefused` when the SMTP server
@@ -233,7 +236,7 @@ pub async fn build_composition(
         (None, Some(id)) => (id, OriginalUse::Forward),
         (None, None) => return Ok(composition),
     };
-    let id = parse_email_id(original_id)?;
+    let id = parse_email_id(original_id, context.mailbox)?;
     let opened = match session {
         Some(opened) => opened,
         None => session.insert(context.open_imap().await?),

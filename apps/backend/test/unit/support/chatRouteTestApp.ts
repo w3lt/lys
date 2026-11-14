@@ -35,7 +35,9 @@ import {
 import type { LlmProviderAccess } from "../../../src/modules/llm/llmProviderAccess"
 import LlmRuntimeService from "../../../src/modules/llm/llmRuntimeService"
 import LlmService from "../../../src/modules/llm/llmService"
-import McpServerRegistry from "../../../src/modules/mcp/mcpServerRegistry"
+import McpServerRegistry, {
+  type BuiltInMcpServer
+} from "../../../src/modules/mcp/mcpServerRegistry"
 import { openMcpServer } from "../../../src/modules/mcp/mcpServerOpening"
 import type { McpSettingsRead } from "../../../src/infrastructure/settings/mcpSettingsFile"
 import type { BuiltInToolEntry } from "../../../src/modules/tool/builtIn/builtInTool"
@@ -275,6 +277,8 @@ export type AgentConversationTestServices = Readonly<{
  * turns and chat service are real instances with every call the chat route
  * can reach replaced by a spy.
  *
+ * @param builtInServers - Servers Lys ships that its MCP server registry
+ * holds; none by default.
  * @returns The application, the destination of its log, and the spies.
  * @throws If the SSE plugin cannot be registered.
  * @remarks The chat route is not registered; each case calls the registrar
@@ -315,7 +319,9 @@ export type AgentConversationTestServices = Readonly<{
  * final state before the in-memory conversation database is closed; the
  * directory is removed last.
  */
-export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
+export async function createChatRouteTestApp(
+  builtInServers: readonly BuiltInMcpServer[] = []
+): Promise<ChatRouteTestApp> {
   const attachmentsDirectoryPath = mkdtempSync(
     join(tmpdir(), "lys-chat-route-attachments-")
   )
@@ -324,7 +330,8 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   })
   const testFastify = await createChatSseTestApp()
   const { services, spies, database } = await createChatRouteTestServices(
-    attachmentsDirectoryPath
+    attachmentsDirectoryPath,
+    builtInServers
   )
   const generations = new ReplyGenerationRegistry()
   onTestFinished(async () => {
@@ -351,13 +358,16 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
  *
  * @param attachmentsDirectoryPath - Directory the attachment file store
  * keeps its files under; the caller owns it.
+ * @param builtInServers - Servers Lys ships that the MCP server registry
+ * holds.
  * @returns The services, their spies, and read access to their database.
  * @throws If the LLM runtime service cannot connect.
  * @remarks When the test finishes, the MCP server registry closes first,
  * then the LLM runtime services are disposed, and the database closes last.
  */
 async function createChatRouteTestServices(
-  attachmentsDirectoryPath: string
+  attachmentsDirectoryPath: string,
+  builtInServers: readonly BuiltInMcpServer[]
 ): Promise<SpiedChatRouteTestServices> {
   const conversation = openConversationTestServices()
   const createConversationTurn = vi
@@ -374,7 +384,7 @@ async function createChatRouteTestServices(
   const readJustRunToolNames = vi.fn<ReadJustRunToolNames>(() =>
     Promise.reject(createUnexpectedCallError("readJustRunToolNames"))
   )
-  const mcp = createTestMcpServerRegistry()
+  const mcp = createTestMcpServerRegistry(builtInServers)
   return Object.freeze({
     services: Object.freeze({
       conversationTurns: conversation.turns,
@@ -570,7 +580,8 @@ function createTestAgentServices(
     requestLimits: TEST_AGENT_REQUEST_LIMITS,
     toolSearchCallRecords: new SqliteToolSearchCallRecordWriter(
       conversation.database
-    )
+    ),
+    readLysEmailAddress: () => null
   })
   return Object.freeze({ agentService, agentRuntimeService })
 }
@@ -606,11 +617,15 @@ function registerChatRouteTestServices(
  * its settings through a spy, opens servers with a 10-second limit, and
  * logs nothing.
  *
+ * @param builtInServers - Servers Lys ships that the registry holds; none
+ * by default.
  * @returns The registry and its settings reader.
  * @remarks The registry saves its process groups to a folder the test
  * owns, and it is closed when the test finishes.
  */
-export function createTestMcpServerRegistry(): TestMcpServerRegistry {
+export function createTestMcpServerRegistry(
+  builtInServers: readonly BuiltInMcpServer[] = []
+): TestMcpServerRegistry {
   const emptyMcpSettings = mcpSettingsSchema.parse({})
   const readMcpSettings = vi.fn<() => Promise<McpSettingsRead>>(() =>
     Promise.resolve(
@@ -620,7 +635,7 @@ export function createTestMcpServerRegistry(): TestMcpServerRegistry {
   const { processGroups } = createOwnedMcpServerProcessGroups()
   const mcpServerRegistry = new McpServerRegistry({
     readSettings: readMcpSettings,
-    builtInServers: [],
+    builtInServers,
     openServer: (settings, context) =>
       openMcpServer(settings, context, MCP_TEST_OPENING_TIMEOUT_MILLISECONDS),
     workingDirectory: process.cwd(),

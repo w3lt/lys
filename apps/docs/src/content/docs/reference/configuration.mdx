@@ -51,17 +51,17 @@ A rejected value stops the desktop app before any window opens and prints
 `Lys cannot start: …` to standard error. The host does not create the directory
 at startup; loading settings creates it when `settings.json` is missing.
 
-| Path under `$LYS_HOME`        | Used by        | Contents                                                                                                                                                                                                                                         |
-| ----------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `settings.json`               | Tauri host     | [Persisted settings JSON](#persisted-settings-json)                                                                                                                                                                                              |
-| `lys_db.sqlite`               | Backend        | Conversation database                                                                                                                                                                                                                            |
-| `attachments/`                | Backend        | One folder per conversation and one per message under it, holding the files sent with that message under their own names; created on the first attachment stored                                                                                 |
-| `mcp-process-groups`          | Backend, host  | The process groups of the running stdio MCP servers, one decimal identifier per line; the host deletes it before it starts the backend and, once it stopped one, ends every group it lists and deletes it                                        |
-| `runtime/node/bin/node`       | Release builds | Node.js executable that runs the backend                                                                                                                                                                                                         |
-| `runtime/backend/backend.mjs` | Release builds | Backend bundle that the release Node.js executable runs                                                                                                                                                                                          |
-| `runtime/vmo/vmo`             | Release builds | vmo, the page reader the desktop starts, signed with the virtualization entitlement                                                                                                                                                              |
-| `runtime/email/email`         | Backend        | The email MCP server Lys ships, which the backend starts once it is switched on in Settings → MCP and runs for each email account check; in development, `LYS_EMAIL_SERVER_PATH`, which the desktop host sets, names the workspace build instead |
-| `logs/backend-YYYY-MM-DD.log` | Backend        | The backend's log lines of one UTC day, appended by every run that day and never deleted; see [the backend log files](/operate/logging/#the-backend-log-files)                                                                                   |
+| Path under `$LYS_HOME`        | Used by        | Contents                                                                                                                                                                                                                                                |
+| ----------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settings.json`               | Tauri host     | [Persisted settings JSON](#persisted-settings-json)                                                                                                                                                                                                     |
+| `lys_db.sqlite`               | Backend        | Conversation database                                                                                                                                                                                                                                   |
+| `attachments/`                | Backend        | One folder per conversation and one per message under it, holding the files sent with that message under their own names; created on the first attachment stored                                                                                        |
+| `mcp-process-groups`          | Backend, host  | The process groups of the running stdio MCP servers, one decimal identifier per line; the host deletes it before it starts the backend and, once it stopped one, ends every group it lists and deletes it                                               |
+| `runtime/node/bin/node`       | Release builds | Node.js executable that runs the backend                                                                                                                                                                                                                |
+| `runtime/backend/backend.mjs` | Release builds | Backend bundle that the release Node.js executable runs                                                                                                                                                                                                 |
+| `runtime/vmo/vmo`             | Release builds | vmo, the page reader the desktop starts, signed with the virtualization entitlement                                                                                                                                                                     |
+| `runtime/email/email`         | Backend        | The email MCP server Lys ships, which the backend starts once a mailbox is switched on in Settings → MCP and runs for each email account check; in development, `LYS_EMAIL_SERVER_PATH`, which the desktop host sets, names the workspace build instead |
+| `logs/backend-YYYY-MM-DD.log` | Backend        | The backend's log lines of one UTC day, appended by every run that day and never deleted; see [the backend log files](/operate/logging/#the-backend-log-files)                                                                                          |
 
 On macOS, `build.sh` installs the four `runtime/` entries under
 `${LYS_HOME:-$HOME/.lys}`. It treats an empty value as unset but does not reject
@@ -84,23 +84,23 @@ not find a runtime that `build.sh` installed under another directory.
 
 ## Backend-composed values
 
-| Value                          | Current source                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend listen address         | `BACKEND_HOST` and `BACKEND_PORT`                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)                                                                                                                                                                                                                                                                                                                                                                                          |
-| Settings file path             | `$LYS_HOME/settings.json`, as `settingsFilePath`; read for the model providers that are on, their addresses and keys, the Tavily API key, the Just run choices, the MCP servers with their switches, and the email account with its password; a tool call that names it is denied                                                                                                                                                                                 |
-| Attachments directory          | `$LYS_HOME/attachments`, as `attachmentsDirectoryPath`; created with its folders on the first attachment stored                                                                                                                                                                                                                                                                                                                                                   |
-| MCP process groups file        | `$LYS_HOME/mcp-process-groups`, as `mcpProcessGroupsFilePath`; written once the first stdio MCP server's group starts                                                                                                                                                                                                                                                                                                                                             |
-| Email server path              | `$LYS_HOME/runtime/email/email`, or the file `LYS_EMAIL_SERVER_PATH` names when the variable is set and not empty, as `emailServerPath`; the email MCP server Lys ships, started once it is switched on and run for each email account check; see [the email server](/architecture/backend/#the-email-server). A path that is not absolute, is longer than 1,024 characters, or has a control character or white space at either end stops the backend at startup |
-| vmo endpoint                   | `127.0.0.1:8080`, as `vmoHost` and `vmoPort`, from `VMO_HOST` and `VMO_PORT` in `@lys/protocol`; where vmo listens. It reads every `read_page` page, and its `GET /health` decides whether `read_page` is offered                                                                                                                                                                                                                                                 |
-| Caliginia system prompt        | `src/utils/prompts/caliginia.txt`, as `caliginiaSystemPrompt`                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Lysiptera system prompt        | `src/utils/prompts/lysiptera.txt`, as `lysipteraSystemPrompt`                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Armitage system prompt         | `src/utils/prompts/armitage.txt`, as `armitageSystemPrompt`; Armitage, the tool keeper, searches a turn's tools with it                                                                                                                                                                                                                                                                                                                                           |
-| Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                                                                                                                                                                                                                                                                                                                                                                                              |
-| Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer                                                                                                                                                                                                                                                                                                                                                                             |
-| Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer                                                                                                                                                                                                                                                                                                                                                                              |
-| Agent request slots            | `2`, from `agentRequestSlotCount` in `src/config.ts`; replies each live agent works on at once; must be a positive integer                                                                                                                                                                                                                                                                                                                                        |
-| Agent waiting request limit    | `8`, from `agentWaitingRequestLimit` in `src/config.ts`; replies that may wait per live agent for a free request slot; must be a non-negative integer, `0` meaning no reply waits                                                                                                                                                                                                                                                                                 |
+| Value                          | Current source                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Backend listen address         | `BACKEND_HOST` and `BACKEND_PORT`                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Settings file path             | `$LYS_HOME/settings.json`, as `settingsFilePath`; read for the model providers that are on, their addresses and keys, the Tavily API key, the Just run choices, the MCP servers with their switches, and the email accounts with their passwords; a tool call that names it is denied                                                                                                                                                                                    |
+| Attachments directory          | `$LYS_HOME/attachments`, as `attachmentsDirectoryPath`; created with its folders on the first attachment stored                                                                                                                                                                                                                                                                                                                                                          |
+| MCP process groups file        | `$LYS_HOME/mcp-process-groups`, as `mcpProcessGroupsFilePath`; written once the first stdio MCP server's group starts                                                                                                                                                                                                                                                                                                                                                    |
+| Email server path              | `$LYS_HOME/runtime/email/email`, or the file `LYS_EMAIL_SERVER_PATH` names when the variable is set and not empty, as `emailServerPath`; the email MCP server Lys ships, started once a mailbox is switched on and run for each email account check; see [the email server](/architecture/backend/#the-email-server). A path that is not absolute, is longer than 1,024 characters, or has a control character or white space at either end stops the backend at startup |
+| vmo endpoint                   | `127.0.0.1:8080`, as `vmoHost` and `vmoPort`, from `VMO_HOST` and `VMO_PORT` in `@lys/protocol`; where vmo listens. It reads every `read_page` page, and its `GET /health` decides whether `read_page` is offered                                                                                                                                                                                                                                                        |
+| Caliginia system prompt        | `src/utils/prompts/caliginia.txt`, as `caliginiaSystemPrompt`                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Lysiptera system prompt        | `src/utils/prompts/lysiptera.txt`, as `lysipteraSystemPrompt`                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Armitage system prompt         | `src/utils/prompts/armitage.txt`, as `armitageSystemPrompt`; Armitage, the tool keeper, searches a turn's tools with it                                                                                                                                                                                                                                                                                                                                                  |
+| Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer                                                                                                                                                                                                                                                                                                                                                                                    |
+| Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer                                                                                                                                                                                                                                                                                                                                                                                     |
+| Agent request slots            | `2`, from `agentRequestSlotCount` in `src/config.ts`; replies each live agent works on at once; must be a positive integer                                                                                                                                                                                                                                                                                                                                               |
+| Agent waiting request limit    | `8`, from `agentWaitingRequestLimit` in `src/config.ts`; replies that may wait per live agent for a free request slot; must be a non-negative integer, `0` meaning no reply waits                                                                                                                                                                                                                                                                                        |
 
 `loadBackendConfig()` builds these values once when the backend starts, so a
 changed `LYS_HOME`, prompt file, or limit takes effect after a restart. The
@@ -161,7 +161,8 @@ defaults:
     "tavilyApiKey": null,
     "ollamaApiKey": null,
     "groqApiKey": null,
-    "emailPassword": null
+    "emailPassword": null,
+    "lysEmailPassword": null
   },
   "providers": {
     "enabled": ["lmStudio"],
@@ -180,46 +181,50 @@ defaults:
   "mcp": {
     "servers": [],
     "builtIn": {
-      "email": { "enabled": false }
+      "email": { "enabled": false, "lysEnabled": false }
     }
   },
   "email": {
-    "account": null
+    "account": null,
+    "lysAccount": null
   }
 }
 ```
 
-| Key                         | Type                    | Meaning                                                                                                                                                                                                   |
-| --------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runtime.autoStartBackend`  | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically                                                                                                                        |
-| `runtime.autoStartVmo`      | `boolean`               | Whether desktop initialization should ask Tauri to start vmo, the page reader `read_page` uses                                                                                                            |
-| `runtime.defaultModel`      | `string \|null`         | Key of the model a new conversation starts with, read as a model of the first provider that is on, in provider order; without one, the first loaded model in provider order; the desktop never changes it |
-| `runtime.backendAddress`    | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address                                                                                                               |
-| `generation.temperature`    | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                                                                                                                                      |
-| `generation.replyCeiling`   | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                                                                                                                |
-| `loadConfiguration`         | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                                                                                                         |
-| `secrets.tavilyApiKey`      | `string \|null`         | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets)                                                                                          |
-| `secrets.ollamaApiKey`      | `string \|null`         | API key of Ollama Cloud, under the same rule; see [Secrets](#secrets)                                                                                                                                     |
-| `secrets.groqApiKey`        | `string \|null`         | Groq API key, under the same rule; see [Secrets](#secrets)                                                                                                                                                |
-| `secrets.emailPassword`     | `string \|null`         | Password of the saved email account, 1 to 1,024 characters without a control character, stored as plain text; see [Secrets](#secrets)                                                                     |
-| `providers`                 | object                  | The model providers that are on, and where to find them; see [Providers](#providers)                                                                                                                      |
-| `tools.justRun`             | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                                                                                                         |
-| `tools.switches`            | object of `boolean`     | Whether each tool the person switched is on, by tool name; any other tool starts at its default; see [Tools](#tools)                                                                                      |
-| `tools.approvedFolders`     | array of absolute paths | Folders tool calls may name paths in; absent or empty lets them name any path; see [Approved folders](#approved-folders)                                                                                  |
-| `location.city`             | `string \|null`         | City the person saved for `get_location`; see [Location](#location)                                                                                                                                       |
-| `location.region`           | `string \|null`         | State, province, or other region the person saved; see [Location](#location)                                                                                                                              |
-| `location.country`          | `string \|null`         | Country the person saved; see [Location](#location)                                                                                                                                                       |
-| `mcp.servers`               | array of server objects | MCP servers Lys connects to, in the order Settings → MCP lists them; see [MCP servers](#mcp-servers)                                                                                                      |
-| `mcp.servers[].enabled`     | `boolean`               | Whether Lys connects to that server and offers its tools; on when omitted; see [MCP servers](#mcp-servers)                                                                                                |
-| `mcp.builtIn.email.enabled` | `boolean`               | Whether the email MCP server Lys ships is on; off when omitted; see [MCP servers](#mcp-servers)                                                                                                           |
-| `email.account`             | object or `null`        | The one email account the email MCP server works with; see [Email account](#email-account)                                                                                                                |
+| Key                            | Type                    | Meaning                                                                                                                                                                                                   |
+| ------------------------------ | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime.autoStartBackend`     | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically                                                                                                                        |
+| `runtime.autoStartVmo`         | `boolean`               | Whether desktop initialization should ask Tauri to start vmo, the page reader `read_page` uses                                                                                                            |
+| `runtime.defaultModel`         | `string \|null`         | Key of the model a new conversation starts with, read as a model of the first provider that is on, in provider order; without one, the first loaded model in provider order; the desktop never changes it |
+| `runtime.backendAddress`       | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address                                                                                                               |
+| `generation.temperature`       | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                                                                                                                                      |
+| `generation.replyCeiling`      | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                                                                                                                |
+| `loadConfiguration`            | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                                                                                                         |
+| `secrets.tavilyApiKey`         | `string \|null`         | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets)                                                                                          |
+| `secrets.ollamaApiKey`         | `string \|null`         | API key of Ollama Cloud, under the same rule; see [Secrets](#secrets)                                                                                                                                     |
+| `secrets.groqApiKey`           | `string \|null`         | Groq API key, under the same rule; see [Secrets](#secrets)                                                                                                                                                |
+| `secrets.emailPassword`        | `string \|null`         | Password of the person's saved email account, 1 to 1,024 characters without a control character, stored as plain text; see [Secrets](#secrets)                                                            |
+| `secrets.lysEmailPassword`     | `string \|null`         | Password of Lys's own saved email account, under the same rule; see [Secrets](#secrets)                                                                                                                   |
+| `providers`                    | object                  | The model providers that are on, and where to find them; see [Providers](#providers)                                                                                                                      |
+| `tools.justRun`                | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                                                                                                         |
+| `tools.switches`               | object of `boolean`     | Whether each tool the person switched is on, by tool name; any other tool starts at its default; see [Tools](#tools)                                                                                      |
+| `tools.approvedFolders`        | array of absolute paths | Folders tool calls may name paths in; absent or empty lets them name any path; see [Approved folders](#approved-folders)                                                                                  |
+| `location.city`                | `string \|null`         | City the person saved for `get_location`; see [Location](#location)                                                                                                                                       |
+| `location.region`              | `string \|null`         | State, province, or other region the person saved; see [Location](#location)                                                                                                                              |
+| `location.country`             | `string \|null`         | Country the person saved; see [Location](#location)                                                                                                                                                       |
+| `mcp.servers`                  | array of server objects | MCP servers Lys connects to, in the order Settings → MCP lists them; see [MCP servers](#mcp-servers)                                                                                                      |
+| `mcp.servers[].enabled`        | `boolean`               | Whether Lys connects to that server and offers its tools; on when omitted; see [MCP servers](#mcp-servers)                                                                                                |
+| `mcp.builtIn.email.enabled`    | `boolean`               | Whether the email MCP server Lys ships serves the person's mailbox; off when omitted; see [MCP servers](#mcp-servers)                                                                                     |
+| `mcp.builtIn.email.lysEnabled` | `boolean`               | Whether it serves Lys's own mailbox; off when omitted; see [MCP servers](#mcp-servers)                                                                                                                    |
+| `email.account`                | object or `null`        | The person's email account, which the email MCP server works with; see [Email account](#email-account)                                                                                                    |
+| `email.lysAccount`             | object or `null`        | Lys's own email account, a mailbox of its own; see [Email account](#email-account)                                                                                                                        |
 
 A missing group, or a missing field in one of them, uses the host defaults;
 for `loadConfiguration` that default is empty, for `secrets` it holds no
 key, for `providers` it is LM Studio on at its default address, for `tools` it
 puts no tool on Just run and switches no tool, for `location` it saves no
 location, for `mcp` it lists no server and keeps every server Lys ships
-off, and for `email` it holds no account. A `model` group, which
+off, and for `email` it holds no account, the person's or Lys's. A `model` group, which
 older files hold for a context-size estimate Lys no longer has, is ignored,
 and the next save leaves it out. Loading never rewrites an
 existing file. Invalid JSON, a JSON array in place of the document, of a
@@ -239,7 +244,8 @@ desktop's file tools refuse it as they refuse `settings.json`. The Tauri host
 is the file's only writer; the backend reads it for
 the model providers that are on with their addresses and keys, the Tavily
 API key, the Just run choices,
-the MCP servers with their switches, and the email account with its password.
+the MCP servers with their switches, and the email accounts with their
+passwords.
 
 The file carries no version marker. The maintainer accepted that for
 [PR #143](https://github.com/w3lt/lys/pull/143); see the
@@ -299,19 +305,21 @@ Each key goes only to its own service. The keys are plain text, protected by
 the file's owner-only permissions; there is no keychain storage yet
 ([#296](https://github.com/w3lt/lys/issues/296)).
 
-The group also holds `emailPassword`, the password of the email account saved
-in the [`email` group](#email-account): 1 to 1,024 characters without a
+The group also holds `emailPassword` and `lysEmailPassword`, the passwords of
+the person's and Lys's email accounts saved in the
+[`email` group](#email-account): each 1 to 1,024 characters without a
 control character, spaces kept, so an app password pasted with its spaces is
 accepted. An invalid password makes the file fail to load too; the error
-names the password rule and never quotes the value. It is stored
+names the password rule and never quotes the value. Each is stored
 as plain text like the keys, and the backend hands it to the email MCP server
-Lys ships, in that server's environment, each time it starts the server or
-checks the account.
+Lys ships, in that server's environment, each time it starts the server while
+its mailbox is on, or checks the account.
 
 The desktop saves one key at a time: it reads the group on disk and replaces
-only the key that changed, so saving one key never overwrites another. The
+only the key that changed, so saving one key never overwrites another. Each
 email account and its password are saved together, in one write of the
-`email` group and of that key, so the file never holds one without the other.
+`email` group and of that key that keeps the other account and its password,
+so the file never holds one without the other.
 
 The backend reads the Tavily key from this file when the desktop lists the
 tools, when a chat request offers `web_search`, and when the person checks the
@@ -516,7 +524,7 @@ Streamable HTTP (`http`):
       }
     ],
     "builtIn": {
-      "email": { "enabled": true }
+      "email": { "enabled": true, "lysEnabled": false }
     }
   }
 }
@@ -546,15 +554,17 @@ Streamable HTTP (`http`):
   makes loading the settings fail; an error about a server names the broken
   rule and never quotes a value. An error about the group itself, such as a
   `servers` value that is not a list, can quote that value.
-- `builtIn` holds the switch of each server Lys ships, today `email`, as
-  `{ "enabled": true }` or `{ "enabled": false }`; an omitted object or
-  server means off. `null` for either, a server name this build does not
+- `builtIn` holds the switches of each server Lys ships, today `email`, whose
+  `enabled` serves the person's mailbox and `lysEnabled` Lys's own, each
+  `true` or `false`; an omitted object, server, or switch means off. The
+  server runs while either switch is on, as one process for both
+  mailboxes. `null` for either, a server name this build does not
   know, or a switch that is not `true` or `false` makes loading the settings
   fail. The servers Lys ships are not in `servers` and do not count toward
   its 16. An added server with a built-in server's name is applied in its
   place, and the built-in server waits until the added one is renamed or
-  removed; the MCP pane's editor refuses such a name. The email server also
-  needs the [email account](#email-account) below; see
+  removed; the MCP pane's editor refuses such a name. Each mailbox of the
+  email server also needs its [email account](#email-account) below; see
   [the email server](/architecture/backend/#the-email-server).
 - A URL's host is plain ASCII or an internationalized domain name that
   follows the rule below.
@@ -579,8 +589,8 @@ Streamable HTTP (`http`):
   its status.
 - The backend reads the group when it starts and whenever the desktop asks it
   to sync: when the backend starts running, after each save and switch in the
-  MCP pane, after an email account save when the email server is switched on
-  once the account is saved, after a reconnect the backend refuses as not
+  MCP pane, after an email account save when its mailbox is switched on once
+  the account is saved, after a reconnect the backend refuses as not
   found or off, and when the person retries a failed sync.
   It takes only `mcp`, and the `email` and `secrets` groups for the email
   server, ignoring every other group, and never writes the file. When the file
@@ -623,13 +633,18 @@ next time it saves settings, so the servers must be added again after going
 back to an older build. A build from before the switches knows the group but
 not `enabled` or `builtIn`, and refuses to load a file that holds either,
 every setting with it; remove them by hand before going back to such a
-build.
+build. A build from before Lys's own email account knows `builtIn` but not
+`lysEnabled`, and refuses such a file the same way; see
+[Email account](#email-account).
 
 ### Email account
 
-The `email` group holds the one account the email MCP server Lys ships works
-with, saved on the server's card in Settings → MCP, with its password in
-`secrets.emailPassword`; see
+The `email` group holds the two accounts the email MCP server Lys ships works
+with, each saved on its own card under the server in Settings → MCP:
+`account`, the person's own, with its password in `secrets.emailPassword`,
+and `lysAccount`, an account of Lys's own that she reads and sends from as an
+agent of her own, with its password in `secrets.lysEmailPassword`. One
+server process serves both mailboxes; see
 [the email server](/architecture/backend/#the-email-server).
 
 ```json
@@ -646,10 +661,19 @@ with, saved on the server's card in Settings → MCP, with its password in
         "security": "starttls"
       },
       "serverKeepsSentCopy": false
+    },
+    "lysAccount": {
+      "address": "lys@example.net",
+      "displayName": "Lys",
+      "userName": "lys@example.net",
+      "imap": { "host": "imap.example.net", "port": 993, "security": "tls" },
+      "smtp": { "host": "smtp.example.net", "port": 465, "security": "tls" },
+      "serverKeepsSentCopy": false
     }
   },
   "secrets": {
-    "emailPassword": "an app password"
+    "emailPassword": "an app password",
+    "lysEmailPassword": "another app password"
   }
 }
 ```
@@ -662,24 +686,41 @@ with, saved on the server's card in Settings → MCP, with its password in
 | `imap`, `smtp`        | The servers, each `{ host, port, security }`: a host name or a dotted IPv4 address, at most 253 characters of labels of ASCII letters, digits, and inner hyphens, each label at most 63 characters, or a bracketed IPv6 address, at most 47 characters; a port, a whole number from 1 to 65535 however the JSON number is written, so `993.0` reads as `993`, which the host writes back; and `tls` (TLS from the first byte), `starttls` (STARTTLS before any credential), or `plain` (no TLS), which is allowed only for `localhost`, `127.0.0.1`, and `[::1]` |
 | `serverKeepsSentCopy` | `true` when the SMTP server files a copy of each sent message itself, as Gmail does; `false` makes the email server append the copy to the Sent folder                                                                                                                                                                                                                                                                                                                                                                                                           |
 
-- A missing group or a `null` account means no account; the email server
-  cannot be switched on until one is saved, and its row in Settings → MCP
-  says so. `null` for the group, an unknown field, or a broken rule makes
+- Both accounts follow the rules of the table. A missing group or a `null`
+  account means no account; a mailbox cannot be switched on until its
+  account is saved, and the email server's row in Settings → MCP says so
+  while neither is. A new card for Lys's account starts with `Lys` as its
+  display name.
+- The two accounts must open two mailboxes: the same address, ignoring case,
+  or the same user name on the same IMAP host and port, ignoring the case of
+  the user name and the host, makes loading the settings fail, without
+  quoting either account; the card refuses it before saving, and the email
+  server refuses to start with it. Otherwise an alias of the person's
+  account saved as Lys's would let Lys's tools read the person's mailbox. `null` for the group, an unknown field, or a broken rule makes
   loading the settings fail; an error about the account names the broken
   rule and never quotes a value.
-- The account and the password belong together: the backend treats an
+- Each account and its password belong together: the backend treats an
   account without a password, or one whose password fails its rule, as
-  unusable, and lists the email server as `failed` with `account-invalid`.
-  Saving on the card first signs in to both servers through the backend and
-  writes both in one save; see [Settings updates](#settings-updates).
+  unusable, and while its mailbox is on lists the email server as `failed`
+  with `account-invalid`. Saving on a card first signs in to both mail
+  servers through the backend and writes the account and its password in
+  one save that keeps the other account; see
+  [Settings updates](#settings-updates).
 - The backend reads the group, with `secrets`, each time it applies the
-  `mcp` group while the email server is switched on, and hands the account
-  and the password to the server in the `LYS_EMAIL_ACCOUNT` variable of its
-  environment, as one line of JSON; see the
+  `mcp` group while either mailbox is switched on, and hands each account of
+  a mailbox that is on, with its password, to the server in a variable of
+  its environment, as one line of JSON: the person's in `LYS_EMAIL_ACCOUNT`
+  and Lys's in `LYS_EMAIL_LYS_ACCOUNT`. A mailbox that is off never reaches
+  the server; see the
   [security notes](/architecture/security/#candid-limits).
 - An older Lys build does not know the group or `emailPassword`. It ignores
   and removes them the next time it saves settings, so the account must be
-  saved again after going back to an older build.
+  saved again after going back to an older build. A build from before Lys's
+  own account knows the group but not `lysAccount`, and refuses to load a
+  file that holds it, every setting with it, as it refuses
+  `mcp.builtIn.email.lysEnabled`; this build writes both, `null` and `false`
+  when unused, so remove both by hand before going back to such a build. It
+  ignores `secrets.lysEmailPassword` and removes it the next time it saves.
 
 ## Settings updates
 
@@ -749,10 +790,13 @@ server's switch saves the group the same way, keeping the other switches,
 and applies it, so switching a server off stops it at once. After a
 failed save, the pane says the save failed, an open editor keeps the server
 as typed, and the backend keeps the servers it applied before. The email
-server's card saves the account and its password together, in one write that
-replaces the `email` group and only `emailPassword` in `secrets`, when the
+server's two cards each save their account and its password together, in one
+write that replaces only that account in the `email` group and only its
+password, `emailPassword` or `lysEmailPassword`, in `secrets`, when the
 person presses Save or Enter and both mail servers accepted the sign-in;
-Remove account switches the server off, then writes `null` for both. Its tool chips
+Remove account switches that mailbox off, then writes `null` for both. Each
+card's Use this mailbox switch saves only its mailbox's switch, and the
+server's row switch saves both, the way any server's switch is saved. Its tool chips
 and a server's Ask me or Just run choice save the `tools` group the way the
 Tools pane does.
 

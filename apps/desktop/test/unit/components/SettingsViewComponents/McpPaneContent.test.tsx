@@ -42,6 +42,8 @@ import {
 } from "../../support/runtimeFixtures"
 import {
   EMAIL_ON_SETTINGS,
+  LYS_EMAIL_ACCOUNT,
+  LYS_EMAIL_PASSWORD,
   STORED_EMAIL_ACCOUNT,
   STORED_EMAIL_PASSWORD,
   STORED_MCP_SETTINGS,
@@ -106,7 +108,8 @@ const FILES_OFF_LIST = buildMcpServerList([
 ])
 
 /** What the email server's row says it does. */
-const EMAIL_BLURB = "Reads, searches, and sends your email over IMAP and SMTP."
+const EMAIL_BLURB =
+  "Reads, searches, and sends your email and Lys's own over IMAP and SMTP."
 
 /** Saved values that can be secrets, which the pane never shows as text. */
 const SECRET_VALUES = ["debug", "fixture-0000", STORED_EMAIL_PASSWORD]
@@ -191,13 +194,13 @@ function getServerSwitch(serverName: string): HTMLElement {
  * Opens the email server's details and gets its account card.
  *
  * @param user - User-event session of the case.
- * @returns The form named Email account.
+ * @returns The form named Your email account.
  */
 async function openEmailAccountCard(
   user: ReturnType<typeof userEvent.setup>
 ): Promise<HTMLElement> {
   const email = await expandServer(user, "email")
-  return within(email).getByRole("form", { name: "Email account" })
+  return within(email).getByRole("form", { name: "Your email account" })
 }
 
 /**
@@ -565,7 +568,10 @@ describe("McpPaneContent", () => {
     expect(listWrittenDocuments(host.commands)).toEqual([
       {
         ...STORED_SETTINGS_DOCUMENT,
-        mcp: { ...STORED_MCP_SETTINGS, builtIn: { email: { enabled: true } } }
+        mcp: {
+          ...STORED_MCP_SETTINGS,
+          builtIn: { email: { enabled: true, lysEnabled: false } }
+        }
       }
     ])
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, SYNC_ROUTE])
@@ -650,7 +656,7 @@ describe("McpPaneContent", () => {
     expect(
       within(email).queryByRole("region", { name: "configuration" })
     ).toBeNull()
-    const card = within(email).getByRole("form", { name: "Email account" })
+    const card = within(email).getByRole("form", { name: "Your email account" })
     expect(within(card).getByRole("textbox", { name: "Address" })).toHaveValue(
       STORED_EMAIL_ACCOUNT.address
     )
@@ -671,7 +677,7 @@ describe("McpPaneContent", () => {
     const user = userEvent.setup()
 
     const secrets = { ...STORED_SETTINGS.secrets, emailPassword: null }
-    const noAccount = { account: null }
+    const noAccount = { account: null, lysAccount: null }
     const settings = { ...STORED_SETTINGS, secrets, email: noAccount }
 
     useLysStore.setState({ settings })
@@ -683,11 +689,11 @@ describe("McpPaneContent", () => {
     )
     const email = await expandServer(user, "email")
     expect(within(email).getAllByRole("status")[0]).toHaveTextContent(
-      "email: OffNeeds an email account. Add one below."
+      "email: OffNeeds an email account. Add yours or Lys's below."
     )
-    const card = within(email).getByRole("form", { name: "Email account" })
+    const card = within(email).getByRole("form", { name: "Your email account" })
     expect(within(card).getByRole("status")).toHaveTextContent(
-      "No account yet. The email server stays off until you save one."
+      "No account yet. This mailbox stays off until you save one."
     )
     expect(within(card).getByRole("textbox", { name: "Address" })).toHaveValue(
       ""
@@ -832,7 +838,7 @@ describe("McpPaneContent", () => {
           ...STORED_SETTINGS_DOCUMENT.secrets,
           emailPassword: "new-app-password"
         },
-        email: { account: editedAccount }
+        email: { account: editedAccount, lysAccount: null }
       }
     ])
     expect(listMcpRouteKeys(backend)).toEqual([
@@ -849,6 +855,56 @@ describe("McpPaneContent", () => {
     expect(
       screen.getByRole("region", { name: "servers" })
     ).not.toHaveTextContent("new-app-password")
+  })
+
+  it("saves Lys's own account on a card of its own, then switches her mailbox on and applies the group", async () => {
+    const host = startSettingsHost()
+    const { backend, useLysStore } = await startMcpPane({
+      [ACCOUNT_CHECK_ROUTE]: () =>
+        buildJsonResponse(200, ACCEPTED_ACCOUNT_CHECK),
+      [SYNC_ROUTE]: answerList(STORED_LIST)
+    })
+    const user = userEvent.setup()
+    const email = await expandServer(user, "email")
+    const card = within(email).getByRole("form", {
+      name: "Lys's email account"
+    })
+    const mailboxSwitch = within(card).getByRole("switch", {
+      name: "Use this mailbox"
+    })
+    const disabledBeforeSave = mailboxSwitch.getAttribute("aria-disabled")
+
+    await user.type(
+      within(card).getByRole("textbox", { name: "Address" }),
+      LYS_EMAIL_ACCOUNT.address
+    )
+    await user.type(
+      within(card).getByRole("textbox", { name: "User name" }),
+      LYS_EMAIL_ACCOUNT.userName
+    )
+    await user.type(within(card).getByLabelText("Password"), LYS_EMAIL_PASSWORD)
+    await user.click(within(card).getByRole("button", { name: "Save" }))
+    await waitForRenderedWork()
+    await user.click(mailboxSwitch)
+    await waitForRenderedWork()
+
+    expect(disabledBeforeSave).toBe("true")
+    expect(useLysStore.getState().settings.email).toEqual({
+      account: STORED_EMAIL_ACCOUNT,
+      lysAccount: LYS_EMAIL_ACCOUNT
+    })
+    expect(useLysStore.getState().settings.mcp.builtIn.email).toEqual({
+      enabled: false,
+      lysEnabled: true
+    })
+    expect(mailboxSwitch).toBeChecked()
+    expect(getServerSwitch("email")).toBeChecked()
+    expect(listWrittenDocuments(host.commands)).toHaveLength(2)
+    expect(listMcpRouteKeys(backend)).toEqual([
+      LIST_ROUTE,
+      ACCOUNT_CHECK_ROUTE,
+      SYNC_ROUTE
+    ])
   })
 
   it("saves the account without applying the group while the email server is off", async () => {
@@ -992,7 +1048,7 @@ describe("McpPaneContent", () => {
     await waitForRenderedWork()
     await user.click(screen.getByRole("button", { name: "Cancel" }))
     const shownAgain = within(getServerRow("email")).getByRole("form", {
-      name: "Email account"
+      name: "Your email account"
     })
 
     expect(whileChecking).toBe("Signing in…")
@@ -1022,7 +1078,7 @@ describe("McpPaneContent", () => {
       within(card).getByRole("button", { name: "Remove account" })
     )
     const question = within(card).getByRole("group", {
-      name: "Remove the email account and its password? The email server is switched off."
+      name: "Remove the email account and its password? This mailbox is switched off."
     })
     expect(
       within(question).getByRole("button", { name: "Keep the email account" })
@@ -1037,14 +1093,14 @@ describe("McpPaneContent", () => {
       {
         ...STORED_SETTINGS_DOCUMENT,
         secrets: { ...STORED_SETTINGS_DOCUMENT.secrets, emailPassword: null },
-        email: { account: null }
+        email: { account: null, lysAccount: null }
       }
     ])
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, SYNC_ROUTE])
     expect(getServerSwitch("email")).not.toBeChecked()
     expect(getServerSwitch("email")).toHaveAttribute("aria-disabled", "true")
     expect(within(card).getByRole("status")).toHaveTextContent(
-      "No account yet. The email server stays off until you save one."
+      "No account yet. This mailbox stays off until you save one."
     )
     expect(within(card).getByRole("textbox", { name: "Address" })).toHaveValue(
       ""
@@ -1085,7 +1141,7 @@ describe("McpPaneContent", () => {
     ])
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE])
     expect(within(card).getByRole("status")).toHaveTextContent(
-      "Lys couldn't switch the email server off, so the account wasn't removed."
+      "Lys couldn't switch this mailbox off, so the account wasn't removed."
     )
     expect(within(card).getByRole("textbox", { name: "Address" })).toHaveValue(
       STORED_EMAIL_ACCOUNT.address

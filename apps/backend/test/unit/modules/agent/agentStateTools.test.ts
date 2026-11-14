@@ -152,6 +152,94 @@ function findStateTool(
 }
 
 /**
+ * Creates `read_my_state` for a member whose state reads.
+ *
+ * @returns The contract harness, counting the reader's state reads.
+ */
+async function createReadMyStateHarness(): Promise<RunnableBuiltInToolHarness> {
+  const reader = createReader({
+    state: {
+      status: "found",
+      state: {
+        code: MEMBER.code,
+        name: "Researcher",
+        role: "member",
+        deletedAt: null,
+        requestSlotCount: 2,
+        requests: [OWN_REQUEST]
+      }
+    }
+  })
+  const tools = buildAgentStateTools({
+    self: MEMBER,
+    requestId: OWN_REQUEST_ID,
+    emailAddress: null,
+    reader
+  })
+  return {
+    tool: findStateTool(tools, "read_my_state"),
+    runnableArguments: {},
+    countStartedWork: () => reader.findAgentState.mock.calls.length
+  }
+}
+
+/**
+ * Creates `read_agent_state` for a leader that reads Lysiptera's state.
+ *
+ * @returns The contract harness, counting the reader's state reads.
+ */
+async function createReadAgentStateHarness(): Promise<BuiltInToolHarness> {
+  const reader = createReader({
+    state: {
+      status: "found",
+      state: {
+        code: "lysiptera",
+        name: "Lysiptera",
+        role: "leader",
+        deletedAt: null,
+        requestSlotCount: 2,
+        requests: []
+      }
+    }
+  })
+  const tools = buildAgentStateTools({
+    self: LEADER,
+    requestId: OWN_REQUEST_ID,
+    emailAddress: null,
+    reader
+  })
+  return {
+    tool: findStateTool(tools, "read_agent_state"),
+    runnableArguments: { code: "lysiptera" },
+    invalidArguments: { code: "Lysiptera" },
+    countStartedWork: () => reader.findAgentState.mock.calls.length
+  }
+}
+
+/**
+ * Creates `find_agents` for a leader whose searches find no agent.
+ *
+ * @returns The contract harness, counting the reader's searches.
+ */
+async function createFindAgentsHarness(): Promise<BuiltInToolHarness> {
+  const reader = createReader({
+    search: { status: "found", matches: [], matchCount: 0 }
+  })
+  const tools = buildAgentStateTools({
+    self: LEADER,
+    requestId: OWN_REQUEST_ID,
+    emailAddress: null,
+    reader
+  })
+  return {
+    tool: findStateTool(tools, "find_agents"),
+    runnableArguments: { query: "lys" },
+    invalidArguments: { query: " " },
+    countStartedWork: () => reader.listAgentMatches.mock.calls.length
+  }
+}
+
+/**
  * Parses and runs one call of a state tool.
  *
  * @param tools - The turn's state tools.
@@ -239,11 +327,13 @@ describe("buildAgentStateTools", () => {
     const leaderTools = buildAgentStateTools({
       self: LEADER,
       requestId: OWN_REQUEST_ID,
+      emailAddress: null,
       reader
     })
     const memberTools = buildAgentStateTools({
       self: MEMBER,
       requestId: OWN_REQUEST_ID,
+      emailAddress: null,
       reader
     })
 
@@ -262,41 +352,14 @@ describe("buildAgentStateTools", () => {
       buildAgentStateTools({
         self: { code: ARMITAGE_AGENT_CODE, role: "tool-keeper" },
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({})
       })
     ).toEqual([])
   })
 
   describe("read_my_state", () => {
-    registerArgumentFreeBuiltInToolContractSuite(
-      async (): Promise<RunnableBuiltInToolHarness> => {
-        const reader = createReader({
-          state: {
-            status: "found",
-            state: {
-              code: MEMBER.code,
-              name: "Researcher",
-              role: "member",
-              deletedAt: null,
-              requestSlotCount: 2,
-              requests: [OWN_REQUEST]
-            }
-          }
-        })
-        return {
-          tool: findStateTool(
-            buildAgentStateTools({
-              self: MEMBER,
-              requestId: OWN_REQUEST_ID,
-              reader
-            }),
-            "read_my_state"
-          ),
-          runnableArguments: {},
-          countStartedWork: () => reader.findAgentState.mock.calls.length
-        }
-      }
-    )
+    registerArgumentFreeBuiltInToolContractSuite(createReadMyStateHarness)
 
     it("tells a leader who it is and each request it works on, marking the calling one", async () => {
       const reader = createReader({
@@ -330,6 +393,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -338,7 +402,7 @@ describe("buildAgentStateTools", () => {
       expect(result).toEqual({
         status: "succeeded",
         content: [
-          "You are Caliginia (code caliginia), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state.",
+          "You are Caliginia (code caliginia), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state. You have no email address in use.",
           "Now: 2026-10-24T10:05:30.000Z.",
           "Request slots: 2 of 2 in use.",
           `1. In "Weekly plan": started 2026-10-24T09:58:10.000Z (7 minutes ago) with qwen/qwen3-14b on Groq; using tools: web_search done, read_page waiting for the person's approval.`,
@@ -369,6 +433,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: MEMBER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -403,6 +468,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: MEMBER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -411,6 +477,36 @@ describe("buildAgentStateTools", () => {
       expect(result).toMatchObject({
         content: expect.stringMatching(
           /^You are Researcher \(code researcher\), a member\. You were deleted on 2026-10-24T10:04:00\.000Z\. As a member/
+        )
+      })
+    })
+
+    it("tells Lys her own email address while one is in use", async () => {
+      const reader = createReader({
+        state: {
+          status: "found",
+          state: {
+            code: "lysiptera",
+            name: "Lysiptera",
+            role: "leader",
+            deletedAt: null,
+            requestSlotCount: 2,
+            requests: [OWN_REQUEST]
+          }
+        }
+      })
+      const tools = buildAgentStateTools({
+        self: { code: "lysiptera", role: "leader" },
+        requestId: OWN_REQUEST_ID,
+        emailAddress: "lys@example.net",
+        reader
+      })
+
+      const result = await runStateTool(tools, "read_my_state")
+
+      expect(result).toMatchObject({
+        content: expect.stringMatching(
+          /^You are Lysiptera \(code lysiptera\), a leader\. As a leader [^\n]*read_agent_state\. Your email address is lys@example\.net\.\n/
         )
       })
     })
@@ -432,6 +528,7 @@ describe("buildAgentStateTools", () => {
       const [readMyState] = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
       const parsed = readMyState?.tool.parseToolCall({})
@@ -454,40 +551,14 @@ describe("buildAgentStateTools", () => {
   })
 
   describe("read_agent_state", () => {
-    registerBuiltInToolContractSuite(async (): Promise<BuiltInToolHarness> => {
-      const reader = createReader({
-        state: {
-          status: "found",
-          state: {
-            code: "lysiptera",
-            name: "Lysiptera",
-            role: "leader",
-            deletedAt: null,
-            requestSlotCount: 2,
-            requests: []
-          }
-        }
-      })
-      return {
-        tool: findStateTool(
-          buildAgentStateTools({
-            self: LEADER,
-            requestId: OWN_REQUEST_ID,
-            reader
-          }),
-          "read_agent_state"
-        ),
-        runnableArguments: { code: "lysiptera" },
-        invalidArguments: { code: "Lysiptera" },
-        countStartedWork: () => reader.findAgentState.mock.calls.length
-      }
-    })
+    registerBuiltInToolContractSuite(createReadAgentStateHarness)
 
     it("refuses a value that cannot be an agent code without reading", async () => {
       const reader = createReader({})
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -505,6 +576,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({
           state: {
             status: "found",
@@ -598,6 +670,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -662,6 +735,7 @@ describe("buildAgentStateTools", () => {
         const tools = buildAgentStateTools({
           self: LEADER,
           requestId: OWN_REQUEST_ID,
+          emailAddress: null,
           reader
         })
 
@@ -691,6 +765,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({
           state: {
             status: "found",
@@ -734,6 +809,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -757,6 +833,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({ state: { status: "missing" } })
       })
 
@@ -773,6 +850,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({ state: { status: "forbidden" } })
       })
 
@@ -786,24 +864,7 @@ describe("buildAgentStateTools", () => {
   })
 
   describe("find_agents", () => {
-    registerBuiltInToolContractSuite(async (): Promise<BuiltInToolHarness> => {
-      const reader = createReader({
-        search: { status: "found", matches: [], matchCount: 0 }
-      })
-      return {
-        tool: findStateTool(
-          buildAgentStateTools({
-            self: LEADER,
-            requestId: OWN_REQUEST_ID,
-            reader
-          }),
-          "find_agents"
-        ),
-        runnableArguments: { query: "lys" },
-        invalidArguments: { query: " " },
-        countStartedWork: () => reader.listAgentMatches.mock.calls.length
-      }
-    })
+    registerBuiltInToolContractSuite(createFindAgentsHarness)
 
     it("lists the matches with their code, role, deletion, and bio on one line, searching the trimmed query", async () => {
       const reader = createReader({
@@ -831,6 +892,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -857,6 +919,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({
           search: {
             status: "found",
@@ -889,6 +952,7 @@ describe("buildAgentStateTools", () => {
       const one = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({
           search: {
             status: "found",
@@ -908,6 +972,7 @@ describe("buildAgentStateTools", () => {
       const none = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({
           search: { status: "found", matches: [], matchCount: 0 }
         })
@@ -936,6 +1001,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -955,6 +1021,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -967,6 +1034,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({ search: { status: "forbidden" } })
       })
 

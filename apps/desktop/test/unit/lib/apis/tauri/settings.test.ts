@@ -26,6 +26,8 @@ import {
   waitForMicrotasks
 } from "../../../support/settlement"
 import {
+  LYS_EMAIL_ACCOUNT,
+  LYS_EMAIL_PASSWORD,
   STORED_EMAIL_ACCOUNT,
   STORED_EMAIL_PASSWORD,
   STORED_GROQ_API_KEY,
@@ -43,8 +45,18 @@ const NO_EMAIL_PASSWORD = Object.freeze({
   emailPassword: null
 })
 
+/** The stored document with Lys's own account and password saved as well. */
+const LYS_ACCOUNT_DOCUMENT = Object.freeze({
+  ...STORED_SETTINGS_DOCUMENT,
+  secrets: {
+    ...STORED_SETTINGS_DOCUMENT.secrets,
+    lysEmailPassword: LYS_EMAIL_PASSWORD
+  },
+  email: { account: STORED_EMAIL_ACCOUNT, lysAccount: LYS_EMAIL_ACCOUNT }
+})
+
 /** Email group of a settings file that saves no account. */
-const NO_EMAIL_ACCOUNT = Object.freeze({ account: null })
+const NO_EMAIL_ACCOUNT = Object.freeze({ account: null, lysAccount: null })
 
 /** Load settings of the model whose key names an object-prototype member. */
 const PROTOTYPE_KEY_LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
@@ -119,7 +131,8 @@ describe("loadSettings", () => {
       tavilyApiKey: null,
       ollamaApiKey: null,
       groqApiKey: null,
-      emailPassword: null
+      emailPassword: null,
+      lysEmailPassword: null
     })
 
     startNativeHostFake({
@@ -351,7 +364,7 @@ describe("loadSettings", () => {
           headers: []
         }
       ],
-      builtIn: { email: { enabled: false } }
+      builtIn: { email: { enabled: false, lysEnabled: false } }
     })
     expect(Object.isFrozen(settings.mcp.servers)).toBe(true)
     expect(Object.isFrozen(settings.mcp.servers[0])).toBe(true)
@@ -361,7 +374,10 @@ describe("loadSettings", () => {
     startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
-        mcp: { servers: [], builtIn: { email: { enabled: true } } }
+        mcp: {
+          servers: [],
+          builtIn: { email: { enabled: true, lysEnabled: false } }
+        }
       })
     })
 
@@ -369,7 +385,7 @@ describe("loadSettings", () => {
 
     expect(settings.mcp).toEqual({
       servers: [],
-      builtIn: { email: { enabled: true } }
+      builtIn: { email: { enabled: true, lysEnabled: false } }
     })
   })
 
@@ -410,9 +426,24 @@ describe("loadSettings", () => {
 
     const settings = await loadSettings()
 
-    expect(settings.email).toEqual({ account: STORED_EMAIL_ACCOUNT })
+    expect(settings.email).toEqual({
+      account: STORED_EMAIL_ACCOUNT,
+      lysAccount: null
+    })
     expect(Object.isFrozen(settings.email.account)).toBe(true)
     expect(settings.secrets.emailPassword).toBe(STORED_EMAIL_PASSWORD)
+  })
+
+  it("reads Lys's saved email account and her password, the password branded", async () => {
+    startNativeHostFake({
+      load_settings: () => LYS_ACCOUNT_DOCUMENT
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.email).toEqual(LYS_ACCOUNT_DOCUMENT.email)
+    expect(Object.isFrozen(settings.email.lysAccount)).toBe(true)
+    expect(settings.secrets.lysEmailPassword).toBe(LYS_EMAIL_PASSWORD)
   })
 
   it("reads a settings file without an email account as no account", async () => {
@@ -426,7 +457,7 @@ describe("loadSettings", () => {
 
     const settings = await loadSettings()
 
-    expect(settings.email).toEqual({ account: null })
+    expect(settings.email).toEqual({ account: null, lysAccount: null })
     expect(settings.secrets.emailPassword).toBeNull()
   })
 
@@ -459,31 +490,34 @@ describe("loadSettings", () => {
     expect(String(failure)).not.toContain("leaked")
   })
 
-  it("rejects an email password that fails the password rule without printing it", async () => {
-    const brokenPassword = "leaked\npassword"
-    startNativeHostFake({
-      load_settings: () => ({
-        ...STORED_SETTINGS_DOCUMENT,
-        secrets: {
-          ...STORED_SETTINGS_DOCUMENT.secrets,
-          emailPassword: brokenPassword
-        }
+  it.each(["emailPassword", "lysEmailPassword"])(
+    "rejects a password in %s that fails the password rule without printing it",
+    async (passwordField) => {
+      const brokenPassword = "leaked\npassword"
+      startNativeHostFake({
+        load_settings: () => ({
+          ...STORED_SETTINGS_DOCUMENT,
+          secrets: {
+            ...STORED_SETTINGS_DOCUMENT.secrets,
+            [passwordField]: brokenPassword
+          }
+        })
       })
-    })
 
-    const failure = await loadSettings().then(
-      () => {
-        throw new Error("The settings loaded")
-      },
-      (rejection: unknown) => rejection
-    )
+      const failure = await loadSettings().then(
+        () => {
+          throw new Error("The settings loaded")
+        },
+        (rejection: unknown) => rejection
+      )
 
-    expect(failure).toBeInstanceOf(Error)
-    expect(failure).toMatchObject({
-      message: "The settings file holds an invalid email password."
-    })
-    expect(String(failure)).not.toContain("leaked")
-  })
+      expect(failure).toBeInstanceOf(Error)
+      expect(failure).toMatchObject({
+        message: "The settings file holds an invalid email password."
+      })
+      expect(String(failure)).not.toContain("leaked")
+    }
+  )
 
   it("rejects with the host's rejection", async () => {
     startNativeHostFake({
@@ -655,7 +689,8 @@ describe("saveSecretsSettings", () => {
               tavilyApiKey: null,
               ollamaApiKey: null,
               groqApiKey: STORED_GROQ_API_KEY,
-              emailPassword: STORED_EMAIL_PASSWORD
+              emailPassword: STORED_EMAIL_PASSWORD,
+              lysEmailPassword: null
             }
           }
         }
@@ -862,7 +897,7 @@ describe("saveEmailAccountSettings", () => {
     displayName: "Ada Edited"
   }
 
-  it("replaces the email account and its password together, in one write", async () => {
+  it("replaces the person's email account and its password together, in one write", async () => {
     const host = startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
@@ -872,7 +907,11 @@ describe("saveEmailAccountSettings", () => {
       save_settings: () => null
     })
 
-    await saveEmailAccountSettings(editedAccount, STORED_EMAIL_PASSWORD)
+    await saveEmailAccountSettings(
+      "person",
+      editedAccount,
+      STORED_EMAIL_PASSWORD
+    )
 
     expect(host.commands).toEqual([
       { command: "load_settings", args: {} },
@@ -881,7 +920,7 @@ describe("saveEmailAccountSettings", () => {
         args: {
           newSettings: {
             ...STORED_SETTINGS_DOCUMENT,
-            email: { account: editedAccount }
+            email: { account: editedAccount, lysAccount: null }
           }
         }
       }
@@ -894,7 +933,7 @@ describe("saveEmailAccountSettings", () => {
       save_settings: () => null
     })
 
-    await saveEmailAccountSettings(null, null)
+    await saveEmailAccountSettings("person", null, null)
 
     expect(host.commands.at(-1)).toEqual({
       command: "save_settings",
@@ -908,6 +947,49 @@ describe("saveEmailAccountSettings", () => {
     })
   })
 
+  it("keeps Lys's account and her password when the person's account is saved", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => LYS_ACCOUNT_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveEmailAccountSettings(
+      "person",
+      editedAccount,
+      STORED_EMAIL_PASSWORD
+    )
+
+    expect(host.commands.at(-1)).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: {
+          ...LYS_ACCOUNT_DOCUMENT,
+          email: { account: editedAccount, lysAccount: LYS_EMAIL_ACCOUNT }
+        }
+      }
+    })
+  })
+
+  it("saves and removes Lys's own account and her password, keeping the person's", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveEmailAccountSettings("lys", LYS_EMAIL_ACCOUNT, LYS_EMAIL_PASSWORD)
+    await saveEmailAccountSettings("lys", null, null)
+
+    expect(
+      host.commands.filter((invoked) => invoked.command === "save_settings")
+    ).toEqual([
+      { command: "save_settings", args: { newSettings: LYS_ACCOUNT_DOCUMENT } },
+      {
+        command: "save_settings",
+        args: { newSettings: STORED_SETTINGS_DOCUMENT }
+      }
+    ])
+  })
+
   it("writes nothing when the document cannot be loaded", async () => {
     const host = startNativeHostFake({
       load_settings: () => Promise.reject("Failed to read settings.json"),
@@ -915,7 +997,7 @@ describe("saveEmailAccountSettings", () => {
     })
 
     await expect(
-      saveEmailAccountSettings(editedAccount, STORED_EMAIL_PASSWORD)
+      saveEmailAccountSettings("person", editedAccount, STORED_EMAIL_PASSWORD)
     ).rejects.toBe("Failed to read settings.json")
     expect(host.commands.map((invoked) => invoked.command)).toEqual([
       "load_settings"
@@ -929,7 +1011,7 @@ describe("saveEmailAccountSettings", () => {
     })
 
     await expect(
-      saveEmailAccountSettings(editedAccount, STORED_EMAIL_PASSWORD)
+      saveEmailAccountSettings("person", editedAccount, STORED_EMAIL_PASSWORD)
     ).rejects.toBe("Disk full")
   })
 })

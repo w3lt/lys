@@ -4,7 +4,8 @@ import {
   CALIGINIA_AGENT_CODE,
   LYSIPTERA_AGENT_CODE,
   type AgentDefinition,
-  type BuiltInAgent
+  type BuiltInAgent,
+  type EmailAddress
 } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import SqliteAgentRecordStore from "../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
@@ -80,7 +81,18 @@ type RuntimeOptions = Readonly<{
    * is not stored.
    */
   conversations?: ReadonlyMap<string, Readonly<{ title: string | null }>>
+  /** Reads the address of Lys's own mailbox; none is in use by default. */
+  readLysEmailAddress?: () => EmailAddress | null
 }>
+
+/**
+ * Reads the address of Lys's own mailbox in a case where none is in use.
+ *
+ * @returns Null.
+ */
+function readNoLysEmailAddress(): null {
+  return null
+}
 
 /**
  * Creates model access whose every reply ends at once.
@@ -220,7 +232,8 @@ function createRuntime(options: RuntimeOptions = {}) {
     findConversationTitle: (conversationId) =>
       buildConversationTitleLookup(conversations.get(conversationId)),
     requestLimits: REQUEST_LIMITS,
-    toolSearchCallRecords: createToolSearchCallRecords().records
+    toolSearchCallRecords: createToolSearchCallRecords().records,
+    readLysEmailAddress: options.readLysEmailAddress ?? readNoLysEmailAddress
   })
   return {
     runtime,
@@ -454,6 +467,29 @@ describe("AgentRuntimeService", () => {
         )
       ).toEqual(toolNames)
     })
+  })
+
+  describe("email address", () => {
+    it.each([
+      ["Caliginia", CALIGINIA_AGENT_CODE, 1],
+      ["Lysiptera", LYSIPTERA_AGENT_CODE, 1],
+      ["a stored agent", "researcher", 0]
+    ])(
+      "lends %s the reader of Lys's own address only when it is Lys, read once per turn",
+      async (_label, code, readCount) => {
+        const readLysEmailAddress = vi.fn(() => "lys@example.net")
+        const { runtime, agentService } = createRuntime({
+          readLysEmailAddress
+        })
+        agentService.createAgent(STATE_READER_RESEARCHER)
+
+        await createHelloReply(findLiveAgent(runtime, code), {
+          trainedForToolUse: true
+        })
+
+        expect(readLysEmailAddress).toHaveBeenCalledTimes(readCount)
+      }
+    )
   })
 
   describe("state reads", () => {

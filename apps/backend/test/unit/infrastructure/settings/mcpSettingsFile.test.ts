@@ -25,7 +25,9 @@ const SYNTHETIC_TOKEN = "Bearer synthetic-token-0123"
 const SYNTHETIC_VARIABLE_VALUE = "synthetic-variable-4567"
 
 /** Switches of the servers Lys ships, every one off, as the desktop writes them. */
-const BUILT_IN_OFF = Object.freeze({ email: Object.freeze({ enabled: false }) })
+const BUILT_IN_OFF = Object.freeze({
+  email: Object.freeze({ enabled: false, lysEnabled: false })
+})
 
 /** One server of each transport, as the desktop writes them. */
 const VALID_MCP_GROUP = Object.freeze({
@@ -46,7 +48,7 @@ const VALID_MCP_GROUP = Object.freeze({
       enabled: false
     }
   ],
-  builtIn: { email: { enabled: true } }
+  builtIn: { email: { enabled: true, lysEnabled: true } }
 })
 
 /** The group a file without servers reads as. */

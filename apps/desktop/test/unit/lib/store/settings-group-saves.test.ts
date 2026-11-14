@@ -270,6 +270,7 @@ describe("createSettingsGroupSaves", () => {
 
     const mcpSave = saves.saveMcpSettings(noServers)
     const emailSave = saves.saveEmailAccountSettings(
+      "person",
       editedAccount,
       STORED_EMAIL_PASSWORD
     )
@@ -285,7 +286,7 @@ describe("createSettingsGroupSaves", () => {
     expect(readStoredDocument()).toEqual({
       ...STORED_SETTINGS_DOCUMENT,
       mcp: noServers,
-      email: { account: editedAccount }
+      email: { account: editedAccount, lysAccount: null }
     })
   })
 

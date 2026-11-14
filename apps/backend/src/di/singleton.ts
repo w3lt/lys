@@ -1,4 +1,5 @@
 import type { LoggerInterface } from "@lmstudio/sdk"
+import type { EmailAddress } from "@lys/share"
 import { homedir } from "node:os"
 import type { LlmProvider } from "@lys/share"
 import type { BackendConfig } from "../config"
@@ -38,7 +39,7 @@ import {
 import { findLlmProviderAccess } from "../infrastructure/settings/llmProviderSettingsFile"
 import ToolApprovalService from "../modules/toolApproval/toolApprovalService"
 import { readJustRunToolNames } from "../infrastructure/settings/justRunToolsFile"
-import { readEmailAccount } from "../infrastructure/settings/emailAccountFile"
+import { readEmailAccounts } from "../infrastructure/settings/emailAccountFile"
 import { readMcpSettings } from "../infrastructure/settings/mcpSettingsFile"
 import { readTavilyApiKey } from "../infrastructure/settings/tavilyApiKeyFile"
 import type { BuiltInToolEntry } from "../modules/tool/builtIn/builtInTool"
@@ -53,7 +54,7 @@ import EmailAccountChecker, {
 } from "../modules/mcp/builtIn/email/emailAccountCheck"
 import {
   buildEmailServerCommand,
-  createEmailMcpServer
+  EmailMcpServer
 } from "../modules/mcp/builtIn/email/emailServer"
 import type { McpServerEvent } from "../modules/mcp/mcpServerEvent"
 import McpServerProcessGroups from "../modules/mcp/mcpServerProcessGroups"
@@ -243,6 +244,20 @@ type ToolServices = Pick<
   | "emailAccountChecker"
 >
 
+/**
+ * The tool services, and the reader of Lys's own email address that the
+ * agent runtime service borrows from them.
+ */
+type CreatedToolServices = Readonly<{
+  /** Services that run, find, and approve tools. */
+  services: ToolServices
+  /**
+   * Reads the address of Lys's own mailbox while the built-in email server
+   * serves it, or null.
+   */
+  readLysEmailAddress: () => EmailAddress | null
+}>
+
 /** Services that keep their data in the shared database and own nothing. */
 type DatabaseServices = Pick<
   SingletonServices,
@@ -311,11 +326,11 @@ export async function createSingletonServices(
   const serviceLifetime = new AsyncDisposableStack()
 
   try {
-    const databaseAcquisition = factories.createDatabase(
-      config.databaseFilePath
+    const { database, services: databaseServices } = acquireDatabaseServices(
+      config,
+      factories,
+      serviceLifetime
     )
-    serviceLifetime.defer(databaseAcquisition.closeService)
-    const databaseServices = createDatabaseServices(databaseAcquisition.service)
 
     const llmProviderServices = buildLlmProviderRecord((provider) =>
       createOwnedLlmProviderServices(provider, {
@@ -332,24 +347,21 @@ export async function createSingletonServices(
     serviceLifetime.defer(chatServiceAcquisition.closeService)
     const chatService = chatServiceAcquisition.service
 
-    const agentServices = createAgentServices(
-      config,
-      databaseAcquisition.service,
-      {
-        chatService,
-        llmProviderServices,
-        historyReader: databaseServices.conversationHistoryReader
-      }
-    )
-    const toolServices = createToolServices(config, logReporters)
-    serviceLifetime.defer(buildCloseToolServices(toolServices))
+    const tools = createToolServices(config, logReporters)
+    serviceLifetime.defer(buildCloseToolServices(tools.services))
+    const agentServices = createAgentServices(config, database, {
+      chatService,
+      llmProviderServices,
+      historyReader: databaseServices.conversationHistoryReader,
+      readLysEmailAddress: tools.readLysEmailAddress
+    })
 
     return Object.freeze({
       chatService,
       llmProviderServices,
       ...databaseServices,
       ...agentServices,
-      ...toolServices,
+      ...tools.services,
       attachmentFileStore: new AttachmentFileStore(
         config.attachmentsDirectoryPath
       ),
@@ -491,6 +503,11 @@ type AgentRuntimeDependencies = Readonly<{
   llmProviderServices: LlmProviderRecord<LlmProviderServices>
   /** History reader that gives the titles of the agents' conversations. */
   historyReader: StoredConversationHistoryReader
+  /**
+   * Reads the address of Lys's own mailbox while it is in use, which
+   * Caliginia and Lysiptera are told.
+   */
+  readLysEmailAddress: () => EmailAddress | null
 }>
 
 /** Services that define agents and run them; they own nothing to release. */
@@ -508,15 +525,20 @@ type AgentServices = Pick<
  * @param database - Shared database lent to the agent records; the caller
  * keeps ownership and closes it.
  * @param dependencies - Chat service the agents answer through, the
- * providers' LLM services they measure through, and the history reader that
- * titles their conversations.
+ * providers' LLM services they measure through, the history reader that
+ * titles their conversations, and the reader of Lys's own email address.
  * @returns Both services, which read nothing at creation and own nothing to
  * release.
  */
 function createAgentServices(
   config: BackendConfig,
   database: SqliteDatabase,
-  { chatService, llmProviderServices, historyReader }: AgentRuntimeDependencies
+  {
+    chatService,
+    llmProviderServices,
+    historyReader,
+    readLysEmailAddress
+  }: AgentRuntimeDependencies
 ): AgentServices {
   const agentService = new AgentService({
     recordStore: SqliteAgentRecordStore.create(database),
@@ -546,7 +568,8 @@ function createAgentServices(
         slotCount: config.agentRequestSlotCount,
         waitingLimit: config.agentWaitingRequestLimit
       }),
-      toolSearchCallRecords: new SqliteToolSearchCallRecordWriter(database)
+      toolSearchCallRecords: new SqliteToolSearchCallRecordWriter(database),
+      readLysEmailAddress
     })
   }
 }
@@ -566,7 +589,9 @@ function createAgentServices(
  * the person's home folder and whose only built-in server is the email
  * server, the holder of those servers' process groups, which the registry
  * borrows, and the email account checker, which runs the same email
- * server; they read and contact nothing at creation.
+ * server; they read and contact nothing at creation. With them, the reader
+ * of the address of Lys's own mailbox, which asks the email server and the
+ * registry's list each time.
  */
 function createToolServices(
   config: BackendConfig,
@@ -577,7 +602,7 @@ function createToolServices(
     | "reportMcpProcessGroupsSaveFailure"
     | "sendEmailAccountCheckEvent"
   >
-): ToolServices {
+): CreatedToolServices {
   /**
    * Longest one check may run before its process is killed: past two
    * sign-ins that each wait the email server's own connect and answer limits.
@@ -601,14 +626,13 @@ function createToolServices(
     logReporters.reportMcpProcessGroupsSaveFailure
   )
   const emailServerCommand = buildEmailServerCommand(config.emailServerPath)
+  const emailMcpServer = new EmailMcpServer(emailServerCommand, () =>
+    readEmailAccounts(config.settingsFilePath)
+  )
   const mcpWorkingDirectory = homedir()
   const mcpServerRegistry = new McpServerRegistry({
     readSettings: () => readMcpSettings(config.settingsFilePath),
-    builtInServers: [
-      createEmailMcpServer(emailServerCommand, () =>
-        readEmailAccount(config.settingsFilePath)
-      )
-    ],
+    builtInServers: [emailMcpServer],
     openServer: (settings, context) =>
       openMcpServer(settings, context, MCP_SERVER_OPENING_TIMEOUT_MILLISECONDS),
     workingDirectory: mcpWorkingDirectory,
@@ -622,12 +646,16 @@ function createToolServices(
     sendEvent: logReporters.sendEmailAccountCheckEvent
   })
   return {
-    builtInTools,
-    webSearchToolProvider,
-    toolApprovalService,
-    mcpServerRegistry,
-    mcpServerProcessGroups,
-    emailAccountChecker
+    services: {
+      builtInTools,
+      webSearchToolProvider,
+      toolApprovalService,
+      mcpServerRegistry,
+      mcpServerProcessGroups,
+      emailAccountChecker
+    },
+    readLysEmailAddress: () =>
+      emailMcpServer.readLysEmailAddress(mcpServerRegistry.listServers())
   }
 }
 
@@ -653,6 +681,40 @@ function buildCloseToolServices(
   toolServicesLifetime.defer(() => toolServices.mcpServerRegistry.close())
   toolServicesLifetime.defer(() => toolServices.emailAccountChecker.close())
   return () => toolServicesLifetime.disposeAsync()
+}
+
+/** The shared database, and the services that keep their data in it. */
+type AcquiredDatabase = Readonly<{
+  /** The database, whose close the service lifetime owns. */
+  database: SqliteDatabase
+  /** The services over it, which own nothing to release. */
+  services: DatabaseServices
+}>
+
+/**
+ * Opens the shared database, hands its close to the service lifetime, and
+ * creates the conversation services over it.
+ *
+ * @param config - Location of the database file.
+ * @param factories - Opens the database.
+ * @param serviceLifetime - Lifetime that takes the database's close before
+ * the services over it are created, so a failure to create them still
+ * closes it.
+ * @returns The database and its services.
+ * @throws If the database cannot be opened, or as
+ * {@link createDatabaseServices} throws.
+ */
+function acquireDatabaseServices(
+  config: BackendConfig,
+  factories: SingletonServiceFactories,
+  serviceLifetime: AsyncDisposableStack
+): AcquiredDatabase {
+  const acquisition = factories.createDatabase(config.databaseFilePath)
+  serviceLifetime.defer(acquisition.closeService)
+  return Object.freeze({
+    database: acquisition.service,
+    services: createDatabaseServices(acquisition.service)
+  })
 }
 
 /**

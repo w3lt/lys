@@ -21,6 +21,7 @@ import type Agent from "../../agent/agent"
 import type { AgentTurn } from "../../agent/agent"
 import { AgentRequestLimitError } from "../../agent/agentActivity"
 import type { FindAttachmentImage } from "../../agent/agentContext"
+import { listAgentMcpTools } from "../../agent/builtInAgents"
 import type { UnofferedTools } from "../../agent/unofferedTools"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
 import { buildAttachmentImageReader } from "../../attachment/attachmentImageReader"
@@ -827,10 +828,11 @@ async function deleteAttachmentsAfterFailure(
  * @param source - The request, what it parsed and looked up, and the stored
  * turn with its agent.
  * @param dependencies - Route capabilities borrowed for the route lifetime.
- * @returns The turn with its agent, request values, the offered tools, the
- * direct tools {@link buildTurnDirectTools} builds for a model trained for
- * tool use, whether the model sees images, and the reader of the
- * conversation's stored images.
+ * @returns The turn with its agent, request values, the offered tools,
+ * without the MCP tools only Lys may use unless the agent is Caliginia or
+ * Lysiptera, the direct tools {@link buildTurnDirectTools} builds for a
+ * model trained for tool use, whether the model sees images, and the reader
+ * of the conversation's stored images.
  */
 function buildTurnGenerationInput(
   source: TurnGenerationSource,
@@ -857,7 +859,7 @@ function buildTurnGenerationInput(
         )
       : NO_DIRECT_TOOLS,
     builtInTools: accepted.builtInTools,
-    mcpTools: accepted.mcpTools,
+    mcpTools: listAgentMcpTools(saved.agent.code, accepted.mcpTools),
     unofferedTools: accepted.unofferedTools,
     canSeeImages: accepted.capabilities.vision,
     trainedForToolUse: accepted.capabilities.trainedForToolUse,

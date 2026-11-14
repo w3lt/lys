@@ -63,8 +63,8 @@ vmo listens at `127.0.0.1:8080` and needs:
 ## Email MCP server
 
 The email MCP server Lys ships, in `mcps/email`, is a Rust program the backend
-starts as a stdio MCP server once it is switched on in Settings → MCP with a
-saved email account, and runs for each account check. Development builds use
+starts as a stdio MCP server once a mailbox is switched on in Settings → MCP
+with its email account saved, and runs for each account check. Development builds use
 `mcps/email/target/debug/email` in the checkout recorded at host compile
 time, which
 `cargo build --manifest-path mcps/email/Cargo.toml --target-dir mcps/email/target`

@@ -41,8 +41,11 @@ async fn build_smtp_context(
         smtp_security,
     };
     ToolContext::new(
+        email::mailbox::Mailbox::Person,
         build_account(servers, false),
-        Trust::create_with_extra_roots(vec![authority.root.clone()]),
+        email::tools::SharedCalls::new(Trust::create_with_extra_roots(vec![
+            authority.root.clone(),
+        ])),
     )
 }
 

@@ -15,6 +15,13 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { useNewConversationModel } from "@/lib/hooks/conversationModel"
+import {
+  findOtherEmailMailbox,
+  isEmailMailboxOn,
+  readEmailMailboxAccount,
+  readEmailMailboxPassword,
+  type EmailMailbox
+} from "@/lib/models/email-mailbox"
 import { findLoadedModelInfo } from "@/lib/models/model-availability"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore, type BackendServerStatus } from "@/lib/store"
@@ -488,7 +495,8 @@ type McpServerListViewProps = {
  * an added server's own switch or the switch of a server Lys ships; a
  * server's approval sets every listed tool of the server; and a server is
  * removed once its removal is saved, which the parent is told with the
- * server's name. The email server's panel is the account card.
+ * server's name. The email server's panel holds two account cards: the
+ * person's, then Lys's own.
  * @param props - Backend status, the list, expansion, focus, and the
  * parent-owned changes.
  * @returns The warning, when one is due, and the section of the servers.
@@ -520,7 +528,14 @@ function McpServerListView({
     <>
       {servers.some(isMcpListedServerOn) ? <McpToolOfferNotice /> : null}
       <McpServerSection
-        builtInPanels={{ email: <EmailAccountCardView /> }}
+        builtInPanels={{
+          email: (
+            <>
+              <EmailAccountCardView mailbox="person" />
+              <EmailAccountCardView mailbox="lys" />
+            </>
+          )
+        }}
         expandedServerKey={expandedServerKey}
         focusTarget={focusTarget}
         isBackendRunning={isBackendRunning}
@@ -568,85 +583,155 @@ function isBackendServerRunning(status: BackendServerStatus): boolean {
   }
 }
 
+/** Properties accepted by {@link EmailAccountCardView}. */
+type EmailAccountCardViewProps = {
+  /** The mailbox whose account the card saves. */
+  readonly mailbox: EmailMailbox
+}
+
 /**
- * Presents the email account card and saves, checks, and removes the
- * account.
+ * Presents one mailbox's email account card and saves, checks, and removes
+ * its account, and saves its switch.
  *
- * @remarks The application store owns the saved account and password, the
- * save, the check, the removal, the email server's switch, and the
- * backend's status; the MCP server store owns the switch's save and the
+ * @remarks The application store owns the saved accounts and passwords,
+ * each mailbox's save, check, and removal, the mailbox switches, and the
+ * backend's status; the MCP server store owns the switches' saves and the
  * sync that applies the group. Saving signs in through the backend first,
- * which the store does; once the account is saved while the email server
- * is on, the backend is asked to apply the group, so the server starts
- * again with the account. The store's removal switches the email server
- * off first, because the server cannot run without an account, through the
- * MCP server store's switch save, which has the backend apply it, and
- * removes nothing when that save fails.
- * @returns The account card.
+ * which the store does; once the account is saved while its mailbox is on,
+ * the backend is asked to apply the group, so the server starts again with
+ * the account. The store's removal switches the mailbox off first, because
+ * the server cannot serve it without its account, through the MCP server
+ * store's switch save, which has the backend apply it, and removes nothing
+ * when that save fails. A change of the mailbox's switch is saved and
+ * applied the same way.
+ * @param props - The mailbox.
+ * @returns The mailbox's account card.
  */
-function EmailAccountCardView(): ReactElement {
-  const savedAccount = useLysStore((state) => state.settings.email.account)
-  const savedPassword = useLysStore(
-    (state) => state.settings.secrets.emailPassword
+function EmailAccountCardView({
+  mailbox
+}: EmailAccountCardViewProps): ReactElement {
+  const savedAccount = useLysStore((state) =>
+    readEmailMailboxAccount(state.settings, mailbox)
   )
-  const saveState = useLysStore((state) => state.emailAccountSave)
-  const checkState = useLysStore((state) => state.emailAccountCheck)
+  const otherAccount = useLysStore((state) =>
+    readEmailMailboxAccount(state.settings, findOtherEmailMailbox(mailbox))
+  )
+  const savedPassword = useLysStore((state) =>
+    readEmailMailboxPassword(state.settings, mailbox)
+  )
+  const isMailboxOn = useLysStore((state) =>
+    isEmailMailboxOn(state.settings.mcp.builtIn.email, mailbox)
+  )
+  const isMailboxSwitchSaving = useLysStore((state) =>
+    isMcpSettingsSaveRunning(state.mcpSettingsSave)
+  )
+  const saveState = useLysStore((state) => state.emailAccountSaves[mailbox])
+  const checkState = useLysStore((state) => state.emailAccountChecks[mailbox])
   const isBackendRunning = useLysStore((state) =>
     isBackendServerRunning(state.backendServerInfo.status)
   )
+  const saves = useEmailAccountSaves(mailbox)
+
+  return (
+    <EmailAccountCard
+      checkState={checkState}
+      isBackendRunning={isBackendRunning}
+      isMailboxOn={isMailboxOn}
+      isMailboxSwitchSaving={isMailboxSwitchSaving}
+      mailbox={mailbox}
+      onMailboxOnChange={saves.handleMailboxOnChange}
+      onRemoveEmailAccount={saves.handleRemoveEmailAccount}
+      onSaveEmailAccount={saves.handleSaveEmailAccount}
+      otherAccount={otherAccount}
+      savedAccount={savedAccount}
+      savedPassword={savedPassword}
+      saveState={saveState}
+    />
+  )
+}
+
+/** The saves one mailbox's account card proposes. */
+type EmailAccountSaves = {
+  /** Checks and saves the account, then applies it while the mailbox is on. */
+  readonly handleSaveEmailAccount: (
+    account: EmailAccount,
+    password: EmailPassword
+  ) => Promise<EmailAccountSaveOutcome>
+  /** Switches the mailbox off while it is on, then removes the account. */
+  readonly handleRemoveEmailAccount: () => Promise<EmailAccountRemovalOutcome>
+  /** Saves the mailbox's switch, which the store applies. */
+  readonly handleMailboxOnChange: (isOn: boolean) => void
+}
+
+/**
+ * Owns the saves one mailbox's account card proposes: the account's save
+ * and removal, and the mailbox's switch.
+ *
+ * @remarks The handlers are rebuilt on every render and read the stores
+ * when they run.
+ * @param mailbox - The mailbox.
+ * @returns The handlers.
+ */
+function useEmailAccountSaves(mailbox: EmailMailbox): EmailAccountSaves {
   const saveEmailAccount = useLysStore((state) => state.saveEmailAccount)
   const deleteEmailAccount = useLysStore((state) => state.deleteEmailAccount)
-  const saveBuiltInMcpServerSwitch = useMcpServerStore(
-    (state) => state.saveBuiltInMcpServerSwitch
+  const saveEmailMailboxSwitch = useMcpServerStore(
+    (state) => state.saveEmailMailboxSwitch
   )
   const sendMcpServerSync = useMcpServerStore(
     (state) => state.sendMcpServerSync
   )
 
   /**
-   * Saves the account and, once saved while the email server is on, asks
-   * the backend to apply the group.
+   * Saves the account and, once saved while its mailbox is on, asks the
+   * backend to apply the group.
    *
    * @param account - Valid account.
    * @param password - Its password.
    * @returns The save outcome.
    * @remarks The switch is read once the save settled, not when the save
-   * started: the person can switch the server on while the check runs, and
+   * started: the person can switch the mailbox on while the check runs, and
    * that switch's sync starts the server with the account saved before.
    */
   async function handleSaveEmailAccount(
     account: EmailAccount,
     password: EmailPassword
   ): Promise<EmailAccountSaveOutcome> {
-    const outcome = await saveEmailAccount(account, password)
-    const isOnAfterSave =
-      useLysStore.getState().settings.mcp.builtIn.email.enabled
+    const outcome = await saveEmailAccount(mailbox, account, password)
+    const isOnAfterSave = isEmailMailboxOn(
+      useLysStore.getState().settings.mcp.builtIn.email,
+      mailbox
+    )
     if (isEmailAccountSaved(outcome) && isOnAfterSave) void sendMcpServerSync()
     return outcome
   }
 
   /**
-   * Removes the account, switching the email server off first while it is
-   * on.
+   * Removes the account, switching its mailbox off first while it is on.
    *
    * @returns The removal outcome: `failed` when the switch or the removal
    * could not be saved, in which case the account stays.
    */
   function handleRemoveEmailAccount(): Promise<EmailAccountRemovalOutcome> {
-    return deleteEmailAccount(() => saveBuiltInMcpServerSwitch("email", false))
+    return deleteEmailAccount(mailbox, () =>
+      saveEmailMailboxSwitch(mailbox, false)
+    )
   }
 
-  return (
-    <EmailAccountCard
-      checkState={checkState}
-      isBackendRunning={isBackendRunning}
-      onRemoveEmailAccount={handleRemoveEmailAccount}
-      onSaveEmailAccount={handleSaveEmailAccount}
-      savedAccount={savedAccount}
-      savedPassword={savedPassword}
-      saveState={saveState}
-    />
-  )
+  /**
+   * Saves the mailbox's switch, which the store applies.
+   *
+   * @param isOn - Whether the email server serves the mailbox.
+   */
+  function handleMailboxOnChange(isOn: boolean): void {
+    void saveEmailMailboxSwitch(mailbox, isOn)
+  }
+
+  return {
+    handleSaveEmailAccount,
+    handleRemoveEmailAccount,
+    handleMailboxOnChange
+  }
 }
 
 /** Properties accepted by {@link McpServerEditorView}. */

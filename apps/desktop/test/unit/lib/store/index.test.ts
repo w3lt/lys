@@ -440,7 +440,7 @@ describe("useLysStore", () => {
     })
   })
 
-  it("selects the model the Model pane shows, and clears it", async () => {
+  it("selects the model the Models pane shows, and clears it", async () => {
     const useLysStore = await loadFreshLysStore()
 
     useLysStore
@@ -455,7 +455,7 @@ describe("useLysStore", () => {
     expect(useLysStore.getState().modelPaneSelection).toBeNull()
   })
 
-  it("shows a provider the Model pane's picker chose with no model selected", async () => {
+  it("shows a provider the Models pane's picker chose with no model selected", async () => {
     const useLysStore = await loadFreshLysStore()
     useLysStore
       .getState()
@@ -469,7 +469,7 @@ describe("useLysStore", () => {
     })
   })
 
-  it("opens the settings view on the Model pane showing one model", async () => {
+  it("opens the settings view on the Models pane showing one model", async () => {
     const useLysStore = await loadFreshLysStore()
     const model = { provider: "lmStudio", modelKey: "qwen3-8b" } as const
 

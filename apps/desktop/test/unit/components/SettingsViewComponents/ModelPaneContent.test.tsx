@@ -4,6 +4,7 @@ import { ollamaApiKeySchema, type LlmProvider } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import {
   updateProviderModelState,
+  type ModelInventoryState,
   type ProviderModelState
 } from "@/lib/store/model-runtime"
 import type { LysSettings } from "@/lib/store/settings"
@@ -112,6 +113,26 @@ type ExtraProvider = {
   readonly state: Partial<ProviderModelState>
 }
 
+/** What a Models pane case arranges besides the runtime. */
+type ModelPaneArrangement = {
+  /** Backend routes the case needs besides the inventory reads. */
+  readonly routes?: BackendRoutes
+  /** Another provider turned on beside LM Studio, with its state. */
+  readonly extra?: ExtraProvider
+  /** Changes the case makes to the arranged settings. */
+  readonly change?: (settings: LysSettings) => LysSettings
+}
+
+/** An inventory read that lists no model, and the notice the pane shows. */
+type InventoryNoticeCase = {
+  /** LM Studio's inventory observation. */
+  readonly modelInventory: ModelInventoryState
+  /** The notice's title. */
+  readonly title: string
+  /** What the notice says to do. */
+  readonly body: string
+}
+
 /**
  * Builds the inventory route of a provider other than LM Studio.
  *
@@ -131,7 +152,7 @@ function buildExtraInventoryRoutes(extra: ExtraProvider): BackendRoutes {
 }
 
 /**
- * Renders the settings view on the Model pane with LM Studio, and another
+ * Renders the settings view on the Models pane with LM Studio, and another
  * provider when given, and waits for the pane's body to settle.
  *
  * @param runtime - Backend, LM Studio, and default model facts.
@@ -140,11 +161,7 @@ function buildExtraInventoryRoutes(extra: ExtraProvider): BackendRoutes {
  */
 async function startModelPane(
   runtime: RuntimeArrangement = TWO_MODELS,
-  options: {
-    readonly routes?: BackendRoutes
-    readonly extra?: ExtraProvider
-    readonly change?: (settings: LysSettings) => LysSettings
-  } = {}
+  options: ModelPaneArrangement = {}
 ) {
   const backend = startBackendFake({
     [INVENTORY_ROUTE]: buildInventoryRoute(runtime),
@@ -207,7 +224,7 @@ function buildDefaultModelChange(
 }
 
 /**
- * Renders the Model pane on Groq, whose one model is the default.
+ * Renders the Models pane on Groq, whose one model is the default.
  *
  * @param routes - Routes the case adds.
  * @returns The store, the backend handle, and the user-event session.
@@ -221,7 +238,7 @@ async function startGroqPane(routes: BackendRoutes = {}) {
 }
 
 /**
- * Renders the Model pane on Ollama Cloud, with a saved key and its one
+ * Renders the Models pane on Ollama Cloud, with a saved key and its one
  * model as the default.
  *
  * @param routes - Routes the case adds.
@@ -796,22 +813,26 @@ describe("ModelPaneContent", () => {
     ).toBeInTheDocument()
   })
 
-  it.each([
+  it.each<[string, InventoryNoticeCase]>([
     [
       "failed",
-      { status: "failed" },
-      "Couldn’t list LM Studio’s models.",
-      "Refresh to try again."
+      {
+        modelInventory: { status: "failed" },
+        title: "Couldn’t list LM Studio’s models.",
+        body: "Refresh to try again."
+      }
     ],
     [
       "empty",
-      { status: "ready", modelLoading: "lys", models: [] },
-      "LM Studio lists no models.",
-      "Download a model in LM Studio, then refresh."
+      {
+        modelInventory: { status: "ready", modelLoading: "lys", models: [] },
+        title: "LM Studio lists no models.",
+        body: "Download a model in LM Studio, then refresh."
+      }
     ]
-  ] as const)(
+  ])(
     "says why no model is listed when the inventory read is %s",
-    async (_label, modelInventory, title, body) => {
+    async (_label, { modelInventory, title, body }) => {
       await startModelPane(
         { ...TWO_MODELS, modelInventory },
         {

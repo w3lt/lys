@@ -11,12 +11,21 @@ import type {
 } from "fastify"
 import * as z from "zod"
 import type { LlmModelStopper } from "../llmModelCapabilities"
-import type { LlmModelStopDiagnostic } from "../stopLlmModelsByKey"
+import type {
+  LlmModelStopDiagnostic,
+  StopLlmModelsByKeyOutcome
+} from "../stopLlmModelsByKey"
 import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
 import { buildLlmRouteValidatorCompiler } from "./llmRouteValidation"
 
 /** Level of the log lines about the diagnostics of one stop outcome. */
 type LlmModelStopDiagnosticLevel = "warn" | "error"
+
+/** Outcome of a stop after which instances of the model are still loaded. */
+type FailedLlmModelStopOutcome = Extract<
+  StopLlmModelsByKeyOutcome,
+  { status: "stop-failed" }
+>
 
 /**
  * Fields that name what the log line about a diagnostic is about, besides the
@@ -174,15 +183,7 @@ async function handleLlmModelUnloadRequest(
       return
     }
     case "stop-failed": {
-      reportLlmModelStopDiagnostics(
-        stopOutcome.diagnostics,
-        modelLogger,
-        "error"
-      )
-      modelLogger.error(
-        { remainingModelIdentifiers: stopOutcome.remainingModelIdentifiers },
-        "LLM model instances remain loaded after stop reconciliation"
-      )
+      reportFailedLlmModelStop(stopOutcome, modelLogger)
 
       const problem = createLlmUnloadProblem({
         reason: "unload-failed",
@@ -193,6 +194,28 @@ async function handleLlmModelUnloadRequest(
       return
     }
   }
+}
+
+/**
+ * Reports a stop after which instances of the model are still loaded: each
+ * diagnostic of the outcome, then the runtime identifiers still loaded, all
+ * at error level.
+ *
+ * @param outcome - Stop-failed outcome, with its diagnostics and remaining
+ * runtime identifiers.
+ * @param modelLogger - Request logger that names the provider and the
+ * canonical model key of the stop, as `provider` and `modelKey`, on every
+ * line.
+ */
+function reportFailedLlmModelStop(
+  outcome: FailedLlmModelStopOutcome,
+  modelLogger: FastifyBaseLogger
+): void {
+  reportLlmModelStopDiagnostics(outcome.diagnostics, modelLogger, "error")
+  modelLogger.error(
+    { remainingModelIdentifiers: outcome.remainingModelIdentifiers },
+    "LLM model instances remain loaded after stop reconciliation"
+  )
 }
 
 /**

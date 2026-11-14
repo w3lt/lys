@@ -408,7 +408,7 @@ export type ModelLoadConfigurationPanelProps = {
 }
 
 /**
- * Presents the load settings of the Model pane's selected model, as its
+ * Presents the load settings of the Models pane's selected model, as its
  * provider lets them be set.
  *
  * @remarks LM Studio's models have editable settings

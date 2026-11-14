@@ -30,6 +30,14 @@ import type {
 } from "./composer-presentation"
 import { buildComposerModelChoiceValue } from "./composer-presentation"
 
+/** Properties accepted by {@link ComposerModelOption}. */
+type ComposerModelOptionProps = {
+  /** The model the row offers. */
+  readonly choice: ComposerModelChoice
+  /** Whether the row holds the menu's selected value. */
+  readonly isSelected: boolean
+}
+
 /** Properties accepted by {@link ComposerModelChoices}. */
 type ComposerModelChoicesProps = {
   /** Provider the group is labelled with. */
@@ -52,6 +60,20 @@ type ComposerProviderStatusProps = {
   readonly provider: LlmProvider
   /** Why the provider lists no model now. */
   readonly status: string
+}
+
+/** Properties accepted by {@link ComposerProviderGroup}. */
+type ComposerProviderGroupProps = {
+  /** The provider's part of the menu. */
+  readonly group: ComposerModelGroup
+  /** Radio value of the conversation's model, or empty when there is none. */
+  readonly selectedValue: string
+  /**
+   * Hands the chosen row's radio value to the menu.
+   *
+   * @param value - Radio value of the chosen row.
+   */
+  readonly onSelectedValueChange: (value: string) => void
 }
 
 /** Properties accepted by {@link ComposerNoProvider}. */
@@ -85,6 +107,42 @@ export type ComposerModelMenuProps = {
 }
 
 /**
+ * Presents one model as a radio row: its tone, its name with its provider,
+ * its detail, and its condition in words.
+ *
+ * @remarks A pure projection of its props. The tone is decorative and hidden
+ * from assistive technology; the tag states the row's condition, `selected`
+ * included, as text.
+ * @param props - The model and whether its row is selected.
+ * @returns The model's row.
+ */
+function ComposerModelOption({
+  choice,
+  isSelected
+}: ComposerModelOptionProps): ReactElement {
+  const { reference, model, request, value } = choice
+
+  return (
+    <DropdownMenuRadioItem className="composer__model-option" value={value}>
+      <span
+        aria-hidden="true"
+        className="composer__model-dot"
+        data-tone={readModelRowTone(request, model)}
+      />
+      <span className="composer__model-option-lines">
+        <span className="composer__model-option-name">
+          {formatModelReferenceLabel(reference)}
+        </span>
+        <span className="composer__model-option-detail">{model.detail}</span>
+      </span>
+      <span className="composer__model-option-tag">
+        {formatComposerModelRowTag(request, model, isSelected)}
+      </span>
+    </DropdownMenuRadioItem>
+  )
+}
+
+/**
  * Presents one connected provider's models as a labelled radio group.
  *
  * @remarks A pure projection of its props. Every row names its model with
@@ -110,29 +168,12 @@ function ComposerModelChoices({
       <DropdownMenuLabel className="composer__menu-eyebrow">
         {LLM_PROVIDER_NAMES[provider]}
       </DropdownMenuLabel>
-      {choices.map(({ reference, model, request, value }) => (
-        <DropdownMenuRadioItem
-          className="composer__model-option"
-          key={value}
-          value={value}
-        >
-          <span
-            aria-hidden="true"
-            className="composer__model-dot"
-            data-tone={readModelRowTone(request, model)}
-          />
-          <span className="composer__model-option-lines">
-            <span className="composer__model-option-name">
-              {formatModelReferenceLabel(reference)}
-            </span>
-            <span className="composer__model-option-detail">
-              {model.detail}
-            </span>
-          </span>
-          <span className="composer__model-option-tag">
-            {formatComposerModelRowTag(request, model, value === selectedValue)}
-          </span>
-        </DropdownMenuRadioItem>
+      {choices.map((choice) => (
+        <ComposerModelOption
+          choice={choice}
+          isSelected={choice.value === selectedValue}
+          key={choice.value}
+        />
       ))}
     </DropdownMenuRadioGroup>
   )
@@ -160,6 +201,37 @@ function ComposerProviderStatus({
         {status}
       </DropdownMenuItem>
     </DropdownMenuGroup>
+  )
+}
+
+/**
+ * Presents one turned-on provider's part of the menu: its models while it
+ * lists some, else a line saying why it lists none.
+ *
+ * @remarks A pure projection of its props, so each provider's part appears
+ * as its list arrives.
+ * @param props - The provider's group, the selected value, and the choice
+ * callback.
+ * @returns The provider's group.
+ */
+function ComposerProviderGroup({
+  group,
+  selectedValue,
+  onSelectedValueChange
+}: ComposerProviderGroupProps): ReactElement {
+  if (group.kind === "status") {
+    return (
+      <ComposerProviderStatus provider={group.provider} status={group.status} />
+    )
+  }
+
+  return (
+    <ComposerModelChoices
+      choices={group.choices}
+      onSelectedValueChange={onSelectedValueChange}
+      provider={group.provider}
+      selectedValue={selectedValue}
+    />
   )
 }
 
@@ -266,23 +338,14 @@ export default function ComposerModelMenu({
         {groups.length === 0 ? (
           <ComposerNoProvider onOpenProviders={onOpenProviders} />
         ) : null}
-        {groups.map((group) =>
-          group.kind === "models" ? (
-            <ComposerModelChoices
-              choices={group.choices}
-              key={group.provider}
-              onSelectedValueChange={handleSelectedValueChange}
-              provider={group.provider}
-              selectedValue={selectedValue}
-            />
-          ) : (
-            <ComposerProviderStatus
-              key={group.provider}
-              provider={group.provider}
-              status={group.status}
-            />
-          )
-        )}
+        {groups.map((group) => (
+          <ComposerProviderGroup
+            group={group}
+            key={group.provider}
+            onSelectedValueChange={handleSelectedValueChange}
+            selectedValue={selectedValue}
+          />
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   )

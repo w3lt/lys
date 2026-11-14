@@ -283,59 +283,69 @@ describe("provider-presentation", () => {
   describe("calculateProviderBadge", () => {
     it("marks a provider that is turned off as off", () => {
       expect(
-        calculateProviderBadge(
-          "groq",
-          STORED_PROVIDERS_SETTINGS,
-          SECRETS,
-          "connected"
-        )
+        calculateProviderBadge({
+          provider: "groq",
+          providers: STORED_PROVIDERS_SETTINGS,
+          secrets: SECRETS,
+          status: "connected"
+        })
       ).toEqual({ label: "off", tone: "muted" })
     })
 
     it("marks a provider the backend reports off as off", () => {
       expect(
-        calculateProviderBadge("groq", GROQ_ACTIVE, SECRETS, "off")
+        calculateProviderBadge({
+          provider: "groq",
+          providers: GROQ_ACTIVE,
+          secrets: SECRETS,
+          status: "off"
+        })
       ).toEqual({ label: "off", tone: "muted" })
     })
 
     it("asks for a key a turned-on provider needs and lacks", () => {
       expect(
-        calculateProviderBadge(
-          "ollamaCloud",
-          OLLAMA_CLOUD,
-          SECRETS,
-          "unreachable"
-        )
+        calculateProviderBadge({
+          provider: "ollamaCloud",
+          providers: OLLAMA_CLOUD,
+          secrets: SECRETS,
+          status: "unreachable"
+        })
       ).toEqual({ label: "needs key", tone: "attention" })
     })
 
     it("follows the connection of a turned-on provider", () => {
       expect(
-        calculateProviderBadge("groq", GROQ_ACTIVE, SECRETS, "connected")
+        calculateProviderBadge({
+          provider: "groq",
+          providers: GROQ_ACTIVE,
+          secrets: SECRETS,
+          status: "connected"
+        })
       ).toEqual({ label: "connected", tone: "success" })
       expect(
-        calculateProviderBadge(
-          "ollama",
-          STORED_PROVIDERS_SETTINGS,
-          SECRETS,
-          "unreachable"
-        )
+        calculateProviderBadge({
+          provider: "ollama",
+          providers: STORED_PROVIDERS_SETTINGS,
+          secrets: SECRETS,
+          status: "unreachable"
+        })
       ).toEqual({ label: "not reachable", tone: "danger" })
       expect(
-        calculateProviderBadge(
-          "ollama",
-          STORED_PROVIDERS_SETTINGS,
-          SECRETS,
-          "connecting"
-        )
+        calculateProviderBadge({
+          provider: "ollama",
+          providers: STORED_PROVIDERS_SETTINGS,
+          secrets: SECRETS,
+          status: "connecting"
+        })
       ).toEqual({ label: "connecting", tone: "attention" })
       expect(
-        calculateProviderBadge(
-          "ollama",
-          STORED_PROVIDERS_SETTINGS,
-          SECRETS,
-          "unknown"
-        )
+        calculateProviderBadge({
+          provider: "ollama",
+          providers: STORED_PROVIDERS_SETTINGS,
+          secrets: SECRETS,
+          status: "unknown"
+        })
       ).toEqual({ label: "unknown", tone: "muted" })
     })
   })

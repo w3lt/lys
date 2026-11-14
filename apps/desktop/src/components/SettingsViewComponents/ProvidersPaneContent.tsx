@@ -1,4 +1,4 @@
-import { LLM_PROVIDERS } from "@lys/share"
+import { LLM_PROVIDERS, type LlmProvider } from "@lys/share"
 import { useId, type ReactElement } from "react"
 
 import { useLysStore } from "@/lib/store"
@@ -33,6 +33,29 @@ export default function ProvidersPane(): ReactElement {
   const saveProviderApiKey = useLysStore((state) => state.saveProviderApiKey)
   const connectProvider = useLysStore((state) => state.connectProvider)
 
+  /**
+   * Builds one provider's card from the pane's store selections.
+   *
+   * @param provider - Provider the card presents, which also keys it.
+   * @returns The card, whose Test connects to that provider again.
+   */
+  function buildProviderCard(provider: LlmProvider): ReactElement {
+    return (
+      <ProviderCard
+        backendStatus={backendStatus}
+        key={provider}
+        onSaveApiKey={saveProviderApiKey}
+        onSaveProviders={saveProviderSettings}
+        onTest={() => void connectProvider(provider)}
+        provider={provider}
+        providers={providers}
+        saveState={saveState}
+        secrets={secrets}
+        status={providerModels[provider].status}
+      />
+    )
+  }
+
   return (
     <section aria-labelledby={headingId} className="settings-view__section">
       <div className="settings-view__section-heading">
@@ -44,20 +67,7 @@ export default function ProvidersPane(): ReactElement {
         provider, and nothing goes to a provider that is off.
       </p>
       <div className="settings-view__provider-list">
-        {LLM_PROVIDERS.map((provider) => (
-          <ProviderCard
-            backendStatus={backendStatus}
-            key={provider}
-            onSaveApiKey={saveProviderApiKey}
-            onSaveProviders={saveProviderSettings}
-            onTest={() => void connectProvider(provider)}
-            provider={provider}
-            providers={providers}
-            saveState={saveState}
-            secrets={secrets}
-            status={providerModels[provider].status}
-          />
-        ))}
+        {LLM_PROVIDERS.map(buildProviderCard)}
       </div>
     </section>
   )

@@ -95,12 +95,12 @@ type LysState = ProviderModelsState & {
   /** Pane the settings view opens on; retained across visits to settings. */
   settingsPane: SettingsPane
   /**
-   * Model the Model pane shows, or null for the pane's own choice; retained
+   * Model the Models pane shows, or null for the pane's own choice; retained
    * across visits to settings.
    */
   modelPaneSelection: LlmModelReference | null
   /**
-   * Provider the Model pane's picker chose while no model of it is selected,
+   * Provider the Models pane's picker chose while no model of it is selected,
    * or null for the pane's own choice; retained across visits to settings.
    */
   modelPaneProvider: LlmProvider | null
@@ -129,19 +129,19 @@ type LysActions = {
    */
   setSettingsPane: (pane: SettingsPane) => void
   /**
-   * Selects the model the Model pane shows.
+   * Selects the model the Models pane shows.
    *
    * @param model - Model to show, or null to leave the choice to the pane.
    */
   setModelPaneSelection: (model: LlmModelReference | null) => void
   /**
-   * Shows one provider in the Model pane with no model of it selected.
+   * Shows one provider in the Models pane with no model of it selected.
    *
    * @param provider - Provider the pane's picker chose.
    */
   setModelPaneProvider: (provider: LlmProvider) => void
   /**
-   * Opens the settings view on the Model pane, showing one model.
+   * Opens the settings view on the Models pane, showing one model.
    *
    * @param model - Model the pane shows.
    */

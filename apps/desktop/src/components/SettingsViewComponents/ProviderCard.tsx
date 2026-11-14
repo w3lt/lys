@@ -24,8 +24,8 @@ import {
   isProviderOn,
   PROVIDER_DESCRIPTIONS,
   UNEDITED_PROVIDER_DRAFT,
-  type ProviderAccessKind,
-  type ProviderFieldDraft
+  type ProviderBadge,
+  type ProviderStatusInput
 } from "./provider-presentation"
 
 /** Requests a provider card sends to the pane. */
@@ -78,24 +78,44 @@ type ProviderCardBodyProps = ProviderCardRequests & {
   readonly saveState: ProviderSettingsSaveState
 }
 
+/** Properties accepted by {@link ProviderCardHeader}. */
+type ProviderCardHeaderProps = {
+  /** Provider the header names. */
+  readonly provider: LlmProvider
+  /**
+   * Identifier given to the provider's name, which names the card and the
+   * switch.
+   */
+  readonly nameId: string
+  /** State the badge shows. */
+  readonly badge: ProviderBadge
+  /** Whether the saved settings turn the provider on. */
+  readonly isOn: boolean
+  /** Whether a provider save runs, which disables the switch. */
+  readonly isSaving: boolean
+  /**
+   * Proposes turning the provider on or off; called once per flip of the
+   * switch.
+   *
+   * @param isOn - Whether the provider is to be on.
+   */
+  readonly onIsOnChange: (isOn: boolean) => void
+}
+
 /** Properties accepted by {@link ProviderCardFooter}. */
 type ProviderCardFooterProps = {
   /** Identifier of the status line, which describes the form's field. */
   readonly statusId: string
-  /** How the provider is reached. */
-  readonly access: ProviderAccessKind
-  /** Saved providers and addresses. */
-  readonly providers: ProvidersSettings
-  /** Saved keys. */
-  readonly secrets: SecretsSettings
-  /** Latest published connection status of the card's provider. */
-  readonly status: LlmProviderStatus
-  /** Backend lifecycle state, which explains an `unknown` status. */
-  readonly backendStatus: BackendServerStatus
+  /**
+   * Facts the status line describes: how the provider is reached, the saved
+   * providers and keys, its connection, the backend's state, and the
+   * person's edit of the form's field. They also tell whether Test and
+   * Remove show, for a saved and unedited key, and whether Test is disabled,
+   * while the provider connects.
+   */
+  readonly lineFacts: ProviderStatusInput
   /** Latest provider save, which disables Test and Remove while it runs. */
   readonly saveState: ProviderSettingsSaveState
-  /** The person's edit of the form's field. */
-  readonly draft: ProviderFieldDraft
   /** Requests that the card connect again. */
   readonly onTest: () => void
   /** Requests that the card remove the saved key. */
@@ -103,36 +123,82 @@ type ProviderCardFooterProps = {
 }
 
 /**
+ * Presents a provider card's header: the provider's logo, name, tag, and
+ * line, its badge, and the switch that turns it on or off.
+ *
+ * @remarks A pure projection of its props. The switch is named after the
+ * provider, described by its line, checked while the provider is on, and
+ * disabled while a save runs. The logo is the provider's monochrome mark
+ * from `@lobehub/icons`, drawn in the text color and hidden from assistive
+ * technology, because the name beside it says the same.
+ * @param props - Provider, the name's identifier, the badge, whether the
+ * provider is on and a save runs, and the request to turn it on or off.
+ * @returns The header.
+ */
+function ProviderCardHeader({
+  provider,
+  nameId,
+  badge,
+  isOn,
+  isSaving,
+  onIsOnChange
+}: ProviderCardHeaderProps): ReactElement {
+  const lineId = useId()
+  const description = PROVIDER_DESCRIPTIONS[provider]
+
+  return (
+    <div className="settings-view__provider-header">
+      <description.logo
+        aria-hidden="true"
+        className="settings-view__provider-logo"
+        size={36}
+      />
+      <div className="settings-view__provider-identity">
+        <div className="settings-view__provider-name-line">
+          <h3 className="settings-view__provider-name" id={nameId}>
+            {description.name}
+          </h3>
+          <span className="settings-view__provider-tag">{description.tag}</span>
+        </div>
+        <p className="settings-view__provider-line" id={lineId}>
+          {description.blurb}
+        </p>
+      </div>
+      <span className="settings-view__secret-state" data-tone={badge.tone}>
+        {badge.label}
+      </span>
+      <Switch
+        aria-describedby={lineId}
+        aria-labelledby={nameId}
+        checked={isOn}
+        disabled={isSaving}
+        onCheckedChange={onIsOnChange}
+        size="lg"
+      />
+    </div>
+  )
+}
+
+/**
  * Presents a turned-on card's status line and, while its key is saved and
  * unedited, Test and Remove.
  *
  * @remarks A pure projection of its props. The status line is a polite live
- * region. Test is disabled while the backend connects or a save runs, and
+ * region. Test is disabled while the provider connects or a save runs, and
  * Remove while a save runs.
- * @param props - Status identifier, the facts the line describes, and the
- * requests.
+ * @param props - Status identifier, the facts the line describes, the save,
+ * and the requests.
  * @returns The footer.
  */
 function ProviderCardFooter({
   statusId,
-  access,
-  providers,
-  secrets,
-  status,
-  backendStatus,
+  lineFacts,
   saveState,
-  draft,
   onTest,
   onRemoveKey
 }: ProviderCardFooterProps): ReactElement {
-  const message = formatProviderMessage({
-    access,
-    providers,
-    secrets,
-    status,
-    backendStatus,
-    draft
-  })
+  const { access, secrets, status, draft } = lineFacts
+  const message = formatProviderMessage(lineFacts)
   const isKeySaved =
     access.kind === "key" &&
     findSavedProviderApiKey(access.provider, secrets) !== null
@@ -198,9 +264,7 @@ function ProviderCardBody({
   onTest
 }: ProviderCardBodyProps): ReactElement {
   const access = findProviderAccessKind(provider)
-  const [draft, setDraft] = useState<ProviderFieldDraft>(
-    UNEDITED_PROVIDER_DRAFT
-  )
+  const [draft, setDraft] = useState(UNEDITED_PROVIDER_DRAFT)
   const [isKeyShown, setIsKeyShown] = useState(false)
   const fieldRef = useRef<HTMLInputElement>(null)
   const fieldId = useId()
@@ -278,15 +342,10 @@ function ProviderCardBody({
         />
       )}
       <ProviderCardFooter
-        access={access}
-        draft={draft}
+        lineFacts={{ access, providers, secrets, status, backendStatus, draft }}
         onRemoveKey={() => void handleRemoveKey()}
         onTest={onTest}
-        providers={providers}
         saveState={saveState}
-        secrets={secrets}
-        backendStatus={backendStatus}
-        status={status}
         statusId={statusId}
       />
     </div>
@@ -325,10 +384,8 @@ export default function ProviderCard({
   onTest
 }: ProviderCardProps): ReactElement {
   const nameId = useId()
-  const lineId = useId()
-  const description = PROVIDER_DESCRIPTIONS[provider]
+  const { name } = PROVIDER_DESCRIPTIONS[provider]
   const isOn = isProviderOn(provider, providers)
-  const badge = calculateProviderBadge(provider, providers, secrets, status)
   const saveMessage = formatProviderSaveMessage(provider, saveState)
 
   return (
@@ -337,42 +394,19 @@ export default function ProviderCard({
       className="settings-view__provider-card"
       data-active={isOn}
     >
-      <div className="settings-view__provider-header">
-        <description.logo
-          aria-hidden="true"
-          className="settings-view__provider-logo"
-          size={36}
-        />
-        <div className="settings-view__provider-identity">
-          <div className="settings-view__provider-name-line">
-            <h3 className="settings-view__provider-name" id={nameId}>
-              {description.name}
-            </h3>
-            <span className="settings-view__provider-tag">
-              {description.tag}
-            </span>
-          </div>
-          <p className="settings-view__provider-line" id={lineId}>
-            {description.blurb}
-          </p>
-        </div>
-        <span className="settings-view__secret-state" data-tone={badge.tone}>
-          {badge.label}
-        </span>
-        <Switch
-          aria-describedby={lineId}
-          aria-labelledby={nameId}
-          checked={isOn}
-          disabled={saveState.status === "saving"}
-          onCheckedChange={(proposedIsOn) =>
-            void onSaveProviders(
-              provider,
-              buildProvidersWithProviderOn(providers, provider, proposedIsOn)
-            )
-          }
-          size="lg"
-        />
-      </div>
+      <ProviderCardHeader
+        badge={calculateProviderBadge({ provider, providers, secrets, status })}
+        isOn={isOn}
+        isSaving={saveState.status === "saving"}
+        nameId={nameId}
+        onIsOnChange={(proposedIsOn) =>
+          void onSaveProviders(
+            provider,
+            buildProvidersWithProviderOn(providers, provider, proposedIsOn)
+          )
+        }
+        provider={provider}
+      />
       {isOn ? (
         <ProviderCardBody
           backendStatus={backendStatus}
@@ -387,7 +421,7 @@ export default function ProviderCard({
         />
       ) : null}
       <p
-        aria-label={`${description.name} save`}
+        aria-label={`${name} save`}
         aria-live="polite"
         className="settings-view__secret-status settings-view__provider-save"
         data-tone={saveMessage.tone}

@@ -179,11 +179,19 @@ function buildModelRequest(step: ModelOperationStep): ActiveModelRequest {
   }
 }
 
+/** Where an admitted operation sends its steps, and over what connection. */
+type ModelOperationTransport = {
+  /** Provider the steps are sent to. */
+  readonly provider: LlmProvider
+  /** Origin and cancellation owned by the operation. */
+  readonly connection: ModelApiConnection
+}
+
 /**
  * Sends one step to the backend and records what it established.
- * @param provider - Provider the step is sent to.
+ * @param transport - Provider the step is sent to, and the operation's
+ * connection.
  * @param step - Step to send.
- * @param connection - Origin and cancellation owned by the operation.
  * @param progress - What the earlier steps established; not modified.
  * @returns New progress: a completed load records the configuration it was
  * sent with under the canonical key the backend reports, a completed unload
@@ -191,9 +199,8 @@ function buildModelRequest(step: ModelOperationStep): ActiveModelRequest {
  * @throws The adapter failure for the step; the progress is then unchanged.
  */
 async function sendModelOperationStep(
-  provider: LlmProvider,
+  { provider, connection }: ModelOperationTransport,
   step: ModelOperationStep,
-  connection: ModelApiConnection,
   progress: ModelOperationProgress
 ): Promise<ModelOperationProgress> {
   switch (step.kind) {
@@ -320,23 +327,34 @@ function hasModelRequestFailed(
   )
 }
 
+/** What the load configurations known after an operation settles come from. */
+type SettledModelConfigurationsInput = {
+  /** Provider the operation was sent to. */
+  readonly provider: LlmProvider
+  /** Records the operation's steps established; not modified. */
+  readonly known: LoadedModelConfigurations
+  /** Inventory observation being published. */
+  readonly inventory: ModelInventoryState
+  /** Load settings stored now. */
+  readonly settings: LoadConfigurationSettings
+}
+
 /**
  * Builds the load configurations known after an operation settles.
  *
- * @param provider - Provider the operation was sent to.
- * @param known - Records the operation's steps established; not modified.
- * @param inventory - Inventory observation being published.
- * @param settings - Load settings stored now.
+ * @param input - The operation's provider, the records its steps
+ * established, the inventory observation being published, and the load
+ * settings stored now.
  * @returns For LM Studio, the records of exactly its loaded models, as
  * {@link buildLoadedModelConfigurations} builds them; for any other provider
  * none, since the stored load settings name LM Studio's models only.
  */
-function buildProviderLoadedModelConfigurations(
-  provider: LlmProvider,
-  known: LoadedModelConfigurations,
-  inventory: ModelInventoryState,
-  settings: LoadConfigurationSettings
-): LoadedModelConfigurations {
+function buildProviderLoadedModelConfigurations({
+  provider,
+  known,
+  inventory,
+  settings
+}: SettledModelConfigurationsInput): LoadedModelConfigurations {
   return provider === "lmStudio"
     ? buildLoadedModelConfigurations(known, inventory, settings)
     : RELEASED_PROVIDER_MODELS.loadedModelConfigurations
@@ -493,20 +511,20 @@ export function createModelSlice(
   /**
    * Sends the steps of one admitted operation in order, stopping at the first
    * failure.
-   * @param provider - Provider the steps are sent to.
+   * @param transport - Provider the steps are sent to, and the operation's
+   * connection.
    * @param steps - Steps sampled at admission.
    * @param controller - Identity of the admitted operation.
-   * @param connection - Origin and cancellation owned by the operation.
    * @returns What the completed steps established, with the failure of the
    * step that ended them, if any; or null when the operation lost its
    * authority to publish and nothing more may be written.
    */
   async function sendModelOperationSteps(
-    provider: LlmProvider,
+    transport: ModelOperationTransport,
     steps: readonly ModelOperationStep[],
-    controller: AbortController,
-    connection: ModelApiConnection
+    controller: AbortController
   ): Promise<ModelOperationProgress | null> {
+    const { provider, connection } = transport
     let progress: ModelOperationProgress = {
       health: null,
       error: null,
@@ -519,12 +537,7 @@ export function createModelSlice(
         return null
       }
       try {
-        progress = await sendModelOperationStep(
-          provider,
-          step,
-          connection,
-          progress
-        )
+        progress = await sendModelOperationStep(transport, step, progress)
       } catch (error) {
         progress = { ...progress, error: formatModelFailure(error) }
       }
@@ -539,7 +552,7 @@ export function createModelSlice(
   /**
    * Owns one admitted operation through acknowledgement and reconciliation.
    * @remarks The closing publication records the time the operation
-   * settled, which the Model pane reports as the last refresh or check.
+   * settled, which the Models pane reports as the last refresh or check.
    * @param operation - Operation performed without automatically retrying effects.
    * @returns Resolves after settlement, failure presentation, or invalidation.
    */
@@ -554,10 +567,9 @@ export function createModelSlice(
     }
     activeRequests.set(provider, controller)
     const progress = await sendModelOperationSteps(
-      provider,
+      { provider, connection },
       listModelOperationSteps(operation),
-      controller,
-      connection
+      controller
     )
     if (progress === null) return
     const result = await readInventoryOutcome(
@@ -573,12 +585,12 @@ export function createModelSlice(
       health: progress.health,
       request: { status: "idle" },
       settledAt: new Date(),
-      loadedModelConfigurations: buildProviderLoadedModelConfigurations(
+      loadedModelConfigurations: buildProviderLoadedModelConfigurations({
         provider,
-        progress.loadedModelConfigurations,
-        result.inventory,
-        dependencies.getLoadConfigurationSettings()
-      )
+        known: progress.loadedModelConfigurations,
+        inventory: result.inventory,
+        settings: dependencies.getLoadConfigurationSettings()
+      })
     })
     if (hasModelRequestFailed(result, progress.health)) {
       await dependencies.handleModelRequestFailure(provider)

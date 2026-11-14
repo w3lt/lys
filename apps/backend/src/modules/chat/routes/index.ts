@@ -29,17 +29,33 @@ export default function registerChatRoutes(
   options: ChatRouteOptions
 ): Promise<void> {
   return new Promise((resolve) => {
-    const generations = new ReplyGenerationRegistry()
-    app.addHook("preClose", async () => {
-      await generations[Symbol.asyncDispose]()
-    })
-    app.setSerializerCompiler(serializerCompiler)
-    const findModelCapabilities = createLlmModelCapabilitiesLookup(
-      app.llmProviderServices
-    )
-    registerChatRoute(app, { ...options, generations, findModelCapabilities })
-    registerChatContextRoute(app, findModelCapabilities)
-    updateFastifyWithChatReplyRoutes(app, generations)
+    registerChatRouteGroup(app, options)
     resolve()
   })
+}
+
+/**
+ * Registers the generation registry with its `preClose` disposal, the Zod
+ * response serializer, and the chat, chat-context, and reply routes.
+ *
+ * @param app - Application instance that receives the chat route group.
+ * @param options - Title-generation attempt limit and tool call policy
+ * forwarded to the chat route.
+ * @throws If a child route registrar fails.
+ */
+function registerChatRouteGroup(
+  app: FastifyInstance,
+  options: ChatRouteOptions
+): void {
+  const generations = new ReplyGenerationRegistry()
+  app.addHook("preClose", async () => {
+    await generations[Symbol.asyncDispose]()
+  })
+  app.setSerializerCompiler(serializerCompiler)
+  const findModelCapabilities = createLlmModelCapabilitiesLookup(
+    app.llmProviderServices
+  )
+  registerChatRoute(app, { ...options, generations, findModelCapabilities })
+  registerChatContextRoute(app, findModelCapabilities)
+  updateFastifyWithChatReplyRoutes(app, generations)
 }

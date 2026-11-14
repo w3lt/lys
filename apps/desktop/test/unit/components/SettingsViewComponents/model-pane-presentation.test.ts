@@ -6,7 +6,8 @@ import {
   formatModelFilterResult,
   formatModelRefreshNote,
   isModelDefaultActionDisabled,
-  type ModelCheckObservation
+  type ModelCheckObservation,
+  type ModelProviderSummarySource
 } from "@/components/SettingsViewComponents/model-pane-presentation"
 import type { LlmProviderTarget } from "@/lib/models/llm-provider-target"
 import type { ModelInventoryState } from "@/lib/store/model-runtime"
@@ -40,6 +41,25 @@ const NINE_OH_FIVE = new Date(2026, 10, 13, 9, 5)
 
 /** A Groq model the cloud status cases describe. */
 const MODEL_KEY = "llama-3.3-70b"
+
+/**
+ * Builds what a provider summary is built from: by default LM Studio,
+ * available, with one loaded model and one on disk, and no default model.
+ *
+ * @param change - Parts the case sets.
+ * @returns The source of the summary.
+ */
+function buildSummarySource(
+  change: Partial<ModelProviderSummarySource> = {}
+): ModelProviderSummarySource {
+  return {
+    target: LM_STUDIO,
+    availability: "available",
+    inventory: TWO_MODELS,
+    defaultModel: null,
+    ...change
+  }
+}
 
 /**
  * Builds the observation of a cloud model nobody checked.
@@ -92,7 +112,7 @@ describe("buildModelProviderSummary", () => {
     "gives a provider on this machine that is %s the %s tone and says %s",
     (availability, tone, status) => {
       expect(
-        buildModelProviderSummary(LM_STUDIO, availability, TWO_MODELS, null)
+        buildModelProviderSummary(buildSummarySource({ availability }))
       ).toMatchObject({ tone, status })
     }
   )
@@ -100,12 +120,12 @@ describe("buildModelProviderSummary", () => {
   it("says a cloud provider is connected, or can't be reached", () => {
     expect(
       [
-        buildModelProviderSummary(GROQ, "available", TWO_MODELS, null),
+        buildModelProviderSummary(buildSummarySource({ target: GROQ })),
         buildModelProviderSummary(
-          GROQ,
-          "provider-unreachable",
-          TWO_MODELS,
-          null
+          buildSummarySource({
+            target: GROQ,
+            availability: "provider-unreachable"
+          })
         )
       ].map((summary) => summary.status)
     ).toEqual(["Connected", "Can’t be reached"])
@@ -115,7 +135,7 @@ describe("buildModelProviderSummary", () => {
     expect(
       [LM_STUDIO, GROQ].map(
         (target) =>
-          buildModelProviderSummary(target, "available", TWO_MODELS, null).count
+          buildModelProviderSummary(buildSummarySource({ target })).count
       )
     ).toEqual(["1 of 2 loaded", "2 models"])
   })
@@ -128,17 +148,15 @@ describe("buildModelProviderSummary", () => {
     }
 
     expect(
-      buildModelProviderSummary(GROQ, "available", inventory, null).count
+      buildModelProviderSummary(buildSummarySource({ target: GROQ, inventory }))
+        .count
     ).toBe("1 model")
   })
 
   it("counts nothing until an inventory is read", () => {
     expect(
       buildModelProviderSummary(
-        LM_STUDIO,
-        "available",
-        { status: "failed" },
-        null
+        buildSummarySource({ inventory: { status: "failed" } })
       ).count
     ).toBeNull()
   })
@@ -150,12 +168,8 @@ describe("buildModelProviderSummary", () => {
         { provider: "groq", modelKey: MODEL_KEY } as const
       ].map(
         (defaultModel) =>
-          buildModelProviderSummary(
-            LM_STUDIO,
-            "available",
-            TWO_MODELS,
-            defaultModel
-          ).defaultModelKey
+          buildModelProviderSummary(buildSummarySource({ defaultModel }))
+            .defaultModelKey
       )
     ).toEqual(["qwen3-8b", null])
   })

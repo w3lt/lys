@@ -16,14 +16,18 @@ import {
   listComposerModelGroups,
   type ComposerActivity,
   type ComposerModelState,
-  type ComposerProviderState
+  type ComposerProviderState,
+  type LocalRuntimeConnection
 } from "@/components/ComposerComponents/composer-presentation"
 import type { ModelAvailability } from "@/lib/models/model-availability"
 import type { ProviderReadiness } from "@/lib/models/provider-connection"
 import type { BackendServerStatus } from "@/lib/store"
 import type { ConversationAgent } from "@/lib/store/agents/conversation-agent"
 import type { ChatRequestState } from "@/lib/store/chat-view"
-import type { LlmProviderStatus } from "@/lib/store/model-runtime"
+import type {
+  LlmProviderStatus,
+  ModelInventoryState
+} from "@/lib/store/model-runtime"
 import type { SecretsSettings } from "@/lib/store/settings"
 import { buildLlmInfo } from "../../support/modelFixtures"
 import { buildComposerRuntime } from "../../support/providerModelFixtures"
@@ -622,13 +626,20 @@ describe("findComposerBannerAction", () => {
   )
 })
 
+/** What the banner says while LM Studio, the only provider on, has a status. */
+type NoModelBannerCase = {
+  /** How the case's title describes LM Studio. */
+  readonly name: string
+  /** LM Studio's status. */
+  readonly status: LlmProviderStatus
+  /** The banner sentence. */
+  readonly message: string
+  /** The label of the banner's action. */
+  readonly action: string
+}
+
 describe("the banner without a model", () => {
-  it.each<{
-    name: string
-    status: LlmProviderStatus
-    message: string
-    action: string
-  }>([
+  it.each<NoModelBannerCase>([
     {
       name: "can't be reached",
       status: "unreachable",
@@ -713,6 +724,26 @@ describe("the banner for a model whose provider needs a key", () => {
   })
 })
 
+/** The line a turned-on provider's group shows while it is not connected. */
+type ProviderStatusLineCase = {
+  /** How the case's title describes the provider. */
+  readonly name: string
+  /** The provider's status, any but `connected`. */
+  readonly status: Exclude<LlmProviderStatus, "connected">
+  /** The group's line. */
+  readonly line: string
+}
+
+/** The line a connected provider's group shows while it offers no model. */
+type InventoryLineCase = {
+  /** How the case's title describes the inventory. */
+  readonly name: string
+  /** The provider's inventory. */
+  readonly inventory: ModelInventoryState
+  /** The group's line. */
+  readonly line: string
+}
+
 describe("listComposerModelGroups", () => {
   /** LM Studio's models: one loaded, one on disk. */
   const LM_STUDIO_MODELS = [
@@ -758,11 +789,7 @@ describe("listComposerModelGroups", () => {
     ])
   })
 
-  it.each<{
-    name: string
-    status: "unknown" | "connecting" | "unreachable" | "off"
-    line: string
-  }>([
+  it.each<ProviderStatusLineCase>([
     { name: "connecting", status: "connecting", line: "Connecting to Ollama…" },
     {
       name: "of unknown status",
@@ -803,14 +830,7 @@ describe("listComposerModelGroups", () => {
     }
   )
 
-  it.each<{
-    name: string
-    inventory:
-      | { status: "unavailable" }
-      | { status: "failed" }
-      | { status: "ready"; modelLoading: "lys"; models: [] }
-    line: string
-  }>([
+  it.each<InventoryLineCase>([
     {
       name: "is still being read",
       inventory: { status: "unavailable" },
@@ -884,42 +904,61 @@ describe("calculateComposerActivity", () => {
   })
 })
 
+/** The placeholder for one model state and activity, with a listed agent. */
+type ListedAgentPlaceholderCase = {
+  /** Whether the model can answer, as the composer describes it. */
+  readonly connection: LocalRuntimeConnection
+  /** The model state. */
+  readonly state: ComposerModelState
+  /** Chat work that keeps the composer from sending. */
+  readonly activity: ComposerActivity
+  /** The placeholder. */
+  readonly placeholder: string
+}
+
 describe("formatComposerPlaceholder", () => {
-  it.each<[string, ComposerModelState, ComposerActivity, string]>([
-    [
-      "offline",
-      buildModelState({ backendStatus: "stopped" }),
-      "idle",
-      "Waiting on the backend…"
-    ],
-    [
-      "provider-unavailable",
-      buildModelState({ provider: buildProvider("provider-unreachable") }),
-      "idle",
-      "Waiting on LM Studio…"
-    ],
-    [
-      "no-model",
-      buildModelState({ availability: NOT_LOADED }),
-      "idle",
-      "Waiting on LM Studio…"
-    ],
-    ["ready", buildModelState(), "idle", "Say something to Lysiptera"],
-    [
-      "ready",
-      buildModelState(),
-      "awaiting-reply",
-      "Keep typing — Send unlocks when the reply ends."
-    ],
-    [
-      "ready",
-      buildModelState(),
-      "opening-conversation",
-      "Opening a past conversation…"
-    ]
+  it.each<ListedAgentPlaceholderCase>([
+    {
+      connection: "offline",
+      state: buildModelState({ backendStatus: "stopped" }),
+      activity: "idle",
+      placeholder: "Waiting on the backend…"
+    },
+    {
+      connection: "provider-unavailable",
+      state: buildModelState({
+        provider: buildProvider("provider-unreachable")
+      }),
+      activity: "idle",
+      placeholder: "Waiting on LM Studio…"
+    },
+    {
+      connection: "no-model",
+      state: buildModelState({ availability: NOT_LOADED }),
+      activity: "idle",
+      placeholder: "Waiting on LM Studio…"
+    },
+    {
+      connection: "ready",
+      state: buildModelState(),
+      activity: "idle",
+      placeholder: "Say something to Lysiptera"
+    },
+    {
+      connection: "ready",
+      state: buildModelState(),
+      activity: "awaiting-reply",
+      placeholder: "Keep typing — Send unlocks when the reply ends."
+    },
+    {
+      connection: "ready",
+      state: buildModelState(),
+      activity: "opening-conversation",
+      placeholder: "Opening a past conversation…"
+    }
   ])(
-    "reads %s/%s with a listed agent as %j",
-    (_connection, state, activity, placeholder) => {
+    "reads $connection/$activity with a listed agent as $placeholder",
+    ({ state, activity, placeholder }) => {
       expect(formatComposerPlaceholder(state, activity, LYSIPTERA)).toBe(
         placeholder
       )

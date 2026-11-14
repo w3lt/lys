@@ -95,7 +95,7 @@ export type LoadConfigurationSettings = {
   /**
    * Settings for every model, each one used when the model has none of its
    * own. Empty unless a person writes settings into the settings file; the
-   * Model pane does not edit it, and the committed default supplies every
+   * Models pane does not edit it, and the committed default supplies every
    * setting it leaves out.
    */
   readonly default: ModelLoadConfiguration

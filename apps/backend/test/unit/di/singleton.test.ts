@@ -21,7 +21,10 @@ import AttachmentFileStore from "../../../src/modules/attachment/attachmentFileS
 import StoredReplyParts from "../../../src/modules/conversation/replyParts"
 import StoredConversationTurns from "../../../src/modules/conversation/turns"
 import { buildLlmChatEndpoint } from "../../../src/modules/llm/llmProviderAccess"
-import { buildLlmProviderRecord } from "../../../src/modules/llm/llmProviderServices"
+import {
+  buildLlmProviderRecord,
+  type LlmProviderRecord
+} from "../../../src/modules/llm/llmProviderServices"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "../../../src/modules/llm/llmRuntimeService"
@@ -215,6 +218,83 @@ function buildHelloAgentTurn(
 }
 
 /**
+ * Creates the acquisition of a provider's real LLM runtime service that is
+ * never connected, with recorded cleanup.
+ *
+ * @param provider - Provider the service belongs to.
+ * @param closeLog - Shared log of cleanup calls in call order.
+ * @returns The acquisition, recorded as `llm-runtime:<provider>` when it is
+ * released. The service's provider lookup and runtime acquisition reject if
+ * anything attempts them.
+ */
+function createUnconnectedLlmRuntimeAcquisition(
+  provider: LlmProvider,
+  closeLog: ClosedServiceName[]
+) {
+  return createAcquisition(
+    new LlmRuntimeService({
+      ...createLogReporters().llmRuntime[provider],
+      findLlmProviderAccess: async () => {
+        throw new Error("Unexpected provider lookup")
+      },
+      acquireLlmRuntime: async () => {
+        throw new Error("Unexpected LLM runtime acquisition")
+      }
+    }),
+    `llm-runtime:${provider}`,
+    closeLog
+  )
+}
+
+/**
+ * Updates an LLM runtime service so that it runs each engine operation on a
+ * connected fake engine whose context measurement fits every turn: a context
+ * of 1,000,000 tokens and one token for each measured text.
+ *
+ * @param runtimeService - Service whose engine operations change; the fake
+ * engine's other operations reject as unexpected.
+ */
+function updateLlmEngineToFittingFake(runtimeService: LlmRuntimeService): void {
+  const engine = createFakeLlmRuntime()
+  engine.findLlmContextMeasurement.mockImplementation(
+    async (_model, texts) => ({
+      contextLength: 1_000_000,
+      textTokenCounts: texts.map(() => 1)
+    })
+  )
+  vi.spyOn(
+    runtimeService,
+    "handleLlmEngineOperationRequest"
+  ).mockImplementation(
+    async (operation) => await operation(createConnectedFakeLlmEngine(engine))
+  )
+}
+
+/**
+ * Builds an LLM runtime service factory that hands out the recorded
+ * acquisition of each provider it is asked for, except one provider, whose
+ * service cannot be created.
+ *
+ * @param acquisitions - Recorded acquisitions of the providers' services.
+ * @param failingProvider - Provider whose service creation fails.
+ * @param creationFailure - Error that creating that provider's service
+ * throws.
+ * @returns The factory.
+ */
+function buildLlmRuntimeServiceFactoryFailingFor(
+  acquisitions: LlmProviderRecord<
+    SingletonServiceAcquisition<LlmRuntimeService>
+  >,
+  failingProvider: LlmProvider,
+  creationFailure: Error
+): SingletonServiceFactories["createLlmRuntimeService"] {
+  return ({ provider }) => {
+    if (provider === failingProvider) throw creationFailure
+    return acquisitions[provider]
+  }
+}
+
+/**
  * Creates factories returning real services with recorded cleanup.
  *
  * @returns The factory mocks, their acquisitions, and the cleanup log; the
@@ -243,19 +323,7 @@ function createRecordedFactories() {
     ),
     database: createAcquisition(database, "database", closeLog),
     llmRuntime: buildLlmProviderRecord((provider) =>
-      createAcquisition(
-        new LlmRuntimeService({
-          ...createLogReporters().llmRuntime[provider],
-          findLlmProviderAccess: async () => {
-            throw new Error("Unexpected provider lookup")
-          },
-          acquireLlmRuntime: async () => {
-            throw new Error("Unexpected LLM runtime acquisition")
-          }
-        }),
-        `llm-runtime:${provider}`,
-        closeLog
-      )
+      createUnconnectedLlmRuntimeAcquisition(provider, closeLog)
     )
   }
   const factories = {
@@ -718,19 +786,7 @@ describe("createSingletonServices", () => {
       factories
     )
     onTestFinished(async () => await closeSingletonServices(services))
-    const engine = createFakeLlmRuntime()
-    engine.findLlmContextMeasurement.mockImplementation(
-      async (_model, texts) => ({
-        contextLength: 1_000_000,
-        textTokenCounts: texts.map(() => 1)
-      })
-    )
-    vi.spyOn(
-      acquisitions.llmRuntime.lmStudio.service,
-      "handleLlmEngineOperationRequest"
-    ).mockImplementation(
-      async (operation) => await operation(createConnectedFakeLlmEngine(engine))
-    )
+    updateLlmEngineToFittingFake(acquisitions.llmRuntime.lmStudio.service)
     const release = Promise.withResolvers<void>()
     vi.spyOn(
       acquisitions.chat.service,
@@ -847,10 +903,13 @@ describe("createSingletonServices", () => {
   it("releases the earlier providers' runtime services, then the database, when one provider's LLM runtime service cannot be created", async () => {
     const { factories, acquisitions, closeLog } = createRecordedFactories()
     const creationFailure = new Error("LLM runtime service construction failed")
-    factories.createLlmRuntimeService.mockImplementation(({ provider }) => {
-      if (provider === "ollamaCloud") throw creationFailure
-      return acquisitions.llmRuntime[provider]
-    })
+    factories.createLlmRuntimeService.mockImplementation(
+      buildLlmRuntimeServiceFactoryFailingFor(
+        acquisitions.llmRuntime,
+        "ollamaCloud",
+        creationFailure
+      )
+    )
 
     await expect(
       createSingletonServices(

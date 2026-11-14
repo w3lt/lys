@@ -17,7 +17,7 @@ export type ModelDefaultSummaryProps = {
    * provider does not list it now.
    */
   readonly contextLength: number | null
-  /** Requests that the Model pane show the default model; once per press. */
+  /** Requests that the Models pane show the default model; once per press. */
   readonly onSelectDefaultModel: () => void
 }
 
@@ -42,7 +42,7 @@ function formatDefaultModelLine(
 }
 
 /**
- * Names the session's default model at the top of the Model pane.
+ * Names the session's default model at the top of the Models pane.
  *
  * @remarks While the model's provider is on, its key is a
  * button that shows its details, titled to say so; while the provider is

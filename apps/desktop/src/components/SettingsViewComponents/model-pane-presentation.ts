@@ -18,10 +18,10 @@ import type { LoadConfigurationSettings } from "@/lib/store/settings"
 /** Where a provider runs its models. */
 export type ModelPlacement = "local" | "cloud"
 
-/** Tone of a status dot in the Model pane, named after its style. */
+/** Tone of a status dot in the Models pane, named after its style. */
 export type ModelPaneTone = "active" | "pending" | "idle" | "danger"
 
-/** What the Model pane needs to know of one provider's character. */
+/** What the Models pane needs to know of one provider's character. */
 export type ModelPaneProviderProfile = {
   /** Where the provider runs its models. */
   readonly placement: ModelPlacement
@@ -31,7 +31,7 @@ export type ModelPaneProviderProfile = {
   readonly note: string
 }
 
-/** Where the Model pane's choice of provider and model comes from. */
+/** Where the Models pane's choice of provider and model comes from. */
 export type ModelPaneChoiceSource = {
   /** Providers that are on, in any order. */
   readonly enabledProviders: readonly LlmProvider[]
@@ -69,7 +69,7 @@ export type ModelProviderGroup = {
   readonly summaries: readonly ModelProviderSummary[]
 }
 
-/** What the Model pane's provider card and picker say of one provider. */
+/** What the Models pane's provider card and picker say of one provider. */
 export type ModelProviderSummary = {
   /** The provider. */
   readonly provider: LlmProvider
@@ -87,6 +87,40 @@ export type ModelProviderSummary = {
   readonly location: string
   /** Key of the session's default model when it is this provider's, or null. */
   readonly defaultModelKey: string | null
+}
+
+/** What the Models pane summarizes one provider from. */
+export type ModelProviderSummarySource = {
+  /** The provider and where Lys reaches it. */
+  readonly target: LlmProviderTarget
+  /** Whether model requests reach the provider. */
+  readonly availability: ProviderAvailability
+  /** The provider's latest inventory observation. */
+  readonly inventory: ModelInventoryState
+  /** The session's default model, or null. */
+  readonly defaultModel: LlmModelReference | null
+}
+
+/**
+ * The Models pane's selected model, with whether it is the session's default
+ * and its provider's request, which its status and its footer's offer
+ * follow.
+ */
+export type SelectedModel = {
+  /** Provider of the model. */
+  readonly provider: LlmProvider
+  /** The selected model. */
+  readonly model: LlmInfo
+  /** Whether the model is the session's default. */
+  readonly isDefault: boolean
+  /** The provider's request in flight, or idle. */
+  readonly request: ModelRequestState
+}
+
+/** The selected model while a provider on this machine lists it. */
+export type LocalSelectedModel = SelectedModel & {
+  /** LM Studio or Ollama. */
+  readonly provider: "lmStudio" | "ollama"
 }
 
 /**
@@ -108,7 +142,7 @@ export type ModelStatusDescription = {
   readonly note: string
 }
 
-/** What the Model pane shows in place of the model list, and its way out. */
+/** What the Models pane shows in place of the model list, and its way out. */
 export type ModelPaneEmptyState = {
   /** The situation in one sentence. */
   readonly title: string
@@ -150,7 +184,7 @@ const NOT_REPORTED = "Not reported"
 const DEFAULT_MODEL_TAG = "latest"
 
 /**
- * Describes a provider's character for the Model pane.
+ * Describes a provider's character for the Models pane.
  *
  * @param provider - Provider to describe.
  * @returns Where it runs models, and its card note.
@@ -187,7 +221,7 @@ export function describeModelPaneProvider(
 }
 
 /**
- * Finds the provider the Model pane shows.
+ * Finds the provider the Models pane shows.
  *
  * @param source - Providers that are on, and the pane's and the session's
  * choices.
@@ -213,7 +247,7 @@ export function findModelPaneProvider(
 }
 
 /**
- * Finds the key of the model the Model pane shows for one provider.
+ * Finds the key of the model the Models pane shows for one provider.
  *
  * @param provider - Provider the pane shows.
  * @param source - The pane's and the session's choices.
@@ -339,19 +373,18 @@ function formatModelCount(
 /**
  * Builds what the provider card and picker say of one provider.
  *
- * @param target - The provider and where Lys reaches it.
- * @param availability - Whether model requests reach the provider.
- * @param inventory - The provider's latest inventory observation.
- * @param defaultModel - The session's default model, or null.
+ * @param source - The provider and where Lys reaches it, whether model
+ * requests reach it, its latest inventory observation, and the session's
+ * default model, or null.
  * @returns The provider's name, placement, status, count, location, and
  * the key of the default model when it is this provider's.
  */
-export function buildModelProviderSummary(
-  target: LlmProviderTarget,
-  availability: ProviderAvailability,
-  inventory: ModelInventoryState,
-  defaultModel: LlmModelReference | null
-): ModelProviderSummary {
+export function buildModelProviderSummary({
+  target,
+  availability,
+  inventory,
+  defaultModel
+}: ModelProviderSummarySource): ModelProviderSummary {
   const { placement } = describeModelPaneProvider(target.provider)
   return {
     provider: target.provider,
@@ -555,19 +588,17 @@ function formatModelTag(model: LlmInfo): string {
 /**
  * Describes the status of a model on this machine.
  *
- * @param provider - LM Studio or Ollama.
- * @param model - The selected model.
- * @param request - The provider's request in flight, or idle.
- * @param isDefault - Whether the model is the session's default.
+ * @param selected - The selected model of LM Studio or Ollama, whether it is
+ * the session's default, and its provider's request in flight, or idle.
  * @returns Loading or unloading while that request runs for the model,
  * else loaded or not loaded, with what the person can do.
  */
-export function describeLocalModelStatus(
-  provider: "lmStudio" | "ollama",
-  model: LlmInfo,
-  request: ModelRequestState,
-  isDefault: boolean
-): ModelStatusDescription {
+export function describeLocalModelStatus({
+  provider,
+  model,
+  isDefault,
+  request
+}: LocalSelectedModel): ModelStatusDescription {
   const transition = findModelTransition(request, model.modelKey)
   if (transition !== null) return describeModelTransition(transition)
   if (!model.loaded) {
@@ -810,7 +841,7 @@ export function isModelCheckFailed(
 }
 
 /**
- * Describes what the Model pane shows when a provider cannot list models.
+ * Describes what the Models pane shows when a provider cannot list models.
  *
  * @param availability - Whether model requests reach the provider.
  * @param target - The provider and where it is reached.
@@ -882,7 +913,7 @@ function describeUnreachableProvider(
 }
 
 /**
- * Describes what the Model pane shows when a reachable provider's
+ * Describes what the Models pane shows when a reachable provider's
  * inventory lists no model.
  *
  * @param inventory - The provider's latest inventory observation.
@@ -966,20 +997,18 @@ export function findListedModel(
 /**
  * Finds what the selected model's footer offers.
  *
- * @param provider - Provider of the model.
- * @param model - The selected model.
- * @param isDefault - Whether it is the session's default.
- * @param request - The provider's request in flight, or idle.
+ * @param selected - The selected model and its provider, whether it is the
+ * session's default, and its provider's request in flight, or idle.
  * @returns That it is the default; else that it is being loaded; else, for
  * an LM Studio model that is not loaded, that it must be loaded first; else
  * that it can be made the default.
  */
-export function findModelDefaultChoice(
-  provider: LlmProvider,
-  model: LlmInfo,
-  isDefault: boolean,
-  request: ModelRequestState
-): ModelDefaultChoice {
+export function findModelDefaultChoice({
+  provider,
+  model,
+  isDefault,
+  request
+}: SelectedModel): ModelDefaultChoice {
   if (isDefault) return "current"
   if (findModelTransition(request, model.modelKey) === "loading") {
     return "loading"

@@ -146,6 +146,16 @@ const FULL_ATTACHMENT_SUPPORT: AttachmentModelSupport = Object.freeze({
   trainedForToolUse: true
 })
 
+/** A file the store refuses for the conversation's model, with why. */
+type RefusedAttachmentCase = Readonly<{
+  /** File the user adds. */
+  file: File
+  /** What the conversation's loaded model can take as attachments. */
+  support: AttachmentModelSupport
+  /** Refusal sentence the store announces. */
+  message: string
+}>
+
 /** Model a harness's new conversations use at first. */
 const QWEN_MODEL: LlmModelReference = Object.freeze({
   provider: "lmStudio",
@@ -406,20 +416,24 @@ describe("createChatViewStore", () => {
       })
     })
 
-    it.each<[string, File, AttachmentModelSupport, string]>([
+    it.each<[string, RefusedAttachmentCase]>([
       [
         "an image for a model without vision",
-        buildPngFile("photo.png"),
-        { vision: false, trainedForToolUse: true },
-        "Images need a model with vision"
+        {
+          file: buildPngFile("photo.png"),
+          support: { vision: false, trainedForToolUse: true },
+          message: "Images need a model with vision"
+        }
       ],
       [
         "a text file for a model not trained for tool use",
-        buildTextFile("notes.md", "# Notes"),
-        { vision: true, trainedForToolUse: false },
-        "Files need a model trained for tool use"
+        {
+          file: buildTextFile("notes.md", "# Notes"),
+          support: { vision: true, trainedForToolUse: false },
+          message: "Files need a model trained for tool use"
+        }
       ]
-    ])("refuses %s", async (_case, file, support, message) => {
+    ])("refuses %s", async (_case, { file, support, message }) => {
       const { store, providers } = createChatHarness()
       setModelAvailability(
         providers,

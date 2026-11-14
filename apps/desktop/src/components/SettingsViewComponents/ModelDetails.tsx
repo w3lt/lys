@@ -143,7 +143,7 @@ export type ModelDetailsProps = {
 }
 
 /**
- * Shows the Model pane's selected model: its status, facts, and load
+ * Shows the Models pane's selected model: its status, facts, and load
  * settings, and makes it the session's default.
  *
  * @remarks Requires SettingsContext and the application
@@ -171,7 +171,7 @@ export default function ModelDetails({
   const { defaultModel } = settings.runtime
   const isDefault = isSameDefaultModel(defaultModel, reference)
   const { request } = providerModels
-  const choice = findModelDefaultChoice(provider, model, isDefault, request)
+  const choice = findModelDefaultChoice({ provider, model, isDefault, request })
 
   /** Loads the model, then makes it the default seen at this press. */
   function handleLoadDefaultModel(): void {

@@ -4,6 +4,7 @@ import {
   type LlmProvider,
   type McpServerSettings
 } from "@lys/share"
+import type { FastifyInstance } from "fastify"
 import {
   existsSync,
   mkdtempSync,
@@ -146,6 +147,22 @@ function createAgentBodyOfSize(code: string, byteLength: number): string {
     ...definition,
     systemPrompt: "x".repeat(byteLength - emptyBody.length)
   })
+}
+
+/**
+ * Lists the connection status of each provider's LLM runtime service.
+ *
+ * @param app - Application whose provider services are read.
+ * @returns The statuses in {@link LLM_PROVIDERS} order.
+ */
+function listLlmRuntimeConnectionStatuses(
+  app: FastifyInstance
+): LlmRuntimeConnectionStatus[] {
+  return LLM_PROVIDERS.map(
+    (provider) =>
+      app.llmProviderServices[provider].llmRuntimeService
+        .llmRuntimeConnectionStatus
+  )
 }
 
 describe("buildApp", () => {
@@ -421,19 +438,14 @@ describe("buildApp", () => {
 
     await app.listen({ host: "127.0.0.1", port: 0 })
 
+    const expectedStatuses = [
+      "unreachable",
+      "connected",
+      "off",
+      "off"
+    ] satisfies readonly LlmRuntimeConnectionStatus[]
     await vi.waitFor(() => {
-      expect(
-        LLM_PROVIDERS.map(
-          (provider) =>
-            app.llmProviderServices[provider].llmRuntimeService
-              .llmRuntimeConnectionStatus
-        )
-      ).toEqual([
-        "unreachable",
-        "connected",
-        "off",
-        "off"
-      ] satisfies readonly LlmRuntimeConnectionStatus[])
+      expect(listLlmRuntimeConnectionStatuses(app)).toEqual(expectedStatuses)
     })
     expect(ollama.requests).toContainEqual(
       expect.objectContaining({ method: "GET", path: "/api/tags" })

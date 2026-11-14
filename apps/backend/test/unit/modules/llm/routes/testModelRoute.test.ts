@@ -116,16 +116,17 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
     "observes the model on %s, the provider the path names, and asks no other provider",
     async (provider) => {
       const testApp = createLlmRouteTestApp()
+      const readyOutcome: LlmModelHealthOutcome = {
+        health: { modelId: MODEL_KEY, status: "ready", latencyMs: 4 },
+        diagnostics: []
+      }
       const observations = LLM_PROVIDERS.map((observed) =>
         vi
           .spyOn(
             testApp.llmProviderServices[observed].llmService,
             "getLlmModelHealth"
           )
-          .mockResolvedValue({
-            health: { modelId: MODEL_KEY, status: "ready", latencyMs: 4 },
-            diagnostics: []
-          })
+          .mockResolvedValue(readyOutcome)
       )
       await updateFastifyWithLlmTestModelRoute(testApp.app)
 

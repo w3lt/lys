@@ -513,6 +513,60 @@ function sendFileDrop(target: Element, files: readonly File[]): void {
   fireEvent(target, drop)
 }
 
+/** Application store of a case, as {@link loadFreshComposer} loads it. */
+type FreshApplicationStore = Awaited<
+  ReturnType<typeof loadFreshComposer>
+>["useLysStore"]
+
+/**
+ * Turns local Ollama on beside LM Studio, connected and listing one model it
+ * reports loaded.
+ *
+ * @param store - Application store of the case, freshly loaded.
+ * @param modelKey - Key of Ollama's only model.
+ * @remarks Every other provider keeps its state, and every other setting its
+ * value.
+ */
+function turnOnOllamaBesideLmStudio(
+  store: FreshApplicationStore,
+  modelKey: string
+): void {
+  const { settings, providerModels } = store.getState()
+  store.setState({
+    settings: {
+      ...settings,
+      providers: { ...settings.providers, enabled: ["lmStudio", "ollama"] }
+    },
+    providerModels: updateProviderModelState(providerModels, "ollama", {
+      status: "connected",
+      inventory: {
+        status: "ready",
+        modelLoading: "provider",
+        models: [buildLlmInfo(modelKey, { loaded: true })]
+      }
+    })
+  })
+}
+
+/**
+ * Lists the model names one provider's group of the open model menu shows.
+ *
+ * @param providerName - Name the group is labelled with.
+ * @returns Each row's model name with its provider, in menu order; a row
+ * without a name gives `undefined`.
+ * @throws When no single group has that name.
+ */
+function listModelOptionNames(
+  providerName: string
+): (string | null | undefined)[] {
+  return within(screen.getByRole("group", { name: providerName }))
+    .getAllByRole("menuitemradio")
+    .map(
+      (option) =>
+        option.querySelector(".composer__model-option-name")?.textContent
+    )
+}
+
 describe("Composer", () => {
   // A ready composer measures what its next message would be sent with.
   beforeEach(() => {
@@ -1251,21 +1305,7 @@ describe("Composer", () => {
       const { backend, streams } = startChatBackend()
       const { useLysStore, useChatViewStore, Composer } =
         await loadFreshComposer(TWO_LOADED)
-      const { settings, providerModels } = useLysStore.getState()
-      useLysStore.setState({
-        settings: {
-          ...settings,
-          providers: { ...settings.providers, enabled: ["lmStudio", "ollama"] }
-        },
-        providerModels: updateProviderModelState(providerModels, "ollama", {
-          status: "connected",
-          inventory: {
-            status: "ready",
-            modelLoading: "provider",
-            models: [buildLlmInfo("qwen3-8b", { loaded: true })]
-          }
-        })
-      })
+      turnOnOllamaBesideLmStudio(useLysStore, "qwen3-8b")
       const user = userEvent.setup()
       render(
         <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
@@ -1275,14 +1315,7 @@ describe("Composer", () => {
         user,
         screen.getByRole("button", { name: "gemma-3 · LM Studio" })
       )
-      expect(
-        within(screen.getByRole("group", { name: "LM Studio" }))
-          .getAllByRole("menuitemradio")
-          .map(
-            (option) =>
-              option.querySelector(".composer__model-option-name")?.textContent
-          )
-      ).toEqual([
+      expect(listModelOptionNames("LM Studio")).toEqual([
         "qwen3-8b · LM Studio",
         "gemma-3 · LM Studio",
         "llama-4 · LM Studio"

@@ -49,7 +49,7 @@ const TWO_MODELS: RuntimeArrangement = {
   }
 }
 
-/** What a case arranges before the Model pane appears. */
+/** What a case arranges before the Models pane appears. */
 type PanelArrangement = Readonly<{
   /** Backend, LM Studio, and model facts; {@link TWO_MODELS} by default. */
   runtime?: RuntimeArrangement
@@ -65,7 +65,7 @@ type PanelArrangement = Readonly<{
 }>
 
 /**
- * Renders the settings view on the Model pane, showing the default model,
+ * Renders the settings view on the Models pane, showing the default model,
  * and waits for its load settings.
  *
  * @param arrangement - Runtime, routes, and settings of the case.

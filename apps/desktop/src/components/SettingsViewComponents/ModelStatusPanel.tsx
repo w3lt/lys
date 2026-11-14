@@ -146,12 +146,12 @@ function describeModelStatus(
   switch (provider) {
     case "lmStudio":
     case "ollama":
-      return describeLocalModelStatus(
+      return describeLocalModelStatus({
         provider,
         model,
-        observation.request,
-        props.isDefault
-      )
+        isDefault: props.isDefault,
+        request: observation.request
+      })
     case "ollamaCloud":
     case "groq":
       return describeCloudModelStatus(provider, model.modelKey, {

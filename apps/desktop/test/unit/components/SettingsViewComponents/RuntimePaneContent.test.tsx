@@ -427,19 +427,15 @@ describe("RuntimePaneContent", () => {
       models: [buildLlmInfo("llama-3.3-70b", { loaded: true })]
     } as const
 
-    it("lists every turned-on provider, refreshes each, and shows a Groq default without commands", async () => {
-      const backend = startBackendFake({
-        [INVENTORY_ROUTE]: buildInventoryRoute(NOTHING_LOADED),
-        "GET /api/v1/llm/groq/list": () =>
-          buildJsonResponse(200, {
-            llms: GROQ_INVENTORY.models,
-            modelLoading: GROQ_INVENTORY.modelLoading
-          }),
-        "POST /api/v1/llm/lmStudio/runtime/connect": () =>
-          buildJsonResponse(200, { status: "connected" }),
-        "POST /api/v1/llm/groq/runtime/connect": () =>
-          buildJsonResponse(200, { status: "connected" })
-      })
+    /**
+     * Renders the settings view on the Runtime pane with LM Studio
+     * unreachable and Groq on and connected, its key saved and its model the
+     * default, and waits for the pane.
+     *
+     * @remarks The case starts the backend fake first; the view reads every
+     * turned-on provider's models from it when it appears.
+     */
+    async function startGroqDefaultRuntimePane(): Promise<void> {
       const { useLysStore, SettingsView } = await loadFreshSettingsView(
         "runtime",
         buildUnreachableRuntime("running", "unreachable")
@@ -463,6 +459,22 @@ describe("RuntimePaneContent", () => {
       render(<SettingsView onDone={vi.fn()} />)
       await screen.findByRole("switch", { name: "Start it when Lys opens" })
       await waitForRenderedWork()
+    }
+
+    it("lists every turned-on provider, refreshes each, and shows a Groq default without commands", async () => {
+      const backend = startBackendFake({
+        [INVENTORY_ROUTE]: buildInventoryRoute(NOTHING_LOADED),
+        "GET /api/v1/llm/groq/list": () =>
+          buildJsonResponse(200, {
+            llms: GROQ_INVENTORY.models,
+            modelLoading: GROQ_INVENTORY.modelLoading
+          }),
+        "POST /api/v1/llm/lmStudio/runtime/connect": () =>
+          buildJsonResponse(200, { status: "connected" }),
+        "POST /api/v1/llm/groq/runtime/connect": () =>
+          buildJsonResponse(200, { status: "connected" })
+      })
+      await startGroqDefaultRuntimePane()
       const user = userEvent.setup()
       const connections = screen.getByRole("region", {
         name: "Provider connections"

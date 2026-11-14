@@ -79,7 +79,7 @@ const EDITED_MODEL_LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
 })
 
 /**
- * Load settings the store holds after the Model pane edited them: only
+ * Load settings the store holds after the Models pane edited them: only
  * `qwen3-30b-a3b` has settings of its own, and the store's copy of the stored
  * default, read at startup, predates a hand edit of the file.
  */

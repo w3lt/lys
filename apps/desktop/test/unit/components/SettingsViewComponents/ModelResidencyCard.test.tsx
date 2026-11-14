@@ -20,6 +20,16 @@ type ModelResidencyArrangement = {
   readonly modelRequest: ModelRequestState
 }
 
+/** A state of the model a new conversation uses, and how the card shows it. */
+type ModelResidencyHeadingCase = {
+  /** Whether the model can answer, or why not. */
+  readonly availability: ModelAvailability
+  /** The card's heading for that state. */
+  readonly heading: string
+  /** The line under the heading. */
+  readonly meta: string
+}
+
 /** Callbacks of one rendered card, as spies. */
 type ModelResidencyCardSpies = {
   readonly onLoadModel: (model: LlmModelReference) => void
@@ -161,11 +171,7 @@ function getCard(): HTMLElement {
 }
 
 describe("ModelResidencyCard", () => {
-  it.each<{
-    availability: ModelAvailability
-    heading: string
-    meta: string
-  }>([
+  it.each<ModelResidencyHeadingCase>([
     {
       availability: NOT_LOADED,
       heading: "No model loaded",

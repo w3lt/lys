@@ -76,6 +76,42 @@ async function waitForConnectedRuntime(backendUrl) {
   return body
 }
 
+/**
+ * Reads the verification provider's model list and requires the
+ * verification model in it, loaded: the step "the verification model is
+ * listed as loaded".
+ *
+ * @param {string} backendUrl - The backend origin.
+ * @param {import("../lib/journey.mjs").EvidenceRecorder} evidence - The
+ * step's recorder; the list's body is saved as `llm-list.json`.
+ * @returns {Promise<{modelKey: string, maxContextLength: unknown}>} The
+ * listed model's key and maximum context length, the step's detail.
+ * @throws If the connection fails or the request's deadline passes.
+ * @throws {import("../lib/journey.mjs").JourneyFailure} If the list does not
+ * include the verification model, or lists it as not loaded.
+ */
+async function getLoadedVerificationModel(backendUrl, evidence) {
+  const list = await sendJsonRequest(buildProviderLlmUrl(backendUrl, "list"))
+  evidence.saveJson("llm-list.json", list.body)
+  const model = list.body?.llms?.find(
+    (llm) => llm.modelKey === VERIFICATION_MODEL_NAME
+  )
+  rejectUnless(
+    model !== undefined,
+    `The model list must include ${VERIFICATION_MODEL_NAME}.`,
+    list.body
+  )
+  rejectUnless(
+    model.loaded === true,
+    "The verification model must be listed as loaded.",
+    model
+  )
+  return {
+    modelKey: model.modelKey,
+    maxContextLength: model.maxContextLength
+  }
+}
+
 export default Object.freeze({
   id: "backend-health",
   feature: "backend-lifecycle",
@@ -136,31 +172,8 @@ export default Object.freeze({
       evidence.saveJson("runtime.json", runtime)
       return runtime
     })
-    await steps.step(
-      "the verification model is listed as loaded",
-      async (evidence) => {
-        const list = await sendJsonRequest(
-          buildProviderLlmUrl(context.backendUrl, "list")
-        )
-        evidence.saveJson("llm-list.json", list.body)
-        const model = list.body?.llms?.find(
-          (llm) => llm.modelKey === VERIFICATION_MODEL_NAME
-        )
-        rejectUnless(
-          model !== undefined,
-          `The model list must include ${VERIFICATION_MODEL_NAME}.`,
-          list.body
-        )
-        rejectUnless(
-          model.loaded === true,
-          "The verification model must be listed as loaded.",
-          model
-        )
-        return {
-          modelKey: model.modelKey,
-          maxContextLength: model.maxContextLength
-        }
-      }
+    await steps.step("the verification model is listed as loaded", (evidence) =>
+      getLoadedVerificationModel(context.backendUrl, evidence)
     )
   }
 })

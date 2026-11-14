@@ -31,6 +31,18 @@ const RAIL_TABS = [
   "Secrets08"
 ]
 
+/** A runtime the rail summarizes, and the summary at the rail's foot. */
+type RailStatusCase = {
+  /** Backend lifecycle state. */
+  readonly backendStatus: BackendServerStatus
+  /** Latest LM Studio status the backend reported. */
+  readonly lmStudioStatus: LlmProviderStatus
+  /** Latest LM Studio inventory observation. */
+  readonly modelInventory: ModelInventoryState
+  /** Text the rail ends with. */
+  readonly summary: string
+}
+
 /**
  * Gets one rail tab.
  *
@@ -135,99 +147,116 @@ describe("SettingsView", () => {
     await waitForRenderedWork()
   })
 
-  it.each<
-    [
-      string,
-      BackendServerStatus,
-      LlmProviderStatus,
-      ModelInventoryState,
-      string
-    ]
-  >([
+  it.each<[string, RailStatusCase]>([
     [
       "a stopped backend",
-      "stopped",
-      "unknown",
-      { status: "unavailable" },
-      "backend stopped"
+      {
+        backendStatus: "stopped",
+        lmStudioStatus: "unknown",
+        modelInventory: { status: "unavailable" },
+        summary: "backend stopped"
+      }
     ],
     [
       "a starting backend",
-      "starting",
-      "unknown",
-      { status: "unavailable" },
-      "backend starting"
+      {
+        backendStatus: "starting",
+        lmStudioStatus: "unknown",
+        modelInventory: { status: "unavailable" },
+        summary: "backend starting"
+      }
     ],
     [
       "a stopping backend",
-      "stopping",
-      "connected",
-      { status: "unavailable" },
-      "backend stopping"
+      {
+        backendStatus: "stopping",
+        lmStudioStatus: "connected",
+        modelInventory: { status: "unavailable" },
+        summary: "backend stopping"
+      }
     ],
     [
       "an unresponsive backend",
-      "unresponsive",
-      "unknown",
-      { status: "unavailable" },
-      "backend not responding"
+      {
+        backendStatus: "unresponsive",
+        lmStudioStatus: "unknown",
+        modelInventory: { status: "unavailable" },
+        summary: "backend not responding"
+      }
     ],
     [
       "LM Studio in an unknown state, as about to be connected",
-      "running",
-      "unknown",
-      { status: "unavailable" },
-      "backend up · connecting to LM Studio"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "unknown",
+        modelInventory: { status: "unavailable" },
+        summary: "backend up · connecting to LM Studio"
+      }
     ],
     [
       "LM Studio turned off on the backend",
-      "running",
-      "off",
-      { status: "unavailable" },
-      "backend up · LM Studio is off"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "off",
+        modelInventory: { status: "unavailable" },
+        summary: "backend up · LM Studio is off"
+      }
     ],
     [
       "LM Studio connecting",
-      "running",
-      "connecting",
-      { status: "unavailable" },
-      "backend up · connecting to LM Studio"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "connecting",
+        modelInventory: { status: "unavailable" },
+        summary: "backend up · connecting to LM Studio"
+      }
     ],
     [
       "LM Studio unreachable",
-      "running",
-      "unreachable",
-      { status: "unavailable" },
-      "backend up · LM Studio not reachable"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "unreachable",
+        modelInventory: { status: "unavailable" },
+        summary: "backend up · LM Studio not reachable"
+      }
     ],
     [
       "loaded weights",
-      "running",
-      "connected",
-      READY_RUNTIME.modelInventory,
-      "backend up · model loaded"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "connected",
+        modelInventory: READY_RUNTIME.modelInventory,
+        summary: "backend up · model loaded"
+      }
     ],
     [
       "no loaded weights",
-      "running",
-      "connected",
       {
-        status: "ready",
-        modelLoading: "lys",
-        models: [buildLlmInfo("qwen3-8b")]
-      },
-      "backend up · no model"
+        backendStatus: "running",
+        lmStudioStatus: "connected",
+        modelInventory: {
+          status: "ready",
+          modelLoading: "lys",
+          models: [buildLlmInfo("qwen3-8b")]
+        },
+        summary: "backend up · no model"
+      }
     ],
     [
       "an unreadable inventory",
-      "running",
-      "connected",
-      { status: "failed" },
-      "backend up · model state unavailable"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "connected",
+        modelInventory: { status: "failed" },
+        summary: "backend up · model state unavailable"
+      }
     ]
   ])(
     "summarizes %s at the foot of the rail",
-    async (_case, backendStatus, lmStudioStatus, modelInventory, summary) => {
+    async (
+      _case,
+      { backendStatus, lmStudioStatus, modelInventory, summary }
+    ) => {
       const runtime = {
         ...READY_RUNTIME,
         backendStatus,

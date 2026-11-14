@@ -62,12 +62,12 @@ function listModelProviderSummaries(
   source: ModelAvailabilitySource
 ): readonly ModelProviderSummary[] {
   return listEnabledProviders(settings.providers.enabled).map((provider) =>
-    buildModelProviderSummary(
-      describeLlmProviderTarget(provider, settings.providers),
-      calculateProviderAvailability(source, provider),
-      source.providerModels[provider].inventory,
-      settings.runtime.defaultModel
-    )
+    buildModelProviderSummary({
+      target: describeLlmProviderTarget(provider, settings.providers),
+      availability: calculateProviderAvailability(source, provider),
+      inventory: source.providerModels[provider].inventory,
+      defaultModel: settings.runtime.defaultModel
+    })
   )
 }
 
@@ -273,12 +273,12 @@ function ModelProviderSection({
         onRefreshProvider={handleRefreshProvider}
         onShownProviderChange={setModelPaneProvider}
         refreshNote={formatModelRefreshNote(request, settledAt, target.name)}
-        shown={buildModelProviderSummary(
+        shown={buildModelProviderSummary({
           target,
           availability,
           inventory,
-          choice.defaultModel
-        )}
+          defaultModel: choice.defaultModel
+        })}
       />
       <ModelProviderInventory
         choice={choice}

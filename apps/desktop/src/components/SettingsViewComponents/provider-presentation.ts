@@ -120,6 +120,18 @@ export type ProviderStatusInput = {
   readonly draft: ProviderFieldDraft
 }
 
+/** Facts a provider card's badge reflects. */
+export type ProviderBadgeInput = {
+  /** Provider the card presents. */
+  readonly provider: LlmProvider
+  /** Saved providers, which tell whether the provider is on. */
+  readonly providers: ProvidersSettings
+  /** Saved keys, which tell whether it lacks a key it needs. */
+  readonly secrets: SecretsSettings
+  /** Latest published connection status of the provider. */
+  readonly status: LlmProviderStatus
+}
+
 /** One line of a provider card: under its form, or its save line. */
 export type ProviderMessage = {
   /** Text of the line. */
@@ -401,21 +413,19 @@ export function parseProviderKeyDraft(
 /**
  * Calculates a provider card's badge.
  *
- * @param provider - Provider the card presents.
- * @param providers - Saved providers.
- * @param secrets - Saved keys.
- * @param status - Latest published connection status of the provider.
+ * @param input - Provider the card presents, the saved providers and keys,
+ * and the provider's latest published connection status.
  * @returns `off` for a provider the saved settings leave off; for a
  * turned-on one, `needs key` while it needs a key it lacks, whatever its
  * status, and otherwise its status: `off` when the backend reports it off,
  * `unknown` while it is not known.
  */
-export function calculateProviderBadge(
-  provider: LlmProvider,
-  providers: ProvidersSettings,
-  secrets: SecretsSettings,
-  status: LlmProviderStatus
-): ProviderBadge {
+export function calculateProviderBadge({
+  provider,
+  providers,
+  secrets,
+  status
+}: ProviderBadgeInput): ProviderBadge {
   if (!isProviderOn(provider, providers)) return { label: "off", tone: "muted" }
   switch (calculateProviderConnectionState(provider, status, secrets)) {
     case "needs-key":

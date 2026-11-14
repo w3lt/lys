@@ -12,7 +12,7 @@ import type {
 import committedDefaultModelLoadConfigurationFile from "./default_model_load_configuration.json"
 
 /**
- * Smallest context-length stop the Model pane's slider offers, in tokens.
+ * Smallest context-length stop the Models pane's slider offers, in tokens.
  * Stops double from here up to the model's maximum.
  */
 const MINIMUM_CONTEXT_LENGTH_STOP_TOKENS = 2048
@@ -59,7 +59,7 @@ export type ModelLoadConfigurationChange =
       readonly modelKey: string
     }
 
-/** Load settings in the order the Model pane lists them. */
+/** Load settings in the order the Models pane lists them. */
 const MODEL_LOAD_SETTING_NAMES: readonly ModelLoadSettingName[] = Object.freeze(
   [
     "contextLength",
@@ -410,7 +410,7 @@ export function calculateContextLengthStopIndex(
 }
 
 /**
- * Formats a token count the way the Model pane abbreviates it.
+ * Formats a token count the way the Models pane abbreviates it.
  *
  * @param tokens - Whole number of tokens.
  * @returns The plain number below 1,024 tokens; above it, the count in units

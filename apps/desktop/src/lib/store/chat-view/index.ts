@@ -819,13 +819,22 @@ function createChatRequestPayload(
   }
 }
 
+/** What one chat request was sampled with before it took ownership. */
+type SampledChatRequest = {
+  /** Prompt, conversation, model, and generation controls of the request. */
+  readonly requestInput: CreateChatRequestPayloadInput
+  /**
+   * Inventory entry of the request's model, sampled with it, which says
+   * whether it was trained for tool use.
+   */
+  readonly loadedModel: LlmInfo
+}
+
 /**
  * Opens the chat stream for one owned request with the tools it offers.
  *
- * @param requestInput - Prompt, conversation, model, and generation controls
- * sampled before the request took ownership.
- * @param loadedModel - Inventory entry of the request's model, sampled with
- * it, which says whether it was trained for tool use.
+ * @param request - Payload values and the model's inventory entry, sampled
+ * before the request took ownership.
  * @param signal - Store-owned signal of the request.
  * @param dependencies - Tool-offer reader and chat transport of the store.
  * @returns An async generator yielding the chat events; it completes when the
@@ -834,8 +843,7 @@ function createChatRequestPayload(
  * then fails without opening the stream.
  */
 async function* openChatStreamWithToolOffer(
-  requestInput: CreateChatRequestPayloadInput,
-  loadedModel: LlmInfo,
+  { requestInput, loadedModel }: SampledChatRequest,
   signal: AbortSignal,
   dependencies: Pick<ChatViewStoreDependencies, "getToolOffer" | "streamChat">
 ): AsyncGenerator<ChatApiStreamEvent, void, unknown> {
@@ -1746,8 +1754,7 @@ export function createChatViewStore(
       await readChatStream(token, {
         openEvents: (signal) =>
           openChatStreamWithToolOffer(
-            requestInput,
-            loadedModel,
+            { requestInput, loadedModel },
             signal,
             dependencies
           ),

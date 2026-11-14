@@ -2,6 +2,7 @@ import { MAXIMUM_CONVERSATION_LIST_PAGE_SIZE } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import * as z from "zod"
 import type {
+  ConversationAssistantMessage,
   ConversationAttachment,
   ConversationSource,
   LlmProvider,
@@ -282,6 +283,26 @@ function createNewConversationMetadata(id: string) {
     id,
     title: null,
     agentCode: "lys",
+    createdAt: CHANGED_AT,
+    updatedAt: CHANGED_AT
+  }
+}
+
+/**
+ * Creates a streaming reply without parts, for a turn to append.
+ *
+ * @returns A new, valid assistant message of `qwen/qwen3-8b` on LM Studio,
+ * created and updated at {@link CHANGED_AT}.
+ */
+function createStreamingAssistantMessage(): ConversationAssistantMessage {
+  return {
+    id: createFixtureUuidV7(11),
+    role: "assistant",
+    model: "qwen/qwen3-8b",
+    provider: "lmStudio",
+    parts: [],
+    status: "streaming",
+    finishReason: null,
     createdAt: CHANGED_AT,
     updatedAt: CHANGED_AT
   }
@@ -1427,17 +1448,10 @@ export function registerConversationTurnRecordWriterContractSuite(
           })
         ).toThrow("Database operation has ended")
         expect(() =>
-          transaction.createAssistantMessage(CONVERSATION_ID, {
-            id: createFixtureUuidV7(11),
-            role: "assistant",
-            model: "qwen/qwen3-8b",
-            provider: "lmStudio",
-            parts: [],
-            status: "streaming",
-            finishReason: null,
-            createdAt: CHANGED_AT,
-            updatedAt: CHANGED_AT
-          })
+          transaction.createAssistantMessage(
+            CONVERSATION_ID,
+            createStreamingAssistantMessage()
+          )
         ).toThrow("Database operation has ended")
 
         expect(
@@ -2052,17 +2066,10 @@ export function registerConversationTurnTransactionContractSuite(
           transaction.createConversation(
             createNewConversationMetadata(CONVERSATION_ID)
           )
-          transaction.createAssistantMessage(CONVERSATION_ID, {
-            id: createFixtureUuidV7(11),
-            role: "assistant",
-            model: "qwen/qwen3-8b",
-            provider: "lmStudio",
-            parts: [],
-            status: "streaming",
-            finishReason: null,
-            createdAt: CHANGED_AT,
-            updatedAt: CHANGED_AT
-          })
+          transaction.createAssistantMessage(
+            CONVERSATION_ID,
+            createStreamingAssistantMessage()
+          )
         }
       )
 

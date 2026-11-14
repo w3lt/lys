@@ -3,7 +3,8 @@ import {
   createLlmServiceBusyProblem,
   llmInfoSchema,
   llmListModelsApi,
-  llmRuntimeUnavailableProblemSchema
+  llmRuntimeUnavailableProblemSchema,
+  type LlmListModelsApiResponse
 } from "@lys/protocol"
 import { LLM_PROVIDERS } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
@@ -53,15 +54,17 @@ describe("updateFastifyWithLlmListModelsRoute", () => {
     "lists the models of %s, the provider the path names, and asks no other provider",
     async (provider) => {
       const testApp = createLlmRouteTestApp()
+      const emptyInventory: LlmListModelsApiResponse = Object.freeze({
+        llms: Object.freeze([]),
+        modelLoading: "lys"
+      })
       const listings = LLM_PROVIDERS.map((listed) =>
         vi
           .spyOn(
             testApp.llmProviderServices[listed].llmService,
             "listLlmModels"
           )
-          .mockResolvedValue(
-            Object.freeze({ llms: Object.freeze([]), modelLoading: "lys" })
-          )
+          .mockResolvedValue(emptyInventory)
       )
       await updateFastifyWithLlmListModelsRoute(testApp.app)
 

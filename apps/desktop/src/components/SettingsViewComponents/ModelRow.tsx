@@ -3,13 +3,13 @@ import type { LlmInfo } from "@lys/protocol"
 
 import { splitModelKey } from "./model-pane-presentation"
 
-/** Display-ready facts of one row of the Model pane's model list. */
+/** Display-ready facts of one row of the Models pane's model list. */
 export type ModelListEntry = {
   /** Model the row represents. */
   readonly model: LlmInfo
   /** Value of the list's right column for the model: its size or context. */
   readonly columnValue: string
-  /** Whether the Model pane shows the model's details. */
+  /** Whether the Models pane shows the model's details. */
   readonly isSelected: boolean
   /** Whether the model is the session's default. */
   readonly isDefault: boolean
@@ -22,7 +22,7 @@ export type ModelRowProps = {
   /** The row's model, column value, and states, from the list owner. */
   readonly entry: ModelListEntry
   /**
-   * Requests that the Model pane show this model, called once per press.
+   * Requests that the Models pane show this model, called once per press.
    *
    * @param modelKey - Key of the row's model.
    */
@@ -30,7 +30,7 @@ export type ModelRowProps = {
 }
 
 /**
- * Presents one model of the Model pane's list as a button that selects it.
+ * Presents one model of the Models pane's list as a button that selects it.
  *
  * @remarks The key's namespace and tag are quieter than its
  * name. Default and loading are stated in words, the selected row is marked

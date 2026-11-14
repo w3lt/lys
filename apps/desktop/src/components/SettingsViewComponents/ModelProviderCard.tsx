@@ -152,7 +152,7 @@ type ModelProviderPickerProps = {
 }
 
 /**
- * Lets the person choose which provider's models the Model pane shows.
+ * Lets the person choose which provider's models the Models pane shows.
  *
  * @remarks The menu owns only its open state; the
  * parent owns the shown provider. The trigger names the shown provider and
@@ -266,7 +266,7 @@ export type ModelProviderCardProps = ModelProviderPickerProps &
   }
 
 /**
- * Lets the person choose which provider's models the Model pane shows, and
+ * Lets the person choose which provider's models the Models pane shows, and
  * shows that provider's status with a way to read it again.
  *
  * @remarks The parent owns the shown provider and the

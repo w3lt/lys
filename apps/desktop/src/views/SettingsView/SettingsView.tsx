@@ -29,6 +29,7 @@ import {
   type ProviderAvailability
 } from "@/lib/models/provider-connection"
 import { type BackendServerStatus, useLysStore } from "@/lib/store"
+import type { ProviderModelState } from "@/lib/store/model-runtime"
 import type { LysSettings } from "@/lib/store/settings"
 
 import "./SettingsView.scss"
@@ -266,26 +267,36 @@ function formatRailProviderStatus(
   }
 }
 
+/** What the one-line runtime summary under the settings rail describes. */
+type RailStatusSource = {
+  /** Store-owned backend lifecycle state. */
+  readonly backendStatus: BackendServerStatus
+  /** The model a new conversation uses, with its availability. */
+  readonly shownModel: ShownModelState
+  /**
+   * Provider the panes show, which the summary describes while there is no
+   * model.
+   */
+  readonly shownProvider: LlmProvider
+  /** Whether model requests can reach that provider. */
+  readonly providerAvailability: ProviderAvailability
+}
+
 /**
  * Formats the one-line runtime summary shown under the settings rail.
  *
- * @param backendStatus - Store-owned backend lifecycle state.
- * @param shownModel - The model a new conversation uses, with its
- * availability.
- * @param shownProvider - Provider the panes show, which the summary
- * describes while there is no model.
- * @param providerAvailability - Whether model requests can reach that
- * provider.
+ * @param source - The backend's state, the model a new conversation uses,
+ * and the provider the panes show with whether model requests reach it.
  * @returns The rail's summary of the first missing prerequisite—the backend,
  * then the model's provider—or of the model's weights once both are
  * available.
  */
-function formatRailStatus(
-  backendStatus: BackendServerStatus,
-  shownModel: ShownModelState,
-  shownProvider: LlmProvider,
-  providerAvailability: ProviderAvailability
-): string {
+function formatRailStatus({
+  backendStatus,
+  shownModel,
+  shownProvider,
+  providerAvailability
+}: RailStatusSource): string {
   if (backendStatus !== "running") return formatRailBackendStatus(backendStatus)
   if (shownModel.model === null || shownModel.availability === null) {
     return formatRailProviderStatus(
@@ -362,6 +373,88 @@ function buildSettingsWithLoadConfigurationChange(
   return { ...settings, loadConfiguration }
 }
 
+/**
+ * Reads every provider's model inventory again while the backend runs.
+ *
+ * @param backendStatus - Store-owned backend lifecycle state; nothing is
+ * read unless it is `running`.
+ * @param updateModelInventory - The application store's inventory read of
+ * one provider, which keeps its own outcome in that provider's state; each
+ * read is started without waiting for the others.
+ */
+function updateModelInventoriesWhileRunning(
+  backendStatus: BackendServerStatus,
+  updateModelInventory: (provider: LlmProvider) => Promise<void>
+): void {
+  if (backendStatus !== "running") return
+  for (const provider of LLM_PROVIDERS) void updateModelInventory(provider)
+}
+
+/** What the settings view builds its context value from. */
+type SettingsContextSource = {
+  /** Current settings, which every change request patches. */
+  readonly settings: LysSettings
+  /**
+   * Model state of the provider whose request, failure, and health the
+   * Runtime pane reports, as {@link findShownProvider} finds it.
+   */
+  readonly shownProviderModels: ProviderModelState
+  /** The model a new conversation uses, with whether it can answer. */
+  readonly newConversationModel: ShownModelState
+  /** Replaces the store-owned settings, which applies them at once. */
+  readonly setSettings: (settings: LysSettings) => void
+}
+
+/**
+ * Builds the settings context value the panes read and propose changes
+ * through.
+ *
+ * @param source - Current settings, the shown provider's model state, the
+ * model a new conversation uses, and the store's settings setter.
+ * @returns The settings, the shown provider's request, failure, and health,
+ * the model a new conversation uses, and change requests that each apply
+ * one change to the current settings through the setter.
+ */
+function buildSettingsContextValue({
+  settings,
+  shownProviderModels,
+  newConversationModel,
+  setSettings
+}: SettingsContextSource): SettingsContextValue {
+  return {
+    settings,
+    modelRequest: shownProviderModels.request,
+    modelError: shownProviderModels.error,
+    modelHealth: shownProviderModels.health,
+    newConversationModel,
+    onRuntimeChange: (patch) =>
+      setSettings({
+        ...settings,
+        runtime: { ...settings.runtime, ...patch }
+      }),
+    onGenerationChange: (patch) =>
+      setSettings({
+        ...settings,
+        generation: { ...settings.generation, ...patch }
+      }),
+    onAssignModelLoadSettings: (modelKey, assignedSettings) => {
+      const change: ModelLoadConfigurationChange = {
+        kind: "assignment",
+        modelKey,
+        settings: assignedSettings
+      }
+      setSettings(buildSettingsWithLoadConfigurationChange(settings, change))
+    },
+    onRemoveModelExpertCount: (modelKey) => {
+      const change: ModelLoadConfigurationChange = {
+        kind: "expert-count-removal",
+        modelKey
+      }
+      setSettings(buildSettingsWithLoadConfigurationChange(settings, change))
+    }
+  }
+}
+
 /** Properties accepted by {@link SettingsView}. */
 export type SettingsViewProps = {
   /** Called when the user completes settings and requests a return to chat. */
@@ -430,52 +523,26 @@ export default function SettingsView({
   )
 
   useEffect(() => {
-    if (backendStatus !== "running") return
-    for (const provider of LLM_PROVIDERS) void updateModelInventory(provider)
+    updateModelInventoriesWhileRunning(backendStatus, updateModelInventory)
   }, [backendStatus, updateModelInventory])
 
   const contextValue = useMemo<SettingsContextValue>(
-    () => ({
-      settings,
-      modelRequest: shownProviderModels.request,
-      modelError: shownProviderModels.error,
-      modelHealth: shownProviderModels.health,
-      newConversationModel,
-      onRuntimeChange: (patch) =>
-        setSettings({
-          ...settings,
-          runtime: { ...settings.runtime, ...patch }
-        }),
-      onGenerationChange: (patch) =>
-        setSettings({
-          ...settings,
-          generation: { ...settings.generation, ...patch }
-        }),
-      onAssignModelLoadSettings: (modelKey, assignedSettings) => {
-        const change: ModelLoadConfigurationChange = {
-          kind: "assignment",
-          modelKey,
-          settings: assignedSettings
-        }
-        setSettings(buildSettingsWithLoadConfigurationChange(settings, change))
-      },
-      onRemoveModelExpertCount: (modelKey) => {
-        const change: ModelLoadConfigurationChange = {
-          kind: "expert-count-removal",
-          modelKey
-        }
-        setSettings(buildSettingsWithLoadConfigurationChange(settings, change))
-      }
-    }),
+    () =>
+      buildSettingsContextValue({
+        settings,
+        shownProviderModels,
+        newConversationModel,
+        setSettings
+      }),
     [settings, shownProviderModels, newConversationModel, setSettings]
   )
 
-  const railStatus = formatRailStatus(
+  const railStatus = formatRailStatus({
     backendStatus,
-    newConversationModel,
+    shownModel: newConversationModel,
     shownProvider,
     providerAvailability
-  )
+  })
 
   return (
     <main aria-label="Settings" className="settings-view">

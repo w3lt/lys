@@ -101,7 +101,7 @@ type ModelGroupProps = {
   /** The group to present. */
   readonly group: ModelRowGroup
   /**
-   * Requests that the Model pane show a model, called once per row press.
+   * Requests that the Models pane show a model, called once per row press.
    *
    * @param modelKey - Key of the pressed row's model.
    */
@@ -158,7 +158,7 @@ export type ModelListProps = {
   /** Key of the model being loaded, or null. */
   readonly loadingModelKey: string | null
   /**
-   * Requests that the Model pane show a model, called once per row press.
+   * Requests that the Models pane show a model, called once per row press.
    *
    * @param modelKey - Key of the pressed row's model.
    */

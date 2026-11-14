@@ -19,12 +19,16 @@ import type { BackendServerStatus } from "@/lib/store"
 import type { ProviderModelStates } from "@/lib/store/model-runtime"
 import type { ProvidersSettings, SecretsSettings } from "@/lib/store/settings"
 
-/** Properties accepted by {@link ProviderStatusRow}. */
-type ProviderStatusRowProps = {
+/** One turned-on provider and its connection, as its status row shows them. */
+type ProviderStatus = {
   /** Provider the row shows, which it names and locates. */
   readonly provider: LlmProviderTarget
   /** That provider's connection, a missing key counted. */
   readonly state: ProviderConnectionState
+}
+
+/** Properties accepted by {@link ProviderStatusRow}. */
+type ProviderStatusRowProps = ProviderStatus & {
   /** Backend lifecycle state, which explains an `unknown` status. */
   readonly backendStatus: BackendServerStatus
 }
@@ -49,6 +53,31 @@ type ProviderStatusCardProps = {
   readonly onRefreshProviders: (providers: readonly LlmProvider[]) => void
   /** Requests that the settings view show the Providers pane. */
   readonly onOpenProviders: () => void
+}
+
+/**
+ * Lists every turned-on provider with its connection, in provider order.
+ *
+ * @param providers - Saved providers: which are on, and their addresses.
+ * @param secrets - Saved keys; a provider that needs a key it lacks is
+ * counted as needing one, whatever its status.
+ * @param providerModels - What the desktop knows of every provider, of
+ * which each turned-on provider's published status is read.
+ * @returns One entry for each provider that is on.
+ */
+function listProviderStatuses(
+  providers: ProvidersSettings,
+  secrets: SecretsSettings,
+  providerModels: ProviderModelStates
+): readonly ProviderStatus[] {
+  return listEnabledProviders(providers.enabled).map((provider) => ({
+    provider: describeLlmProviderTarget(provider, providers),
+    state: calculateProviderConnectionState(
+      provider,
+      providerModels[provider].status,
+      secrets
+    )
+  }))
 }
 
 /**
@@ -114,9 +143,9 @@ export default function ProviderStatusCard({
   onOpenProviders
 }: ProviderStatusCardProps): ReactElement {
   const headingId = useId()
-  const enabled = listEnabledProviders(providers.enabled)
+  const statuses = listProviderStatuses(providers, secrets, providerModels)
   const refreshable = listRefreshableProviders(providers, providerModels)
-  const isNoneOn = enabled.length === 0
+  const isNoneOn = statuses.length === 0
 
   return (
     <section aria-labelledby={headingId} className="settings-view__card">
@@ -124,7 +153,7 @@ export default function ProviderStatusCard({
         <div className="settings-view__identity-lines">
           <h2 id={headingId}>Provider connections</h2>
           <p className="settings-view__meta">
-            {formatProviderConnectionsSummary(enabled.length)}
+            {formatProviderConnectionsSummary(statuses.length)}
           </p>
         </div>
         <div className="settings-view__actions">
@@ -147,16 +176,12 @@ export default function ProviderStatusCard({
         </div>
       </div>
       <ul className="settings-view__provider-status-list">
-        {enabled.map((provider) => (
+        {statuses.map(({ provider, state }) => (
           <ProviderStatusRow
             backendStatus={backendStatus}
-            key={provider}
-            provider={describeLlmProviderTarget(provider, providers)}
-            state={calculateProviderConnectionState(
-              provider,
-              providerModels[provider].status,
-              secrets
-            )}
+            key={provider.provider}
+            provider={provider}
+            state={state}
           />
         ))}
       </ul>

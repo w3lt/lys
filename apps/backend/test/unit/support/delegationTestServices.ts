@@ -56,8 +56,7 @@ import {
 } from "./conversationDatabase"
 import {
   createNewConversationTarget,
-  createTurnUserMessage,
-  createTurnWakeUpMessage
+  createTurnUserMessage
 } from "./conversationFixtures"
 import { CapturedLogDestination } from "./fastifyTestApp"
 import { createRoomyReplyContextMeter } from "./replyContextMeterFakes"
@@ -714,6 +713,12 @@ async function resolveScriptedReply(
   await reply.started.generation.settled
 }
 
+/** Conversation a turn of the person's starts or continues. */
+type PersonTurnTarget = Extract<
+  ConversationTurnTarget,
+  { kind: "new" | "existing" }
+>
+
 /**
  * Stores a turn of the person's and builds the context its starter's hooks
  * are handed, as the chat route stores one before it starts it.
@@ -730,9 +735,7 @@ async function resolveScriptedReply(
  */
 export function createPersonTurn(
   turns: Pick<ConversationTurnWriter, "createConversationTurn">,
-  target: ConversationTurnTarget = createNewConversationTarget(
-    CALIGINIA_AGENT_CODE
-  ),
+  target: PersonTurnTarget = createNewConversationTarget(CALIGINIA_AGENT_CODE),
   settings: TurnSettings = DELEGATING_TURN_SETTINGS
 ): TurnDelegationContext {
   const userMessage = createTurnUserMessage("Collect information about moths")
@@ -761,7 +764,7 @@ export function createPersonTurn(
  */
 export function startPersonTurn(
   services: Pick<DelegationTestServices, "runtime" | "conversation">,
-  target?: ConversationTurnTarget,
+  target?: PersonTurnTarget,
   settings: TurnSettings = DELEGATING_TURN_SETTINGS
 ): TurnDelegationContext {
   const { runtime } = services
@@ -800,9 +803,9 @@ export function createWakeUpTurn(
   conversationId: string,
   settings: TurnSettings
 ): TurnDelegationContext {
-  const userMessage = createTurnWakeUpMessage("Reports of your jobs arrived.")
+  const userMessage = createTurnUserMessage("Reports of your jobs arrived.")
   const turn = turns.createConversationTurn({
-    conversation: { kind: "existing", id: conversationId },
+    conversation: { kind: "wake-up", id: conversationId },
     userMessage,
     model: settings.model
   })

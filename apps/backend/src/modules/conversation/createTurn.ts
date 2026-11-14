@@ -5,13 +5,13 @@ import {
   conversationAssistantMessageSchema,
   type Conversation,
   type ConversationAssistantMessage,
+  type ConversationMessageOrigin,
   type ConversationSource,
   type ConversationUserMessage,
   type JobReport
 } from "@lys/share"
 import type {
   ConversationTurn,
-  ConversationTurnAuthor,
   ConversationTurnTarget,
   ConversationTurnUserMessage,
   CreateConversationTurnOptions
@@ -22,13 +22,14 @@ import type {
   ConversationTurnRecords,
   ConversationTurnTransaction,
   JobReportDelivery,
-  JobTurnTransaction
+  JobTurnTransaction,
+  NewUserMessageAuthor
 } from "./records"
 
 /** Target of a turn that continues a stored conversation or a stored job. */
 type ContinuedConversationTarget = Extract<
   ConversationTurnTarget,
-  { kind: "existing" | "existing-job" }
+  { kind: "existing" | "wake-up" | "existing-job" }
 >
 
 /** The records a continued conversation is changed and read through. */
@@ -84,30 +85,25 @@ type DeliveredJobReports = Readonly<{
 }>
 
 /**
- * What a turn fails with when its message's author and its conversation do
- * not fit.
- */
-const JOB_MESSAGE_AUTHOR_MESSAGE =
-  "A job message is written by a delegator, and only into a job"
-
-/**
- * Finds the `delegate_work` call that sends the message of a turn.
+ * Builds who writes the user message of a turn, as the turn's target says.
  * @param target - Conversation the turn starts or continues.
- * @param author - Who writes the turn's user message.
- * @returns The call's UUIDv7 for a job message, which a delegator writes
- * into a job; undefined for any other message.
- * @throws If the turn starts or continues a job and its author is not a
- * delegator, or a delegator writes the message of any other turn.
+ * @returns The person for a new or an existing main conversation, the
+ * backend for a wake-up, and a delegator with the call that sends the job
+ * message for a new or an existing job.
  */
-function findJobCallId(
-  target: ConversationTurnTarget,
-  author: ConversationTurnAuthor
-): string | undefined {
-  const isJobTarget =
-    target.kind === "new-job" || target.kind === "existing-job"
-  if (isJobTarget !== (author.origin === "delegator"))
-    throw new Error(JOB_MESSAGE_AUTHOR_MESSAGE)
-  return author.origin === "delegator" ? author.jobCallId : undefined
+function buildUserMessageAuthor(
+  target: ConversationTurnTarget
+): NewUserMessageAuthor {
+  switch (target.kind) {
+    case "new":
+    case "existing":
+      return { origin: "person" }
+    case "wake-up":
+      return { origin: "wake-up" }
+    case "new-job":
+    case "existing-job":
+      return { origin: "delegator", jobCallId: target.jobCallId }
+  }
 }
 
 /**
@@ -216,13 +212,17 @@ function updateContinuedConversation(
   target: ContinuedConversationTarget,
   now: string
 ): Conversation {
+  /** What a job message that continues a main conversation fails with. */
+  const jobMessageRefusal =
+    "A job message is written by a delegator, and only into a job"
+
   const isJobTarget = target.kind === "existing-job"
   if (isJobTarget) records.jobs.updateJobTitle(target.id, target.title)
   records.turn.updateStreamingAssistantMessagesToInterrupted(target.id, now)
   const conversation = records.turn.findConversation(target.id)
   if (conversation === undefined) throw new ConversationNotFoundError()
   if (isJobTarget && conversation.parentConversationId === null)
-    throw new Error(JOB_MESSAGE_AUTHOR_MESSAGE)
+    throw new Error(jobMessageRefusal)
   return conversation
 }
 
@@ -250,6 +250,7 @@ function saveTurnConversation(
     case "new-job":
       return createJob(records.turn, target, now)
     case "existing":
+    case "wake-up":
     case "existing-job":
       return updateContinuedConversation(records, target, now)
   }
@@ -274,16 +275,18 @@ function calculateNextAttachmentNumber(conversation: Conversation): number {
 /**
  * Builds the validated user message of a turn with provisional attachment
  * numbers.
- * @param userMessage - Identity, content, author, and attachment drafts.
+ * @param userMessage - Identity, content, and attachment drafts.
+ * @param origin - Who writes the message.
  * @param now - Time of the turn.
- * @returns The message with its author's origin, without reports, and with
- * its attachments numbered from 1 in message order, for
+ * @returns The message with its origin, without reports, and with its
+ * attachments numbered from 1 in message order, for
  * {@link buildNumberedUserMessage} once the conversation's highest number is
  * known.
  * @throws If the message or an attachment violates the conversation contract.
  */
 function buildUserMessage(
   userMessage: ConversationTurnUserMessage,
+  origin: ConversationMessageOrigin,
   now: string
 ): ConversationUserMessage {
   return conversationUserMessageSchema.parse({
@@ -294,7 +297,7 @@ function buildUserMessage(
       ...draft,
       number: index + 1
     })),
-    origin: userMessage.author.origin,
+    origin,
     reports: [],
     createdAt: now
   })
@@ -503,12 +506,13 @@ function updateJobReportsToDelivered(
  * with the conversation or the job the turn starts, and delivers the reports
  * that wait for the conversation.
  * @param records - Records lent to the caller's write transaction.
- * @param options - Conversation selection, the user message with its
- * identity, author, and attachment drafts, and the model. A new conversation
- * stores the identity and the agent code it names; an existing conversation
- * keeps its agent. A new job also stores its parent, its title, and the
- * number after its parent's highest; a continued job gets the title of the
- * job message.
+ * @param options - Conversation selection, which says who writes the user
+ * message, the user message with its identity and attachment drafts, and
+ * the model. A new conversation stores the identity and the agent code it
+ * names; an existing conversation keeps its agent. A new job also stores its
+ * parent, its title, and the number after its parent's highest; a continued
+ * job gets the title of the job message. A job message is stored with the
+ * call that sends it.
  * @param now - Time of the turn, read once by the caller. Every value the turn
  * builds carries it: a new conversation's times, both messages' times, and
  * the update time of each reply the turn interrupts.
@@ -518,9 +522,6 @@ function updateJobReportsToDelivered(
  * conversation's highest attachment number in message order, and the
  * reports the turn delivered with it, as the conversation's agent reads
  * them.
- * @throws If the turn starts or continues a job and its message is not a
- * delegator's, or a delegator's message starts or continues a main
- * conversation; nothing is stored by then.
  * @throws ConversationNotFoundError if the continued conversation, or the
  * parent of a new job, is not stored.
  * @throws If a job message continues a conversation that is not a job,
@@ -550,15 +551,22 @@ export function createConversationTurn(
   now: string
 ): ConversationTurn {
   const target = options.conversation
-  const jobCallId = findJobCallId(target, options.userMessage.author)
-  const draftUserMessage = buildUserMessage(options.userMessage, now)
+  const author = buildUserMessageAuthor(target)
+  const draftUserMessage = buildUserMessage(
+    options.userMessage,
+    author.origin,
+    now
+  )
   const assistantMessage = buildStreamingReply(options.model, now)
   const conversation = saveTurnConversation(records, target, now)
   const storedUserMessage = buildNumberedUserMessage(
     draftUserMessage,
     conversation
   )
-  records.turn.createUserMessage(conversation.id, storedUserMessage, jobCallId)
+  records.turn.createUserMessage(conversation.id, {
+    ...storedUserMessage,
+    ...author
+  })
   const delivered = updateJobReportsToDelivered(
     records,
     conversation,

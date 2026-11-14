@@ -65,8 +65,8 @@ export default class StoredConversationTurns
    * user/assistant pair.
    * @param options - Target conversation and initial message values.
    * @returns An independent snapshot and pair after the whole transaction commits.
-   * @throws If lookup, validation, or persistence fails, or the message's
-   * author does not fit the target; no partial turn remains.
+   * @throws If lookup, validation, or persistence fails, or a job message
+   * continues a conversation that is not a job; no partial turn remains.
    * @remarks Implements {@link ConversationTurnWriter.createConversationTurn},
    * including interruption of a superseded streaming reply and delivery of
    * the reports that wait for the conversation. Every value the turn builds

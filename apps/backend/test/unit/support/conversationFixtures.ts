@@ -13,7 +13,6 @@ import {
 import { v7 as uuidv7 } from "uuid"
 import type {
   ConversationTurn,
-  ConversationTurnAuthor,
   ConversationTurnTarget,
   ConversationTurnUserMessage
 } from "../../../src/modules/chat/persistence"
@@ -47,7 +46,7 @@ export function createUserMessage(
   sequence: number,
   content: string,
   attachments: readonly ConversationAttachment[] = []
-): ConversationUserMessage {
+): ConversationUserMessage & Readonly<{ origin: "person" }> {
   return {
     id: createFixtureUuidV7(sequence),
     role: "user",
@@ -120,30 +119,30 @@ export function createNewConversationTarget(
 }
 
 /**
- * Creates the target of a turn that starts a job.
+ * Creates the target of a turn that starts a job of the agent `researcher`
+ * titled `Find what moths eat`.
  *
  * @param parentConversationId - Conversation the job is started from.
- * @param agentCode - Code of the agent that works on the job.
- * @param title - Title of the job message that starts it.
+ * @param jobCallId - The `delegate_work` call that sends the job message.
  * @returns The target with a fresh UUIDv7.
  */
 export function createNewJobTarget(
   parentConversationId: string,
-  agentCode: string,
-  title: string
+  jobCallId: string
 ): Extract<ConversationTurnTarget, { kind: "new-job" }> {
   return {
     kind: "new-job",
     id: uuidv7(),
-    agentCode,
+    agentCode: "researcher",
     parentConversationId,
-    title
+    title: "Find what moths eat",
+    jobCallId
   }
 }
 
 /**
- * Creates the user message of a turn before it is stored, written by the
- * person, without attachments.
+ * Creates the user message of a turn before it is stored, without
+ * attachments. The turn's target says who writes it.
  *
  * @param content - Authored text.
  * @returns The message with a fresh UUIDv7, as the chat route makes one.
@@ -151,38 +150,7 @@ export function createNewJobTarget(
 export function createTurnUserMessage(
   content: string
 ): ConversationTurnUserMessage {
-  const author: ConversationTurnAuthor = { origin: "person" }
-  return { id: uuidv7(), content, attachments: [], author }
-}
-
-/**
- * Creates the job message of a turn before it is stored, without
- * attachments.
- *
- * @param content - Instructions the delegator sends.
- * @param jobCallId - The `delegate_work` call that sends them.
- * @returns The delegator's message with a fresh UUIDv7.
- */
-export function createTurnJobMessage(
-  content: string,
-  jobCallId: string
-): ConversationTurnUserMessage {
-  const author: ConversationTurnAuthor = { origin: "delegator", jobCallId }
-  return { id: uuidv7(), content, attachments: [], author }
-}
-
-/**
- * Creates the wake-up message of a turn before it is stored, without
- * attachments.
- *
- * @param content - Text the backend writes for the conversation's agent.
- * @returns The backend's message with a fresh UUIDv7.
- */
-export function createTurnWakeUpMessage(
-  content: string
-): ConversationTurnUserMessage {
-  const author: ConversationTurnAuthor = { origin: "wake-up" }
-  return { id: uuidv7(), content, attachments: [], author }
+  return { id: uuidv7(), content, attachments: [] }
 }
 
 /** Lifecycle fields that distinguish assistant-message fixtures. */

@@ -6,10 +6,8 @@ import { createConversationTurn } from "../../../../src/modules/conversation/cre
 import type {
   ConversationTurn,
   ConversationTurnTarget,
-  ConversationTurnUserMessage,
   CreateConversationTurnOptions
 } from "../../../../src/modules/chat/persistence"
-import type { ConversationRecordReader } from "../../../../src/modules/conversation/records"
 import { ConversationNotFoundError } from "../../../../src/utils/errors"
 import { openSqliteConversationRecords } from "../../support/conversationDatabase"
 import {
@@ -17,9 +15,7 @@ import {
   createNewConversationTarget,
   createNewJobTarget,
   createTextPart,
-  createTurnJobMessage,
   createTurnUserMessage,
-  createTurnWakeUpMessage,
   formatMessageText
 } from "../../support/conversationFixtures"
 import {
@@ -40,16 +36,6 @@ const NOW = "2026-03-04T05:06:07.890Z"
 
 /** Existing conversation used by continuation cases. */
 const EXISTING_CONVERSATION_ID = createFixtureUuidV7(1)
-
-/**
- * The `delegate_work` call that sent the first message of job 1 of
- * {@link EXISTING_CONVERSATION_ID}.
- */
-const JOB_CALL_ID = createFixtureUuidV7(12)
-
-/** What a turn says when its message and its conversation do not fit. */
-const JOB_MESSAGE_REFUSAL =
-  "A job message is written by a delegator, and only into a job"
 
 /** A result report the delivery cases store undelivered. */
 const RESULT_REPORT: JobReportFixture = Object.freeze({
@@ -134,18 +120,9 @@ function createJobTurn(
     parentId,
     createdAt: createFixtureTimestamp(1)
   })
-  const conversation = createNewJobTarget(
-    parentId,
-    "researcher",
-    "Find what moths eat"
-  )
-  const userMessage = createTurnJobMessage(
-    "Find out what moths eat.",
-    call.callId
-  )
   return createCommittedTurn(records, {
-    conversation,
-    userMessage,
+    conversation: createNewJobTarget(parentId, call.callId),
+    userMessage: createTurnUserMessage("Find out what moths eat."),
     model: "qwen/qwen3-8b"
   })
 }
@@ -174,42 +151,14 @@ function createJobContinuationTurn(
   const conversation: ConversationTurnTarget = {
     kind: "existing-job",
     id: jobId,
-    title: "Now look at butterflies"
+    title: "Now look at butterflies",
+    jobCallId: call.callId
   }
-  const userMessage = createTurnJobMessage(
-    "Look at butterflies too.",
-    call.callId
-  )
   return createCommittedTurn(records, {
     conversation,
-    userMessage,
+    userMessage: createTurnUserMessage("Look at butterflies too."),
     model: "qwen/qwen3-8b"
   })
-}
-
-/**
- * A turn whose message and conversation do not fit: its label, its target,
- * and its message.
- */
-type MisfitTurnRow = readonly [
-  label: string,
-  conversation: ConversationTurnTarget,
-  userMessage: ConversationTurnUserMessage
-]
-
-/**
- * Lists conversations as one reader sees them.
- *
- * @param reader - The store's reads, or those of a running turn write.
- * @param conversationIds - Conversations to read.
- * @returns Each conversation in the given order; undefined for one that is
- * not stored.
- */
-function listReadConversations(
-  reader: Pick<ConversationRecordReader, "findConversation">,
-  conversationIds: readonly string[]
-) {
-  return conversationIds.map((id) => reader.findConversation(id))
 }
 
 /**
@@ -584,21 +533,16 @@ describe("createConversationTurn", () => {
   })
 
   it("throws ConversationNotFoundError and stores nothing when a new job's parent is not stored", () => {
+    /** A `delegate_work` call of the parent, which is not stored either. */
+    const jobCallId = createFixtureUuidV7(12)
+
     const records = openSqliteConversationRecords()
-    const conversation = createNewJobTarget(
-      EXISTING_CONVERSATION_ID,
-      "researcher",
-      "Find what moths eat"
-    )
-    const userMessage = createTurnJobMessage(
-      "Find out what moths eat.",
-      JOB_CALL_ID
-    )
+    const conversation = createNewJobTarget(EXISTING_CONVERSATION_ID, jobCallId)
 
     expect(() =>
       createCommittedTurn(records, {
         conversation,
-        userMessage,
+        userMessage: createTurnUserMessage("Find out what moths eat."),
         model: "qwen/qwen3-8b"
       })
     ).toThrow(ConversationNotFoundError)
@@ -651,6 +595,10 @@ describe("createConversationTurn", () => {
   })
 
   it("refuses a job message that continues a main conversation and leaves it as it is, with its reply still streaming", () => {
+    /** What a turn says when a job message continues a main conversation. */
+    const jobMessageRefusal =
+      "A job message is written by a delegator, and only into a job"
+
     const records = openSqliteConversationRecords()
     const mainId = saveMainConversation(records, 1)
     const otherId = saveMainConversation(records, 50)
@@ -667,7 +615,7 @@ describe("createConversationTurn", () => {
     const before = records.recordReader.findConversation(otherId)
 
     expect(() => createJobContinuationTurn(records, mainId, otherId)).toThrow(
-      JOB_MESSAGE_REFUSAL
+      jobMessageRefusal
     )
 
     expect(before?.messages.at(-1)).toMatchObject({ status: "streaming" })
@@ -678,16 +626,13 @@ describe("createConversationTurn", () => {
     const records = openSqliteConversationRecords()
     saveExistingConversation(records)
     const conversation: ConversationTurnTarget = {
-      kind: "existing",
+      kind: "wake-up",
       id: EXISTING_CONVERSATION_ID
     }
-    const userMessage = createTurnWakeUpMessage(
-      "Reports from your jobs arrived."
-    )
 
     const turn = createCommittedTurn(records, {
       conversation,
-      userMessage,
+      userMessage: createTurnUserMessage("Reports from your jobs arrived."),
       model: "qwen/qwen3-8b"
     })
 
@@ -949,88 +894,4 @@ describe("createConversationTurn", () => {
     ])
     expect(webSources).toEqual([{ number: 3, url: SILK_URL, title: "Silk" }])
   })
-
-  /**
-   * Job number 1 of {@link EXISTING_CONVERSATION_ID}, as the job fixtures store
-   * it.
-   */
-  const jobId = createFixtureUuidV7(10)
-
-  /**
-   * One misfit turn for each kind of target and each author it refuses, over
-   * {@link EXISTING_CONVERSATION_ID} and its job `jobId`.
-   */
-  const misfitTurns: readonly MisfitTurnRow[] = [
-    [
-      "a delegator's message that starts a main conversation",
-      createNewConversationTarget("caliginia"),
-      createTurnJobMessage("Find out what moths eat.", JOB_CALL_ID)
-    ],
-    [
-      "a delegator's message that continues a main conversation",
-      { kind: "existing", id: EXISTING_CONVERSATION_ID },
-      createTurnJobMessage("Find out what moths eat.", JOB_CALL_ID)
-    ],
-    [
-      "a person's message that starts a job",
-      createNewJobTarget(
-        EXISTING_CONVERSATION_ID,
-        "researcher",
-        "Find what moths eat"
-      ),
-      createTurnUserMessage("Find out what moths eat.")
-    ],
-    [
-      "a wake-up message that starts a job",
-      createNewJobTarget(
-        EXISTING_CONVERSATION_ID,
-        "researcher",
-        "Find what moths eat"
-      ),
-      createTurnWakeUpMessage("Reports from your jobs arrived.")
-    ],
-    [
-      "a person's message that continues a job as a job message",
-      { kind: "existing-job", id: jobId, title: "Now look at butterflies" },
-      createTurnUserMessage("Look at butterflies too.")
-    ],
-    [
-      "a wake-up message that continues a job as a job message",
-      { kind: "existing-job", id: jobId, title: "Now look at butterflies" },
-      createTurnWakeUpMessage("Reports from your jobs arrived.")
-    ]
-  ]
-
-  it.each(misfitTurns)(
-    "refuses %s before any write",
-    (_label, conversation, userMessage) => {
-      const records = openSqliteConversationRecords()
-      const mainId = saveMainConversation(records, 1)
-      saveJob(records, createJobFixture(mainId, 1, "streaming"))
-      const options: CreateConversationTurnOptions = {
-        conversation,
-        userMessage,
-        model: "qwen/qwen3-8b"
-      }
-      const conversationIds = [mainId, jobId, conversation.id]
-      const before = listReadConversations(
-        records.recordReader,
-        conversationIds
-      )
-
-      const observed =
-        records.turnRecordWriter.handleConversationTurnWriteRequest(
-          (transaction, jobs) => {
-            const turnRecords = { turn: transaction, jobs }
-            expect(() =>
-              createConversationTurn(turnRecords, options, NOW)
-            ).toThrow(JOB_MESSAGE_REFUSAL)
-            return listReadConversations(transaction, conversationIds)
-          }
-        )
-
-      expect(before[1]?.messages.at(-1)).toMatchObject({ status: "streaming" })
-      expect(observed).toEqual(before)
-    }
-  )
 })

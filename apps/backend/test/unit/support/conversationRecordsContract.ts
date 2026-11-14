@@ -21,6 +21,7 @@ import type {
   ConversationTurnRecordWriter,
   ConversationTurnTransaction,
   ListConversationsInput,
+  NewUserMessage,
   ReplyPartRecordWriter,
   UpdateReplyToolCallInput
 } from "../../../src/modules/conversation/records"
@@ -774,7 +775,7 @@ function createNewConversationMetadata(id: string) {
 function createNewUserMessage(
   sequence: number,
   content: string
-): ConversationUserMessage {
+): Extract<NewUserMessage, { origin: "person" }> {
   return { ...createUserMessage(sequence, content), createdAt: CHANGED_AT }
 }
 
@@ -2315,8 +2316,7 @@ async function saveConversationAroundAwait(
   await Promise.resolve()
   transaction.createUserMessage(
     CONVERSATION_ID,
-    createNewUserMessage(10, "after await"),
-    undefined
+    createNewUserMessage(10, "after await")
   )
 }
 
@@ -2464,8 +2464,7 @@ export function registerConversationTurnRecordWriterContractSuite(
         expect(() =>
           transaction.createUserMessage(
             CONVERSATION_ID,
-            createNewUserMessage(10, "late"),
-            undefined
+            createNewUserMessage(10, "late")
           )
         ).toThrow("Database operation has ended")
         expect(() =>
@@ -3075,9 +3074,11 @@ function registerJobCreationCases(
  *
  * @param sequence - Identity sequence of the message.
  * @returns A valid message of a delegator written at {@link CHANGED_AT} that
- * delivers no reports.
+ * delivers no reports, without the call that sends it, which each case adds.
  */
-function createNewJobMessage(sequence: number): ConversationUserMessage {
+function createNewJobMessage(
+  sequence: number
+): ConversationUserMessage & Readonly<{ origin: "delegator" }> {
   return {
     ...createNewUserMessage(sequence, "Now look at butterflies"),
     origin: "delegator"
@@ -3104,7 +3105,7 @@ function registerMessageAuthorCases(
       transaction.createConversation(
         createNewConversationMetadata(CONVERSATION_ID)
       )
-      transaction.createUserMessage(CONVERSATION_ID, message, undefined)
+      transaction.createUserMessage(CONVERSATION_ID, message)
     })
 
     expect(recordReader.findConversation(CONVERSATION_ID)?.messages).toEqual([
@@ -3125,7 +3126,10 @@ function registerMessageAuthorCases(
 
     harness.turnRecordWriter.handleConversationTurnWriteRequest(
       (transaction) => {
-        transaction.createUserMessage(job.id, message, call.callId)
+        transaction.createUserMessage(job.id, {
+          ...message,
+          jobCallId: call.callId
+        })
       }
     )
 
@@ -3135,50 +3139,6 @@ function registerMessageAuthorCases(
     expect(
       harness.recordReader.findConversation(mainId)?.jobs[0]?.jobCallIds
     ).toEqual([job.callId, call.callId])
-  })
-
-  it.each([
-    ["the person's message", "person"],
-    ["a wake-up message", "wake-up"]
-  ] as const)(
-    "refuses a call given with %s and writes nothing",
-    (_label, origin) => {
-      const harness = createHarness()
-      const mainId = saveMainConversation(harness, 1)
-      const job = saveJob(harness, createJobFixture(mainId, 1, "completed"))
-      const message = { ...createNewUserMessage(300, "Hello"), origin }
-
-      expect(() =>
-        harness.turnRecordWriter.handleConversationTurnWriteRequest(
-          (transaction) => {
-            transaction.createUserMessage(mainId, message, job.callId)
-          }
-        )
-      ).toThrow("A job call is given exactly with a delegator's message")
-
-      expect(
-        harness.recordReader.findConversation(mainId)?.messages
-      ).toHaveLength(2)
-    }
-  )
-
-  it("refuses a delegator's message without its call and writes nothing", () => {
-    const harness = createHarness()
-    const mainId = saveMainConversation(harness, 1)
-    const job = saveJob(harness, createJobFixture(mainId, 1, "completed"))
-    const message = createNewJobMessage(300)
-
-    expect(() =>
-      harness.turnRecordWriter.handleConversationTurnWriteRequest(
-        (transaction) => {
-          transaction.createUserMessage(job.id, message, undefined)
-        }
-      )
-    ).toThrow("A job call is given exactly with a delegator's message")
-
-    expect(
-      harness.recordReader.findConversation(job.id)?.messages
-    ).toHaveLength(2)
   })
 
   it("refuses a delegator's message whose call is not stored and writes nothing", () => {
@@ -3191,7 +3151,10 @@ function registerMessageAuthorCases(
     expect(() =>
       harness.turnRecordWriter.handleConversationTurnWriteRequest(
         (transaction) => {
-          transaction.createUserMessage(job.id, message, unstoredCallId)
+          transaction.createUserMessage(job.id, {
+            ...message,
+            jobCallId: unstoredCallId
+          })
         }
       )
     ).toThrow()
@@ -3248,7 +3211,7 @@ export function registerConversationTurnTransactionContractSuite(
         transaction.createConversation(
           createNewConversationMetadata(CONVERSATION_ID)
         )
-        transaction.createUserMessage(CONVERSATION_ID, message, undefined)
+        transaction.createUserMessage(CONVERSATION_ID, message)
       })
 
       expect(recordReader.findConversation(CONVERSATION_ID)?.messages).toEqual([
@@ -3278,7 +3241,7 @@ export function registerConversationTurnTransactionContractSuite(
       expect(() =>
         harness.turnRecordWriter.handleConversationTurnWriteRequest(
           (transaction) => {
-            transaction.createUserMessage(CONVERSATION_ID, message, undefined)
+            transaction.createUserMessage(CONVERSATION_ID, message)
           }
         )
       ).toThrow()
@@ -3354,8 +3317,7 @@ export function registerConversationTurnTransactionContractSuite(
         createMessage: (transaction: ConversationTurnTransaction) => {
           transaction.createUserMessage(
             CONVERSATION_ID,
-            createNewUserMessage(10, "Hello"),
-            undefined
+            createNewUserMessage(10, "Hello")
           )
         }
       },
@@ -3409,8 +3371,7 @@ export function registerConversationTurnTransactionContractSuite(
         (transaction) => {
           transaction.createUserMessage(
             CONVERSATION_ID,
-            createNewUserMessage(10, "Hello"),
-            undefined
+            createNewUserMessage(10, "Hello")
           )
         }
       )
@@ -3471,7 +3432,7 @@ export function registerConversationTurnTransactionContractSuite(
           transaction.createConversation(
             createNewConversationMetadata(CONVERSATION_ID)
           )
-          transaction.createUserMessage(CONVERSATION_ID, userMessage, undefined)
+          transaction.createUserMessage(CONVERSATION_ID, userMessage)
           transaction.createAssistantMessage(CONVERSATION_ID, assistantMessage)
           return transaction.findConversation(CONVERSATION_ID)?.messages
         }

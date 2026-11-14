@@ -74,7 +74,7 @@ describe("SqliteConversationTurnRecordWriter", () => {
       records.turnRecordWriter.handleConversationTurnWriteRequest(
         (transaction) => {
           transaction.createConversation(metadata)
-          transaction.createUserMessage(CONVERSATION_ID, message, undefined)
+          transaction.createUserMessage(CONVERSATION_ID, message)
         }
       )
     ).toThrow("FOREIGN KEY constraint failed")

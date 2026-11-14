@@ -33,7 +33,6 @@ import type {
 import { findTurnBuiltInTools } from "../../tool/builtIn/builtInTools"
 import type {
   ConversationTurn,
-  ConversationTurnAuthor,
   ConversationTurnTarget,
   ConversationTurnUserMessage,
   ConversationTurnWriter,
@@ -584,12 +583,10 @@ function buildTurnOptions(
     body.conversation.kind === "new"
       ? { kind: "new", id: uuidv7(), agentCode: body.conversation.agentCode }
       : body.conversation
-  const author: ConversationTurnAuthor = { origin: "person" }
   const userMessage: ConversationTurnUserMessage = {
     id: uuidv7(),
     content: body.message,
-    attachments: attachments.map((attachment) => attachment.draft),
-    author
+    attachments: attachments.map((attachment) => attachment.draft)
   }
   return { conversation, userMessage, model: body.model }
 }

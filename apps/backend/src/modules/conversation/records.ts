@@ -58,6 +58,30 @@ export type ConversationPage = Readonly<{
   hasMore: boolean
 }>
 
+/** Who wrote a user message that is not stored yet, selected by `origin`. */
+export type NewUserMessageAuthor =
+  | Readonly<{
+      /** The person wrote the message, in a chat request. */
+      origin: "person"
+    }>
+  | Readonly<{
+      /** The backend wrote a wake-up message. */
+      origin: "wake-up"
+    }>
+  | Readonly<{
+      /** A delegator wrote a job message. */
+      origin: "delegator"
+      /** UUIDv7 of the stored `delegate_work` call that sends the message. */
+      jobCallId: string
+    }>
+
+/**
+ * A user message to append, as the variant its origin selects: a job
+ * message carries the call that sends it, and no other message has one.
+ */
+export type NewUserMessage = Readonly<ConversationUserMessage> &
+  NewUserMessageAuthor
+
 /** One new part for a reply that is still streaming. */
 export type CreateReplyPartInput = Readonly<{
   /** UUIDv7 of the reply. */
@@ -454,17 +478,12 @@ export interface ConversationTurnTransaction {
    * wrote it.
    *
    * @param conversationId - UUIDv7 of a stored conversation.
-   * @param message - Valid message whose identity is not stored yet; its
-   * attachments carry numbers the conversation does not store yet. Its
-   * reports are not stored by this call:
-   * {@link JobTurnTransaction.updateJobReportToDelivered} delivers a report
-   * with a stored message.
-   * @param jobCallId - UUIDv7 of the stored `delegate_work` call that sends
-   * a job message; given exactly when the message's origin is `delegator`.
+   * @param message - Valid message whose identity is not stored yet, with
+   * the call that sends it when it is a job message; its attachments carry
+   * numbers the conversation does not store yet. Its reports are not stored
+   * by this call: {@link JobTurnTransaction.updateJobReportToDelivered}
+   * delivers a report with a stored message.
    * @throws If the transaction has ended or the write fails.
-   * @throws `A job call is given exactly with a delegator's message` when a
-   * call is given with a message a delegator did not write, or none with one
-   * a delegator wrote; nothing is then written.
    * @throws The store's own error when the conversation is not stored, the
    * message's identity is, the call is not stored, or an attachment's number
    * is stored for the conversation already, which breaks the precondition.
@@ -473,11 +492,7 @@ export interface ConversationTurnTransaction {
    * later time the store chooses. Each attachment is stored under the
    * message, and is read back with it by `findConversation`.
    */
-  createUserMessage(
-    conversationId: string,
-    message: ConversationUserMessage,
-    jobCallId: string | undefined
-  ): void
+  createUserMessage(conversationId: string, message: NewUserMessage): void
   /**
    * Appends an assistant message exactly as given, including its state.
    *

@@ -2,7 +2,6 @@ import type { ConversationAttachmentDraft } from "@lys/share"
 import { v7 as uuidv7 } from "uuid"
 import type Agent from "../agent/agent"
 import type {
-  ConversationTurnAuthor,
   ConversationTurnTarget,
   ConversationTurnUserMessage,
   CreateConversationTurnOptions
@@ -211,8 +210,8 @@ function startWakeUpTurn(
  * @param jobs - Reads the conversation's jobs.
  * @param conversationId - UUIDv7 of the delegator's main conversation.
  * @param settings - The conversation's wake settings.
- * @returns Frozen options: the stored conversation as the target; a
- * wake-up message with a fresh UUIDv7, no attachments, and the text
+ * @returns Frozen options: a wake-up of the stored conversation as the
+ * target; a wake-up message with a fresh UUIDv7, no attachments, and the text
  * {@link formatWakeUpMessage} writes for the jobs that are still working,
  * in number order; and the settings' model.
  * @throws If the job store is closed or a stored job violates the job
@@ -227,16 +226,14 @@ function buildWakeUpTurnOptions(
     .listJobs(conversationId)
     .filter((job) => job.state === "working")
   const conversation: ConversationTurnTarget = Object.freeze({
-    kind: "existing",
+    kind: "wake-up",
     id: conversationId
   })
-  const author: ConversationTurnAuthor = Object.freeze({ origin: "wake-up" })
   const attachments: readonly ConversationAttachmentDraft[] = Object.freeze([])
   const userMessage: ConversationTurnUserMessage = Object.freeze({
     id: uuidv7(),
     content: formatWakeUpMessage(workingJobs),
-    attachments,
-    author
+    attachments
   })
   return Object.freeze({ conversation, userMessage, model: settings.model })
 }

@@ -12,10 +12,21 @@ import type {
   ReplyToolCallChange
 } from "../agent/replyPartSequence"
 
-/** Conversation a turn starts or continues, selected by `kind`. */
+/**
+ * Conversation a turn starts or continues, and so who writes the turn's
+ * user message, selected by `kind`.
+ *
+ * @remarks Each kind is one pairing the turn allows: the person writes a
+ * new or an existing main conversation, the backend writes a wake-up
+ * message into an existing main conversation, and a delegator writes a new
+ * or an existing job, with the call that sends the job message. The turn
+ * refuses a job message that continues a main conversation; whoever
+ * continues a conversation as the person or as the backend makes sure it is
+ * a main conversation.
+ */
 export type ConversationTurnTarget =
   | Readonly<{
-      /** The turn creates a conversation. */
+      /** The person starts a main conversation. */
       kind: "new"
       /**
        * UUIDv7 the new conversation is stored under, made by the caller
@@ -26,13 +37,25 @@ export type ConversationTurnTarget =
       agentCode: string
     }>
   | Readonly<{
-      /** The turn continues a stored conversation, which keeps its agent. */
+      /**
+       * The person continues a stored main conversation, which keeps its
+       * agent.
+       */
       kind: "existing"
       /** UUIDv7 of the stored conversation. */
       id: string
     }>
   | Readonly<{
-      /** The turn creates a job: its first job message starts it. */
+      /**
+       * The backend continues a stored main conversation with a wake-up
+       * message, so its agent reads the reports of its jobs.
+       */
+      kind: "wake-up"
+      /** UUIDv7 of the stored conversation. */
+      id: string
+    }>
+  | Readonly<{
+      /** A delegator starts a job: its first job message starts it. */
       kind: "new-job"
       /** UUIDv7 the new job is stored under, made by the caller. */
       id: string
@@ -45,10 +68,15 @@ export type ConversationTurnTarget =
       parentConversationId: string
       /** Non-empty title of the job message, which becomes the job's title. */
       title: string
+      /**
+       * UUIDv7 of the stored `delegate_work` call, in the job's parent, that
+       * sends the job message.
+       */
+      jobCallId: string
     }>
   | Readonly<{
       /**
-       * The turn continues a stored job with a later job message. The job
+       * A delegator continues a stored job with a later job message. The job
        * keeps its agent, its parent, and its number.
        */
       kind: "existing-job"
@@ -56,29 +84,17 @@ export type ConversationTurnTarget =
       id: string
       /** Non-empty title of the job message, which replaces the job's title. */
       title: string
-    }>
-
-/** Who writes the user message of a turn, selected by `origin`. */
-export type ConversationTurnAuthor =
-  | Readonly<{
-      /** The person writes the message, in a chat request. */
-      origin: "person"
-    }>
-  | Readonly<{
-      /** The backend writes a wake-up message, so the agent reads reports. */
-      origin: "wake-up"
-    }>
-  | Readonly<{
-      /** The delegator of a job writes a job message. */
-      origin: "delegator"
       /**
        * UUIDv7 of the stored `delegate_work` call, in the job's parent, that
-       * sends the message.
+       * sends the job message.
        */
       jobCallId: string
     }>
 
-/** The user message of a turn before it is stored. */
+/**
+ * The user message of a turn before it is stored; the turn's target says
+ * who writes it.
+ */
 export type ConversationTurnUserMessage = Readonly<{
   /**
    * UUIDv7 the message is stored under, made by the caller before the
@@ -92,16 +108,14 @@ export type ConversationTurnUserMessage = Readonly<{
    * ignoring case; the turn numbers them after the conversation's.
    */
   attachments: readonly ConversationAttachmentDraft[]
-  /**
-   * Who writes the message. A delegator writes exactly the messages of a
-   * turn that starts or continues a job.
-   */
-  author: ConversationTurnAuthor
 }>
 
 /** Inputs for atomically creating one persisted user/assistant pair. */
 export type CreateConversationTurnOptions = Readonly<{
-  /** Conversation the turn starts or continues. */
+  /**
+   * Conversation the turn starts or continues, which says who writes the
+   * user message.
+   */
   conversation: ConversationTurnTarget
   /** User message appended once to the transcript, with its attachments. */
   userMessage: ConversationTurnUserMessage
@@ -136,9 +150,9 @@ export interface ConversationTurnWriter {
    * or the job the turn starts.
    * @param options - Conversation selection and validated message inputs.
    * @returns Independent prior transcript and newly committed pair.
-   * @throws If the target or a new job's parent is absent, the message's
-   * author does not fit the target, validation fails, or persistence is
-   * closed/unavailable; no partial turn remains.
+   * @throws If the target or a new job's parent is absent, a job message
+   * continues a conversation that is not a job, validation fails, or
+   * persistence is closed/unavailable; no partial turn remains.
    * @remarks The new turn supersedes a reply still streaming in the same
    * conversation: that reply becomes interrupted with its stored parts kept
    * and its waiting and running calls interrupted, and later writes for it

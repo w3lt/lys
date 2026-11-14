@@ -7,7 +7,6 @@ import type {
 } from "../agent/turnDelegation"
 import type {
   ConversationTurn,
-  ConversationTurnAuthor,
   ConversationTurnTarget,
   ConversationTurnUserMessage,
   CreateConversationTurnOptions
@@ -234,10 +233,10 @@ function createJobTurn(
  * @param request - The delegating turn and what its call asks.
  * @param job - The job to continue; undefined to start a new one.
  * @returns A new job of the named agent started from the delegating turn's
- * conversation, or the continued job, with the message's title; the
- * instructions as a delegator's message carrying the call's identity; and
- * the delegating turn's model. The new job and the message get fresh
- * UUIDv7 identities.
+ * conversation, or the continued job, with the message's title and the
+ * call's identity, so the message is a delegator's; the instructions as the
+ * message; and the delegating turn's model. The new job and the message get
+ * fresh UUIDv7 identities.
  */
 function buildJobTurnOptions(
   { context, draft }: JobMessageRequest,
@@ -253,15 +252,10 @@ function buildJobTurnOptions(
     draft,
     job
   )
-  const author: ConversationTurnAuthor = {
-    origin: "delegator",
-    jobCallId: draft.toolCallId
-  }
   const userMessage: ConversationTurnUserMessage = {
     id: uuidv7(),
     content: draft.instructions,
-    attachments: noAttachments,
-    author
+    attachments: noAttachments
   }
   return { conversation, userMessage, model: context.settings.model }
 }
@@ -270,23 +264,31 @@ function buildJobTurnOptions(
  * Builds the conversation a job message is stored in.
  *
  * @param parentConversationId - UUIDv7 of the delegator's conversation.
- * @param draft - Agent and title the `delegate_work` call named.
+ * @param draft - Agent and title the `delegate_work` call named, and the
+ * call's identity.
  * @param job - The job to continue; undefined to start a new one.
  * @returns The continued job with the message's title, or a new job of the
- * named agent with a fresh UUIDv7 and the message's title.
+ * named agent with a fresh UUIDv7 and the message's title; either carries
+ * the call that sends the message.
  */
 function buildJobTurnTarget(
   parentConversationId: string,
-  draft: Pick<JobMessageDraft, "agentCode" | "title">,
+  draft: Pick<JobMessageDraft, "agentCode" | "title" | "toolCallId">,
   job: Job | undefined
 ): ConversationTurnTarget {
   if (job !== undefined)
-    return { kind: "existing-job", id: job.id, title: draft.title }
+    return {
+      kind: "existing-job",
+      id: job.id,
+      title: draft.title,
+      jobCallId: draft.toolCallId
+    }
   return {
     kind: "new-job",
     id: uuidv7(),
     agentCode: draft.agentCode,
     parentConversationId,
-    title: draft.title
+    title: draft.title,
+    jobCallId: draft.toolCallId
   }
 }

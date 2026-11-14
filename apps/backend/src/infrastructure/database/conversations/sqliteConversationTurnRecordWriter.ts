@@ -9,6 +9,7 @@ import type {
   ConversationTurnOperation,
   ConversationTurnRecordWriter,
   ConversationTurnTransaction,
+  NewUserMessage,
   UpdateAssistantMessageStateInput
 } from "../../../modules/conversation/records"
 import type {
@@ -224,40 +225,30 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
    * each attachment of the message under it. The person's message is stored
    * without an origin, as every message was before a row had one.
    * @param conversationId - Interface-defined conversation.
-   * @param message - Interface-defined message with its attachments.
-   * @param jobCallId - Interface-defined call of a job message.
+   * @param message - Interface-defined message with its attachments, and
+   * with its call when it is a job message.
    * @throws The interface-defined failures; an absent conversation or call
    * fails the foreign-key constraint, a stored identity the primary-key
    * constraint, and a stored attachment number the unique constraint.
-   * @remarks The call is compared with the author before the row is written,
-   * so a misfit fails with a sentence that names it. The schema's check
-   * refuses the same rows.
    */
   public createUserMessage(
     conversationId: string,
-    message: ConversationUserMessage,
-    jobCallId: string | undefined
+    message: NewUserMessage
   ): void {
-    /** What a user message fails with when its call does not fit its author. */
-    const jobCallAuthorMessage =
-      "A job call is given exactly with a delegator's message"
-
-    const insertMessage = this.#statements.getStatement(
-      `INSERT INTO conversation_messages
+    this.#statements
+      .getStatement(
+        `INSERT INTO conversation_messages
     (id, conversation_id, role, content, created_at, origin, job_call_id)
     VALUES (?, ?, 'user', ?, ?, ?, ?)`
-    )
-    const isJobMessage = message.origin === "delegator"
-    if ((jobCallId !== undefined) !== isJobMessage)
-      throw new Error(jobCallAuthorMessage)
-    insertMessage.run(
-      message.id,
-      conversationId,
-      message.content,
-      message.createdAt,
-      message.origin === "person" ? null : message.origin,
-      jobCallId ?? null
-    )
+      )
+      .run(
+        message.id,
+        conversationId,
+        message.content,
+        message.createdAt,
+        message.origin === "person" ? null : message.origin,
+        message.origin === "delegator" ? message.jobCallId : null
+      )
     createMessageAttachments(this.#statements, conversationId, message)
   }
 

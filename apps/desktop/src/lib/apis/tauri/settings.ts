@@ -279,10 +279,10 @@ function buildEmailPassword(
 }
 
 /**
- * Builds the renderer's provider choice from the document group.
+ * Builds the renderer's providers group from the document group.
  *
  * @param providers - Group Rust validated.
- * @returns The provider choice with its addresses branded.
+ * @returns The providers that are on and the addresses, branded.
  * @throws If the group fails the shared provider settings schema, which
  * Rust's validation rules out.
  */
@@ -291,7 +291,7 @@ function buildProvidersSettings(
 ): ProvidersSettings {
   const parsed = llmProviderSettingsSchema.safeParse(providers)
   if (!parsed.success) {
-    throw new Error("The settings file holds an invalid provider choice.")
+    throw new Error("The settings file holds an invalid providers group.")
   }
   return parsed.data
 }
@@ -440,7 +440,7 @@ function buildToolSettings(tools: SettingsDocumentTools): ToolSettings {
  * {@link buildToolSettings} builds them, the MCP servers are parsed by
  * {@link buildMcpSettings}, and the email account by
  * {@link buildEmailSettings}.
- * @throws If a key, the password, the provider choice, the location, the
+ * @throws If a key, the password, the providers group, the location, the
  * MCP servers, or the email account fail their shared schema, which Rust's
  * validation rules out.
  */

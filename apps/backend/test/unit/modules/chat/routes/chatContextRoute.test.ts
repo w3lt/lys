@@ -979,7 +979,7 @@ describe("registerChatContextRoute", () => {
       title: "Model not loaded",
       status: 503,
       detail:
-        "The provider has not loaded the model. Load it, or choose a model the provider serves, in Settings → Model to measure the conversation.",
+        "The provider has not loaded the model. Load it, or choose a model the provider serves, in Settings → Models to measure the conversation.",
       instance: chatContextApi.path
     })
   })

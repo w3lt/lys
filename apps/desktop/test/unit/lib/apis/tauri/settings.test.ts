@@ -250,7 +250,7 @@ describe("loadSettings", () => {
     })
 
     await expect(loadSettings()).rejects.toThrow(
-      "The settings file holds an invalid provider choice."
+      "The settings file holds an invalid providers group."
     )
   })
 

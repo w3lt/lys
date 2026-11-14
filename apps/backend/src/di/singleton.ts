@@ -1,7 +1,6 @@
 import type { LoggerInterface } from "@lmstudio/sdk"
-import type { EmailAddress } from "@lys/share"
+import type { EmailAddress, LlmProvider } from "@lys/share"
 import { homedir } from "node:os"
-import type { LlmProvider } from "@lys/share"
 import type { BackendConfig } from "../config"
 import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgentRecordStore"
 import AttachmentFileStore from "../modules/attachment/attachmentFileStore"

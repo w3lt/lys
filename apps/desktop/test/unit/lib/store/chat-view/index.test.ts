@@ -910,7 +910,7 @@ describe("createChatViewStore", () => {
             title: "Image needs vision",
             status: 409,
             detail:
-              "The image photo.png needs a model with vision, and qwen3-8b cannot see images.",
+              "The image photo.png needs a model with vision, and qwen3-8b on LM Studio cannot see images.",
             fileName: "photo.png",
             model: "qwen3-8b"
           })
@@ -927,7 +927,7 @@ describe("createChatViewStore", () => {
         attachments: [{ draft: { name: "photo.png" } }],
         request: { status: "idle" },
         error:
-          "The image photo.png needs a model with vision, and qwen3-8b cannot see images."
+          "The image photo.png needs a model with vision, and qwen3-8b on LM Studio cannot see images."
       })
     })
 

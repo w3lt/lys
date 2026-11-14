@@ -43,7 +43,7 @@ type ProviderFormProps = {
 type ProviderAddressFormProps = ProviderFormProps & {
   /** Provider whose address the form edits. */
   readonly provider: AddressedLlmProvider
-  /** Saved provider choice and addresses. */
+  /** Saved providers group: the providers that are on and the addresses. */
   readonly providers: ProvidersSettings
   /** Whether the backend is connecting, which blocks Test. */
   readonly isConnecting: boolean

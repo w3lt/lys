@@ -96,7 +96,7 @@ const NEW_CONVERSATION_HISTORY: MeasuredHistory = Object.freeze({
 
 /** Explanation sent when no loaded instance matches the requested model. */
 const MODEL_NOT_LOADED_DETAIL =
-  "The provider has not loaded the model. Load it, or choose a model the provider serves, in Settings → Model to measure the conversation."
+  "The provider has not loaded the model. Load it, or choose a model the provider serves, in Settings → Models to measure the conversation."
 
 /**
  * Registers the endpoint that measures the context a conversation's next

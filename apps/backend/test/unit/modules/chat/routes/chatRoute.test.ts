@@ -2408,6 +2408,7 @@ describe("updateFastifyWithChatRoute", () => {
         expect(
           chatImageNeedsVisionProblemSchema.parse(response.json())
         ).toMatchObject({
+          detail: `The image photo.png needs a model with vision, and ${NEW_CONVERSATION_REQUEST.model.modelKey} on LM Studio cannot see images.`,
           fileName: "photo.png",
           model: NEW_CONVERSATION_REQUEST.model.modelKey,
           instance: chatApi.path

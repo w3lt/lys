@@ -458,7 +458,7 @@ export type ChatViewStore = ChatViewState & ChatViewActions
 
 /** Error shown when the conversation's model cannot take a message or a staged file. */
 const CHAT_UNAVAILABLE_MESSAGE =
-  "Chat is unavailable. Check the backend and loaded model in Settings → Model, then try again."
+  "Chat is unavailable. Check the backend and loaded model in Settings → Models, then try again."
 
 /** Error shown when an owned stream closes before its done event. */
 const PREMATURE_STREAM_CLOSE_MESSAGE = "Chat stream ended before completion."

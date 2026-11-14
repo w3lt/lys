@@ -272,7 +272,8 @@ export function findProviderAccessKind(
  * Finds the address an addressed provider saved.
  *
  * @param provider - Addressed provider.
- * @param providers - Saved provider choice.
+ * @param providers - Saved providers group: the providers that are on and
+ * the addresses.
  * @returns The saved address, or null while the provider uses its default.
  */
 export function findSavedProviderAddress(
@@ -285,12 +286,14 @@ export function findSavedProviderAddress(
 }
 
 /**
- * Builds the provider choice with one provider's address replaced.
+ * Builds the providers group with one provider's address replaced.
  *
- * @param providers - Saved provider choice.
+ * @param providers - Saved providers group: the providers that are on and
+ * the addresses.
  * @param provider - Addressed provider.
  * @param address - New address, or null for the default.
- * @returns A new choice; the rest is unchanged.
+ * @returns A new group; the providers that are on and the other address are
+ * unchanged.
  */
 export function buildProvidersWithAddress(
   providers: ProvidersSettings,
@@ -306,7 +309,8 @@ export function buildProvidersWithAddress(
  * Formats the address field's placeholder.
  *
  * @param provider - Addressed provider.
- * @param providers - Saved provider choice.
+ * @param providers - Saved providers group: the providers that are on and
+ * the addresses.
  * @returns The saved address, or the default while none is saved.
  */
 export function formatProviderAddressPlaceholder(

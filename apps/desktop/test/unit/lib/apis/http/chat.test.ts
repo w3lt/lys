@@ -163,7 +163,7 @@ const IMAGE_NEEDS_VISION_PROBLEM = chatImageNeedsVisionProblemSchema.parse({
   title: "Image needs vision",
   status: 409,
   detail:
-    "The image photo.png needs a model with vision, and qwen3-8b cannot see images.",
+    "The image photo.png needs a model with vision, and qwen3-8b on LM Studio cannot see images.",
   fileName: "photo.png",
   model: "qwen3-8b"
 })

@@ -497,7 +497,7 @@ async function parseTurnRequest(
       reply,
       createChatImageNeedsVisionProblem(
         unseenImage.name,
-        body.model.modelKey,
+        body.model,
         request.url
       )
     )

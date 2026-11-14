@@ -89,12 +89,15 @@ const llmRuntimeConnectApiResponseSchemas = Object.freeze({
  *
  * @remarks A connected backend keeps a runtime that still answers; otherwise
  * it acquires a new one. A provider that is off is not contacted: a held
- * runtime is released and the status is `off`. Concurrent requests share one attempt while it is
- * for the provider saved when they arrive. The attempt
- * occupies one position in the model-operation queue, so a full queue answers
- * with service-busy Problem Details and starts no attempt. A 200 response
- * carries the settled status, `connected`, `unreachable`, or `off`. A client that
- * disconnects does not cancel an accepted attempt.
+ * runtime is released and the status is `off`. Concurrent requests share
+ * one attempt: a request made before the attempt starts joins it, and one
+ * made while it runs joins it only when both found the provider on with the
+ * same address or key in its saved settings; otherwise it queues an attempt
+ * of its own. An attempt occupies one position in the provider's
+ * model-operation queue, so a full queue answers with service-busy Problem
+ * Details and starts no attempt. A 200 response carries the settled status,
+ * `connected`, `unreachable`, or `off`. A client that disconnects does not
+ * cancel an accepted attempt.
  */
 export const llmRuntimeConnectApi = Object.freeze({
   method: "POST",

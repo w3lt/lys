@@ -1104,10 +1104,10 @@ function handleReplyFailure(turn: AgentTurn, error: unknown): void {
  */
 function formatReplyFailureMessage(failure: unknown): string {
   if (failure instanceof ReplyContextOverflowError) {
-    return `The conversation no longer fits the model's context window: the next request to the model needs ${formatTokenCount(failure.requiredTokens)} tokens, including the room kept for the reply, and the model is loaded with ${formatTokenCount(failure.contextLength)}. Start a new conversation, or load the model with a longer context in Settings → Model.`
+    return `The conversation no longer fits the model's context window: the next request to the model needs ${formatTokenCount(failure.requiredTokens)} tokens, including the room kept for the reply, and the model is loaded with ${formatTokenCount(failure.contextLength)}. Start a new conversation, or load the model with a longer context in Settings → Models.`
   }
   if (failure instanceof ReplyModelNotLoadedError) {
-    return "The model is not loaded, so Lys cannot check that the conversation fits it. Load the model in Settings → Model, or in the provider itself when Lys does not load its models, then try again."
+    return "The model is not loaded, so Lys cannot check that the conversation fits it. Load the model in Settings → Models, or in the provider itself when Lys does not load its models, then try again."
   }
   if (failure instanceof AgentRequestLimitError) {
     return formatRequestLimitMessage(failure.limits)

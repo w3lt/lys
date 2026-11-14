@@ -146,55 +146,58 @@ function useAgentListRead(): void {
   }, [backendStatus])
 }
 
+/** The chat view's ways to open a conversation, and the job opened last. */
+type ConversationOpening = Readonly<{
+  /**
+   * Identity of the job the person last opened from its card, or undefined
+   * while they opened none from the view.
+   */
+  jobOpenedFromCardId: string | undefined
+  /**
+   * Closes history, pins the transcript, focuses the message field, and
+   * opens one conversation: a past conversation chosen in history, or a
+   * job's parent chosen on its notice.
+   */
+  handleOpenConversation: (conversationId: string) => void
+  /**
+   * Closes history, pins the transcript, records the job, and opens it: a
+   * job chosen on its card.
+   */
+  handleOpenJob: (jobId: string) => void
+}>
+
 /**
- * Presents the shown conversation, past conversations, and the composer.
+ * Opens the conversations the person chooses from the chat view, and keeps
+ * the job they last opened from its card.
  *
- * @remarks The shown conversation's panel owns its transcript, the cards of
- * its jobs, its pending-work announcement, and its scroll position; the
- * chat-view store owns opening and starting conversations; the history store
- * owns whether past conversations are shown; the surrounding shell owns
- * whether the transcript is pinned to its latest content. The agent store
- * owns the agent list, which the view reads when it appears and whenever the
- * backend starts running, so the transcript and the composer can name the
- * agent that answers and tell when it was deleted; leaving the view cancels
- * nothing. The component owns the message-field ref and the count of
- * conversations the person started from it; request cancellation is owned
- * by the composer, which stays mounted in every request phase. Command+K or
- * Control+K toggles past conversations, which then dim the workspace behind
- * a dialog docked above the composer. Opening a conversation from that
- * dialog, or a job from its card, closes the dialog, pins the transcript to
- * its latest content, and moves focus to the message field; the open itself
- * continues in the store. The open callback keeps its identity while
- * `onScrollPositionChange` keeps its own, so the transcript's messages are
- * not rendered again for a new one. Starting a conversation, from that
- * dialog or from the composer's deleted-agent notice, closes the dialog,
- * pins the transcript, and moves focus to the message field once the new
- * conversation is shown, when the field can take it. The history dialog is
- * loaded eagerly because it is small and opening it must not wait on a
- * module load.
- * @param props - Parent-owned transcript position and its change notification.
- * @returns The conversation workspace in its empty, active, or failed state.
+ * @param messageFieldRef - Host of the composer's message field, which takes
+ * focus when a conversation is opened.
+ * @param onScrollPositionChange - Receives `true` on every open, which pins
+ * the transcript before any scroll.
+ * @returns The job last opened from its card and both open handlers. Each
+ * handler keeps its identity while `onScrollPositionChange` keeps its own.
+ * @remarks The chat-view store owns opening, which continues there after a
+ * handler returns; the history store owns whether history is open. Opening a
+ * conversation moves focus to the message field at once, which takes it
+ * only while it is on. Opening a job moves no focus itself: the job turns
+ * the field off, and the job's notice gives its Back focus once the job is
+ * shown, because the card that had focus leaves with the parent's
+ * transcript.
  */
-export default function ChatView({
-  atBottom,
-  onScrollPositionChange
-}: ChatViewProps): ReactElement {
+function useConversationOpening(
+  messageFieldRef: RefObject<HTMLTextAreaElement | null>,
+  onScrollPositionChange: (atBottom: boolean) => void
+): ConversationOpening {
   const openConversation = useChatViewStore((state) => state.openConversation)
-  const resetConversation = useChatViewStore((state) => state.resetConversation)
-  const historyVisibility = useConversationHistoryStore(
-    (state) => state.visibility
-  )
   const closeConversationHistory = useConversationHistoryStore(
     (state) => state.closeConversationHistory
   )
-  const [startedConversationCount, setStartedConversationCount] = useState(0)
-  const messageFieldRef = useMessageFieldFocus(startedConversationCount)
-  useConversationHistoryShortcut()
-  useAgentListRead()
+  const [jobOpenedFromCardId, setJobOpenedFromCardId] = useState<string>()
 
   /**
    * Closes history and opens one conversation for reading and replying: a
-   * past conversation chosen in history, or a job chosen on its card.
+   * past conversation chosen in history, or a job's parent chosen on its
+   * notice.
    */
   const handleOpenConversation = useCallback(
     (conversationId: string): void => {
@@ -210,6 +213,68 @@ export default function ChatView({
       openConversation
     ]
   )
+  /** Closes history, records the job, and opens it: a job chosen on its card. */
+  const handleOpenJob = useCallback(
+    (jobId: string): void => {
+      closeConversationHistory()
+      onScrollPositionChange(true)
+      setJobOpenedFromCardId(jobId)
+      void openConversation(jobId)
+    },
+    [closeConversationHistory, onScrollPositionChange, openConversation]
+  )
+
+  return { jobOpenedFromCardId, handleOpenConversation, handleOpenJob }
+}
+
+/**
+ * Presents the shown conversation, past conversations, and the composer.
+ *
+ * @remarks The shown conversation's panel owns its transcript, the cards of
+ * its jobs, its pending-work announcement, and its scroll position; the
+ * chat-view store owns opening and starting conversations; the history store
+ * owns whether past conversations are shown; the surrounding shell owns
+ * whether the transcript is pinned to its latest content. The agent store
+ * owns the agent list, which the view reads when it appears and whenever the
+ * backend starts running, so the transcript and the composer can name the
+ * agent that answers and tell when it was deleted; leaving the view cancels
+ * nothing. The component owns the message-field ref and the count of
+ * conversations the person started from it, and the job they last opened
+ * from its card; request cancellation is owned by the composer, which stays
+ * mounted in every request phase. Command+K or Control+K toggles past
+ * conversations, which then dim the workspace behind a dialog docked above
+ * the composer. Opening a conversation from that dialog, or a job's parent
+ * from the job's notice, closes the dialog, pins the transcript to its
+ * latest content, and moves focus to the message field; opening a job from
+ * its card does the same, except that the job's notice gives its Back focus
+ * once the job is shown. The open itself continues in the store. The open
+ * callbacks keep their identities while `onScrollPositionChange` keeps its
+ * own, so the transcript's messages are not rendered again for a new one.
+ * Starting a conversation, from that dialog or from the composer's
+ * deleted-agent notice, closes the dialog, pins the transcript, and moves
+ * focus to the message field once the new conversation is shown, when the
+ * field can take it. The history dialog is loaded eagerly because it is
+ * small and opening it must not wait on a module load.
+ * @param props - Parent-owned transcript position and its change notification.
+ * @returns The conversation workspace in its empty, active, or failed state.
+ */
+export default function ChatView({
+  atBottom,
+  onScrollPositionChange
+}: ChatViewProps): ReactElement {
+  const resetConversation = useChatViewStore((state) => state.resetConversation)
+  const historyVisibility = useConversationHistoryStore(
+    (state) => state.visibility
+  )
+  const closeConversationHistory = useConversationHistoryStore(
+    (state) => state.closeConversationHistory
+  )
+  const [startedConversationCount, setStartedConversationCount] = useState(0)
+  const messageFieldRef = useMessageFieldFocus(startedConversationCount)
+  const { jobOpenedFromCardId, handleOpenConversation, handleOpenJob } =
+    useConversationOpening(messageFieldRef, onScrollPositionChange)
+  useConversationHistoryShortcut()
+  useAgentListRead()
 
   /**
    * Closes history, starts a new, empty conversation, and records the start,
@@ -226,7 +291,7 @@ export default function ChatView({
     <main className="app-shell__chat">
       <ShownConversationPanel
         atBottom={atBottom}
-        onOpenJob={handleOpenConversation}
+        onOpenJob={handleOpenJob}
         onScrollPositionChange={onScrollPositionChange}
       />
       {historyVisibility.status === "open" ? (
@@ -242,7 +307,9 @@ export default function ChatView({
         </>
       ) : null}
       <Composer
+        jobOpenedFromCardId={jobOpenedFromCardId}
         messageFieldRef={messageFieldRef}
+        onOpenConversation={handleOpenConversation}
         onStartConversation={handleStartConversation}
       />
     </main>

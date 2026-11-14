@@ -739,31 +739,38 @@ describe("ChatView", () => {
   })
 
   describe("job cards", () => {
+    /** Route key of reading job 1. */
+    const jobRoute = `GET /api/v1/conversations/${FIXTURE_JOB_ID}`
+
+    /** Route key of reading the conversation that job 1 belongs to. */
+    const parentRoute = `GET /api/v1/conversations/${FIXTURE_CONVERSATION_ID}`
+
+    /** Main conversation whose reply started job 1, which works. */
+    const parent = buildConversationWithJobs(
+      buildConversation(FIXTURE_CONVERSATION_ID, "News", [
+        buildUserMessage(14, "Get me the news"),
+        buildCompletedAssistantMessage(15, [
+          buildToolCallPart(65, 0, {
+            toolName: "delegate_work",
+            argumentText:
+              '{"agent":"nyx","title":"News","instructions":"Find the news."}',
+            status: "succeeded",
+            result: "Job 1 started.",
+            sourceNumbers: []
+          }),
+          buildTextPart(16, 1, "Nyx is on it.")
+        ])
+      ]),
+      [buildJob()]
+    )
+
     /**
-     * Shows, in a fresh chat view, a main conversation whose reply started
-     * job 1, which works.
+     * Shows, in a fresh chat view, {@link parent}.
      *
      * @param routes - Routes the case's backend adds.
      * @returns The backend observation handle.
      */
     async function startParentConversation(routes: BackendRoutes) {
-      const parent = buildConversationWithJobs(
-        buildConversation(FIXTURE_CONVERSATION_ID, "News", [
-          buildUserMessage(14, "Get me the news"),
-          buildCompletedAssistantMessage(15, [
-            buildToolCallPart(65, 0, {
-              toolName: "delegate_work",
-              argumentText:
-                '{"agent":"nyx","title":"News","instructions":"Find the news."}',
-              status: "succeeded",
-              result: "Job 1 started.",
-              sourceNumbers: []
-            }),
-            buildTextPart(16, 1, "Nyx is on it.")
-          ])
-        ]),
-        [buildJob()]
-      )
       const { backend } = startChatViewBackend(routes)
       const { useChatViewStore, ChatView } = await loadFreshChatView()
       act(() => {
@@ -778,8 +785,14 @@ describe("ChatView", () => {
       return backend
     }
 
-    it("opens a job from its card and names who wrote each message", async () => {
-      const jobRoute = `GET /api/v1/conversations/${FIXTURE_JOB_ID}`
+    /**
+     * Shows {@link parent} in a fresh chat view and opens job 1 from its
+     * card.
+     *
+     * @returns The backend observation handle and the case's user; the
+     * backend also serves {@link parent} again.
+     */
+    async function startOpenedJob() {
       // Lysiptera works on the job that Caliginia gave.
       const job = buildJobConversation(
         conversationSchema.parse({
@@ -791,12 +804,17 @@ describe("ChatView", () => {
         })
       )
       const backend = await startParentConversation({
-        [jobRoute]: () => buildJsonResponse(200, job)
+        [jobRoute]: () => buildJsonResponse(200, job),
+        [parentRoute]: () => buildJsonResponse(200, parent)
       })
       const user = userEvent.setup()
-
       await user.click(screen.getByRole("button", { name: "News, job 1" }))
       await waitForRenderedWork()
+      return { backend, user }
+    }
+
+    it("opens a job from its card and names who wrote each message", async () => {
+      const { backend } = await startOpenedJob()
 
       expect(listRequestsBesideMeasurements(backend).at(-1)?.routeKey).toBe(
         jobRoute
@@ -804,6 +822,43 @@ describe("ChatView", () => {
       expect(
         screen.getAllByRole("article").map((article) => article.textContent)
       ).toEqual(["CaliginiaFind the news.", "LysipteraHere is the news."])
+    })
+
+    it("moves focus to Back when a job opens from its card", async () => {
+      await startOpenedJob()
+
+      expect(
+        screen.getByRole("button", { name: "Back to the conversation" })
+      ).toHaveFocus()
+    })
+
+    it("goes back from a job to its conversation", async () => {
+      const { backend, user } = await startOpenedJob()
+
+      await user.click(
+        screen.getByRole("button", { name: "Back to the conversation" })
+      )
+      await waitForRenderedWork()
+
+      expect(listRequestsBesideMeasurements(backend).at(-1)?.routeKey).toBe(
+        parentRoute
+      )
+      expect(
+        screen.getByRole("button", { name: "News, job 1" })
+      ).toBeInTheDocument()
+    })
+
+    it("moves focus to the message field after going back", async () => {
+      const { user } = await startOpenedJob()
+
+      await user.click(
+        screen.getByRole("button", { name: "Back to the conversation" })
+      )
+      await waitForRenderedWork()
+
+      expect(
+        screen.getByRole("textbox", { name: "Message Caliginia" })
+      ).toHaveFocus()
     })
 
     it("stops a job from its card", async () => {

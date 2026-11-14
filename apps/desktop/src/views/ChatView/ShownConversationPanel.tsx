@@ -18,11 +18,9 @@ import {
   type JobCardPresentation
 } from "@/components/ChatViewComponents/job-presentation"
 import { useAnsweringAgent } from "@/lib/hooks/answeringAgent"
+import { useDelegatorName } from "@/lib/hooks/delegatorName"
 import { useAgentStore } from "@/lib/store/agents"
-import {
-  findConversationAgent,
-  formatConversationAgentName
-} from "@/lib/store/agents/conversation-agent"
+import { formatConversationAgentName } from "@/lib/store/agents/conversation-agent"
 import {
   type ChatRequestState,
   type ConversationOpenState,
@@ -175,25 +173,6 @@ function useJobCards(jobs: readonly Job[]): readonly JobCardPresentation[] {
     () => createJobCardPresentations(jobs, heldCalls, agentList),
     [jobs, heldCalls, agentList]
   )
-}
-
-/**
- * Names the agent that wrote the messages of the shown job.
- *
- * @param delegatorAgentCode - Code of the shown conversation's delegator,
- * null in a main conversation; read reactively.
- * @returns The delegator's name from the agent list, its code once the agent
- * is deleted or while the list is unread, or undefined when the shown
- * conversation is not a job.
- */
-function useDelegatorName(
-  delegatorAgentCode: string | null
-): string | undefined {
-  const agentList = useAgentStore((state) => state.list)
-  if (delegatorAgentCode === null) return undefined
-
-  const delegator = findConversationAgent(agentList, delegatorAgentCode)
-  return formatConversationAgentName(delegator)
 }
 
 /**

@@ -23,11 +23,6 @@ const SEARCH_CALL = buildToolCall(10, "search_files", {
   maxResults: 20
 })
 
-/** Call to the backend's page reader. */
-const PAGE_CALL = buildToolCall(11, "read_page", {
-  url: "https://example.com/docs"
-})
-
 /**
  * Builds the address of one call's answer in the fixture conversation.
  *
@@ -63,44 +58,6 @@ const WAITING_SEARCH: ShownToolCall = Object.freeze({
   }
 } satisfies ShownToolCall)
 
-/** Page read that waits for the person. */
-const WAITING_PAGE_READ: ShownToolCall = Object.freeze({
-  target: buildCallTarget(PAGE_CALL.id),
-  call: PAGE_CALL,
-  step: "approval",
-  answer: {
-    status: "awaiting-person",
-    definition: buildBackendToolDefinition("read_page"),
-    input: {
-      runner: "backend",
-      toolName: "read_page",
-      url: "https://example.com/docs"
-    }
-  }
-} satisfies ShownToolCall)
-
-/** Call to the backend's web search. */
-const WEB_SEARCH_CALL = buildToolCall(12, "web_search", {
-  query: "moths at night"
-})
-
-/** Web search that waits for the person. */
-const WAITING_WEB_SEARCH: ShownToolCall = Object.freeze({
-  target: buildCallTarget(WEB_SEARCH_CALL.id),
-  call: WEB_SEARCH_CALL,
-  step: "approval",
-  answer: {
-    status: "awaiting-person",
-    definition: buildBackendToolDefinition("web_search"),
-    input: {
-      runner: "backend",
-      toolName: "web_search",
-      query: "moths at night",
-      host: "api.tavily.com"
-    }
-  }
-} satisfies ShownToolCall)
-
 /** Tool of an MCP server whose call waits for the person. */
 const NOTES_SEARCH = buildMcpToolDefinition("notes", "search")
 
@@ -128,29 +85,17 @@ const WAITING_MCP_CALL: ShownToolCall = Object.freeze({
   }
 } satisfies ShownToolCall)
 
-/** Search whose result could not be sent to the backend after it ran. */
-const UNSENT_SEARCH: ShownToolCall = Object.freeze({
-  target: buildCallTarget(SEARCH_CALL.id),
-  call: SEARCH_CALL,
-  step: "run",
-  answer: {
-    status: "send-failed",
-    toolAnswer: { status: "succeeded", content: "{}" },
-    error: "Couldn't send the answer to Lys: The backend could not be reached."
-  }
-} satisfies ShownToolCall)
-
 /**
  * Renders the card for one shown call.
  *
- * @param props - Shown call and whether the composer holds a draft; the
- * answers default to recorders.
+ * @param props - Shown call, whether the composer holds a draft, and whether
+ * its field routes the answer keys; the answers are recorders.
  * @returns The recorders of the three answers.
  */
 function startToolApproval(
   props: Pick<
     ComponentProps<typeof ComposerToolApproval>,
-    "toolCall" | "hasDraft"
+    "toolCall" | "hasDraft" | "hasKeyShortcuts"
   >
 ) {
   const answers = {
@@ -165,7 +110,11 @@ function startToolApproval(
 describe("ComposerToolApproval", () => {
   describe("a call that waits for the person", () => {
     it("says which desktop tool was called, what it does with the machine, and what this call will do", () => {
-      startToolApproval({ toolCall: WAITING_SEARCH, hasDraft: false })
+      startToolApproval({
+        toolCall: WAITING_SEARCH,
+        hasDraft: false,
+        hasKeyShortcuts: true
+      })
 
       const card = screen.getByRole("group", {
         name: "Tool call waiting for your answer"
@@ -184,7 +133,28 @@ describe("ComposerToolApproval", () => {
     })
 
     it("names the page a backend read reads, and that the backend runs it", () => {
-      startToolApproval({ toolCall: WAITING_PAGE_READ, hasDraft: false })
+      const pageCall = buildToolCall(11, "read_page", {
+        url: "https://example.com/docs"
+      })
+      const waitingPageRead: ShownToolCall = {
+        target: buildCallTarget(pageCall.id),
+        call: pageCall,
+        step: "approval",
+        answer: {
+          status: "awaiting-person",
+          definition: buildBackendToolDefinition("read_page"),
+          input: {
+            runner: "backend",
+            toolName: "read_page",
+            url: "https://example.com/docs"
+          }
+        }
+      }
+      startToolApproval({
+        toolCall: waitingPageRead,
+        hasDraft: false,
+        hasKeyShortcuts: true
+      })
 
       const card = screen.getByRole("group", {
         name: "Tool call waiting for your answer"
@@ -200,8 +170,30 @@ describe("ComposerToolApproval", () => {
     })
 
     it("quotes a web search's whole query and says it is sent to Tavily", async () => {
+      const webSearchCall = buildToolCall(12, "web_search", {
+        query: "moths at night"
+      })
+      const waitingWebSearch: ShownToolCall = {
+        target: buildCallTarget(webSearchCall.id),
+        call: webSearchCall,
+        step: "approval",
+        answer: {
+          status: "awaiting-person",
+          definition: buildBackendToolDefinition("web_search"),
+          input: {
+            runner: "backend",
+            toolName: "web_search",
+            query: "moths at night",
+            host: "api.tavily.com"
+          }
+        }
+      }
       const user = userEvent.setup()
-      startToolApproval({ toolCall: WAITING_WEB_SEARCH, hasDraft: false })
+      startToolApproval({
+        toolCall: waitingWebSearch,
+        hasDraft: false,
+        hasKeyShortcuts: true
+      })
       const card = screen.getByRole("group", {
         name: "Tool call waiting for your answer"
       })
@@ -220,7 +212,11 @@ describe("ComposerToolApproval", () => {
 
     it("keeps the arguments hidden until asked, then lists each by name in the call's order", async () => {
       const user = userEvent.setup()
-      startToolApproval({ toolCall: WAITING_SEARCH, hasDraft: false })
+      startToolApproval({
+        toolCall: WAITING_SEARCH,
+        hasDraft: false,
+        hasKeyShortcuts: true
+      })
       const toggle = screen.getByRole("button", { name: "Arguments" })
       const whileHidden = {
         isExpanded: toggle.getAttribute("aria-expanded"),
@@ -245,7 +241,11 @@ describe("ComposerToolApproval", () => {
     })
 
     it("asks whether to run an MCP tool on its server, with its arguments shown at once, objects as JSON", () => {
-      startToolApproval({ toolCall: WAITING_MCP_CALL, hasDraft: false })
+      startToolApproval({
+        toolCall: WAITING_MCP_CALL,
+        hasDraft: false,
+        hasKeyShortcuts: true
+      })
 
       const card = screen.getByRole("group", {
         name: "Tool call waiting for your answer"
@@ -277,7 +277,8 @@ describe("ComposerToolApproval", () => {
       const call = buildToolCall(14, NOTES_SEARCH.name, {})
       startToolApproval({
         toolCall: { ...WAITING_MCP_CALL, call },
-        hasDraft: false
+        hasDraft: false,
+        hasKeyShortcuts: true
       })
 
       const card = screen.getByRole("group", {
@@ -295,7 +296,11 @@ describe("ComposerToolApproval", () => {
 
     it("hides the arguments again on a second press", async () => {
       const user = userEvent.setup()
-      startToolApproval({ toolCall: WAITING_SEARCH, hasDraft: false })
+      startToolApproval({
+        toolCall: WAITING_SEARCH,
+        hasDraft: false,
+        hasKeyShortcuts: true
+      })
       const toggle = screen.getByRole("button", { name: "Arguments" })
 
       await user.click(toggle)
@@ -309,7 +314,8 @@ describe("ComposerToolApproval", () => {
       const user = userEvent.setup()
       const answers = startToolApproval({
         toolCall: WAITING_SEARCH,
-        hasDraft: false
+        hasDraft: false,
+        hasKeyShortcuts: true
       })
       const allow = screen.getByRole("button", { name: "Allow once" })
       const reject = screen.getByRole("button", { name: "Reject" })
@@ -331,7 +337,8 @@ describe("ComposerToolApproval", () => {
       const user = userEvent.setup()
       const answers = startToolApproval({
         toolCall: WAITING_SEARCH,
-        hasDraft: true
+        hasDraft: true,
+        hasKeyShortcuts: true
       })
       const allow = screen.getByRole("button", { name: "Allow anyway" })
 
@@ -347,14 +354,50 @@ describe("ComposerToolApproval", () => {
       expect(answers.onAllowToolCall).toHaveBeenCalledOnce()
       expect(answers.onRejectToolCall).not.toHaveBeenCalled()
     })
+    it("names no keys when the field routes none", async () => {
+      const user = userEvent.setup()
+      const answers = startToolApproval({
+        toolCall: WAITING_SEARCH,
+        hasDraft: false,
+        hasKeyShortcuts: false
+      })
+      const allow = screen.getByRole("button", { name: "Allow once" })
+      const reject = screen.getByRole("button", { name: "Reject" })
+
+      await user.click(allow)
+      await user.click(reject)
+
+      expect(allow).not.toHaveAttribute("aria-keyshortcuts")
+      expect(reject).not.toHaveAttribute("aria-keyshortcuts")
+      expect(allow).toHaveTextContent(/^Allow once$/)
+      expect(reject).toHaveTextContent(/^Reject$/)
+      expect(
+        screen.queryByText("Or type below to say no, with a reason")
+      ).not.toBeInTheDocument()
+      expect(answers.onAllowToolCall).toHaveBeenCalledOnce()
+      expect(answers.onRejectToolCall).toHaveBeenCalledOnce()
+    })
   })
 
   describe("an answer that failed to send", () => {
     it("announces the reason as an alert and offers only to try again", async () => {
+      // The search ran, and its result could not be sent to the backend.
+      const unsentSearch: ShownToolCall = {
+        target: buildCallTarget(SEARCH_CALL.id),
+        call: SEARCH_CALL,
+        step: "run",
+        answer: {
+          status: "send-failed",
+          toolAnswer: { status: "succeeded", content: "{}" },
+          error:
+            "Couldn't send the answer to Lys: The backend could not be reached."
+        }
+      }
       const user = userEvent.setup()
       const answers = startToolApproval({
-        toolCall: UNSENT_SEARCH,
-        hasDraft: false
+        toolCall: unsentSearch,
+        hasDraft: false,
+        hasKeyShortcuts: true
       })
       const card = screen.getByRole("group", { name: "Tool answer not sent" })
 

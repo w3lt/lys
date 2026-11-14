@@ -8,7 +8,11 @@ import {
   within
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { chatReplyEventSchema } from "@lys/protocol"
+import {
+  activityEventSchema,
+  chatReplyEventSchema,
+  type ChatToolCall
+} from "@lys/protocol"
 import {
   CALIGINIA_AGENT_CODE,
   conversationSchema,
@@ -19,6 +23,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import type { HeldToolCall } from "@/lib/store/tool-calls"
+import { buildActivityReply } from "../support/activityFixtures"
 import { buildAgentListPage, buildBuiltInAgent } from "../support/agentFixtures"
 import { buildPngFile, buildTextFile } from "../support/attachmentFixtures"
 import {
@@ -40,10 +45,14 @@ import {
   buildConversation,
   buildConversationListPage,
   buildConversationMetadata,
+  buildDelegatorMessage,
+  buildJobConversation,
   buildTextPart,
   buildStreamingAssistantMessage,
   buildUserMessage,
-  FIXTURE_CONVERSATION_ID
+  FIXTURE_CONVERSATION_ID,
+  FIXTURE_JOB_ID,
+  FIXTURE_JOB_REPLY_ID
 } from "../support/conversationFixtures"
 import { buildLlmInfo } from "../support/modelFixtures"
 import { startNativeHostFake } from "../support/nativeHostFake"
@@ -62,9 +71,6 @@ import { buildToolCall, buildToolDefinition } from "../support/toolFixtures"
 
 /** Route key of the chat request. */
 const CHAT_ROUTE = "POST /api/v1/chat"
-
-/** Route key of the history list read. */
-const HISTORY_ROUTE = "GET /api/v1/conversations"
 
 /** Reply the first turn streams. */
 const REPLY = buildStreamingAssistantMessage(3, "")
@@ -136,15 +142,22 @@ const WAITING_READ: HeldToolCall = Object.freeze({
 /** Code of a stored agent the user deleted after talking to it. */
 const DELETED_AGENT_CODE = "web-researcher"
 
+/** Reply of {@link JOB} that still generates. */
+const JOB_REPLY = buildStreamingAssistantMessage(61, "Looking for the news")
+
 /**
- * Pasted passage of 1,319 characters, long enough for the composer to divert
- * it from the draft (1,200 or more). It has no whitespace at either end and
- * no character JSON escapes, so a request carrying it contains it verbatim.
+ * Job 1 of the fixture conversation: Caliginia gave it, Lysiptera works on
+ * it, and its reply {@link JOB_REPLY} still generates.
  */
-const LONG_PASTE = Array.from(
-  { length: 60 },
-  () => "a long pasted passage"
-).join(" ")
+const JOB = buildJobConversation(
+  conversationSchema.parse({
+    ...buildConversation(FIXTURE_JOB_ID, "News", [
+      buildDelegatorMessage(68, "Find the news."),
+      JOB_REPLY
+    ]),
+    agentCode: LYSIPTERA_AGENT_CODE
+  })
+)
 
 /** Content of a file the user attaches; no character in it is escaped. */
 const NOTES_CONTENT = "Renew the passport before March."
@@ -248,6 +261,50 @@ async function loadFreshComposerWithWaitingCall() {
 }
 
 /**
+ * Loads a fresh composer that shows {@link JOB}.
+ *
+ * @returns The stores and the composer component of {@link loadFreshComposer}.
+ */
+async function loadFreshJobComposer() {
+  const loaded = await loadFreshComposer()
+  loaded.useChatViewStore.setState({
+    conversation: createStoredChatViewConversation(JOB)
+  })
+  return loaded
+}
+
+/**
+ * Loads a fresh composer that shows {@link JOB} while its reply waits for the
+ * person to answer a call, as the activity stream reported it.
+ *
+ * @param call - Call of {@link JOB_REPLY} shown for approval, to the
+ * `read_text_file` tool.
+ * @returns The stores and the composer component of {@link loadFreshComposer}.
+ * @remarks The tool list holds `read_text_file`, so the prompt needs no list
+ * read; the tool-call store holds the prompt as it does once an activity
+ * snapshot listed it.
+ */
+async function loadFreshJobComposerWithPrompt(call: ChatToolCall) {
+  const loaded = await loadFreshJobComposer()
+  const { useToolStore } = await import("@/lib/store/tools")
+  const { useToolCallStore } = await import("@/lib/store/tool-calls")
+  useToolStore.setState({
+    list: {
+      status: "loaded",
+      tools: [buildToolDefinition("read_text_file")],
+      unavailableTools: new Map()
+    }
+  })
+  await useToolCallStore.getState().handleActivityEvent(
+    activityEventSchema.parse({
+      type: "activity-snapshot",
+      replies: [buildActivityReply({ pendingToolApprovals: [call] })]
+    })
+  )
+  return loaded
+}
+
+/**
  * Builds a stored conversation answered by {@link DELETED_AGENT_CODE}, which
  * {@link BUILT_IN_AGENT_PAGE} no longer lists.
  *
@@ -320,8 +377,8 @@ function listChatBodies(backend: ReturnType<typeof startBackendFake>) {
  * Tells whether a chat request body carries a text.
  *
  * @param body - JSON-decoded chat request body.
- * @param text - Text without characters JSON escapes, such as
- * {@link LONG_PASTE} or {@link NOTES_CONTENT}.
+ * @param text - Text without characters JSON escapes, such as a long
+ * paste or {@link NOTES_CONTENT}.
  * @returns Whether the serialized body contains the text as written or
  * base64-encoded, the two forms in which a JSON body can carry a file's
  * content; the request contract does not fix which one an attachment uses.
@@ -505,7 +562,12 @@ describe("Composer", () => {
       const { useChatViewStore, Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       const field = getMessageField()
@@ -526,7 +588,9 @@ describe("Composer", () => {
 
       render(
         <Composer
+          jobOpenedFromCardId={undefined}
           messageFieldRef={messageFieldRef}
+          onOpenConversation={vi.fn()}
           onStartConversation={vi.fn()}
         />
       )
@@ -540,7 +604,12 @@ describe("Composer", () => {
       const { generation } = useLysStore.getState().settings
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.type(getMessageField(), "Hello{Enter}")
@@ -562,7 +631,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.type(getMessageField(), "Hello{Shift>}{Enter}{/Shift}there")
@@ -577,7 +651,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.type(getMessageField(), "  {Enter}")
@@ -592,7 +671,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.type(getMessageField(), "Hello")
 
@@ -607,7 +691,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.click(getMessageField())
 
@@ -624,7 +713,12 @@ describe("Composer", () => {
       const { useChatViewStore, Composer } = await loadFreshComposer()
       useChatViewStore.setState({ inputDraft: "Konnichi" })
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       fireEvent.keyDown(getMessageField(), { key: "Enter", isComposing: true })
@@ -636,17 +730,29 @@ describe("Composer", () => {
     })
 
     it("keeps a long paste in the draft and sends it with the message", async () => {
+      // 1,319 characters, enough for the composer to divert it from the draft
+      // (1,200 or more). It has no whitespace at either end and no character
+      // JSON escapes, so a request carrying it contains it verbatim.
+      const longPaste = Array.from(
+        { length: 60 },
+        () => "a long pasted passage"
+      ).join(" ")
       const { backend, streams } = startChatBackend()
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.type(getMessageField(), "Summarize this: ")
 
-      await user.paste(LONG_PASTE)
+      await user.paste(longPaste)
       const draftAfterPaste = getMessageField()
-      expect(draftAfterPaste).toHaveValue(`Summarize this: ${LONG_PASTE}`)
+      expect(draftAfterPaste).toHaveValue(`Summarize this: ${longPaste}`)
       await user.keyboard("{Enter}")
       await waitForRenderedWork()
 
@@ -655,7 +761,7 @@ describe("Composer", () => {
       ).toBeNull()
       expect(
         listChatBodies(backend).map((body) =>
-          isTextInChatBody(body, LONG_PASTE)
+          isTextInChatBody(body, longPaste)
         ),
         "whether each chat request carries the pasted text"
       ).toEqual([true])
@@ -671,7 +777,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.type(getMessageField(), "Hello{Enter}")
       await waitForRenderedWork()
@@ -699,7 +810,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.type(getMessageField(), "Hello{Enter}")
       await waitForRenderedWork()
@@ -729,7 +845,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.type(getMessageField(), "Hello{Enter}")
       await waitForRenderedWork()
@@ -760,7 +881,12 @@ describe("Composer", () => {
       })
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       expect(getMessageField()).toHaveAttribute(
@@ -786,7 +912,12 @@ describe("Composer", () => {
       const { backendAddress } = useLysStore.getState().settings.runtime
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       expect(listStatusTexts()).toContainEqual(
@@ -856,7 +987,9 @@ describe("Composer", () => {
         const user = userEvent.setup()
         render(
           <Composer
+            jobOpenedFromCardId={undefined}
             messageFieldRef={createRef()}
+            onOpenConversation={vi.fn()}
             onStartConversation={vi.fn()}
           />
         )
@@ -896,7 +1029,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer(TWO_LOADED)
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       expect(screen.getByRole("button", { name: "gemma-3" })).toHaveAttribute(
@@ -918,7 +1056,12 @@ describe("Composer", () => {
       const { useLysStore, Composer } = await loadFreshComposer(TWO_LOADED)
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await openMenuWithKeyboard(
@@ -947,7 +1090,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer(TWO_LOADED)
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await openMenuWithKeyboard(
@@ -974,7 +1122,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await openMenuWithKeyboard(
@@ -1010,7 +1163,9 @@ describe("Composer", () => {
       const user = userEvent.setup()
       render(
         <Composer
+          jobOpenedFromCardId={undefined}
           messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
           onStartConversation={onStartConversation}
         />
       )
@@ -1024,6 +1179,9 @@ describe("Composer", () => {
         "This conversation is read-only."
       )
       expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+      expect(
+        screen.getByRole("button", { name: "Add to this message" })
+      ).toBeDisabled()
       expect(listStatusTexts()).toContain(DELETED_CONVERSATION_AGENT_MESSAGE)
 
       // The notice sits above the field, so its button precedes the session
@@ -1052,7 +1210,12 @@ describe("Composer", () => {
         )
       })
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       const statusTexts = listStatusTexts()
@@ -1079,7 +1242,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposerWithWaitingCall()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.type(getMessageField(), "{Enter}")
@@ -1114,7 +1282,9 @@ describe("Composer", () => {
         const user = userEvent.setup()
         render(
           <Composer
+            jobOpenedFromCardId={undefined}
             messageFieldRef={createRef()}
+            onOpenConversation={vi.fn()}
             onStartConversation={vi.fn()}
           />
         )
@@ -1143,7 +1313,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposerWithWaitingCall()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.type(getMessageField(), "{Escape}")
@@ -1171,7 +1346,12 @@ describe("Composer", () => {
       useChatViewStore.setState({ inputDraft: "Use the other folder" })
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.click(screen.getByRole("button", { name: "Reject" }))
@@ -1196,7 +1376,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposerWithWaitingCall()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.type(getMessageField(), "Wait{Shift>}{Enter}{/Shift}")
@@ -1232,7 +1417,12 @@ describe("Composer", () => {
       useChatViewStore.setState({ inputDraft: "Keep this" })
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.type(getMessageField(), "{Escape}")
@@ -1258,7 +1448,9 @@ describe("Composer", () => {
         useChatViewStore.setState({ inputDraft: "Konnichi" })
         render(
           <Composer
+            jobOpenedFromCardId={undefined}
             messageFieldRef={createRef()}
+            onOpenConversation={vi.fn()}
             onStartConversation={vi.fn()}
           />
         )
@@ -1282,7 +1474,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposerWithWaitingCall()
 
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       expect(listStatusTexts()).toContain(
@@ -1291,18 +1488,188 @@ describe("Composer", () => {
     })
   })
 
+  describe("a job", () => {
+    it("turns the field, the attach menu, and file drops off in a job", async () => {
+      const { useChatViewStore, Composer } = await loadFreshAttachingComposer()
+      useChatViewStore.setState({
+        conversation: createStoredChatViewConversation(JOB)
+      })
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+      const field = screen.getByRole("textbox", { name: "Message Lysiptera" })
+
+      fireEvent.dragOver(field, { dataTransfer: { files: [] } })
+      const dropHint = screen.queryByText("release to add to context")
+      sendFileDrop(field, [buildTextFile("dropped.txt", "x")])
+      await waitForRenderedWork()
+
+      expect(field).toBeDisabled()
+      expect(field).toHaveAttribute(
+        "placeholder",
+        "This conversation is read-only."
+      )
+      expect(
+        screen.getByRole("button", { name: "Add to this message" })
+      ).toBeDisabled()
+      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+      expect(dropHint).toBeNull()
+      expect(listStagedNames(["dropped.txt"])).toEqual([])
+    })
+
+    it("keeps Stop working while the job's reply streams", async () => {
+      const jobRoute = `GET /api/v1/conversations/${FIXTURE_JOB_ID}`
+      const replyEventsRoute = `GET /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/events`
+      const stopRoute = `POST /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/stop`
+      const snapshot = chatReplyEventSchema.parse({
+        type: "reply-snapshot",
+        conversationTitle: "News",
+        assistantMessage: JOB_REPLY,
+        sources: [],
+        pendingToolCalls: [],
+        pendingToolApprovals: []
+      })
+      const follows: BackendEventStream[] = []
+      const backend = startBackendFake({
+        ...MEASURING_BACKEND_ROUTES,
+        [jobRoute]: () => buildJsonResponse(200, JOB),
+        [replyEventsRoute]: () => {
+          const follow = startBackendEventStream()
+          follow.sendEvent(snapshot)
+          follows.push(follow)
+          return follow.response
+        },
+        [stopRoute]: () => new Response(null, { status: 204 })
+      })
+      const { useChatViewStore, Composer } = await loadFreshComposer()
+      const user = userEvent.setup()
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+      act(() => void useChatViewStore.getState().openConversation(JOB.id))
+      await waitForRenderedWork()
+
+      await user.click(screen.getByRole("button", { name: "Stop reply" }))
+      await waitForRenderedWork()
+
+      expect(
+        listRequestsBesideMeasurements(backend)
+          .map((request) => request.routeKey)
+          .filter((routeKey) => routeKey !== replyEventsRoute)
+      ).toEqual([jobRoute, stopRoute])
+      await act(async () => {
+        follows.forEach((follow) => {
+          follow.sendEvent({ type: "interrupted" })
+          follow.close()
+        })
+        await waitForMicrotasks()
+      })
+    })
+
+    it("asks the parent to open the parent conversation", async () => {
+      const { Composer } = await loadFreshJobComposer()
+      const onOpenConversation = vi.fn()
+      const user = userEvent.setup()
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={onOpenConversation}
+          onStartConversation={vi.fn()}
+        />
+      )
+      const back = screen.getByRole("button", {
+        name: "Back to the conversation"
+      })
+      // The job was not opened from its card, so nothing moved focus.
+      const focusedBeforePress = document.activeElement
+
+      await user.click(back)
+
+      expect(focusedBeforePress).toBe(document.body)
+      expect(listStatusTexts()).toContain(
+        "This is a job from Caliginia. You can read it and stop it."
+      )
+      expect(onOpenConversation.mock.calls).toEqual([[FIXTURE_CONVERSATION_ID]])
+    })
+
+    it("answers a job's own prompt by its buttons, without a reason, and keeps the draft", async () => {
+      const jobCall = buildToolCall(70, "read_text_file")
+      const approvalRoute = `POST /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/tool-approvals/${jobCall.id}`
+      startNativeHostFake({})
+      const backend = startBackendFake({
+        ...MEASURING_BACKEND_ROUTES,
+        [approvalRoute]: () => new Response(null, { status: 204 })
+      })
+      const { useChatViewStore, Composer } =
+        await loadFreshJobComposerWithPrompt(jobCall)
+      useChatViewStore.setState({ inputDraft: "later" })
+      const user = userEvent.setup()
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+      const allowNames = screen
+        .getAllByRole("button", { name: /^Allow/ })
+        .map((button) => button.textContent?.trim())
+      const reject = screen.getByRole("button", { name: "Reject" })
+
+      await user.click(reject)
+      await waitForRenderedWork()
+
+      expect(allowNames).toEqual(["Allow once"])
+      expect(reject).not.toHaveAttribute("aria-keyshortcuts")
+      expect(
+        listRequestsBesideMeasurements(backend).map((request) => [
+          request.routeKey,
+          request.body
+        ])
+      ).toEqual([
+        [
+          approvalRoute,
+          {
+            status: "rejected",
+            reason: "declined",
+            content: "The person declined this call."
+          }
+        ]
+      ])
+      expect(useChatViewStore.getState().inputDraft).toBe("later")
+    })
+  })
+
   describe("session controls", () => {
     it("opens past conversations and closes them again, stating which", async () => {
+      const historyRoute = "GET /api/v1/conversations"
       startBackendFake({
         ...MEASURING_BACKEND_ROUTES,
-        [HISTORY_ROUTE]: () =>
+        [historyRoute]: () =>
           buildJsonResponse(200, buildConversationListPage([]))
       })
       const { useConversationHistoryStore, Composer } =
         await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       const history = screen.getByRole("button", { name: "Past conversations" })
 
@@ -1338,7 +1705,12 @@ describe("Composer", () => {
       })
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.click(screen.getByRole("button", { name: "New conversation" }))
@@ -1351,7 +1723,12 @@ describe("Composer", () => {
       const { useLysStore, Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.click(screen.getByRole("button", { name: "Settings" }))
@@ -1363,7 +1740,12 @@ describe("Composer", () => {
       const { useLysStore, Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await openMenuWithKeyboard(
@@ -1382,7 +1764,12 @@ describe("Composer", () => {
       const { useLysStore, Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.click(screen.getByRole("button", { name: /^Context window/ }))
@@ -1402,7 +1789,12 @@ describe("Composer", () => {
       const { backend } = startChatBackend()
       const { Composer } = await loadFreshComposer()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await waitForRenderedWork()
@@ -1434,7 +1826,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.type(getMessageField(), "Summarize this{Enter}")
@@ -1454,7 +1851,12 @@ describe("Composer", () => {
       const { useChatViewStore, Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.type(getMessageField(), "Summarize this")
       await waitForRenderedWork()
@@ -1493,7 +1895,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.type(getMessageField(), "Hello")
@@ -1516,7 +1923,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshAttachingComposer()
       const user = userEvent.setup()
       const { container } = render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.upload(getFileInput(container), [
@@ -1548,7 +1960,9 @@ describe("Composer", () => {
       const { container } = render(
         <StrictMode>
           <Composer
+            jobOpenedFromCardId={undefined}
             messageFieldRef={createRef()}
+            onOpenConversation={vi.fn()}
             onStartConversation={vi.fn()}
           />
         </StrictMode>
@@ -1572,7 +1986,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshAttachingComposer()
       const user = userEvent.setup()
       const { container } = render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.upload(
         getFileInput(container),
@@ -1596,7 +2015,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshAttachingComposer()
       const user = userEvent.setup()
       const { container } = render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       const regionsBefore = screen.getAllByRole("status")
       await user.upload(
@@ -1620,7 +2044,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshAttachingComposer()
       const user = userEvent.setup()
       const { container } = render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       const sentence = "The file notes.md is already uploaded"
       await user.upload(
@@ -1650,7 +2079,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshComposer()
       const user = userEvent.setup()
       const { container } = render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
 
       await user.upload(getFileInput(container), buildPngFile("photo.png"))
@@ -1663,7 +2097,12 @@ describe("Composer", () => {
     it("stages dropped files and shows the drop hint only while dragging", async () => {
       const { Composer } = await loadFreshAttachingComposer()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       const field = getMessageField()
 
@@ -1680,7 +2119,12 @@ describe("Composer", () => {
     it("hides the drop hint when the drag leaves the field", async () => {
       const { Composer } = await loadFreshComposer()
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       const field = getMessageField()
       fireEvent.dragOver(field, { dataTransfer: { files: [] } })
@@ -1695,7 +2139,12 @@ describe("Composer", () => {
         buildUnreachableRuntime("stopped")
       )
       render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       const field = getMessageField()
 
@@ -1712,7 +2161,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshAttachingComposer()
       const user = userEvent.setup()
       const { container } = render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.type(getMessageField(), "Summarize this")
 
@@ -1733,7 +2187,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshAttachingComposer()
       const user = userEvent.setup()
       const { container } = render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.type(getMessageField(), "Summarize this")
 
@@ -1754,7 +2213,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshAttachingComposer()
       const user = userEvent.setup()
       const { container } = render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.upload(
         getFileInput(container),
@@ -1776,7 +2240,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshAttachingComposer()
       const user = userEvent.setup()
       const { container } = render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.upload(getFileInput(container), buildPngFile("photo.png"))
       await waitForRenderedWork()
@@ -1796,7 +2265,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshAttachingComposer()
       const user = userEvent.setup()
       const { container } = render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.upload(
         getFileInput(container),
@@ -1828,7 +2302,12 @@ describe("Composer", () => {
       const { Composer } = await loadFreshAttachingComposer()
       const user = userEvent.setup()
       const { container } = render(
-        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
       )
       await user.upload(
         getFileInput(container),

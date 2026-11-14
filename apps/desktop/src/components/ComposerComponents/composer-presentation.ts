@@ -72,6 +72,20 @@ export type ReconnectActionState = {
   readonly provider: LlmProviderTarget
 }
 
+/** Facts that choose the composer textarea's placeholder. */
+export type ComposerPlaceholderInput = {
+  /** Current local generation availability. */
+  readonly connection: LocalRuntimeConnection
+  /** Chat work that keeps the composer from sending. */
+  readonly activity: ComposerActivity
+  /** Agent that answers the next message. */
+  readonly agent: ConversationAgent
+  /** Name of the active provider. */
+  readonly providerName: string
+  /** Whether the shown conversation is a job, which the person only reads. */
+  readonly isJob: boolean
+}
+
 /**
  * Calculates the composer's view of local generation availability.
  *
@@ -228,23 +242,21 @@ export function calculateComposerActivity(
 /**
  * Formats the composer textarea placeholder.
  *
- * @param connection - Current local generation availability.
- * @param activity - Chat work that keeps the composer from sending.
- * @param agent - Agent that answers the next message.
- * @param providerName - Name of the active provider.
+ * @param input - Availability, chat work, answering agent, provider name,
+ * and whether the shown conversation is a job.
  * @returns The placeholder shown while the field is empty: what the composer
- * waits on, that a conversation whose agent was deleted is read-only, or an
- * invitation naming the agent.
+ * waits on, that a job or a conversation whose agent was deleted is
+ * read-only, or an invitation naming the agent.
  */
 export function formatComposerPlaceholder(
-  connection: LocalRuntimeConnection,
-  activity: ComposerActivity,
-  agent: ConversationAgent,
-  providerName: string
+  input: ComposerPlaceholderInput
 ): string {
+  const { connection, activity, agent } = input
   if (connection === "offline") return "Waiting on the backend…"
-  if (connection !== "ready") return `Waiting on ${providerName}…`
-  if (agent.status === "deleted") return "This conversation is read-only."
+  if (connection !== "ready") return `Waiting on ${input.providerName}…`
+  if (input.isJob || agent.status === "deleted") {
+    return "This conversation is read-only."
+  }
 
   switch (activity) {
     case "idle":

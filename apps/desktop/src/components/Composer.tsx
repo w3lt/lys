@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useAnsweringAgent } from "@/lib/hooks/answeringAgent"
 import { useChatContextMeasurement } from "@/lib/hooks/chatContextMeasurement"
+import { useDelegatorName } from "@/lib/hooks/delegatorName"
 import { useLysStore } from "@/lib/store"
 import { useAgentStore } from "@/lib/store/agents"
 import {
@@ -27,6 +28,7 @@ import ComposerAgentMenu from "./ComposerComponents/ComposerAgentMenu"
 import ComposerAttachmentTray from "./ComposerComponents/ComposerAttachmentTray"
 import ComposerContextMeter from "./ComposerComponents/ComposerContextMeter"
 import ComposerDeletedAgentNotice from "./ComposerComponents/ComposerDeletedAgentNotice"
+import ComposerJobNotice from "./ComposerComponents/ComposerJobNotice"
 import ComposerModelMenu from "./ComposerComponents/ComposerModelMenu"
 import ComposerOfflineBanner from "./ComposerComponents/ComposerOfflineBanner"
 import ComposerPlusMenu from "./ComposerComponents/ComposerPlusMenu"
@@ -53,7 +55,8 @@ export type ComposerProps = {
    * Parent-owned ref attached to the message field.
    *
    * @remarks The parent uses it only to move focus into the field after the
-   * user opens or starts a conversation.
+   * user opens or starts a conversation; the job notice uses it to move
+   * focus into the field after its Back leaves with focus.
    */
   readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
   /**
@@ -61,6 +64,17 @@ export type ComposerProps = {
    * message field once that conversation is shown.
    */
   readonly onStartConversation: () => void
+  /**
+   * Requests that the parent open a conversation, by its identity: a job's
+   * parent, from the job's notice.
+   */
+  readonly onOpenConversation: (conversationId: string) => void
+  /**
+   * Identity of the job the person last opened from its card, or undefined
+   * while they opened none; the job notice's Back takes focus as it appears
+   * for that job.
+   */
+  readonly jobOpenedFromCardId: string | undefined
 }
 
 /**
@@ -108,13 +122,22 @@ export type ComposerProps = {
  * selects the agent of the new conversation from the agent store's list, and
  * once a conversation is shown or its first reply is awaited that agent is
  * fixed. The field is named after the agent. When the shown conversation's
- * agent was deleted, the field and Send are disabled and a notice above the
- * field offers a new conversation; the conversation stays readable. The
- * notice's status line stays rendered while it is empty, and its New
- * conversation button asks the parent for the conversation, because the
- * button leaves with the notice and the parent moves focus to the field. The
- * menu's Start a new one resets the conversation in the store instead and
- * keeps the menu open, so the agent can be chosen at once.
+ * agent was deleted, the field, the add menu, file drops, and Send are off
+ * and a notice above the field offers a new conversation; the conversation
+ * stays readable. The notice's status line stays rendered while it is empty,
+ * and its New conversation button asks the parent for the conversation,
+ * because the button leaves with the notice and the parent moves focus to
+ * the field. The menu's Start a new one resets the conversation in the store
+ * instead and keeps the menu open, so the agent can be chosen at once.
+ *
+ * A job is read-only, as a conversation whose agent was deleted is: the
+ * field, the add menu, file drops, and Send are off, and a notice above the
+ * field, which stands in for the deleted-agent notice, names the agent that
+ * gave the job and offers Back to the conversation, which asks the parent to
+ * open the job's parent. Stop keeps working while the job's reply is
+ * followed. Back takes focus as it appears for the job the person opened
+ * from its card; when it leaves while it has focus, focus moves to the
+ * field.
  *
  * Above the field, the tool-call prompt shows the first tool call of the
  * shown conversation that waits for the person or whose answer failed to
@@ -123,7 +146,9 @@ export type ComposerProps = {
  * rejects it with the draft as the reason, and Enter without Shift allows it
  * once when the draft is empty or rejects it with the draft as the reason
  * otherwise. A rejection, from the field or the card, clears the draft; Allow
- * anyway keeps it.
+ * anyway keeps it. In a job the field is off and routes no keys, so only the
+ * card's buttons answer, the card names no keys, and a rejection carries no
+ * reason and keeps the draft, which was not written for the call.
  *
  * Files chosen through the add menu or dropped on the field are handed to
  * the store, which reads and admits them and lists them in the tray above
@@ -139,12 +164,15 @@ export type ComposerProps = {
  * wherever they appear; staged text files are read on request, so they are
  * not counted.
  *
- * @param props - Parent-owned ref for the message field and the request
- * for a new conversation.
+ * @param props - Parent-owned ref for the message field, the requests for a
+ * new conversation and for opening one, and the job last opened from its
+ * card.
  * @returns The rendered conversation composer.
  */
 export function Composer({
+  jobOpenedFromCardId,
   messageFieldRef,
+  onOpenConversation,
   onStartConversation
 }: ComposerProps): ReactElement {
   const backendServerInfo = useLysStore((state) => state.backendServerInfo)
@@ -177,6 +205,9 @@ export function Composer({
   const answeringAgent = useAnsweringAgent()
   const agentName = formatConversationAgentName(answeringAgent)
   const isAgentDeleted = answeringAgent.status === "deleted"
+  const job = conversation?.kind === "job" ? conversation : undefined
+  const isJob = job !== undefined
+  const delegatorName = useDelegatorName(job?.delegatorAgentCode ?? null)
 
   const isHistoryOpen = useConversationHistoryStore(
     (state) => state.visibility.status === "open"
@@ -225,19 +256,27 @@ export function Composer({
     contextMeter.usage.overflowTokens > 0
 
   const canSubmitDraft = inputDraft.trim().length > 0 && !isOverWindow
-  const isFieldDisabled = isUnavailable || isAgentDeleted
+  const isFieldDisabled = isUnavailable || isAgentDeleted || isJob
   const isSendDisabled =
     activity !== "idle" || isFieldDisabled || !canSubmitDraft
 
   /**
    * Rejects the waiting tool call with the draft as the person's reason, and
-   * clears the draft.
+   * clears the draft; in a job, rejects it without a reason and keeps the
+   * draft.
    *
    * @param callId - Call that waits for the person.
    */
   function rejectShownToolCall(callId: string): void {
-    void useToolCallStore.getState().rejectToolCall(callId, inputDraft)
-    setInputDraft("")
+    void useToolCallStore
+      .getState()
+      .rejectToolCall(callId, isJob ? "" : inputDraft)
+    if (!isJob) setInputDraft("")
+  }
+
+  /** Asks the parent to open the shown job's parent conversation. */
+  function handleOpenParentConversation(): void {
+    if (job !== undefined) onOpenConversation(job.parentConversationId)
   }
 
   /**
@@ -311,7 +350,7 @@ export function Composer({
    */
   function handleDragOver(event: DragEvent<HTMLDivElement>): void {
     event.preventDefault()
-    if (isUnavailable || isDropping) return
+    if (isFieldDisabled || isDropping) return
 
     setIsDropping(true)
   }
@@ -344,7 +383,7 @@ export function Composer({
   function handleDrop(event: DragEvent<HTMLDivElement>): void {
     event.preventDefault()
     setIsDropping(false)
-    if (isUnavailable) return
+    if (isFieldDisabled) return
 
     void addAttachments(Array.from(event.dataTransfer.files))
   }
@@ -423,19 +462,27 @@ export function Composer({
         />
       ) : null}
       <ComposerDeletedAgentNotice
-        isShown={isAgentDeleted && !isUnavailable}
+        isShown={isAgentDeleted && !isJob && !isUnavailable}
         onStartConversation={onStartConversation}
+      />
+      <ComposerJobNotice
+        delegatorName={delegatorName ?? ""}
+        isBackFocusedOnShow={isJob && job.id === jobOpenedFromCardId}
+        isShown={isJob}
+        messageFieldRef={messageFieldRef}
+        onOpenParentConversation={handleOpenParentConversation}
       />
 
       <div className="composer__inner">
         <ComposerToolCallPrompt
           agentName={agentName}
+          hasKeyShortcuts={!isJob}
           onRejectToolCall={rejectShownToolCall}
         />
 
         <div
           className="composer__field"
-          data-dropping={isDropping && !isUnavailable ? "" : undefined}
+          data-dropping={isDropping && !isFieldDisabled ? "" : undefined}
           data-focused={isFocused ? "" : undefined}
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
@@ -469,7 +516,7 @@ export function Composer({
             />
 
             <ComposerPlusMenu
-              disabled={isUnavailable}
+              disabled={isFieldDisabled}
               hasAttachments={attachments.length > 0}
               onAttachFile={() => fileInputRef.current?.click()}
             />
@@ -482,12 +529,13 @@ export function Composer({
               onChange={(event) => setInputDraft(event.currentTarget.value)}
               onFocus={() => setIsFocused(true)}
               onKeyDown={handleKeyDown}
-              placeholder={formatComposerPlaceholder(
+              placeholder={formatComposerPlaceholder({
                 connection,
                 activity,
-                answeringAgent,
-                provider.name
-              )}
+                agent: answeringAgent,
+                providerName: provider.name,
+                isJob
+              })}
               ref={messageFieldRef}
               rows={1}
               value={inputDraft}
@@ -515,7 +563,7 @@ export function Composer({
             )}
           </div>
 
-          {isDropping && !isUnavailable ? (
+          {isDropping && !isFieldDisabled ? (
             <span aria-hidden="true" className="composer__drop">
               release to add to context
             </span>

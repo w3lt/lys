@@ -90,12 +90,6 @@ const LYSIPTERA: ConversationAgent = {
   }
 }
 
-/** Caliginia while the agent list is unread, known only by her code. */
-const UNREAD_AGENT: ConversationAgent = {
-  status: "unread",
-  code: CALIGINIA_AGENT_CODE
-}
-
 /** A stored agent the read agent list no longer holds. */
 const DELETED_AGENT: ConversationAgent = {
   status: "deleted",
@@ -327,20 +321,56 @@ describe("formatComposerPlaceholder", () => {
     "reads %s/%s with a listed agent as %j",
     (connection, activity, placeholder) => {
       expect(
-        formatComposerPlaceholder(connection, activity, LYSIPTERA, "LM Studio")
+        formatComposerPlaceholder({
+          connection,
+          activity,
+          agent: LYSIPTERA,
+          providerName: "LM Studio",
+          isJob: false
+        })
       ).toBe(placeholder)
     }
   )
 
   it("invites the agent by its code while the agent list is unread", () => {
+    // Caliginia, known only by her code.
+    const unreadAgent: ConversationAgent = {
+      status: "unread",
+      code: CALIGINIA_AGENT_CODE
+    }
+
     expect(
-      formatComposerPlaceholder("ready", "idle", UNREAD_AGENT, "LM Studio")
+      formatComposerPlaceholder({
+        connection: "ready",
+        activity: "idle",
+        agent: unreadAgent,
+        providerName: "LM Studio",
+        isJob: false
+      })
     ).toBe("Say something to caliginia")
   })
 
   it("says a conversation whose agent was deleted is read-only", () => {
     expect(
-      formatComposerPlaceholder("ready", "idle", DELETED_AGENT, "LM Studio")
+      formatComposerPlaceholder({
+        connection: "ready",
+        activity: "idle",
+        agent: DELETED_AGENT,
+        providerName: "LM Studio",
+        isJob: false
+      })
+    ).toBe("This conversation is read-only.")
+  })
+
+  it("says a job is read-only", () => {
+    expect(
+      formatComposerPlaceholder({
+        connection: "ready",
+        activity: "idle",
+        agent: LYSIPTERA,
+        providerName: "LM Studio",
+        isJob: true
+      })
     ).toBe("This conversation is read-only.")
   })
 
@@ -352,15 +382,28 @@ describe("formatComposerPlaceholder", () => {
     "names what it waits on while %s, before a deleted agent",
     (connection, placeholder) => {
       expect(
-        formatComposerPlaceholder(
+        formatComposerPlaceholder({
           connection,
-          "idle",
-          DELETED_AGENT,
-          "LM Studio"
-        )
+          activity: "idle",
+          agent: DELETED_AGENT,
+          providerName: "LM Studio",
+          isJob: false
+        })
       ).toBe(placeholder)
     }
   )
+
+  it("names a lost connection first in a job too", () => {
+    expect(
+      formatComposerPlaceholder({
+        connection: "offline",
+        activity: "idle",
+        agent: LYSIPTERA,
+        providerName: "LM Studio",
+        isJob: true
+      })
+    ).toBe("Waiting on the backend…")
+  })
 })
 
 describe("formatComposerActivity", () => {

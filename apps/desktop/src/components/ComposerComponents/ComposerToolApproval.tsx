@@ -23,6 +23,11 @@ type ComposerToolApprovalProps = {
   readonly toolCall: ShownToolCall
   /** Whether the composer holds text, which Enter then sends as a rejection. */
   readonly hasDraft: boolean
+  /**
+   * Whether the composer field routes Escape and Enter to the answers; false
+   * while the field is off, as in a job.
+   */
+  readonly hasKeyShortcuts: boolean
   /** Requests that the parent allow the waiting call once. */
   readonly onAllowToolCall: () => void
   /** Requests that the parent reject the waiting call, with the draft as reason. */
@@ -39,10 +44,24 @@ type ComposerToolCallRequestProps = {
   readonly answer: Extract<HeldToolCallAnswer, { status: "awaiting-person" }>
   /** Whether the composer holds text, which Enter then sends as a rejection. */
   readonly hasDraft: boolean
+  /** Whether the composer field routes Escape and Enter to the answers. */
+  readonly hasKeyShortcuts: boolean
   /** Requests that the parent allow the call once. */
   readonly onAllowToolCall: () => void
   /** Requests that the parent reject the call, with the draft as reason. */
   readonly onRejectToolCall: () => void
+}
+
+/** Properties accepted by {@link ComposerToolCallHeader}. */
+type ComposerToolCallHeaderProps = {
+  /** Whether the call has arguments; a call without them has no toggle. */
+  readonly hasArguments: boolean
+  /** Whether the argument list is shown. */
+  readonly isArgumentsExpanded: boolean
+  /** Identifier of the argument list, which the toggle controls. */
+  readonly argumentsListId: string
+  /** Requests that the card show the argument list, or hide it when shown. */
+  readonly onToggleArguments: () => void
 }
 
 /** Properties accepted by {@link ComposerCalledTool}. */
@@ -67,6 +86,8 @@ type ComposerToolCallArgumentsProps = {
 type ComposerToolCallFooterProps = {
   /** Whether the composer holds text, which turns Allow once into Allow anyway. */
   readonly hasDraft: boolean
+  /** Whether the composer field routes Escape and Enter to the answers. */
+  readonly hasKeyShortcuts: boolean
   /** Requests that the parent allow the call once. */
   readonly onAllowToolCall: () => void
   /** Requests that the parent reject the call, with the draft as reason. */
@@ -81,6 +102,44 @@ type ComposerToolResultFailureProps = {
   readonly error: string
   /** Requests that the parent send the failed answer again. */
   readonly onRetryToolCallAnswer: () => void
+}
+
+/**
+ * Presents the header of a waiting call's card: its label and, for a call
+ * with arguments, the toggle that shows them.
+ *
+ * @remarks The dot is decorative. The toggle exposes whether the list is
+ * shown through `aria-expanded` and points at the list through
+ * `aria-controls` while it is shown. The card owns whether the list is
+ * shown; the component owns no state.
+ * @param props - Whether the call has arguments, whether they are shown,
+ * the list's identifier, and the toggle request.
+ * @returns The card's header.
+ */
+function ComposerToolCallHeader({
+  hasArguments,
+  isArgumentsExpanded,
+  argumentsListId,
+  onToggleArguments
+}: ComposerToolCallHeaderProps): ReactElement {
+  return (
+    <div className="composer__approval-header">
+      <span aria-hidden="true" className="composer__approval-dot" />
+      <span className="composer__approval-label">She’s paused for you</span>
+      {hasArguments ? (
+        <button
+          aria-controls={isArgumentsExpanded ? argumentsListId : undefined}
+          aria-expanded={isArgumentsExpanded}
+          className="composer__approval-toggle"
+          onClick={onToggleArguments}
+          type="button"
+        >
+          <ChevronRight aria-hidden="true" />
+          Arguments
+        </button>
+      ) : null}
+    </div>
+  )
 }
 
 /**
@@ -147,29 +206,34 @@ function ComposerToolCallArguments({
  * @remarks Without a draft, Allow once is the primary action and announces
  * Enter as its shortcut; with one, Allow anyway allows the call and keeps
  * the draft, and the hint says Enter sends the draft as a rejection. Reject
- * announces Escape. The parent routes both keys from the composer field. The
- * component owns no state.
- * @param props - Whether a draft exists, and the answers.
+ * announces Escape. The parent routes both keys from the composer field.
+ * While the field routes no keys, the footer shows no hint and no key
+ * labels, and no button announces a shortcut. The component owns no state.
+ * @param props - Whether a draft exists, whether the field routes the keys,
+ * and the answers.
  * @returns The footer of a waiting call's card.
  */
 function ComposerToolCallFooter({
   hasDraft,
+  hasKeyShortcuts,
   onAllowToolCall,
   onRejectToolCall
 }: ComposerToolCallFooterProps): ReactElement {
   return (
     <div className="composer__approval-footer">
-      <span className="composer__approval-hint">
-        {hasDraft ? DRAFT_APPROVAL_HINT : EMPTY_DRAFT_APPROVAL_HINT}
-      </span>
+      {hasKeyShortcuts ? (
+        <span className="composer__approval-hint">
+          {hasDraft ? DRAFT_APPROVAL_HINT : EMPTY_DRAFT_APPROVAL_HINT}
+        </span>
+      ) : null}
       <Button
-        aria-keyshortcuts="Escape"
+        aria-keyshortcuts={hasKeyShortcuts ? "Escape" : undefined}
         onClick={onRejectToolCall}
         size="sm"
         type="button"
         variant="outline"
       >
-        Reject <kbd aria-hidden="true">esc</kbd>
+        Reject {hasKeyShortcuts ? <kbd aria-hidden="true">esc</kbd> : null}
       </Button>
       {hasDraft ? (
         <Button
@@ -182,12 +246,12 @@ function ComposerToolCallFooter({
         </Button>
       ) : (
         <Button
-          aria-keyshortcuts="Enter"
+          aria-keyshortcuts={hasKeyShortcuts ? "Enter" : undefined}
           onClick={onAllowToolCall}
           size="sm"
           type="button"
         >
-          Allow once <kbd aria-hidden="true">↵</kbd>
+          Allow once {hasKeyShortcuts ? <kbd aria-hidden="true">↵</kbd> : null}
         </Button>
       )}
     </div>
@@ -203,16 +267,17 @@ function ComposerToolCallFooter({
  * its arguments, so they start shown; the parent keys it by call, so each
  * call starts again. A call without arguments has neither the toggle nor
  * the list. The parent owns the call, the draft, and every answer,
- * including Esc and Enter in the composer field. Reject uses the draft as
- * the reason. The card is a named group, and the arguments toggle exposes
- * its state through `aria-expanded`.
- * @param props - Waiting call, whether a draft exists, and the answers.
+ * including Esc and Enter in the composer field while it routes them. Reject
+ * uses the draft as the reason. The card is a named group.
+ * @param props - Waiting call, whether a draft exists, whether the field
+ * routes the answer keys, and the answers.
  * @returns The waiting call's card.
  */
 function ComposerToolCallRequest({
   call,
   answer,
   hasDraft,
+  hasKeyShortcuts,
   onAllowToolCall,
   onRejectToolCall
 }: ComposerToolCallRequestProps): ReactElement {
@@ -227,22 +292,14 @@ function ComposerToolCallRequest({
       aria-label="Tool call waiting for your answer"
       className="composer__approval"
     >
-      <div className="composer__approval-header">
-        <span aria-hidden="true" className="composer__approval-dot" />
-        <span className="composer__approval-label">She’s paused for you</span>
-        {hasArguments ? (
-          <button
-            aria-controls={isArgumentsExpanded ? argumentsId : undefined}
-            aria-expanded={isArgumentsExpanded}
-            className="composer__approval-toggle"
-            onClick={() => setIsArgumentsExpanded((isExpanded) => !isExpanded)}
-            type="button"
-          >
-            <ChevronRight aria-hidden="true" />
-            Arguments
-          </button>
-        ) : null}
-      </div>
+      <ComposerToolCallHeader
+        argumentsListId={argumentsId}
+        hasArguments={hasArguments}
+        isArgumentsExpanded={isArgumentsExpanded}
+        onToggleArguments={() =>
+          setIsArgumentsExpanded((isExpanded) => !isExpanded)
+        }
+      />
 
       <ComposerCalledTool
         access={answer.definition.access}
@@ -263,6 +320,7 @@ function ComposerToolCallRequest({
 
       <ComposerToolCallFooter
         hasDraft={hasDraft}
+        hasKeyShortcuts={hasKeyShortcuts}
         onAllowToolCall={onAllowToolCall}
         onRejectToolCall={onRejectToolCall}
       />
@@ -319,17 +377,20 @@ function ComposerToolResultFailure({
  * for the person, or one whose answer failed to send.
  *
  * @remarks The parent selects the call, owns every answer, and routes Esc
- * and Enter from the composer field; it keys this component by call, so a
- * new call starts with its arguments hidden, or shown for an MCP call. A
- * waiting call shows what it will do and offers Reject and Allow once, or
- * Allow anyway while the composer holds text. A failed answer shows the
- * reason and Try again.
- * @param props - Shown call, whether a draft exists, and the answers.
+ * and Enter from the composer field while the field takes them; it keys
+ * this component by call, so a new call starts with its arguments hidden,
+ * or shown for an MCP call. A waiting call shows what it will do and offers
+ * Reject and Allow once, or Allow anyway while the composer holds text;
+ * while the field routes no keys, the card names none. A failed answer shows
+ * the reason and Try again.
+ * @param props - Shown call, whether a draft exists, whether the field
+ * routes the answer keys, and the answers.
  * @returns The card for the call's state.
  */
 export default function ComposerToolApproval({
   toolCall,
   hasDraft,
+  hasKeyShortcuts,
   onAllowToolCall,
   onRejectToolCall,
   onRetryToolCallAnswer
@@ -343,6 +404,7 @@ export default function ComposerToolApproval({
           answer={answer}
           call={toolCall.call}
           hasDraft={hasDraft}
+          hasKeyShortcuts={hasKeyShortcuts}
           onAllowToolCall={onAllowToolCall}
           onRejectToolCall={onRejectToolCall}
         />

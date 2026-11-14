@@ -69,12 +69,6 @@ function buildWaitingRead(
   }
 }
 
-/** Route key of the tool-result endpoint for {@link FIRST_CALL}. */
-const FIRST_RESULT_ROUTE = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/tool-results/${FIRST_CALL.id}`
-
-/** Route key of the tool-approval endpoint for {@link FIRST_CALL}. */
-const FIRST_APPROVAL_ROUTE = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/tool-approvals/${FIRST_CALL.id}`
-
 /**
  * Loads fresh application, chat-view, and tool-call stores with the prompt
  * that reads them: the fixture conversation is shown with an empty draft,
@@ -103,6 +97,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onRejectToolCall={vi.fn()}
       />
     )
@@ -119,7 +114,11 @@ describe("ComposerToolCallPrompt", () => {
     ])
 
     render(
-      <ComposerToolCallPrompt agentName="Poet" onRejectToolCall={vi.fn()} />
+      <ComposerToolCallPrompt
+        agentName="Poet"
+        hasKeyShortcuts
+        onRejectToolCall={vi.fn()}
+      />
     )
 
     expect(
@@ -138,6 +137,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onRejectToolCall={vi.fn()}
       />
     )
@@ -147,9 +147,10 @@ describe("ComposerToolCallPrompt", () => {
   })
 
   it("sends the person's allowing answer, running nothing itself, then shows the next call that waits", async () => {
+    const firstApprovalRoute = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/tool-approvals/${FIRST_CALL.id}`
     const host = startNativeHostFake({ read_text_file: () => "Buy milk." })
     const backend = startBackendFake({
-      [FIRST_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
+      [firstApprovalRoute]: () => new Response(null, { status: 204 })
     })
     const { ComposerToolCallPrompt } = await loadFreshToolCallPrompt([
       buildWaitingRead(FIRST_CALL),
@@ -159,6 +160,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onRejectToolCall={vi.fn()}
       />
     )
@@ -187,6 +189,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onRejectToolCall={onRejectToolCall}
       />
     )
@@ -206,6 +209,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onRejectToolCall={vi.fn()}
       />
     )
@@ -221,10 +225,32 @@ describe("ComposerToolCallPrompt", () => {
     ).toBeInTheDocument()
   })
 
+  it("offers Allow once, naming no keys, whatever the draft holds while the field routes none", async () => {
+    const { useChatViewStore, ComposerToolCallPrompt } =
+      await loadFreshToolCallPrompt([buildWaitingRead(FIRST_CALL)])
+    useChatViewStore.setState({ inputDraft: "not that file" })
+
+    render(
+      <ComposerToolCallPrompt
+        agentName="Caliginia"
+        hasKeyShortcuts={false}
+        onRejectToolCall={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Allow once" })
+    ).not.toHaveAttribute("aria-keyshortcuts")
+    expect(
+      screen.queryByRole("button", { name: "Allow anyway" })
+    ).not.toBeInTheDocument()
+  })
+
   it("sends an unsent answer again on Try again, without running the tool again", async () => {
+    const firstResultRoute = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/tool-results/${FIRST_CALL.id}`
     startNativeHostFake({})
     const backend = startBackendFake({
-      [FIRST_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+      [firstResultRoute]: () => new Response(null, { status: 204 })
     })
     const unsentAnswer = { status: "succeeded", content: "Buy milk." } as const
     const { ComposerToolCallPrompt } = await loadFreshToolCallPrompt([
@@ -243,6 +269,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onRejectToolCall={vi.fn()}
       />
     )
@@ -265,6 +292,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onRejectToolCall={vi.fn()}
       />
     )

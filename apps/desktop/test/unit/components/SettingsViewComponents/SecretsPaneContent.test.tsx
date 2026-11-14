@@ -43,8 +43,8 @@ async function startSecretsPane(routes: BackendRoutes = {}) {
   const { useToolStore } = await import("@/lib/store/tools")
   useLysStore.setState({ settings: STORED_SETTINGS })
   render(<SettingsView onDone={vi.fn()} />)
-  // The closing note is withheld until the lazily loaded pane body is shown.
-  await screen.findByText(/^Saved in plain text in settings\.json/)
+  // The storage banner is part of the lazily loaded pane body.
+  await screen.findByText("Kept on this machine, in plain text")
   await waitForRenderedWork()
   return { useLysStore, useToolStore, backend }
 }
@@ -79,13 +79,17 @@ describe("SecretsPaneContent", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Keys for the services Lys calls on your behalf. Each key goes only to its own service and is never sent to the model."
+        "Keys for services Lys calls on your behalf that are not set up anywhere else, such as web search. Each goes only to its own service and is never sent to the model."
       )
     ).toBeInTheDocument()
-    const section = screen.getByRole("region", { name: "web search service" })
-    expect(section).toHaveTextContent("1 service")
+    expect(
+      screen.getByText(/^A server's token is kept with that server under/)
+    ).toHaveTextContent(
+      "A server's token is kept with that server under MCP. A mailbox's password is kept with its mailbox, in Lys for Lys's and under MCP for yours."
+    )
+    const section = screen.getByRole("region", { name: "Search service" })
     expect(section).toHaveTextContent(
-      "The web_search tool sends queries to one service. Give Lys its key here."
+      "The web_search tool sends queries to one service at a time."
     )
     expect(
       within(section).getByRole("article", { name: "Tavily" })
@@ -94,6 +98,16 @@ describe("SecretsPaneContent", () => {
       "placeholder",
       "tvly-••••••••0000"
     )
+  })
+
+  it("shows the MCP and Lys panes from its opening line", async () => {
+    startNativeHostFake({})
+    const { useLysStore } = await startSecretsPane()
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole("button", { name: "Lys" }))
+
+    expect(useLysStore.getState().settingsPane).toBe("lys")
   })
 
   it("saves a new key, then reads the tool list again so web_search's availability follows it", async () => {

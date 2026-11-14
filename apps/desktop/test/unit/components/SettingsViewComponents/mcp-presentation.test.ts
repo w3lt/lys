@@ -16,6 +16,7 @@ import {
   canAddMcpServer,
   canSwitchMcpServer,
   calculateConnectedMcpServerCount,
+  filterMcpTools,
   findMcpPaneRetry,
   findMcpServerApproval,
   findMcpServerStatus,
@@ -26,6 +27,7 @@ import {
   formatMcpServerApprovalNote,
   formatMcpServerJsonMessage,
   formatMcpServerListMeta,
+  formatMcpServerOverviewNote,
   formatMcpServerRemovalQuestion,
   formatMcpServerStatus,
   formatMcpServerTarget,
@@ -36,6 +38,7 @@ import {
   formatMcpSignInLabel,
   formatMcpSignInNote,
   formatMcpToolNamePreview,
+  formatMcpToolSearchOutcome,
   formatMcpToolOfferWarning,
   formatSkippedMcpToolName,
   formatSkippedMcpToolReason,
@@ -57,8 +60,10 @@ import {
   MCP_SERVER_LIMIT_NOTE,
   MCP_SERVER_NAME_RULE,
   MCP_SERVER_TRANSPORTS,
-  MCP_TOOL_CHIPS_NOTE,
+  MCP_TOOL_CHOICES_NOTE,
   MCP_TOOL_LIST_CUT_NOTE,
+  summarizeMcpServers,
+  summarizeMcpTools,
   type McpListedServer,
   type McpPaneFacts,
   type McpServerRowFacts
@@ -90,7 +95,8 @@ import {
   EMAIL_ON_MCP_SETTINGS,
   LYS_MAILBOX_ON_SETTINGS,
   STORED_EMAIL_SETTINGS,
-  STORED_MCP_SETTINGS
+  STORED_MCP_SETTINGS,
+  STORED_SETTINGS
 } from "../../support/settingsFixtures"
 import {
   buildBackendToolDefinition,
@@ -596,7 +602,8 @@ describe("formatMcpServerStatus", () => {
   })
 
   it("says what the email server needs while it is off without an account, whether or not the backend runs", () => {
-    const needsNote = "Needs an email account. Add yours or Lys's below."
+    const needsNote =
+      "Needs an email account. Add yours below, or Lys's in the Lys pane."
 
     expect(
       formatMcpServerStatus({
@@ -707,10 +714,13 @@ describe("formatMcpServerStatus", () => {
   )
 
   it.each([
-    ["account-missing", "Needs an email account. Add yours or Lys's below."],
+    [
+      "account-missing",
+      "Needs an email account. Add yours below, or Lys's in the Lys pane."
+    ],
     [
       "account-invalid",
-      "The saved email account is not usable. Save it again below."
+      "The saved email account is not usable. Save yours again below, or Lys's in the Lys pane."
     ]
   ] as const)(
     "says why the email server failed: %s, and offers no Retry, which the backend refuses until an account is saved",
@@ -936,6 +946,46 @@ describe("formatMcpServerToolCount", () => {
     [0, 0, ""]
   ])("counts %i on of %i listed tools as %j", (onCount, toolCount, text) => {
     expect(formatMcpServerToolCount(onCount, toolCount)).toBe(text)
+  })
+})
+
+describe("filterMcpTools", () => {
+  const readFile = buildMcpToolDefinition("files", "read_file")
+  const writeFile = buildMcpToolDefinition("files", "write_file")
+
+  it("keeps every tool while the search is blank", () => {
+    expect(filterMcpTools([readFile, writeFile], "  ")).toEqual([
+      readFile,
+      writeFile
+    ])
+  })
+
+  it("matches the name, spaces for underscores, or the description, ignoring case", () => {
+    expect(filterMcpTools([readFile, writeFile], " READ")).toEqual([readFile])
+    expect(filterMcpTools([readFile, writeFile], "write file")).toEqual([
+      writeFile
+    ])
+    expect(filterMcpTools([readFile, writeFile], "on files")).toEqual([
+      readFile,
+      writeFile
+    ])
+    expect(filterMcpTools([readFile, writeFile], "delete")).toEqual([])
+  })
+
+  it("says how many tools match, that none does, or nothing while the search is blank", () => {
+    const search = { serverName: "files", shownCount: 1, toolCount: 3 }
+
+    expect(formatMcpToolSearchOutcome({ ...search, query: " " })).toBe("")
+    expect(formatMcpToolSearchOutcome({ ...search, query: "read" })).toBe(
+      "Showing 1 of 3 tools"
+    )
+    expect(
+      formatMcpToolSearchOutcome({
+        ...search,
+        query: " delete ",
+        shownCount: 0
+      })
+    ).toBe("No files tool matches “delete”.")
   })
 })
 
@@ -1756,8 +1806,126 @@ describe("pane notes", () => {
     expect(MCP_SERVER_JSON_HINT).toBe(
       "claude_desktop_config.json, .cursor/mcp.json or a single server object"
     )
-    expect(MCP_TOOL_CHIPS_NOTE).toBe(
-      "Click a tool to leave it out. Every tool that is on is described to the model with each request."
+    expect(MCP_TOOL_CHOICES_NOTE).toBe(
+      "Ask waits for your yes before each call, Run goes ahead without asking, and Off keeps the tool out of the agents' reach. Every tool that is not off is described to the model with each request."
     )
+  })
+})
+
+describe("summarizeMcpServers", () => {
+  it("counts the listed servers, and how many run, failed, or connect once the list was read", () => {
+    const list = buildLoadedMcpList([
+      buildMcpServerStatus("files", "stdio", buildConnectedMcpState(3)),
+      buildMcpServerStatus("notes", "http", buildFailedMcpState("closed")),
+      buildMcpServerStatus("wiki", "http", CONNECTING_MCP_STATE),
+      buildBuiltInMcpServerStatus("email", OFF_MCP_STATE)
+    ])
+
+    expect(summarizeMcpServers(list, 5)).toEqual({
+      runningCount: 1,
+      totalCount: 5,
+      failedCount: 1,
+      connectingCount: 1
+    })
+    expect(summarizeMcpServers({ status: "loading" }, 2)).toEqual({
+      runningCount: 0,
+      totalCount: 2,
+      failedCount: 0,
+      connectingCount: 0
+    })
+  })
+})
+
+/**
+ * One overview note: the running, failed, and connecting counts of three
+ * servers, and the note they make.
+ */
+type OverviewNoteCase = {
+  /** Names the case. */
+  readonly label: string
+  /** The running, failed, and connecting counts. */
+  readonly counts: readonly [number, number, number]
+  /** The expected note. */
+  readonly text: string
+  /** The expected tone. */
+  readonly tone: string
+}
+
+describe("formatMcpServerOverviewNote", () => {
+  it.each<OverviewNoteCase>([
+    {
+      label: "one failed",
+      counts: [1, 1, 1],
+      text: "1 needs attention",
+      tone: "danger"
+    },
+    {
+      label: "two failed",
+      counts: [0, 2, 0],
+      text: "2 need attention",
+      tone: "danger"
+    },
+    {
+      label: "one connecting",
+      counts: [1, 0, 1],
+      text: "1 connecting",
+      tone: "pending"
+    },
+    {
+      label: "none running",
+      counts: [0, 0, 0],
+      text: "No server is running",
+      tone: "neutral"
+    },
+    {
+      label: "every one running",
+      counts: [2, 0, 0],
+      text: "Every server that is on is answering",
+      tone: "success"
+    }
+  ])(
+    "says $label",
+    ({ counts: [runningCount, failedCount, connectingCount], text, tone }) => {
+      expect(
+        formatMcpServerOverviewNote({
+          runningCount,
+          totalCount: 3,
+          failedCount,
+          connectingCount
+        })
+      ).toEqual({ text, tone })
+    }
+  )
+})
+
+describe("summarizeMcpTools", () => {
+  it("counts the MCP tools that are offered, ask first, run without asking, and are off", () => {
+    const [ask, run, off] = ["search", "fetch", "delete"].map((name) =>
+      buildMcpToolDefinition("files", name)
+    )
+    const toolList = buildLoadedToolList([
+      buildToolDefinition("read_text_file"),
+      ask,
+      run,
+      off
+    ])
+    const toolSettings = {
+      ...STORED_SETTINGS.tools,
+      switches: new Map([[off.name, false]]),
+      justRunToolNames: new Set([run.name])
+    }
+
+    expect(summarizeMcpTools(toolList, toolSettings)).toEqual({
+      offeredCount: 2,
+      askCount: 1,
+      runCount: 1,
+      offCount: 1
+    })
+    expect(summarizeMcpTools({ status: "loading" }, toolSettings)).toEqual({
+      offeredCount: 0,
+      askCount: 0,
+      runCount: 0,
+      offCount: 0
+    })
   })
 })

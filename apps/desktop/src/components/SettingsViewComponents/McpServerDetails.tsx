@@ -4,16 +4,19 @@ import type {
   McpServerSettings,
   McpToolDefinition
 } from "@lys/share"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, Search, X } from "lucide-react"
 import {
   useId,
+  useRef,
   useState,
   type KeyboardEvent,
   type ReactElement,
-  type ReactNode
+  type ReactNode,
+  type RefObject
 } from "react"
 
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { ToolSettings } from "@/lib/store/settings"
 import { TOOL_APPROVALS, type ToolApproval } from "@/lib/store/tool-settings"
@@ -21,21 +24,24 @@ import { isToolOn, type ToolListState } from "@/lib/store/tools"
 
 import { handleFocusTargetAttach } from "./focus-target"
 import {
+  filterMcpTools,
   findMcpServerApproval,
   formatMcpServerApprovalNote,
   formatMcpServerRemovalQuestion,
   formatMcpServerToolMeta,
   formatMcpServerToolsNote,
+  formatMcpToolSearchOutcome,
   formatSkippedMcpToolName,
   formatSkippedMcpToolReason,
   getMcpListedServerName,
   listMcpServerConfiguration,
   listSkippedMcpTools,
-  MCP_TOOL_CHIPS_NOTE,
+  MCP_TOOL_CHOICES_NOTE,
   MCP_TOOL_LIST_CUT_NOTE,
   type McpListedServer,
   type McpServerStatusPresentation
 } from "./mcp-presentation"
+import SettingsChoiceGroup, { type SettingsChoice } from "./SettingsChoiceGroup"
 import { findToolApproval, formatToolApprovalLabel } from "./tool-presentation"
 
 /** Connected state of a server whose skipped tools its details can list. */
@@ -199,44 +205,228 @@ function McpServerStatusLine({
   )
 }
 
-/** Properties accepted by {@link McpToolChip}. */
-type McpToolChipProps = {
-  /** Tool the chip switches. */
+/** What runs one MCP tool: asking first, running at once, or nothing. */
+type McpToolChoice = ToolApproval | "off"
+
+/** The choices of one MCP tool, in order. */
+const MCP_TOOL_CHOICES: readonly SettingsChoice<McpToolChoice>[] =
+  Object.freeze([
+    { value: "ask", label: "Ask" },
+    { value: "run", label: "Run" },
+    { value: "off", label: "Off" }
+  ])
+
+/** The section's switches and approvals, as each tool row reads them. */
+type McpToolRowContext = Pick<
+  McpServerToolSectionProps,
+  | "toolSwitches"
+  | "justRunToolNames"
+  | "onToolOnChange"
+  | "onToolApprovalChange"
+>
+
+/** Properties accepted by {@link McpToolRow}. */
+type McpToolRowProps = {
+  /** The tool. */
   readonly tool: McpToolDefinition
-  /** Whether the tool is on. */
-  readonly isOn: boolean
-  /** Proposes switching the tool on or off. */
-  readonly onIsOnChange: (isOn: boolean) => void
+  /** The switches, the approvals, and their proposals. */
+  readonly context: McpToolRowContext
 }
 
 /**
- * Presents one tool of a server as a toggle button that switches it.
+ * Presents one tool of a server with its choice: Ask, Run, or Off.
  *
- * @remarks The parent owns the switch; the chip owns no state. It is a
- * pressed toggle named by the server's name for the tool while the tool is
- * on; a tool that is off is crossed out and dimmed. The tool's description
- * is its tooltip.
- * @param props - Tool, its switch, and the switch proposal.
- * @returns One list item holding the toggle.
+ * @remarks The parent owns the switch and the approval; the row owns no
+ * state. Off switches the tool off and keeps its approval; Ask or Run
+ * switches it on when it is off, and saves the approval. The choice group
+ * is named by the tool's name; the description says what the tool does.
+ * @param props - The tool, and the switches, the approvals, and the
+ * proposals.
+ * @returns The row.
  */
-function McpToolChip({
-  tool,
-  isOn,
-  onIsOnChange
-}: McpToolChipProps): ReactElement {
+function McpToolRow({ tool, context }: McpToolRowProps): ReactElement {
+  const nameId = useId()
+  const isOn = isToolOn(context.toolSwitches, tool)
+  const isJustRun = context.justRunToolNames.has(tool.name)
+  const choice: McpToolChoice = isOn ? (isJustRun ? "run" : "ask") : "off"
+
+  /**
+   * Proposes the switch and the approval the chosen value stands for.
+   *
+   * @param next - The chosen value.
+   */
+  function handleChoiceChange(next: McpToolChoice): void {
+    if (next === "off") {
+      context.onToolOnChange(tool.name, false)
+      return
+    }
+    if (!isOn) context.onToolOnChange(tool.name, true)
+    context.onToolApprovalChange([tool.name], next)
+  }
+
   return (
-    <li>
-      <button
-        aria-pressed={isOn}
-        className="settings-view__mcp-tool"
-        onClick={() => onIsOnChange(!isOn)}
-        title={tool.description}
-        type="button"
-      >
-        <span aria-hidden="true" className="settings-view__mcp-tool-dot" />
-        {tool.serverToolName}
-      </button>
+    <li
+      className="settings-view__mcp-tool-row"
+      data-off={isOn ? undefined : ""}
+    >
+      <div className="settings-view__row-lines">
+        <span className="settings-view__mono" id={nameId}>
+          {tool.serverToolName}
+        </span>
+        <span className="settings-view__mcp-tool-description">
+          {tool.description}
+        </span>
+      </div>
+      <SettingsChoiceGroup
+        choices={MCP_TOOL_CHOICES}
+        disabled={false}
+        labelId={nameId}
+        onValueChange={handleChoiceChange}
+        value={choice}
+      />
     </li>
+  )
+}
+
+/** Properties accepted by {@link McpToolSearch}. */
+type McpToolSearchProps = {
+  /** Name of the server, which names the field. */
+  readonly serverName: string
+  /** How many tools the server lists. */
+  readonly toolCount: number
+  /** The search text, owned by the parent. */
+  readonly query: string
+  /** Proposes new search text. */
+  readonly onQueryChange: (query: string) => void
+  /** Requests that the search text be emptied. */
+  readonly onClear: () => void
+  /** The parent's ref to the field, which takes focus once cleared. */
+  readonly fieldRef: RefObject<HTMLInputElement | null>
+}
+
+/**
+ * Presents the field that searches a server's tools.
+ *
+ * @remarks The parent owns the search text and the field's focus; the
+ * component owns no state. The field is a native search field named
+ * `Search the <server> tools`; its clear button shows only with text.
+ * @param props - Server, tool count, search text, ref, and the proposals.
+ * @returns The field.
+ */
+function McpToolSearch({
+  serverName,
+  toolCount,
+  query,
+  onQueryChange,
+  onClear,
+  fieldRef
+}: McpToolSearchProps): ReactElement {
+  return (
+    <div className="settings-view__mcp-tool-search">
+      <Search aria-hidden="true" className="settings-view__mcp-search-icon" />
+      <Input
+        aria-label={`Search the ${serverName} tools`}
+        className="settings-view__mcp-search-field"
+        onChange={(event) => onQueryChange(event.target.value)}
+        placeholder={`Search ${toolCount} tools by name or what they do`}
+        ref={fieldRef}
+        type="search"
+        value={query}
+      />
+      {query === "" ? null : (
+        <Button
+          aria-label="Clear search"
+          className="settings-view__mcp-search-clear"
+          onClick={onClear}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+        >
+          <X aria-hidden="true" />
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/** Properties accepted by {@link McpToolList}. */
+type McpToolListProps = {
+  /** Name of the server, which names the list and the search. */
+  readonly serverName: McpServerName
+  /** The server's listed tools, in the backend's order; not empty. */
+  readonly tools: readonly McpToolDefinition[]
+  /** The switches, the approvals, and their proposals. */
+  readonly context: McpToolRowContext
+}
+
+/**
+ * Presents a server's tools with a field that searches them.
+ *
+ * @remarks The component owns the search text, which lasts while the
+ * server's details are open. The rows are a list named
+ * `Tools of <server>`, keyed by tool name, holding the tools whose name or
+ * description matches. A polite live line says how many match while the
+ * search holds text, or that none does, with Clear search. Clearing
+ * returns focus to the field, because the button pressed goes away.
+ * @param props - Server, tools, and the rows' context.
+ * @returns The search and the list.
+ */
+function McpToolList({
+  serverName,
+  tools,
+  context
+}: McpToolListProps): ReactElement {
+  const [query, setQuery] = useState("")
+  const fieldRef = useRef<HTMLInputElement>(null)
+  const shownTools = filterMcpTools(tools, query)
+
+  /** Empties the search text and returns focus to the field. */
+  function handleClear(): void {
+    setQuery("")
+    fieldRef.current?.focus()
+  }
+
+  return (
+    <>
+      <McpToolSearch
+        fieldRef={fieldRef}
+        onClear={handleClear}
+        onQueryChange={setQuery}
+        query={query}
+        serverName={serverName}
+        toolCount={tools.length}
+      />
+      <div className="settings-view__mcp-search-outcome">
+        <p aria-live="polite" className="settings-view__mcp-detail-note">
+          {formatMcpToolSearchOutcome({
+            serverName,
+            query,
+            shownCount: shownTools.length,
+            toolCount: tools.length
+          })}
+        </p>
+        {shownTools.length === 0 ? (
+          <Button
+            onClick={handleClear}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Clear search
+          </Button>
+        ) : null}
+      </div>
+      {shownTools.length === 0 ? null : (
+        <ul
+          aria-label={`Tools of ${serverName}`}
+          className="settings-view__mcp-tools"
+        >
+          {shownTools.map((tool) => (
+            <McpToolRow context={context} key={tool.name} tool={tool} />
+          ))}
+        </ul>
+      )}
+    </>
   )
 }
 
@@ -252,21 +442,28 @@ type McpServerToolSectionProps = {
   readonly skippedToolsState: ConnectedMcpServerState | undefined
   /** Saved switches by tool name. */
   readonly toolSwitches: ReadonlyMap<string, boolean>
+  /** Names of the tools that run without asking first. */
+  readonly justRunToolNames: ReadonlySet<string>
   /** Proposes switching one tool on or off. */
   readonly onToolOnChange: (toolName: string, isOn: boolean) => void
+  /** Proposes one approval for several tools. */
+  readonly onToolApprovalChange: (
+    toolNames: readonly string[],
+    approval: ToolApproval
+  ) => void
 }
 
 /**
- * Presents a server's tools, each switched on or off by its chip.
+ * Presents a server's tools, each with its choice: Ask, Run, or Off.
  *
- * @remarks The parent owns the tools, the switches, and the note; the
- * section owns no state. Its heading names it; while tools are listed, a
- * meta line says how many are on and what they cost per request, and the
- * chips are a list named `Tools of <server>`, keyed by tool name. Without
- * tools the note says why. A server whose tools the backend skipped lets the
- * person list them.
- * @param props - Server, tools, note, skipped tools, switches, and the
- * switch proposal.
+ * @remarks The parent owns the tools, the switches, the approvals, and the
+ * note; the section owns no state. Its heading names it; while tools are
+ * listed, a meta line says how many are on and what they cost per request,
+ * and {@link McpToolList} shows the rows with a field that searches them.
+ * Without tools the note says why. A server whose tools the backend skipped
+ * lets the person list them.
+ * @param props - Server, tools, note, skipped tools, switches, approvals,
+ * and the proposals.
  * @returns The tools section.
  */
 function McpServerToolSection({
@@ -275,9 +472,17 @@ function McpServerToolSection({
   emptyNote,
   skippedToolsState,
   toolSwitches,
-  onToolOnChange
+  justRunToolNames,
+  onToolOnChange,
+  onToolApprovalChange
 }: McpServerToolSectionProps): ReactElement {
   const headingId = useId()
+  const rowContext: McpToolRowContext = {
+    toolSwitches,
+    justRunToolNames,
+    onToolOnChange,
+    onToolApprovalChange
+  }
 
   return (
     <section aria-labelledby={headingId} className="settings-view__mcp-block">
@@ -291,21 +496,13 @@ function McpServerToolSection({
         <p className="settings-view__mcp-detail-note">{emptyNote}</p>
       ) : (
         <>
-          <ul
-            aria-label={`Tools of ${serverName}`}
-            className="settings-view__mcp-tools"
-          >
-            {tools.map((tool) => (
-              <McpToolChip
-                isOn={isToolOn(toolSwitches, tool)}
-                key={tool.name}
-                onIsOnChange={(isOn) => onToolOnChange(tool.name, isOn)}
-                tool={tool}
-              />
-            ))}
-          </ul>
+          <McpToolList
+            context={rowContext}
+            serverName={serverName}
+            tools={tools}
+          />
           <p className="settings-view__mcp-detail-note">
-            {MCP_TOOL_CHIPS_NOTE}
+            {MCP_TOOL_CHOICES_NOTE}
           </p>
         </>
       )}
@@ -668,8 +865,8 @@ export type McpServerDetailsProps = {
  * @remarks The parent owns the server, the state, the tools, the choices
  * about them, every action, and what follows; the details own no state of
  * their own. They carry the identifier the row's toggle controls. A tool's
- * chip proposes its switch; the approval proposes one approval for every
- * listed tool.
+ * row proposes its switch and its approval; the approval row proposes one
+ * approval for every listed tool.
  * @param props - Server, state, tools, choices, backend status, the
  * actions, and what follows.
  * @returns The details region.
@@ -704,6 +901,8 @@ export function McpServerDetails({
       />
       <McpServerToolSection
         emptyNote={toolsNote}
+        justRunToolNames={toolSettings.justRunToolNames}
+        onToolApprovalChange={onToolApprovalChange}
         onToolOnChange={onToolOnChange}
         serverName={getMcpListedServerName(server)}
         skippedToolsState={skippedToolsState}

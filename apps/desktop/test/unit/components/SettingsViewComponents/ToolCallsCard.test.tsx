@@ -25,6 +25,7 @@ function startToolCallsCard(
   const proposals = { onAreToolCallsOnChange: vi.fn() }
   render(
     <ToolCallsCard
+      contextLength={null}
       isLocked={false}
       summary={OFFERING}
       {...proposals}
@@ -83,5 +84,22 @@ describe("ToolCallsCard", () => {
       "true"
     )
     expect(proposals.onAreToolCallsOnChange).not.toHaveBeenCalled()
+  })
+
+  it("draws the descriptions' share of the loaded model's context", () => {
+    startToolCallsCard({ contextLength: 8192 })
+
+    expect(
+      screen.getByRole("img", {
+        name: "Tool descriptions: ~216 tok of 8.2k tokens · 2.6%"
+      })
+    ).toBeInTheDocument()
+  })
+
+  it("states the descriptions' tokens without a bar while no context length is known", () => {
+    startToolCallsCard()
+
+    expect(screen.getByText("~216 tok per request")).toBeInTheDocument()
+    expect(screen.queryByRole("img")).toBeNull()
   })
 })

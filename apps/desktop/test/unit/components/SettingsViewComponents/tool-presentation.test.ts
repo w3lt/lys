@@ -17,14 +17,23 @@ import {
   formatToolTokenEstimate,
   formatToolUnavailableNote,
   getToolRunnerPresentation,
+  formatMcpToolsPointerNote,
+  formatToolContextUse,
   isFixedInSecretsPane,
-  listToolArguments
+  listToolArguments,
+  type ToolCallsSummary
 } from "@/components/SettingsViewComponents/tool-presentation"
 import {
   buildBackendToolDefinition,
   buildMcpToolDefinition,
   buildToolDefinition
 } from "../../support/toolFixtures"
+import {
+  buildConnectedMcpState,
+  buildFailedMcpState,
+  buildMcpServerList,
+  buildMcpServerStatus
+} from "../../support/mcpFixtures"
 
 /** Tools listed in Settings order. */
 const READ_TEXT_FILE = buildToolDefinition("read_text_file")
@@ -444,5 +453,59 @@ describe("findToolApproval", () => {
     expect(findToolApproval(["run"])).toBe("run")
     expect(findToolApproval([])).toBeUndefined()
     expect(findToolApproval(["later"])).toBeUndefined()
+  })
+})
+
+describe("formatToolContextUse", () => {
+  /** Two tools of 2,048 tokens offered to a model trained for tools. */
+  const offering: ToolCallsSummary = {
+    areToolCallsOn: true,
+    support: { status: "trained", modelKey: "qwen3-8b" },
+    offeredToolCount: 2,
+    offeredTokenCount: 2048
+  }
+
+  it("states the descriptions' share of a known context length", () => {
+    expect(formatToolContextUse(offering, 32768)).toEqual({
+      label: "~2.0k tok of 33k tokens · 6.3%",
+      fraction: 0.0625
+    })
+  })
+
+  it("fills the bar at most once the descriptions exceed the context", () => {
+    expect(formatToolContextUse(offering, 1024).fraction).toBe(1)
+  })
+
+  it("states the tokens alone while the context length is unknown", () => {
+    expect(formatToolContextUse(offering, null)).toEqual({
+      label: "~2.0k tok per request",
+      fraction: null
+    })
+    expect(formatToolContextUse(offering, 0).fraction).toBeNull()
+  })
+
+  it("counts nothing while tool calls are off", () => {
+    expect(
+      formatToolContextUse({ ...offering, areToolCallsOn: false }, 8192)
+    ).toEqual({ label: "~0 tok of 8.2k tokens · 0.0%", fraction: 0 })
+  })
+})
+
+describe("formatMcpToolsPointerNote", () => {
+  it("counts the running servers and their tools once the list was read", () => {
+    const list = {
+      status: "loaded",
+      ...buildMcpServerList([
+        buildMcpServerStatus("files", "stdio", buildConnectedMcpState(3)),
+        buildMcpServerStatus("notes", "http", buildFailedMcpState("closed"))
+      ])
+    } as const
+
+    expect(formatMcpToolsPointerNote(list)).toBe(
+      "1 of 2 servers running · 3 tools. Switch them and choose which ask first under MCP."
+    )
+    expect(formatMcpToolsPointerNote({ status: "loading" })).toBe(
+      "Switch them and choose which ask first under MCP."
+    )
   })
 })

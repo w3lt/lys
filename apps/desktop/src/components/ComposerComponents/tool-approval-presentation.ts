@@ -46,7 +46,7 @@ export function formatToolCallSummary(input: ToolCallInput): string {
     case "get_current_time":
       return "Read the date, time, and time zone of this machine. Nothing is changed."
     case "get_location":
-      return "Read the location you saved in Settings → Tools. Nothing is changed."
+      return "Read the location you saved in Settings → Profile. Nothing is changed."
     case "read_page":
       return `Read ${input.url}.`
     case "web_search":

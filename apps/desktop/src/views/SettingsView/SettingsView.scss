@@ -5,84 +5,115 @@
   background: var(--app-surface);
 }
 
-.settings-view__tabs {
+.settings-view__layout {
   display: flex;
   width: 100%;
   height: 100%;
   min-height: 0;
-  gap: 0;
 }
 
 /* Rail */
 
 .settings-view__rail {
   display: flex;
-  width: 192px;
-  min-width: 192px;
+  width: 240px;
+  min-width: 240px;
   height: 100%;
   flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 0;
-  padding: 26px 0 16px;
+  gap: 20px;
+  padding: 24px 12px 20px;
+  overflow-y: auto;
   border-right: 1px solid var(--app-border-subtle);
   background: var(--app-surface-rail);
+  backdrop-filter: blur(18px);
 }
 
 .settings-view__rail-heading {
-  padding: 0 18px 18px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 12px;
+  margin: 0;
+}
+
+.settings-view__rail-wordmark {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: transparent;
+  background-image: var(--gradient-wordmark);
+  background-clip: text;
+}
+
+.settings-view__rail-heading-label {
   font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.26em;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  white-space: nowrap;
-  color: var(--app-text-faint);
+  color: var(--app-text-muted);
+}
+
+.settings-view__rail-list,
+.settings-view__rail-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.settings-view__rail-entry {
+  display: flex;
+  flex-direction: column;
 }
 
 /*
  * Navigation is sentence-case sans against a mono ordinal: the label is the
- * destination, the number is only a position. Selection is carried by the left
- * edge and the tinted surface, so nothing reflows when it moves.
+ * destination, the number is only a position. Selection is carried by the
+ * tinted surface and the wingline, so nothing reflows when it moves.
  */
 .settings-view__rail-tab {
   display: flex;
-  width: auto;
-  min-height: 32px;
+  width: 100%;
+  height: 36px;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 8px 18px;
+  gap: 8px;
+  padding: 0 12px;
   border: 0;
-  border-left: 2px solid transparent;
-  border-radius: 0;
+  border-radius: var(--radius-control);
   background: transparent;
   font-family: var(--font-sans);
   font-size: 14px;
   font-weight: 500;
+  text-align: left;
   color: var(--app-text-muted);
   transition:
     background-color var(--duration-standard) var(--ease-standard),
-    border-color var(--duration-standard) var(--ease-standard),
     color var(--duration-standard) var(--ease-standard);
 }
 
-.settings-view__rail-tab:hover {
+.settings-view__rail-tab:hover,
+.settings-view__rail-section:hover {
   background: var(--app-surface-hover);
   color: var(--app-text-strong);
 }
 
 .settings-view__rail-tab[data-active] {
-  border-left-color: var(--lys-violet);
   background: var(--app-surface-navigation-active);
+  box-shadow: inset 0 0 0 1px var(--app-border-subtle);
   color: var(--app-text-strong);
 }
 
 /*
- * The rail is one half of a split view, so the primitive's outward focus halo
- * would spill across the divider onto the content pane. Drawing the indicator
- * inside the trigger keeps keyboard focus legible within the rail's bounds.
+ * The rail is one half of a split view, so an outward focus halo would spill
+ * across the divider onto the content pane. Drawing the indicator inside the
+ * control keeps keyboard focus legible within the rail's bounds.
  */
-.settings-view__rail-tab:focus-visible {
+.settings-view__rail-tab:focus-visible,
+.settings-view__rail-section:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--app-focus);
 }
@@ -90,36 +121,56 @@
 .settings-view__rail-marks {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
 }
 
 .settings-view__rail-ordinal {
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 500;
+  color: var(--app-text-muted);
+}
+
+.settings-view__rail-sections {
+  padding-left: 8px;
+  margin: 4px 0 6px 20px;
+  border-left: 1px solid var(--app-border-default);
+}
+
+.settings-view__rail-section {
+  display: flex;
+  width: 100%;
+  height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  font-size: 13px;
+  text-align: left;
+  color: var(--app-text-muted);
+  transition:
+    background-color var(--duration-standard) var(--ease-standard),
+    color var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__rail-marker-text {
+  font-size: 12px;
   color: var(--app-text-faint);
 }
 
 .settings-view__rail-status {
   display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding-top: 15px;
-  margin: auto 18px 0;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 12px 0;
+  margin: auto 0 0;
   border-top: 1px solid var(--app-border-subtle);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.45;
   color: var(--app-text-muted);
-}
-
-.settings-view__rail-status-dot {
-  width: 5px;
-  height: 5px;
-  flex: none;
-  margin-top: 5px;
-  border-radius: var(--radius-capsule);
-  background: var(--app-status-neutral);
 }
 
 /* Content */
@@ -130,10 +181,6 @@
   flex: 1;
   overflow-y: auto;
   background: var(--app-surface-content);
-}
-
-.settings-view__content [data-slot="tabs-content"] {
-  min-height: 100%;
 }
 
 .settings-view__pane {
@@ -147,15 +194,32 @@
   margin-inline: auto;
 }
 
+/* The redesigned panes are wider and stack panels, so they breathe less. */
+.settings-view__pane[data-layout="panels"] {
+  max-width: 960px;
+  gap: 24px;
+  padding: 40px 40px 96px;
+}
+
 .settings-view__pane-top {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px 20px;
+}
+
+.settings-view__pane-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
 }
 
 .settings-view__pane-heading {
   display: flex;
+  flex: 1 1 420px;
+  min-width: 0;
   flex-direction: column;
   gap: 10px;
 }
@@ -176,8 +240,13 @@
   color: var(--app-text-strong);
 }
 
+/* The title takes focus only to keep it in the view; it is not a control. */
+.settings-view__pane-heading h1:focus {
+  outline: none;
+}
+
 .settings-view__pane-note {
-  max-width: 470px;
+  max-width: 620px;
   margin: 0;
   font-size: 14px;
   line-height: 1.5;
@@ -379,7 +448,8 @@
 }
 
 /* The glow is the only lit thing on a resting card, so it reads across the pane. */
-.settings-view__status-dot[data-tone="active"] {
+.settings-view__status-dot[data-tone="active"],
+.settings-view__status-dot[data-tone="success"] {
   background: var(--app-status-success);
   box-shadow: var(--app-status-success-glow);
 }
@@ -1555,60 +1625,82 @@
   color: var(--app-text-muted);
 }
 
-.settings-view__mcp-tools {
+/* The search sits above the tool list, its icon inside the field. */
+.settings-view__mcp-tool-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.settings-view__mcp-search-icon {
+  position: absolute;
+  left: 10px;
+  width: 16px;
+  height: 16px;
+  color: var(--app-text-faint);
+  pointer-events: none;
+}
+
+.settings-view__mcp-search-field {
+  padding-inline: 32px;
+}
+
+/* The browser's own clear control would double the Clear search button. */
+.settings-view__mcp-search-field::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.settings-view__mcp-search-clear {
+  position: absolute;
+  right: 2px;
+}
+
+.settings-view__mcp-search-outcome {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+/* No search, no line: the list follows the field directly. */
+.settings-view__mcp-search-outcome:has(> p:empty):not(:has(button)) {
+  margin-top: -12px;
+}
+
+.settings-view__mcp-tools {
+  display: flex;
+  flex-direction: column;
   padding: 0;
   margin: 0;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-surface);
   list-style: none;
 }
 
-/* A tool that is off is struck through as well as dimmed. */
-.settings-view__mcp-tool {
+.settings-view__mcp-tool-row {
   display: flex;
-  min-height: 26px;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
-  padding: 0 9px;
-  border: 1px solid var(--app-border-strong);
-  border-radius: 6px;
-  background: var(--app-surface-field);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--app-text);
-  cursor: pointer;
-  transition:
-    color var(--duration-standard) var(--ease-standard),
-    border-color var(--duration-standard) var(--ease-standard);
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 14px;
 }
 
-.settings-view__mcp-tool:hover {
-  border-color: var(--app-border-interactive);
+.settings-view__mcp-tool-row + .settings-view__mcp-tool-row {
+  border-top: 1px solid var(--app-border-subtle);
 }
 
-.settings-view__mcp-tool:focus-visible {
-  outline: 2px solid var(--app-focus);
-  outline-offset: 2px;
+/* A tool that is off recedes; its choice still says Off in words. */
+.settings-view__mcp-tool-row[data-off] .settings-view__row-lines {
+  opacity: 0.6;
 }
 
-.settings-view__mcp-tool[aria-pressed="false"] {
-  border-color: var(--app-border-subtle);
-  background: transparent;
-  text-decoration: line-through;
-  color: var(--app-text-faint);
-}
-
-.settings-view__mcp-tool-dot {
-  width: 5px;
-  height: 5px;
-  flex: none;
-  border-radius: var(--radius-capsule);
-  background: var(--app-status-success);
-}
-
-.settings-view__mcp-tool[aria-pressed="false"] .settings-view__mcp-tool-dot {
-  background: var(--app-status-neutral);
+.settings-view__mcp-tool-description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .settings-view__mcp-config {
@@ -3714,4 +3806,847 @@ legend.settings-view__mcp-field-label {
 .settings-view__provider-status-row {
   padding: 12px 18px;
   border-top: 1px solid var(--app-border-subtle);
+}
+
+/* Panels: the collapsible sections of the redesigned panes */
+
+.settings-view__panels {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-view__panel {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-surface);
+  background: var(--app-surface-panel);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(18px);
+}
+
+.settings-view__panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 12px 24px 12px 14px;
+  border-bottom: 1px solid transparent;
+}
+
+.settings-view__panel[data-expanded] > .settings-view__panel-head {
+  border-bottom-color: var(--app-border-subtle);
+}
+
+.settings-view__panel-heading {
+  min-width: 0;
+  flex: 1 1 320px;
+  margin: 0;
+  font: inherit;
+}
+
+.settings-view__disclosure {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 6px 6px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  transition: background-color var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__disclosure:hover {
+  background: var(--app-surface-hover);
+}
+
+.settings-view__disclosure:focus-visible {
+  outline: 1px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+.settings-view__disclosure-chevron {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin: 4px;
+  color: var(--app-text-muted);
+  rotate: -90deg;
+  transition: rotate var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__panel[data-expanded] .settings-view__disclosure-chevron {
+  rotate: 0deg;
+}
+
+.settings-view__disclosure:hover .settings-view__disclosure-chevron {
+  color: var(--app-text-strong);
+}
+
+.settings-view__disclosure-titles {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-view__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.settings-view__eyebrow svg {
+  width: 14px;
+  height: 14px;
+}
+
+.settings-view__panel-title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--app-text-strong);
+}
+
+.settings-view__panel-description,
+.settings-view__panel-summary {
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.settings-view__panel-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-view__panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px;
+}
+
+.settings-view__panel-aside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--app-text-strong);
+}
+
+.settings-view__aside-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--app-border-default);
+}
+
+.settings-view__saved-at,
+.settings-view__mailbox-status,
+.settings-view__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-view__saved-at {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.settings-view__saved-at svg {
+  width: 14px;
+  height: 14px;
+  color: var(--app-status-success);
+}
+
+.settings-view__mailbox-status {
+  gap: 8px;
+}
+
+.settings-view__badge {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--radius-capsule);
+  background: var(--muted);
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.settings-view__badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-capsule);
+  background: var(--chart-2);
+}
+
+.settings-view__initial {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-capsule);
+  background: var(--secondary);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--secondary-foreground);
+}
+
+/* Fields of a panel */
+
+.settings-view__panel-fields {
+  display: grid;
+  min-width: 0;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.settings-view__panel-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-view__panel-field[data-wide] {
+  grid-column: 1 / -1;
+}
+
+.settings-view__panel-field label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--app-text-strong);
+}
+
+.settings-view__optional {
+  font-weight: 400;
+  color: var(--app-text-muted);
+}
+
+.settings-view__panel-help,
+.settings-view__panel-intro {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.settings-view__panel-intro {
+  max-width: 640px;
+  font-size: 13px;
+}
+
+.settings-view__select {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--app-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--app-surface-field);
+  font-size: 14px;
+  color: var(--app-text-strong);
+}
+
+.settings-view__select:focus-visible {
+  outline: 1px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+.settings-view__notes-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-view__mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--app-text);
+}
+
+.settings-view__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.settings-view__chip {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  background: var(--secondary);
+  font-size: 12px;
+  color: var(--secondary-foreground);
+}
+
+.settings-view__chip[data-mono] {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+/* Rows of a panel: a title and its note, then a control */
+
+.settings-view__panel-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-surface);
+}
+
+.settings-view__panel-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 14px 16px;
+}
+
+.settings-view__panel-row + .settings-view__panel-row {
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.settings-view__row-lines {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 280px;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.settings-view__row-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--app-text-strong);
+}
+
+.settings-view__choices {
+  flex-wrap: wrap;
+}
+
+.settings-view__choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+}
+
+.settings-view__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-surface);
+  background: var(--muted);
+}
+
+.settings-view__preview-text {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--app-text-strong);
+}
+
+.settings-view__inline-link {
+  height: auto;
+  padding: 0;
+  font-size: inherit;
+}
+
+.settings-view__closing-note {
+  max-width: 680px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--app-text-muted);
+}
+
+/* Lys pane */
+
+.settings-view__about-lys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+}
+
+.settings-view__about-lys > .settings-view__panel-fields {
+  flex: 1 1 420px;
+}
+
+.settings-view__portrait-column {
+  display: flex;
+  width: 112px;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-view__portrait {
+  display: flex;
+  width: 80px;
+  height: 80px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--radius-capsule);
+  background: var(--secondary);
+  box-shadow: inset 0 0 0 1px var(--app-border-default);
+}
+
+.settings-view__portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.settings-view__portrait-initial {
+  font-size: 34px;
+  font-weight: 620;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: transparent;
+  background-image: var(--gradient-wordmark);
+  background-clip: text;
+}
+
+.settings-view__portrait-change {
+  display: inline-flex;
+  white-space: nowrap;
+  height: 28px;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: var(--radius-control);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--app-text-muted);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-standard) var(--ease-standard),
+    color var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__portrait-change:hover {
+  background: var(--app-surface-hover);
+  color: var(--app-text-strong);
+}
+
+.settings-view__portrait-change:focus-within {
+  outline: 1px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+.settings-view__mailbox,
+.settings-view__mailbox-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.settings-view__mailbox-setup > [role="status"] {
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mailbox-back {
+  align-self: flex-start;
+}
+
+.settings-view__mailbox-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.settings-view__mailbox-icon {
+  display: flex;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-surface);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+
+.settings-view__mailbox-lines {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 280px;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mailbox-address {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--app-text-strong);
+}
+
+.settings-view__mailbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-view__mailbox-servers {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.settings-view__mailbox-server,
+.settings-view__model-view-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-surface);
+  background: var(--muted);
+}
+
+.settings-view__mailbox-server-address {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--app-text-strong);
+}
+
+.settings-view__mailbox-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.settings-view__mailbox-message {
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mailbox-message[data-tone="success"] {
+  color: var(--app-status-success);
+}
+
+.settings-view__mailbox-message[data-tone="danger"] {
+  color: var(--app-text-danger);
+}
+
+.settings-view__mailbox-remove:hover {
+  background: var(--app-surface-danger);
+  color: var(--app-text-danger);
+}
+
+.settings-view__mailbox-removal {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  margin: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--app-border-danger);
+  border-radius: var(--radius-surface);
+  background: var(--app-surface-danger);
+}
+
+.settings-view__mailbox-removal p {
+  min-width: 0;
+  flex: 1 1 320px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-text-strong);
+}
+
+.settings-view__mailbox-removal-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Profile pane */
+
+.settings-view__model-view {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.settings-view__model-view-tile {
+  gap: 6px;
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.settings-view__model-view-value {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--app-text-strong);
+}
+
+.settings-view__model-view-value span {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--app-text-muted);
+}
+
+/* In a panel, the location form is the body itself, not a card of its own. */
+.settings-view__panel-body > .settings-view__location-card,
+.settings-view__mailbox-setup > .settings-view__email-card {
+  gap: 20px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.settings-view__location-sharing {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Tools pane */
+
+.settings-view__context {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px 16px;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.settings-view__context-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-view__context-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--app-text);
+}
+
+.settings-view__context-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-capsule);
+  background: var(--app-control-track);
+}
+
+.settings-view__context-bar > span {
+  display: block;
+  height: 100%;
+  min-inline-size: 4px;
+  border-radius: inherit;
+  background-image: var(--gradient-primary);
+}
+
+.settings-view__context-note {
+  font-size: 12px;
+  line-height: 1.5;
+  text-transform: none;
+  letter-spacing: normal;
+  font-family: var(--font-sans);
+  color: var(--app-text-muted);
+}
+
+.settings-view__pointer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 16px;
+  padding: 14px 16px;
+  border: 1px dashed var(--app-border-default);
+  border-radius: var(--radius-surface);
+}
+
+.settings-view__pointer-icon {
+  display: flex;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-surface);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+
+.settings-view__pointer-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.settings-view__panel-intro-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 20px 24px 0;
+}
+
+.settings-view__panel-intro-head > .settings-view__panel-intro {
+  margin-top: 4px;
+}
+
+.settings-view__panel > .settings-view__folder-card {
+  padding: 16px 24px 24px;
+  border: 0;
+  background: none;
+}
+
+/* MCP pane */
+
+.settings-view__overview {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.settings-view__overview-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  border: 1px solid var(--app-border-default);
+  border-radius: var(--radius-surface);
+  background: var(--app-surface-panel);
+  box-shadow: var(--shadow-card);
+}
+
+.settings-view__overview-value {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--app-text-strong);
+}
+
+.settings-view__overview-value span {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--app-text-muted);
+}
+
+.settings-view__overview-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.settings-view__overview-bar {
+  display: flex;
+  height: 6px;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: var(--radius-capsule);
+}
+
+.settings-view__overview-bar > span {
+  min-width: 0;
+  flex-basis: 0;
+}
+
+.settings-view__overview-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.settings-view__overview-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-view__overview-legend > span::before {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  content: "";
+}
+
+.settings-view__overview-bar > [data-choice="ask"],
+.settings-view__overview-legend > [data-choice="ask"]::before {
+  background: var(--chart-1);
+}
+
+.settings-view__overview-bar > [data-choice="run"],
+.settings-view__overview-legend > [data-choice="run"]::before {
+  background: var(--chart-2);
+}
+
+.settings-view__overview-bar > [data-choice="off"],
+.settings-view__overview-legend > [data-choice="off"]::before {
+  background: var(--app-control-track);
+}
+
+.settings-view__mcp-mailboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-view__mcp-mailboxes > .settings-view__panel-row {
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-surface);
+}
+
+/* Secrets pane */
+
+.settings-view__banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--radius-surface);
+  background: var(--muted);
+}
+
+.settings-view__panel > .settings-view__secret-card {
+  margin: 16px 24px 24px;
+}
+
+.settings-view__overview + * {
+  margin-top: 12px;
 }

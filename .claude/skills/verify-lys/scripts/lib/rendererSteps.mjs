@@ -38,10 +38,11 @@ export function buildSwitchExpression(label) {
 const BACKEND_STATUS_HEADING = `document.querySelector('[aria-label="Backend status"] h2')`
 
 /**
- * One settings pane: its tab label and what shows it is rendered.
+ * One settings pane: its label in the settings rail and what shows it is
+ * rendered.
  *
  * @typedef {object} SettingsPane
- * @property {string} label - Start of the tab's text.
+ * @property {string} label - Start of the rail entry's text.
  * @property {string} readyExpression - Expression that is truthy once the
  * pane's content is on the page.
  */
@@ -116,7 +117,7 @@ export async function openSettingsPane(page, pane) {
     timeoutMs: 10_000
   })
   await page.click(
-    `[...document.querySelectorAll('[aria-label="Settings sections"] [role="tab"]')].find((tab) => tab.textContent.startsWith(${JSON.stringify(pane.label)}))`
+    `[...document.querySelectorAll('[aria-label="Settings sections"] > ul > li > button')].find((entry) => entry.textContent.startsWith(${JSON.stringify(pane.label)}))`
   )
   await page.waitForPageCondition({
     description: `the ${pane.label} pane`,

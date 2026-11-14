@@ -10,42 +10,70 @@ import {
   readProcessGroupId
 } from "../lib/processControl.mjs"
 import { BACKEND_PORT } from "../lib/repository.mjs"
-import { VERIFICATION_MODEL_NAME } from "../lib/verificationProvider.mjs"
+import {
+  VERIFICATION_MODEL_NAME,
+  VERIFICATION_PROVIDER
+} from "../lib/verificationProvider.mjs"
 import { waitForCondition } from "../lib/waiting.mjs"
 
 /**
- * Waits until the backend reports its provider connected, asking it to
- * connect once if it is not.
+ * Builds the URL of one of the verification provider's LLM routes.
  *
  * @param {string} backendUrl - The backend origin.
+ * @param {string} route - The route's part after the provider, such as
+ * `runtime` or `list`.
+ * @returns {string} The absolute URL, `/api/v1/llm/<provider>/<route>`.
+ */
+function buildProviderLlmUrl(backendUrl, route) {
+  return `${backendUrl}/api/v1/llm/${VERIFICATION_PROVIDER}/${route}`
+}
+
+/**
+ * Reads the verification provider's runtime status once it has settled on
+ * an answer a wait can end on.
+ *
+ * @param {string} statusUrl - The provider's runtime status URL.
+ * @returns {Promise<unknown>} The status body when it is `connected` or
+ * `off`.
+ * @throws If the status is another one, so a wait polls again and records
+ * the last body it saw.
+ */
+async function getSettledRuntimeStatus(statusUrl) {
+  const exchange = await sendJsonRequest(statusUrl)
+  if (["connected", "off"].includes(exchange.body?.status)) return exchange.body
+  throw new Error(`the runtime reported ${JSON.stringify(exchange.body)}`)
+}
+
+/**
+ * Waits until the backend reports the verification provider connected,
+ * asking it to connect once if it is not.
+ *
+ * @remarks `off` ends the wait at once: it means the settings turn the
+ * provider off, which no connection attempt changes.
+ * @param {string} backendUrl - The backend origin.
  * @returns {Promise<unknown>} The runtime status body.
- * @throws If the runtime is not connected within 30 seconds.
+ * @throws If the runtime is off, or not connected within 30 seconds.
  */
 async function waitForConnectedRuntime(backendUrl) {
-  const first = await sendJsonRequest(`${backendUrl}/api/v1/llm/runtime`)
+  const statusUrl = buildProviderLlmUrl(backendUrl, "runtime")
+  const first = await sendJsonRequest(statusUrl)
   if (first.body?.status !== "connected") {
-    await sendJsonRequest(`${backendUrl}/api/v1/llm/runtime/connect`, {
+    await sendJsonRequest(buildProviderLlmUrl(backendUrl, "runtime/connect"), {
       method: "POST",
       json: {}
     })
   }
-  return waitForCondition({
-    description: "the LLM runtime to report connected",
+  const body = await waitForCondition({
+    description: `the ${VERIFICATION_PROVIDER} runtime to report connected`,
     timeoutMs: 30_000,
-    check: async () => {
-      const exchange = await sendJsonRequest(`${backendUrl}/api/v1/llm/runtime`)
-      return exchange.body?.status === "connected"
-        ? exchange.body
-        : exchange.body
-    }
-  }).then((body) => {
-    rejectUnless(
-      body?.status === "connected",
-      "The runtime must be connected.",
-      body
-    )
-    return body
+    check: () => getSettledRuntimeStatus(statusUrl)
   })
+  rejectUnless(
+    body.status === "connected",
+    `The ${VERIFICATION_PROVIDER} runtime must be on and connected.`,
+    body
+  )
+  return body
 }
 
 export default Object.freeze({
@@ -112,7 +140,7 @@ export default Object.freeze({
       "the verification model is listed as loaded",
       async (evidence) => {
         const list = await sendJsonRequest(
-          `${context.backendUrl}/api/v1/llm/list`
+          buildProviderLlmUrl(context.backendUrl, "list")
         )
         evidence.saveJson("llm-list.json", list.body)
         const model = list.body?.llms?.find(

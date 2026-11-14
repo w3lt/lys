@@ -7,7 +7,9 @@
  * HTTP. This host answers every command the renderer invokes the way the
  * Rust host in `apps/desktop/src-tauri` does: it loads and saves
  * `settings.json` in the run's scratch Lys home, writing the defaults when
- * the file is missing and saving atomically with owner-only permissions;
+ * the file is missing, reading a legacy `providers.active` as the one
+ * provider on in `providers.enabled`, and saving atomically with owner-only
+ * permissions;
  * it starts the real backend from source with `tsx src/index.ts` in its
  * own process group and stops it with `SIGTERM`, then `SIGKILL`; it reports
  * vmo as stopped and refuses to start it; and it lists no client tools.
@@ -36,6 +38,7 @@ import {
   SETTINGS_GROUPS,
   buildSettingsPath,
   isSettingsDocumentShape,
+  parseProvidersSettingsGroup,
   readSettingsDocument,
   saveSettingsDocument
 } from "./lib/settingsDocument.mjs"
@@ -134,16 +137,46 @@ async function stopBackend(state) {
 }
 
 /**
+ * Reads a stored or sent settings document the way the Rust host reads it.
+ *
+ * @remarks Every group is present in the host's order; a missing group or
+ * field takes its default, and a group the host does not know is dropped.
+ * The `providers` group is read on its own, not merged with its default, so
+ * a legacy `active` provider turns on that provider alone and is replaced by
+ * the `enabled` list.
+ * @param {Record<string, unknown>} stored - A document from `settings.json`
+ * or from the renderer.
+ * @returns {object} The document the host answers with and saves.
+ * @throws If the `providers` group breaks the host's rules.
+ */
+function parseHostSettingsDocument(stored) {
+  const document = Object.fromEntries(
+    SETTINGS_GROUPS.map((group) => [
+      group,
+      { ...DEFAULT_SETTINGS_DOCUMENT[group], ...(stored[group] ?? {}) }
+    ])
+  )
+  return {
+    ...document,
+    providers: parseProvidersSettingsGroup(stored.providers ?? {})
+  }
+}
+
+/**
  * Loads `settings.json`, writing the defaults when it is missing.
  *
+ * @remarks Like the Rust host, an existing file is read, not rewritten: a
+ * legacy `active` provider is answered as the `enabled` list but stays in
+ * the file until the next save.
  * @param {string} lysHome - The scratch Lys home.
- * @returns {object} The settings document.
- * @throws If the file exists but cannot be parsed.
+ * @returns {object} The settings document as the host reads it.
+ * @throws If the file exists but cannot be parsed, or its `providers` group
+ * breaks the host's rules.
  */
 function loadSettings(lysHome) {
   const path = buildSettingsPath(lysHome)
   if (!existsSync(path)) saveSettingsDocument(path, DEFAULT_SETTINGS_DOCUMENT)
-  return readSettingsDocument(path)
+  return parseHostSettingsDocument(readSettingsDocument(path))
 }
 
 /**
@@ -152,18 +185,16 @@ function loadSettings(lysHome) {
  * @param {string} lysHome - The scratch Lys home.
  * @param {unknown} newSettings - The renderer's `newSettings` argument.
  * @returns {null} Nothing, like the Rust command.
- * @throws If the argument is not a settings document.
+ * @throws If the argument is not a settings document, or its `providers`
+ * group breaks the host's rules; nothing is written then.
  */
 function saveSettings(lysHome, newSettings) {
   if (!isSettingsDocumentShape(newSettings))
     throw new Error("save_settings needs a settings document in newSettings")
-  const document = Object.fromEntries(
-    SETTINGS_GROUPS.map((group) => [
-      group,
-      { ...DEFAULT_SETTINGS_DOCUMENT[group], ...(newSettings[group] ?? {}) }
-    ])
+  saveSettingsDocument(
+    buildSettingsPath(lysHome),
+    parseHostSettingsDocument(newSettings)
   )
-  saveSettingsDocument(buildSettingsPath(lysHome), document)
   return null
 }
 

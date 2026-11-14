@@ -176,7 +176,7 @@ function LysPortrait(): ReactElement {
         )}
       </div>
       <label className="settings-view__portrait-change">
-        Change portrait
+        <span>Change portrait</span>
         <input
           accept="image/*"
           className="sr-only"
@@ -774,7 +774,7 @@ type RemovalNoticeView = {
   readonly isNoticeShown: boolean
   /** Attaches the notice while it must take focus; undefined otherwise. */
   readonly attachNotice:
-    ((element: HTMLParagraphElement | null) => void) | undefined
+    ((element: HTMLOutputElement | null) => void) | undefined
   /** Shows the notice, which takes focus once. */
   readonly announceRemoval: () => void
 }
@@ -796,7 +796,7 @@ function useRemovalNotice(): RemovalNoticeView {
    * @param element - Attached notice, or null when React detaches it,
    * which is ignored.
    */
-  function handleNoticeAttach(element: HTMLParagraphElement | null): void {
+  function handleNoticeAttach(element: HTMLOutputElement | null): void {
     if (element === null) return
     element.focus()
     setNotice("announced")
@@ -807,6 +807,29 @@ function useRemovalNotice(): RemovalNoticeView {
     attachNotice: notice === "announcing" ? handleNoticeAttach : undefined,
     announceRemoval: () => setNotice("announcing")
   }
+}
+
+/**
+ * Presents the status line saying that Lys's mailbox was removed.
+ *
+ * @remarks The section owns whether the line shows and whether it takes
+ * focus; the line owns no state. It is an `output`, whose status role
+ * announces it.
+ * @param props - Attaches the line while it must take focus.
+ * @returns The line.
+ */
+function LysMailboxRemovedNotice({
+  attachNotice
+}: Pick<RemovalNoticeView, "attachNotice">): ReactElement {
+  return (
+    <output
+      className="settings-view__mailbox-notice"
+      ref={attachNotice}
+      tabIndex={-1}
+    >
+      Lys&apos;s mailbox was removed.
+    </output>
+  )
 }
 
 /**
@@ -855,9 +878,7 @@ function LysEmailSection(): ReactElement {
       {account === null || isCardShown ? (
         <div className="settings-view__mailbox-setup">
           {isNoticeShown && account === null ? (
-            <p ref={attachNotice} role="status" tabIndex={-1}>
-              Lys&apos;s mailbox was removed.
-            </p>
+            <LysMailboxRemovedNotice attachNotice={attachNotice} />
           ) : null}
           {account === null ? null : (
             <EmailMailboxBackButton

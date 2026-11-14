@@ -387,7 +387,9 @@ describe("LysPaneContent", () => {
     expect(settings.email.lysAccount).toBeNull()
     expect(settings.secrets.lysEmailPassword).toBeNull()
     expect(settings.mcp.builtIn.email.lysEnabled).toBe(false)
-    expect(screen.getByText("Lys's mailbox was removed.")).toHaveFocus()
+    const notice = screen.getByText("Lys's mailbox was removed.")
+    expect(notice).toHaveFocus()
+    expect(notice).toHaveRole("status")
     expect(
       screen.getByRole("form", { name: "Lys's email account" })
     ).toBeInTheDocument()

@@ -208,6 +208,19 @@ function McpServerStatusLine({
 /** What runs one MCP tool: asking first, running at once, or nothing. */
 type McpToolChoice = ToolApproval | "off"
 
+/**
+ * Finds a tool's choice from its switch and its approval.
+ *
+ * @param isOn - Whether the tool is switched on.
+ * @param isJustRun - Whether the tool runs without asking.
+ * @returns `off` while the tool is off, whatever its approval; otherwise
+ * `run` when it runs without asking, and `ask` when it asks first.
+ */
+function findMcpToolChoice(isOn: boolean, isJustRun: boolean): McpToolChoice {
+  if (!isOn) return "off"
+  return isJustRun ? "run" : "ask"
+}
+
 /** The choices of one MCP tool, in order. */
 const MCP_TOOL_CHOICES: readonly SettingsChoice<McpToolChoice>[] =
   Object.freeze([
@@ -247,8 +260,10 @@ type McpToolRowProps = {
 function McpToolRow({ tool, context }: McpToolRowProps): ReactElement {
   const nameId = useId()
   const isOn = isToolOn(context.toolSwitches, tool)
-  const isJustRun = context.justRunToolNames.has(tool.name)
-  const choice: McpToolChoice = isOn ? (isJustRun ? "run" : "ask") : "off"
+  const choice = findMcpToolChoice(
+    isOn,
+    context.justRunToolNames.has(tool.name)
+  )
 
   /**
    * Proposes the switch and the approval the chosen value stands for.

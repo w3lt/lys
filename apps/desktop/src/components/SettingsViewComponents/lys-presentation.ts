@@ -95,8 +95,9 @@ export function formatLysIdentitySummary(identity: LysIdentity): string {
  */
 export function formatLysMailboxSummary(account: EmailAccount | null): string {
   if (account === null) return "No mailbox yet"
+  const incomingServer = `${account.imap.host}:${account.imap.port}`
   const provider = findEmailPreset(account.address)?.name
-  return `${account.address} · ${provider ?? `${account.imap.host}:${account.imap.port}`}`
+  return `${account.address} · ${provider ?? incomingServer}`
 }
 
 /**

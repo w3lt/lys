@@ -123,6 +123,30 @@ export const STOP_JOB_TOOL_NAME = "stop_job"
 export const MAXIMUM_JOB_TITLE_LENGTH = 80
 
 /**
+ * Parses an argument value as the title of a job, as a `delegate_work` call
+ * gives it.
+ *
+ * @param value - Untrusted argument value.
+ * @returns The trimmed title, or undefined when the value is not text, is
+ * blank, is longer than {@link MAXIMUM_JOB_TITLE_LENGTH}, or holds a line
+ * break.
+ * @remarks The backend refuses a call whose title this rejects, and the
+ * desktop describes a call on its approval card by the same rule.
+ */
+export function parseJobTitle(value: unknown): string | undefined {
+  /** Matches a line break: a title that holds one is not on one line. */
+  const lineBreakPattern = /[\n\r\u2028\u2029]/
+
+  if (typeof value !== "string") return undefined
+  const title = value.trim()
+  const isOneBoundedLine =
+    title !== "" &&
+    title.length <= MAXIMUM_JOB_TITLE_LENGTH &&
+    !lineBreakPattern.test(title)
+  return isOneBoundedLine ? title : undefined
+}
+
+/**
  * Inclusive maximum length of a trimmed progress note, in UTF-16 code units.
  *
  * @remarks Checked when a `report_progress` call is parsed: a longer note is

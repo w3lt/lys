@@ -4,6 +4,7 @@ import {
   FIND_AGENTS_TOOL_NAME,
   MAXIMUM_JOB_TITLE_LENGTH,
   MAXIMUM_PROGRESS_NOTE_LENGTH,
+  parseJobTitle,
   REPORT_PROGRESS_TOOL_NAME,
   STOP_JOB_TOOL_NAME,
   toolDefinitionSchema,
@@ -160,25 +161,6 @@ function parseTrimmedText(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined
   const text = value.trim()
   return text === "" ? undefined : text
-}
-
-/**
- * Parses an argument value as the title of a job.
- *
- * @param value - Argument value of a call.
- * @returns The trimmed title, or undefined when the value is not text, is
- * blank, is longer than `MAXIMUM_JOB_TITLE_LENGTH` of `@lys/share`, or holds
- * a line break.
- */
-function parseJobTitle(value: unknown): string | undefined {
-  /** Matches a line break: a title that holds one is not on one line. */
-  const lineBreakPattern = /[\n\r\u2028\u2029]/
-
-  const title = parseTrimmedText(value)
-  if (title === undefined) return undefined
-  const isOneBoundedLine =
-    title.length <= MAXIMUM_JOB_TITLE_LENGTH && !lineBreakPattern.test(title)
-  return isOneBoundedLine ? title : undefined
 }
 
 /**

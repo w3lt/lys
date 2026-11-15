@@ -599,7 +599,7 @@ describe("startTurn", () => {
     height: 32
   })
 
-  it.each([
+  it.for([
     [
       "a model that is not trained for tool use",
       [NOTES_ATTACHMENT],
@@ -618,9 +618,9 @@ describe("startTurn", () => {
       true,
       [...SETTINGS_TOOL_NAMES, ...LEADER_STATE_TOOL_NAMES]
     ]
-  ])(
+  ] as const)(
     "adds no attachment reader for %s",
-    async (_label, attachments, trainedForToolUse, toolNames) => {
+    async ([, attachments, trainedForToolUse, toolNames]) => {
       const harness = openTurnStartHarness()
       const openReplyStream = createEventStream(HI_REPLY)
       const turn = createStoredTurn(harness.services, attachments)

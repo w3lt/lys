@@ -82,7 +82,7 @@ describe("formatJobReportsBlock", () => {
     )
   })
 
-  it.each([
+  it.for([
     [
       "progress note",
       "note",
@@ -111,7 +111,7 @@ describe("formatJobReportsBlock", () => {
     ]
   ] as const)(
     "writes a %s report as its sentence",
-    (_label, kind, content, statement) => {
+    ([, kind, content, statement]) => {
       const report = createDeliveredReport({ ...JOB_4_REPORT, kind, content })
 
       expect(formatJobReportsBlock([report])).toBe(

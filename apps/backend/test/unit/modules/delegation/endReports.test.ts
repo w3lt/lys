@@ -44,7 +44,7 @@ describe("buildEndReport", () => {
   /** Text of a failed report whose reply sent no usable error sentence. */
   const unknownFailure = "The agent's reply failed."
 
-  it.each<
+  it.for<
     [
       string,
       EndedReplyRecord,
@@ -139,7 +139,7 @@ describe("buildEndReport", () => {
     ]
   ])(
     "builds the report of a reply that %s",
-    (_label, reply, requester, errorMessage, expected) => {
+    ([, reply, requester, errorMessage, expected]) => {
       expect(buildEndReport(reply, requester, errorMessage)).toEqual(expected)
     }
   )

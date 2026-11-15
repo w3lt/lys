@@ -274,7 +274,7 @@ describe("createJobMessage", () => {
    */
   const otherConversationsJob = 2
 
-  it.each<[string, string, number | undefined, JobMessageRefusal]>([
+  it.for<[string, string, number | undefined, JobMessageRefusal]>([
     [
       "an unknown agent",
       "nobody",
@@ -325,7 +325,7 @@ describe("createJobMessage", () => {
     ]
   ])(
     "refuses %s, stores nothing, starts nothing, and reports the refusal",
-    (_label, agentCode, jobNumber, refusal) => {
+    ([, agentCode, jobNumber, refusal]) => {
       const services = openDelegationTestServices()
       const other = createPersonTurn(services.conversation.turns)
       sendJobMessage(services, other, MOTHS_REQUEST)

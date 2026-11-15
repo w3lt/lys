@@ -6,6 +6,7 @@ import ActivityHub, {
   type EndedActivityStatus
 } from "../../../../src/modules/activity/activityHub"
 import type { AssistantMessageCompletion } from "../../../../src/modules/agent/agent"
+import type { ReplyPartDraft } from "../../../../src/modules/agent/replyPartSequence"
 import type { EndedReply } from "../../../../src/modules/chat/turnStart"
 import type { DelegationRuntime } from "../../../../src/modules/delegation/dependencies"
 import { handleReplyEnded } from "../../../../src/modules/delegation/replyEnds"
@@ -80,21 +81,16 @@ function addStopRequest(
  *
  * @param services - The case's conversation services.
  * @param replyId - UUIDv7 of the reply.
- * @param round - Zero-based model round the text belongs to.
- * @param content - Non-empty text of the part.
+ * @param text - The part: the zero-based model round it belongs to and its
+ * non-empty text.
  * @throws If the reply is no longer streaming.
  */
 function createReplyText(
   services: Pick<DelegationTestServices, "conversation">,
   replyId: string,
-  round: number,
-  content: string
+  text: Extract<ReplyPartDraft, { kind: "text" }>
 ): void {
-  const part = services.conversation.replyParts.createReplyPart(replyId, {
-    kind: "text",
-    round,
-    content
-  })
+  const part = services.conversation.replyParts.createReplyPart(replyId, text)
   if (part === undefined) throw new Error("The reply took no text")
 }
 
@@ -157,7 +153,7 @@ function followJobReply(
 }
 
 describe("handleReplyEnded", () => {
-  it.each<
+  it.for<
     [
       string,
       AssistantMessageCompletion,
@@ -197,7 +193,7 @@ describe("handleReplyEnded", () => {
     ]
   ])(
     "removes a job's reply that %s from the hub with its stored status, and sends the job update",
-    (_label, completion, requester, status, jobState) => {
+    ([, completion, requester, status, jobState]) => {
       const services = openDelegationTestServices()
       const delegating = createPersonTurn(services.conversation.turns)
       const conversationId = delegating.turn.conversation.id
@@ -223,7 +219,7 @@ describe("handleReplyEnded", () => {
     }
   )
 
-  it.each<
+  it.for<
     [
       string,
       AssistantMessageCompletion,
@@ -286,12 +282,16 @@ describe("handleReplyEnded", () => {
     ]
   ])(
     "stores %s for a job's ended reply, with the job's title",
-    (_label, completion, requester, errorMessage, expected) => {
+    ([, completion, requester, errorMessage, expected]) => {
       const services = openDelegationTestServices()
       const delegating = createPersonTurn(services.conversation.turns)
       const conversationId = delegating.turn.conversation.id
       const job = sendJobMessage(services, delegating, MOTHS_REQUEST)
-      createReplyText(services, job.replyId, 0, LAST_ROUND_TEXT)
+      createReplyText(services, job.replyId, {
+        kind: "text",
+        round: 0,
+        content: LAST_ROUND_TEXT
+      })
       addStopRequest(services, job.replyId, requester)
       services.conversation.turns.updateAssistantMessageState(
         job.replyId,
@@ -354,8 +354,16 @@ describe("handleReplyEnded", () => {
     const delegating = createPersonTurn(services.conversation.turns)
     const conversationId = delegating.turn.conversation.id
     const job = sendJobMessage(services, delegating, MOTHS_REQUEST)
-    createReplyText(services, job.replyId, 0, "Let me look that up.")
-    createReplyText(services, job.replyId, 1, LAST_ROUND_TEXT)
+    createReplyText(services, job.replyId, {
+      kind: "text",
+      round: 0,
+      content: "Let me look that up."
+    })
+    createReplyText(services, job.replyId, {
+      kind: "text",
+      round: 1,
+      content: LAST_ROUND_TEXT
+    })
     services.conversation.turns.updateAssistantMessageState(job.replyId, {
       status: "completed",
       finishReason: "stop"

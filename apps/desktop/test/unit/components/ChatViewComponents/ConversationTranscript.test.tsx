@@ -445,7 +445,7 @@ describe("ConversationTranscript", () => {
     expect(screen.getByText("Nyx · News · Result")).toBeVisible()
   })
 
-  it.each<[string, CompletedConversationMessage[], string, string[]]>([
+  it.for<[string, CompletedConversationMessage[], string, string[]]>([
     [
       "messages of the person",
       [
@@ -475,7 +475,7 @@ describe("ConversationTranscript", () => {
     ]
   ])(
     "names apart by message the report lines of two %s that each delivered one report, which show the same label",
-    (_label, messages, shownLabel, names) => {
+    ([, messages, shownLabel, names]) => {
       render(
         <ConversationTranscript
           {...NO_JOBS}

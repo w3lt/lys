@@ -366,7 +366,7 @@ describe("buildDelegationDefinitions", () => {
     job: undefined
   })
 
-  it.each<OfferCase>([
+  it.for<OfferCase>([
     [
       "a leader that may delegate",
       "leader",
@@ -394,7 +394,7 @@ describe("buildDelegationDefinitions", () => {
     ],
     ["a member in a job", "member", JOB_OFFER, ["report_progress"]],
     ["a turn outside delegation", "leader", noOffer, []]
-  ])("offers %s exactly these tools", (_label, role, offer, toolNames) => {
+  ])("offers %s exactly these tools", ([, role, offer, toolNames]) => {
     const definitions = buildDelegationDefinitions(role, offer)
     const tools = buildDelegationTools(role, buildTurnDelegation(offer))
 
@@ -536,7 +536,7 @@ describe("buildDelegationTools", () => {
   describe("delegate_work", () => {
     registerBuiltInToolContractSuite(createDelegateWorkHarness)
 
-    it.each<TextParseCase>([
+    it.for<TextParseCase>([
       ["80 characters", "parsed", "a".repeat(80), PARSED_CALL],
       [
         "80 characters between spaces",
@@ -560,7 +560,7 @@ describe("buildDelegationTools", () => {
         INVALID_TITLE_CALL
       ],
       ["only spaces", "invalid", "   ", INVALID_TITLE_CALL]
-    ])("parses a title of %s as %s", (_label, _status, title, outcome) => {
+    ])("parses a title of %s as %s", ([, , title, outcome]) => {
       const tool = buildDelegateWorkTool(handleUnexpectedDelegationCall)
 
       const parsed = tool.parseToolCall({ ...DELEGATE_WORK_ARGUMENTS, title })
@@ -864,7 +864,7 @@ describe("buildDelegationTools", () => {
       message: "The note must be 1 to 2000 characters long after trimming."
     })
 
-    it.each<TextParseCase>([
+    it.for<TextParseCase>([
       ["2000 characters", "parsed", "n".repeat(2000), PARSED_CALL],
       [
         "2000 characters between line breaks",
@@ -874,7 +874,7 @@ describe("buildDelegationTools", () => {
       ],
       ["2001 characters", "invalid", "n".repeat(2001), invalidNoteCall],
       ["only spaces and line breaks", "invalid", " \n ", invalidNoteCall]
-    ])("parses a note of %s as %s", (_label, _status, note, outcome) => {
+    ])("parses a note of %s as %s", ([, , note, outcome]) => {
       const tool = buildReportProgressTool(handleUnexpectedDelegationCall)
 
       expect(tool.parseToolCall({ note })).toEqual(outcome)

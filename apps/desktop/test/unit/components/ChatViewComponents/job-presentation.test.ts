@@ -169,14 +169,14 @@ describe("job-presentation", () => {
     )
   })
 
-  it.each([
+  it.for([
     ["started it", [65], [CARD], []],
     ["only continued it", [66], [], [CARD]],
     ["started and then continued it", [65, 66], [CARD], []],
     ["sent it no message", [67], [], []]
   ] as const)(
     "shows a job on a reply whose calls %s",
-    (_label, callSequences, started, continued) => {
+    ([, callSequences, started, continued]) => {
       const parts = callSequences.map(buildDelegationCall)
 
       expect(createReplyJobsPresentation(parts, [CARD, OTHER_CARD])).toEqual({

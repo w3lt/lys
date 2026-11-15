@@ -2,6 +2,7 @@ import type {
   AnsweredToolCallReplyPart,
   ConversationAssistantMessageStatus,
   ConversationSource,
+  JobReport,
   ReplyPart,
   ToolCallReplyPart,
   ToolCallReplyPartStatus
@@ -79,6 +80,11 @@ export type ReplySourceScopeMessage = Readonly<
       id: string
       /** A user message, which shows no sources. */
       role: "user"
+      /**
+       * Reports delivered with the message, oldest first, with the numbers
+       * of the conversation's sources each cites.
+       */
+      reports: readonly Pick<JobReport, "sourceNumbers">[]
     }
   | {
       /** Identifier of the reply. */
@@ -437,9 +443,10 @@ function isContextReplyStatus(
  * @param messages - Transcript messages in conversation order.
  * @returns For each reply's identifier, the numbers its own succeeded calls
  * showed, together with those the succeeded calls of earlier completed or
- * interrupted replies showed, which the backend sends to the model as
- * context. A failed reply is left out of later turns, so the sources only it
- * showed stay its own; a later reply's sources were found after the reply.
+ * interrupted replies showed and those the reports delivered with earlier
+ * user messages cite, which the backend sends to the model as context. A
+ * failed reply is left out of later turns, so the sources only it showed
+ * stay its own; a later reply's sources were found after the reply.
  */
 export function calculateReplyCitableSourceNumbers(
   messages: readonly ReplySourceScopeMessage[]
@@ -447,7 +454,13 @@ export function calculateReplyCitableSourceNumbers(
   const citableNumbers = new Map<string, ReadonlySet<number>>()
   const contextNumbers = new Set<number>()
   for (const message of messages) {
-    if (message.role === "user") continue
+    if (message.role === "user") {
+      const reportNumbers = message.reports.flatMap(
+        (report) => report.sourceNumbers
+      )
+      for (const number of reportNumbers) contextNumbers.add(number)
+      continue
+    }
     const shownNumbers = listShownSourceNumbers(message.parts)
     citableNumbers.set(
       message.id,

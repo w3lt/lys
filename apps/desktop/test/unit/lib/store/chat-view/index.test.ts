@@ -55,6 +55,7 @@ import {
   buildStreamingAssistantMessage,
   buildToolCallPart,
   buildUserMessage,
+  buildUserMessageWithReports,
   buildWakeUpMessage,
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID,
@@ -870,6 +871,44 @@ describe("createChatViewStore", () => {
         buildUserMessage(4, "More").id,
         secondReply.id
       ])
+    })
+
+    it("merges the sources a continued turn's delivered reports cite, which the backend sends right after the start event and the title", async () => {
+      const { store, streams, send } = await startStreamingReply()
+      await sendStreamEvents(streams[0], { type: "done", finishReason: "stop" })
+      streams[0]?.close()
+      await send
+      const report = buildJobReport({
+        content: "Wool [3].",
+        sourceNumbers: [3]
+      })
+      const source = {
+        number: 3,
+        url: "https://moths.example/diet",
+        title: "Moth diet"
+      }
+
+      void store.getState().sendMessage("Any news?")
+      await waitForMicrotasks()
+      await sendStreamEvents(
+        streams[1],
+        {
+          type: "start-existing-conversation-turn",
+          userMessage: buildUserMessageWithReports(
+            buildUserMessage(4, "Any news?"),
+            [report]
+          ),
+          assistantMessage: buildStreamingAssistantMessage(5, "")
+        },
+        { type: "title", title: "Moths" },
+        { type: "sources", sources: [source] }
+      )
+
+      expect(store.getState().conversation).toMatchObject({
+        title: "Moths",
+        sources: [source],
+        messages: [{}, {}, { reports: [report] }, {}]
+      })
     })
 
     it("hands the reply of each started turn to the tool-call follow", async () => {

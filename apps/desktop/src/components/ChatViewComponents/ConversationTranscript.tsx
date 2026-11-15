@@ -156,17 +156,17 @@ function buildTranscriptEntries(
  * owns messages, lifecycle state, the conversation's sources and jobs, the
  * name every assistant reply is shown under, the name a job's messages are
  * shown under, and what opening and stopping a job do. The transcript gives
- * each reply the sources its model read, so a reply's `[n]` never links to a
- * source a later reply or a failed earlier reply found, and each message the
- * cards of the jobs it shows or names, so a job's change renders again only
- * the messages that show it, such as a reply's card or the reports a
- * message delivered. It exposes no interruption control, because
- * cancellation must stay reachable in active phases that have no assistant
- * message and is therefore owned by the composer. Every message, the
- * streaming tail included, is one entry of the same list keyed by its
- * immutable identifier, so a reply that ends updates in place and keeps its
- * open disclosures and focus. A lifecycle error is announced after the
- * transcript when supplied.
+ * each reply the sources its model read, those of earlier delivered reports
+ * included, so a reply's `[n]` never links to a source a later reply or a
+ * failed earlier reply found, and each message the cards of the jobs it
+ * shows or names, so a job's change renders again only the messages that
+ * show it, such as a reply's card or the reports a message delivered. It
+ * exposes no interruption control, because cancellation must stay reachable
+ * in active phases that have no assistant message and is therefore owned by
+ * the composer. Every message, the streaming tail included, is one entry of
+ * the same list keyed by its immutable identifier, so a reply that ends
+ * updates in place and keeps its open disclosures and focus. A lifecycle
+ * error is announced after the transcript when supplied.
  * @param props - Completed-only or streaming-tail transcript presentation,
  * with the delegator's name and the conversation's jobs and their callbacks.
  * @returns The rendered transcript list and optional lifecycle error.

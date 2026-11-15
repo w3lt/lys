@@ -445,6 +445,34 @@ describe("ConversationTranscript", () => {
     expect(screen.getByText("Nyx · News · Result")).toBeVisible()
   })
 
+  it("links a citation of a report's source in the reply that follows it", async () => {
+    render(
+      <ConversationTranscript
+        {...NO_JOBS}
+        completedMessages={[
+          QUESTION,
+          ANSWER,
+          buildWakeUpMessage(5, [
+            buildJobReport({ content: "Wool [3].", sourceNumbers: [3] })
+          ]),
+          buildCompletedChatViewReply(6, "Moths eat wool [3].")
+        ]}
+        kind="completed-only"
+        speakerName={SPEAKER_NAME}
+        sources={[
+          { number: 3, url: "https://moths.example/diet", title: "Moth diet" }
+        ]}
+      />
+    )
+    const [, , , wakeUpReply] = screen
+      .getAllByRole("article")
+      .map((article) => within(article))
+
+    expect(
+      await wakeUpReply?.findByRole("link", { name: "3, source: Moth diet" })
+    ).toBeVisible()
+  })
+
   it.for<[string, CompletedConversationMessage[], string, string[]]>([
     [
       "messages of the person",

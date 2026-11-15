@@ -1247,7 +1247,9 @@ export function createChatViewStore(
     }
 
     /**
-     * Handles the numbered sources a tool call of the streaming reply stored.
+     * Handles numbered sources the stream sends: those a tool call of the
+     * streaming reply stored, or those the reports the turn's user message
+     * delivered cite, which come right after the start event.
      *
      * @param event - Sources event emitted by the backend stream.
      * @param token - Token expected to own the started reply.

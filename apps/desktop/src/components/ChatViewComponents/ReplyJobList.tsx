@@ -4,7 +4,7 @@ import { useRef, type ReactElement } from "react"
 import {
   useFocusedRemovalReport,
   useFocusSuccessor
-} from "@/components/SettingsViewComponents/focus-target"
+} from "@/components/focus-target"
 
 import { Button } from "../ui/button"
 import {

@@ -8,7 +8,7 @@ import {
 import {
   useFocusedRemovalReport,
   useFocusSuccessor
-} from "@/components/SettingsViewComponents/focus-target"
+} from "@/components/focus-target"
 import { Button } from "@/components/ui/button"
 
 /** Properties accepted by {@link ComposerJobNotice}. */

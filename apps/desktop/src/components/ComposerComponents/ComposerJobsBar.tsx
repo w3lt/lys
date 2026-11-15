@@ -3,7 +3,7 @@ import type { ReactElement, RefObject } from "react"
 import {
   useFocusedRemovalReport,
   useFocusSuccessor
-} from "@/components/SettingsViewComponents/focus-target"
+} from "@/components/focus-target"
 import { Button } from "@/components/ui/button"
 
 import { formatWorkingJobs } from "./composer-presentation"

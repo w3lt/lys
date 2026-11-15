@@ -33,6 +33,7 @@ import {
   startBackendEventStream,
   startBackendFake,
   type BackendEventStream,
+  type BackendRoute,
   type BackendRoutes
 } from "../support/backendFake"
 import {
@@ -285,6 +286,46 @@ async function loadFreshJobComposer() {
     conversation: createStoredChatViewConversation(JOB)
   })
   return loaded
+}
+
+/**
+ * Route that answers the chat view's follows of {@link JOB_REPLY}, and the
+ * follows it opened.
+ */
+type JobReplyEventsRoute = Readonly<{
+  /** Route that answers each follow of {@link JOB_REPLY}. */
+  route: BackendRoute
+  /** Stream of each follow the route opened, in order. */
+  follows: readonly BackendEventStream[]
+}>
+
+/**
+ * Builds the route that answers each follow of {@link JOB_REPLY}, which the
+ * chat view opens while it shows {@link JOB}.
+ *
+ * @returns The route, whose every follow opens with a snapshot of the
+ * streaming reply and stays open, and the follows it opened, so the case can
+ * end them.
+ */
+function buildJobReplyEventsRoute(): JobReplyEventsRoute {
+  const snapshot = chatReplyEventSchema.parse({
+    type: "reply-snapshot",
+    conversationTitle: "News",
+    assistantMessage: JOB_REPLY,
+    sources: [],
+    pendingToolCalls: [],
+    pendingToolApprovals: []
+  })
+  const follows: BackendEventStream[] = []
+  return {
+    route: () => {
+      const follow = startBackendEventStream()
+      follow.sendEvent(snapshot)
+      follows.push(follow)
+      return follow.response
+    },
+    follows
+  }
 }
 
 /**
@@ -1540,24 +1581,11 @@ describe("Composer", () => {
       const jobRoute = `GET /api/v1/conversations/${FIXTURE_JOB_ID}`
       const replyEventsRoute = `GET /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/events`
       const stopRoute = `POST /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/stop`
-      const snapshot = chatReplyEventSchema.parse({
-        type: "reply-snapshot",
-        conversationTitle: "News",
-        assistantMessage: JOB_REPLY,
-        sources: [],
-        pendingToolCalls: [],
-        pendingToolApprovals: []
-      })
-      const follows: BackendEventStream[] = []
+      const jobReplyEvents = buildJobReplyEventsRoute()
       const backend = startBackendFake({
         ...MEASURING_BACKEND_ROUTES,
         [jobRoute]: () => buildJsonResponse(200, JOB),
-        [replyEventsRoute]: () => {
-          const follow = startBackendEventStream()
-          follow.sendEvent(snapshot)
-          follows.push(follow)
-          return follow.response
-        },
+        [replyEventsRoute]: jobReplyEvents.route,
         [stopRoute]: () => new Response(null, { status: 204 })
       })
       const { useChatViewStore, Composer } = await loadFreshComposer()
@@ -1582,7 +1610,7 @@ describe("Composer", () => {
           .filter((routeKey) => routeKey !== replyEventsRoute)
       ).toEqual([jobRoute, stopRoute])
       await act(async () => {
-        follows.forEach((follow) => {
+        jobReplyEvents.follows.forEach((follow) => {
           follow.sendEvent({ type: "interrupted" })
           follow.close()
         })

@@ -74,8 +74,11 @@ type ComposerToolCallHeaderProps = {
   readonly isArgumentsExpanded: boolean
   /** Identifier of the argument list, which the toggle controls. */
   readonly argumentsListId: string
-  /** Requests that the card show the argument list, or hide it when shown. */
-  readonly onToggleArguments: () => void
+  /**
+   * Proposes whether the card shows the argument list; receives the opposite
+   * of {@link ComposerToolCallHeaderProps.isArgumentsExpanded}.
+   */
+  readonly onIsArgumentsExpandedChange: (isExpanded: boolean) => void
 }
 
 /** Properties accepted by {@link ComposerCalledTool}. */
@@ -138,14 +141,14 @@ type ComposerToolResultFailureProps = {
  * `aria-controls` while it is shown. The card owns whether the list is
  * shown; the component owns no state.
  * @param props - Whether the call has arguments, whether they are shown,
- * the list's identifier, and the toggle request.
+ * the list's identifier, and the proposal to show or hide them.
  * @returns The card's header.
  */
 function ComposerToolCallHeader({
   hasArguments,
   isArgumentsExpanded,
   argumentsListId,
-  onToggleArguments
+  onIsArgumentsExpandedChange
 }: ComposerToolCallHeaderProps): ReactElement {
   return (
     <div className="composer__approval-header">
@@ -156,7 +159,7 @@ function ComposerToolCallHeader({
           aria-controls={isArgumentsExpanded ? argumentsListId : undefined}
           aria-expanded={isArgumentsExpanded}
           className="composer__approval-toggle"
-          onClick={onToggleArguments}
+          onClick={() => onIsArgumentsExpandedChange(!isArgumentsExpanded)}
           type="button"
         >
           <ChevronRight aria-hidden="true" />
@@ -349,9 +352,7 @@ function ComposerToolCallRequest({
         argumentsListId={argumentsId}
         hasArguments={hasArguments}
         isArgumentsExpanded={isArgumentsExpanded}
-        onToggleArguments={() =>
-          setIsArgumentsExpanded((isExpanded) => !isExpanded)
-        }
+        onIsArgumentsExpandedChange={setIsArgumentsExpanded}
       />
 
       <ComposerCalledTool

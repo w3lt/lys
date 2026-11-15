@@ -11,6 +11,7 @@ import {
 import type { ToolSettings } from "@/lib/store/settings"
 import {
   buildBackendToolDefinition,
+  buildDelegateWorkToolDefinition,
   buildMcpToolDefinition,
   buildToolDefinition
 } from "../../support/toolFixtures"
@@ -316,6 +317,20 @@ describe("ToolGroupSection", () => {
     expect(
       within(approval).getByRole("button", { name: "Just run" })
     ).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("lists delegate_work under agents, on, with its access", () => {
+    const [agentsGroup] = buildToolGroups([buildDelegateWorkToolDefinition()])
+    startToolGroup({ listing: agentsGroup })
+
+    const section = screen.getByRole("region", { name: "agents" })
+    expect(section).toHaveTextContent(/^agents1 of 1 on/)
+    expect(getToolToggle("delegate_work")).toHaveAccessibleDescription(
+      "gives work in backend Gives work to another agent in Lys. asks before it runs"
+    )
+    expect(
+      screen.getByRole("switch", { name: "Use delegate_work" })
+    ).toBeChecked()
   })
 
   it("lists an MCP server's tools under the server, on until switched off, with its arguments from the input schema", () => {

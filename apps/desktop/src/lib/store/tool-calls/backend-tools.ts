@@ -4,6 +4,11 @@ import {
   WEB_SEARCH_TOOL_NAME,
   type ChatToolCall
 } from "@lys/protocol"
+import {
+  agentCodeSchema,
+  DELEGATE_WORK_TOOL_NAME,
+  MAXIMUM_JOB_TITLE_LENGTH
+} from "@lys/share"
 
 /** Validated input of one call to a tool the backend runs. */
 export type BackendToolInput =
@@ -27,6 +32,26 @@ export type BackendToolInput =
       readonly query: string
       /** Host of the search service the query is sent to. */
       readonly host: string
+    }
+  | {
+      /** The backend runs the tool once the call is allowed. */
+      readonly runner: "backend"
+      /** The tool that gives work to another agent. */
+      readonly toolName: typeof DELEGATE_WORK_TOOL_NAME
+      /** Code of the agent the work goes to, as the model wrote it. */
+      readonly agentCode: string
+      /**
+       * Title of the job exactly as the backend stores it: trimmed, on one
+       * line, and 1 to `MAXIMUM_JOB_TITLE_LENGTH` characters long.
+       */
+      readonly title: string
+      /**
+       * Instructions exactly as the backend sends them to the agent: trimmed
+       * and not blank. They are all the agent gets.
+       */
+      readonly instructions: string
+      /** Number of the job the call continues; undefined for a new job. */
+      readonly jobNumber: number | undefined
     }
 
 /** Outcome of checking one backend call's tool name and arguments. */
@@ -128,6 +153,100 @@ function parseWebSearchInput(call: ChatToolCall): BackendToolInputResult {
 }
 
 /**
+ * Parses an argument value as text that is not blank, as the backend does
+ * for the text of a `delegate_work` call.
+ *
+ * @param value - Untrusted argument value.
+ * @returns The trimmed text, or undefined when the value is not text or is
+ * blank.
+ */
+function parseTrimmedText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  const text = value.trim()
+  return text === "" ? undefined : text
+}
+
+/**
+ * Parses an argument value as the title of a job, as the backend does.
+ *
+ * @param value - Untrusted argument value.
+ * @returns The trimmed title, or undefined when the value is not text, is
+ * blank, is longer than `MAXIMUM_JOB_TITLE_LENGTH` of `@lys/share`, or holds
+ * a line break.
+ */
+function parseJobTitle(value: unknown): string | undefined {
+  /** Matches a line break: a title that holds one is not on one line. */
+  const lineBreakPattern = /[\n\r\u2028\u2029]/
+
+  const title = parseTrimmedText(value)
+  if (title === undefined) return undefined
+  const isOneBoundedLine =
+    title.length <= MAXIMUM_JOB_TITLE_LENGTH && !lineBreakPattern.test(title)
+  return isOneBoundedLine ? title : undefined
+}
+
+/**
+ * Answers whether an argument value can be the number of a job.
+ *
+ * @param value - Untrusted argument value.
+ * @returns True for a safe integer of 1 or more, which the backend accepts;
+ * false for any other value, such as a fraction, zero, or text.
+ */
+function isJobNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1
+}
+
+/**
+ * Parses the arguments of a `delegate_work` call.
+ *
+ * @param call - Call naming `delegate_work`.
+ * @returns `parsed` with the agent code, the trimmed title and instructions,
+ * and the number of the job a continuation names, or `rejected` for the
+ * first argument the backend's own rules refuse: an agent that is not an
+ * agent code, a title {@link parseJobTitle} refuses, blank instructions, or
+ * a job that is not a whole number of 1 or more.
+ * @remarks The backend refused such calls before it asked the person; this
+ * check keeps the card from describing work the backend would not send.
+ */
+function parseDelegateWorkInput(call: ChatToolCall): BackendToolInputResult {
+  const mismatch = `The arguments do not match ${call.toolName}:`
+  const { agent, title, instructions } = call.arguments
+  /** Number of the job to continue; a call that starts a job leaves it out. */
+  const job: unknown = call.arguments.job
+  const agentCode = agentCodeSchema.safeParse(agent)
+  if (!agentCode.success) {
+    return buildRejectedInput(`${mismatch} agent: expected an agent code.`)
+  }
+  const jobTitle = parseJobTitle(title)
+  if (jobTitle === undefined) {
+    return buildRejectedInput(
+      `${mismatch} title: expected 1 to ${MAXIMUM_JOB_TITLE_LENGTH} characters on one line after trimming.`
+    )
+  }
+  const jobInstructions = parseTrimmedText(instructions)
+  if (jobInstructions === undefined) {
+    return buildRejectedInput(
+      `${mismatch} instructions: expected text that is not blank.`
+    )
+  }
+  if (job !== undefined && !isJobNumber(job)) {
+    return buildRejectedInput(
+      `${mismatch} job: expected a whole number of 1 or more.`
+    )
+  }
+
+  const input: BackendToolInput = Object.freeze({
+    runner: "backend",
+    toolName: DELEGATE_WORK_TOOL_NAME,
+    agentCode: agentCode.data,
+    title: jobTitle,
+    instructions: jobInstructions,
+    jobNumber: job
+  })
+  return Object.freeze({ status: "parsed", input })
+}
+
+/**
  * Parses one call into the input of a backend tool the desktop can describe.
  *
  * @param call - Call whose arguments the backend checked against the tool's
@@ -140,6 +259,9 @@ export function parseBackendToolInput(
 ): BackendToolInputResult {
   if (call.toolName === "read_page") return parseReadPageInput(call)
   if (call.toolName === WEB_SEARCH_TOOL_NAME) return parseWebSearchInput(call)
+  if (call.toolName === DELEGATE_WORK_TOOL_NAME) {
+    return parseDelegateWorkInput(call)
+  }
   return buildRejectedInput(
     `The desktop cannot describe the backend tool "${call.toolName}", so it was not run.`
   )

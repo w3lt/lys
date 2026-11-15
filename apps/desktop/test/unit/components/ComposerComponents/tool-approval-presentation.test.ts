@@ -94,6 +94,36 @@ describe("formatToolCallSummary", () => {
     )
   })
 
+  it("names the agent a new job goes to, its title, and all the instructions it gets", () => {
+    expect(
+      formatToolCallSummary({
+        runner: "backend",
+        toolName: "delegate_work",
+        agentCode: "nyx",
+        title: "News",
+        instructions: "Find this week's hologram news.",
+        jobNumber: undefined
+      })
+    ).toBe(
+      "Give nyx the job “News”. It gets only these instructions: Find this week's hologram news."
+    )
+  })
+
+  it("names the agent and the job a continuation goes to, its new title, and all the instructions it gets", () => {
+    expect(
+      formatToolCallSummary({
+        runner: "backend",
+        toolName: "delegate_work",
+        agentCode: "nyx",
+        title: "News",
+        instructions: "Find this week's hologram news.",
+        jobNumber: 2
+      })
+    ).toBe(
+      "Send nyx more work on job 2, now titled “News”. It gets only these instructions: Find this week's hologram news."
+    )
+  })
+
   it("asks whether to run an MCP tool, by its server's name for it, on its server", () => {
     expect(
       formatToolCallSummary({

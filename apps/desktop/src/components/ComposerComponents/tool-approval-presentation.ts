@@ -1,13 +1,13 @@
 import type { SearchFilesFilter } from "@lys/protocol"
+import { DELEGATE_WORK_TOOL_NAME } from "@lys/share"
 
 import type { ShownToolCall, ToolCallInput } from "@/lib/store/tool-calls"
 
-/** Phrase naming what a search compares with its query, by target. */
-const SEARCH_TARGET_PHRASES = Object.freeze({
-  name: "file names",
-  content: "file contents",
-  nameAndContent: "file names and contents"
-} satisfies Readonly<Record<SearchFilesFilter["target"], string>>)
+/** Validated input of a `delegate_work` call. */
+type DelegateWorkInput = Extract<
+  ToolCallInput,
+  { readonly toolName: typeof DELEGATE_WORK_TOOL_NAME }
+>
 
 /** Footer hint of a waiting call while the composer is empty. */
 export const EMPTY_DRAFT_APPROVAL_HINT =
@@ -17,18 +17,43 @@ export const EMPTY_DRAFT_APPROVAL_HINT =
 export const DRAFT_APPROVAL_HINT = "↵ sends your message as her answer"
 
 /**
+ * Formats what a `delegate_work` call will do.
+ *
+ * @param input - Validated input of the call.
+ * @returns Whom the job goes to, by the agent code the model wrote, and
+ * under which title, or for a continuation which job gets more work under
+ * which new title; then the whole instructions, because they are all the
+ * agent gets.
+ */
+function formatDelegateWorkSummary(input: DelegateWorkInput): string {
+  const instructionsSentence = `It gets only these instructions: ${input.instructions}`
+  if (input.jobNumber === undefined) {
+    return `Give ${input.agentCode} the job “${input.title}”. ${instructionsSentence}`
+  }
+  return `Send ${input.agentCode} more work on job ${input.jobNumber}, now titled “${input.title}”. ${instructionsSentence}`
+}
+
+/**
  * Formats the plain sentences that say what a call will do.
  *
  * @param input - Validated input of the call.
  * @returns The action and its target, then its effect: a tool that reads
  * this machine changes nothing, a page read names the full URL of the page,
  * and a web search names where its full query goes. A location read names
- * where the location comes from, because the person typed it. An MCP call
- * asks whether to run the tool, by the name its server calls it, on that
- * server: what it does depends on the server, and the card shows its
- * arguments, if it has any.
+ * where the location comes from, because the person typed it. A
+ * `delegate_work` call names the agent and the job, then quotes all the
+ * instructions the agent gets. An MCP call asks whether to run the tool, by
+ * the name its server calls it, on that server: what it does depends on the
+ * server, and the card shows its arguments, if it has any.
  */
 export function formatToolCallSummary(input: ToolCallInput): string {
+  /** Phrase naming what a search compares with its query, by target. */
+  const searchTargetPhrases = Object.freeze({
+    name: "file names",
+    content: "file contents",
+    nameAndContent: "file names and contents"
+  } satisfies Readonly<Record<SearchFilesFilter["target"], string>>)
+
   if (input.runner === "mcp") {
     return `Run ${input.serverToolName} on the MCP server ${input.server}?`
   }
@@ -36,7 +61,7 @@ export function formatToolCallSummary(input: ToolCallInput): string {
     case "read_text_file":
       return `Read ${input.input.path}. Nothing is changed.`
     case "search_files":
-      return `Search ${SEARCH_TARGET_PHRASES[input.filter.target]} under ${input.filter.root} for “${input.filter.query}”. Nothing is changed.`
+      return `Search ${searchTargetPhrases[input.filter.target]} under ${input.filter.root} for “${input.filter.query}”. Nothing is changed.`
     case "get_current_time":
       return "Read the date, time, and time zone of this machine. Nothing is changed."
     case "get_location":
@@ -45,6 +70,8 @@ export function formatToolCallSummary(input: ToolCallInput): string {
       return `Read ${input.url}.`
     case "web_search":
       return `Search the web for “${input.query}”. Sends the query to Tavily (${input.host}).`
+    case DELEGATE_WORK_TOOL_NAME:
+      return formatDelegateWorkSummary(input)
   }
 }
 

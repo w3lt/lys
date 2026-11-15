@@ -72,7 +72,7 @@
 /*
  * Navigation is sentence-case sans against a mono ordinal: the label is the
  * destination, the number is only a position. Selection is carried by the
- * tinted surface and the wingline, so nothing reflows when it moves.
+ * tinted surface, so nothing reflows when it moves.
  */
 .settings-view__rail-tab {
   display: flex;

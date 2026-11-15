@@ -38,6 +38,41 @@ function StarterPortrait(): ReactElement {
   )
 }
 
+/** Properties accepted by {@link StarterPromptButton}. */
+type StarterPromptButtonProps = {
+  /** Text of the prompt, shown on the button and sent when it is clicked. */
+  readonly prompt: string
+  /** Requests that the parent send the prompt as a message. */
+  readonly onSendStarterPrompt: (prompt: string) => void
+}
+
+/**
+ * Presents one starter prompt as a button that asks to send it.
+ *
+ * @remarks The parent owns submission; the
+ * component owns no state. `onSendStarterPrompt` fires once per click with
+ * the button's prompt. The trailing arrow is hidden from assistive technology.
+ * @param props - The prompt and the parent callback.
+ * @returns The prompt's button.
+ */
+function StarterPromptButton({
+  prompt,
+  onSendStarterPrompt
+}: StarterPromptButtonProps): ReactElement {
+  return (
+    <Button
+      className="chat-view__starter"
+      onClick={() => onSendStarterPrompt(prompt)}
+      size="lg"
+      type="button"
+      variant="outline"
+    >
+      <span>{prompt}</span>
+      <ArrowRight aria-hidden="true" />
+    </Button>
+  )
+}
+
 /**
  * Presents the empty-session introduction and its starter prompts.
  *
@@ -67,18 +102,11 @@ export default function StarterView({
       <fieldset aria-label="Starter prompts" className="chat-view__starters">
         <div className="chat-view__starter-stack">
           {STARTER_PROMPTS.map((prompt) => (
-            <Button
-              className="chat-view__starter lys-wingline"
-              data-lys-wingline="primary"
+            <StarterPromptButton
               key={prompt}
-              onClick={() => onSendStarterPrompt(prompt)}
-              size="lg"
-              type="button"
-              variant="outline"
-            >
-              <span>{prompt}</span>
-              <ArrowRight aria-hidden="true" />
-            </Button>
+              onSendStarterPrompt={onSendStarterPrompt}
+              prompt={prompt}
+            />
           ))}
         </div>
       </fieldset>

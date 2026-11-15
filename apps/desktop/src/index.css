@@ -3,7 +3,6 @@
 @import "@lys/share/shadcn.css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
-@import "./components/ui/wingline.scss";
 @import "katex/dist/katex.min.css";
 
 @custom-variant dark (&:is(.dark *));
@@ -181,18 +180,6 @@
   --duration-standard: 160ms;
   --duration-enter: 200ms;
   --ease-standard: cubic-bezier(0.32, 0.72, 0.35, 1);
-
-  /* Wingline Trace geometry; its finite motion lives in ui/wingline.scss. */
-  --wingline-inset: var(--radius-control);
-  --wingline-thickness: 1px;
-  /*
-   * Offset from the host's padding box. The default lays the trace over the
-   * host's own 1px top border; a host without a border overrides this to 0.
-   */
-  --wingline-top: calc(-1 * var(--wingline-thickness));
-  --wingline-length: clamp(12px, 28%, 40px);
-  --wingline-extension: 8px;
-  --wingline-translation: 4px;
 
   --sidebar: oklch(0.98 0.012 260 / 86%);
   --sidebar-foreground: oklch(0.19 0.045 293);

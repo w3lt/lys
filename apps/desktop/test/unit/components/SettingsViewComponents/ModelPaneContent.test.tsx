@@ -1,5 +1,5 @@
-import { render, screen, within } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import { render, screen, waitFor, within } from "@testing-library/react"
+import userEvent, { type UserEvent } from "@testing-library/user-event"
 import { ollamaApiKeySchema, type LlmProvider } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import {
@@ -638,27 +638,44 @@ describe("ModelPaneContent", () => {
     ).toBeInTheDocument()
   })
 
-  it("shows the provider the picker chose, with no model selected", async () => {
-    const { useLysStore, user } = await startModelPane(TWO_MODELS, {
-      extra: { provider: "groq", state: GROQ_MODELS }
-    })
+  it.each<[string, (user: UserEvent) => Promise<void>]>([
+    [
+      "a pointer",
+      async (user) => {
+        await user.click(
+          await screen.findByRole("menuitemradio", { name: /^Groq/ })
+        )
+      }
+    ],
+    // A menu opened from the keyboard highlights its first item: Groq, as
+    // cloud providers are listed first.
+    ["the keyboard", (user) => user.keyboard("{Enter}")]
+  ])(
+    "closes the picker on a provider chosen with %s, and shows that provider with no model selected",
+    async (_label, chooseGroq) => {
+      const { useLysStore, user } = await startModelPane(TWO_MODELS, {
+        extra: { provider: "groq", state: GROQ_MODELS }
+      })
 
-    await openMenuWithKeyboard(
-      user,
-      screen.getByRole("button", { name: /^LM Studio/ })
-    )
-    await user.click(
-      await screen.findByRole("menuitemradio", { name: /^Groq/ })
-    )
-    await waitForRenderedWork()
+      await openMenuWithKeyboard(
+        user,
+        screen.getByRole("button", { name: /^LM Studio/ })
+      )
+      await screen.findByRole("menu")
+      await chooseGroq(user)
+      await waitForRenderedWork()
 
-    expect(useLysStore.getState().modelPaneProvider).toBe("groq")
-    expect(screen.getByRole("button", { name: /^Groq/ })).toBeInTheDocument()
-    expect(listRowTexts("Models")).toEqual(["llama-3.3-70b128k"])
-    expect(
-      screen.getByText("Choose a model to see its status and load settings.")
-    ).toBeInTheDocument()
-  })
+      await waitFor(() => {
+        expect(screen.queryByRole("menu")).not.toBeInTheDocument()
+      })
+      expect(useLysStore.getState().modelPaneProvider).toBe("groq")
+      expect(screen.getByRole("button", { name: /^Groq/ })).toBeInTheDocument()
+      expect(listRowTexts("Models")).toEqual(["llama-3.3-70b128k"])
+      expect(
+        screen.getByText("Choose a model to see its status and load settings.")
+      ).toBeInTheDocument()
+    }
+  )
 
   it("says LM Studio isn't running and asks the backend to connect again on Refresh", async () => {
     const { backend, user } = await startModelPane(

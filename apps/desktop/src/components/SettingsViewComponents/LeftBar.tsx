@@ -200,7 +200,7 @@ type SettingsRailEntryProps = {
  *
  * @remarks The rail owns the entry and the selection; the component owns no
  * state. The shown pane's button is the current page, marked with the
- * wingline and the active surface.
+ * active surface.
  * @param props - Entry, selection, and the requests.
  * @returns The list item.
  */
@@ -213,9 +213,8 @@ function SettingsRailEntry({
     <li className="settings-view__rail-entry">
       <button
         aria-current={isSelected ? "page" : undefined}
-        className="settings-view__rail-tab lys-wingline"
+        className="settings-view__rail-tab"
         data-active={isSelected ? "" : undefined}
-        data-lys-wingline={isSelected ? "selected" : undefined}
         onClick={() => requests.onPaneSelect(item.value)}
         type="button"
       >

@@ -15,7 +15,8 @@ import { cn } from "@/lib/utils"
  * `back` is the uppercase eyebrow that returns from an editor to its list.
  * Sizes follow the compact desktop density of 28/32/36px controls with
  * 14/16/18px icons, plus icon-only sizes from 24px; `link`, `text`, and `back`
- * keep no frame, so they ignore the size's height and padding. `default` is
+ * keep no frame, so they ignore the size's height and padding, and `text` and
+ * `back` set a 12px icon beside their text whatever the size. `default` is
  * used for both variant and size when omitted.
  */
 const buttonVariants = cva(
@@ -34,8 +35,8 @@ const buttonVariants = cva(
         destructive:
           "border-[var(--app-border-danger)] bg-destructive/10 text-[var(--app-text-danger)] hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40",
         link: "text-[length:inherit] text-[var(--app-text-link)] underline-offset-4 hover:underline",
-        text: "font-mono text-meta font-normal tracking-[0.04em] text-[var(--app-text-link)] hover:text-[var(--app-text-strong)] [&_svg:not([class*='size-'])]:size-3",
-        back: "font-mono text-meta tracking-[0.14em] text-[var(--app-text-muted)] uppercase hover:text-[var(--app-text-strong)] [&_svg:not([class*='size-'])]:size-3"
+        text: "font-mono text-meta font-normal tracking-[0.04em] text-[var(--app-text-link)] hover:text-[var(--app-text-strong)]",
+        back: "font-mono text-meta tracking-[0.14em] text-[var(--app-text-muted)] uppercase hover:text-[var(--app-text-strong)]"
       },
       size: {
         default:
@@ -56,7 +57,7 @@ const buttonVariants = cva(
       },
       {
         variant: ["text", "back"],
-        class: "min-h-6 gap-1.5"
+        class: "min-h-6 gap-1.5 [&_svg:not([class*='size-'])]:size-3"
       }
     ],
     defaultVariants: {

@@ -39,6 +39,20 @@ const CONTROL_HEIGHT_PX = Object.freeze({
   "icon-lg": 36
 })
 
+/** Width of a framed button's icon by its `data-size`, in CSS pixels. */
+const ICON_PX = Object.freeze({
+  "icon-xs": 14,
+  sm: 14,
+  "icon-sm": 14,
+  default: 16,
+  icon: 16,
+  lg: 18,
+  "icon-lg": 18
+})
+
+/** Width of the icon beside a `text` or `back` action, in CSS pixels. */
+const META_ICON_PX = 12
+
 /** Height of a one-line field, a text input or a select, in CSS pixels. */
 const FIELD_HEIGHT_PX = 32
 
@@ -81,6 +95,9 @@ function buildMeasureExpression(rootSelector) {
         .trim();
       if (!isControl && ownText === "") continue;
       const style = getComputedStyle(element);
+      const icon = element.matches('[data-slot="button"]')
+        ? [...element.querySelectorAll("svg")].find((svg) => !(svg.getAttribute("class") ?? "").includes("size-"))
+        : undefined;
       measurements.push({
         label: (ownText || element.getAttribute("aria-label") || element.getAttribute("placeholder") || element.innerText || element.tagName).trim().slice(0, 48),
         tag: element.tagName.toLowerCase(),
@@ -92,6 +109,7 @@ function buildMeasureExpression(rootSelector) {
         fontWeight: Number(style.fontWeight),
         isMono: style.fontFamily.includes("Mono"),
         heightPx: box.height,
+        iconPx: icon === undefined ? null : icon.getBoundingClientRect().width,
         parentFontSizePx: Number.parseFloat(getComputedStyle(element.parentElement).fontSize)
       });
     }
@@ -143,6 +161,20 @@ function findHeightDepartures(measurement, kind) {
 }
 
 /**
+ * Lists how a button's icon departs from the width it should have. A button
+ * without an icon, or whose icon carries its own `size-*` class, complies.
+ *
+ * @param {object} measurement - The button's measurement.
+ * @param {number} expectedPx - The icon width its variant and size declare.
+ * @returns {string[]} The departure; empty when it complies.
+ */
+function findIconDepartures(measurement, expectedPx) {
+  if (measurement.iconPx === null) return []
+  if (isSameLength(measurement.iconPx, expectedPx)) return []
+  return [`icon ${measurement.iconPx}px, not ${expectedPx}px`]
+}
+
+/**
  * Lists how a `link` button departs from the size of the text around it.
  *
  * @param {object} measurement - The button's measurement.
@@ -158,13 +190,16 @@ function findLinkDepartures(measurement) {
 
 /**
  * Lists how a `text` or `back` button departs from its contract: mono meta
- * text on a target at least 24 px tall.
+ * text and a 12 px icon on a target at least 24 px tall.
  *
  * @param {object} measurement - The button's measurement.
  * @returns {string[]} The departures; empty when it complies.
  */
 function findMetaActionDepartures(measurement) {
-  const departures = findMetaTextDepartures(measurement, measurement.variant)
+  const departures = [
+    ...findMetaTextDepartures(measurement, measurement.variant),
+    ...findIconDepartures(measurement, META_ICON_PX)
+  ]
   if (measurement.heightPx < MINIMUM_TARGET_PX - 0.5)
     departures.push(`target ${measurement.heightPx}px tall`)
   return departures
@@ -172,13 +207,16 @@ function findMetaActionDepartures(measurement) {
 
 /**
  * Lists how a framed button departs from its contract: a medium label in the
- * control text, at the height of its size.
+ * control text, at the height and icon width of its size.
  *
  * @param {object} measurement - The button's measurement.
  * @returns {string[]} The departures; empty when it complies.
  */
 function findFramedButtonDepartures(measurement) {
-  const departures = findHeightDepartures(measurement, "button")
+  const departures = [
+    ...findHeightDepartures(measurement, "button"),
+    ...findIconDepartures(measurement, ICON_PX[measurement.size ?? "default"])
+  ]
   if (!isSameLength(measurement.fontSizePx, CONTROL_TEXT_PX))
     departures.push(
       `label ${measurement.fontSizePx}px, not ${CONTROL_TEXT_PX}px`
@@ -327,6 +365,11 @@ async function checkSurface(page, evidence, surface) {
   )
   const controls = result.measurements.filter(
     (measurement) => measurement.isControl
+  )
+  rejectUnless(
+    controls.length > 0,
+    `${surface.name} shows no shared control to measure.`,
+    result.measurements
   )
   return {
     controls: controls.length,

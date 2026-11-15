@@ -35,6 +35,25 @@ describe("Button", () => {
     expect(settings).toHaveAttribute("data-size", "icon-xs")
   })
 
+  it("sizes the icon of a text or back action to its mono text, at any size", () => {
+    render(
+      <>
+        <Button variant="text">add variable</Button>
+        <Button size="lg" variant="back">
+          agents
+        </Button>
+      </>
+    )
+
+    for (const name of ["add variable", "agents"]) {
+      const iconSizes = screen
+        .getByRole("button", { name })
+        .className.split(" ")
+        .filter((utility) => utility.startsWith("[&_svg:not"))
+      expect(iconSizes).toEqual(["[&_svg:not([class*='size-'])]:size-3"])
+    }
+  })
+
   it("keeps native button behavior in a frameless variant", async () => {
     const onClick = vi.fn()
     const user = userEvent.setup()

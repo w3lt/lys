@@ -204,6 +204,20 @@ const JOB_CALL = buildToolCall(70, "read_text_file")
 /** A call made inside the job to the desktop tool that reads the time. */
 const JOB_TIME_CALL = buildToolCall(71, "get_current_time", {})
 
+/** What the native host answers when {@link JOB_TIME_CALL} runs. */
+const JOB_CURRENT_TIME = Object.freeze({
+  dateTime: "2026-10-22T21:30:05+02:00",
+  weekday: "Thursday",
+  utcOffset: "+02:00",
+  timeZone: "Europe/Paris"
+})
+
+/** Route key of the endpoint that takes {@link JOB_TIME_CALL}'s result. */
+const JOB_TIME_RESULT_ROUTE = `POST /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/tool-results/${JOB_TIME_CALL.id}`
+
+/** Route key of the reply-events endpoint for the job's reply. */
+const JOB_EVENTS_ROUTE = `GET /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/events`
+
 /** Activity event that announces the job's reply. */
 const JOB_REPLY_STARTED_EVENT = activityEventSchema.parse({
   type: "reply-started",
@@ -225,6 +239,14 @@ function buildActivitySnapshotEvent(
 /** Activity snapshot in which the job's reply waits for {@link JOB_CALL}. */
 const JOB_PROMPT_SNAPSHOT_EVENT = buildActivitySnapshotEvent([
   buildActivityReply({ pendingToolApprovals: [JOB_CALL] })
+])
+
+/**
+ * Activity snapshot in which the job's reply waits for the result of
+ * {@link JOB_TIME_CALL}.
+ */
+const JOB_RUN_SNAPSHOT_EVENT = buildActivitySnapshotEvent([
+  buildActivityReply({ pendingToolCalls: [JOB_TIME_CALL] })
 ])
 
 /**
@@ -1190,10 +1212,9 @@ describe("useToolCallStore", () => {
     ])(
       "ends its own follow and keeps the held prompt when the stream announces the reply in %s",
       async (_label, announcement) => {
-        const jobEventsRoute = `GET /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/events`
         const replyStream = startBackendEventStream()
         const backend = startBackendFake({
-          [jobEventsRoute]: () => replyStream.response
+          [JOB_EVENTS_ROUTE]: () => replyStream.response
         })
         const { useToolCallStore } = await loadFreshToolCallStore()
         useToolCallStore.getState().startReplyToolCallFollow({
@@ -1217,7 +1238,7 @@ describe("useToolCallStore", () => {
         await waitForMicrotasks()
 
         expect(replyStream.isCancelled()).toBe(true)
-        expect(listRouteKeys(backend)).toEqual([jobEventsRoute])
+        expect(listRouteKeys(backend)).toEqual([JOB_EVENTS_ROUTE])
         expect(heldPrompt?.call.id).toBe(JOB_CALL.id)
         expect(useToolCallStore.getState().heldCalls).toEqual([heldPrompt])
         expect(
@@ -1308,6 +1329,33 @@ describe("useToolCallStore", () => {
       }
     )
 
+    it.each([
+      ["a prompt", buildJobApprovalEvent(JOB_CALL)],
+      ["a call to run", buildJobRunEvent(JOB_TIME_CALL)]
+    ])(
+      "ignores %s of a reply it follows itself that the stream did not announce",
+      async (_label, event) => {
+        startNativeHostFake({})
+        const replyStream = startBackendEventStream()
+        const backend = startBackendFake({
+          [JOB_EVENTS_ROUTE]: () => replyStream.response
+        })
+        const { useToolCallStore } = await loadFreshToolCallStore()
+        useToolCallStore.getState().startReplyToolCallFollow({
+          conversationId: FIXTURE_JOB_ID,
+          assistantMessageId: FIXTURE_JOB_REPLY_ID
+        })
+        await waitForMicrotasks()
+
+        await useToolCallStore.getState().handleActivityEvent(event)
+        await waitForMicrotasks()
+
+        expect(useToolCallStore.getState().heldCalls).toEqual([])
+        expect(listRouteKeys(backend)).toEqual([JOB_EVENTS_ROUTE])
+        expect(replyStream.isCancelled()).toBe(false)
+      }
+    )
+
     it("sends the answer to the conversation and reply the event named", async () => {
       const approvalRoute = `POST /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/tool-approvals/${JOB_CALL.id}`
       const backend = startBackendFake({
@@ -1328,16 +1376,11 @@ describe("useToolCallStore", () => {
 
     it("runs a desktop tool call of a job and sends its result", async () => {
       const host = startNativeHostFake({
-        get_current_time: () => ({
-          dateTime: "2026-10-22T21:30:05+02:00",
-          weekday: "Thursday",
-          utcOffset: "+02:00",
-          timeZone: "Europe/Paris"
-        })
+        get_current_time: () => JOB_CURRENT_TIME
       })
-      const resultRoute = `POST /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/tool-results/${JOB_TIME_CALL.id}`
       const backend = startBackendFake({
-        [resultRoute]: () => new Response(null, { status: ACCEPTED_STATUS })
+        [JOB_TIME_RESULT_ROUTE]: () =>
+          new Response(null, { status: ACCEPTED_STATUS })
       })
       const { useToolCallStore } = await loadFreshToolCallStore()
       await useToolCallStore
@@ -1350,10 +1393,55 @@ describe("useToolCallStore", () => {
       await waitForMicrotasks()
 
       expect(host.commands).toEqual([{ command: "get_current_time", args: {} }])
-      expect(listRouteKeys(backend)).toEqual([resultRoute])
+      expect(listRouteKeys(backend)).toEqual([JOB_TIME_RESULT_ROUTE])
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
         { step: "run", answer: { status: "answered" } }
       ])
+    })
+
+    it("runs a desktop tool call of a job that a snapshot lists, sends its result to the job's reply, and does not run it again when a reconnect's snapshot still lists it", async () => {
+      const host = startNativeHostFake({
+        get_current_time: () => JOB_CURRENT_TIME
+      })
+      const backend = startBackendFake({
+        [JOB_TIME_RESULT_ROUTE]: () =>
+          new Response(null, { status: ACCEPTED_STATUS })
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const { handleActivityEvent } = useToolCallStore.getState()
+      await handleActivityEvent(JOB_RUN_SNAPSHOT_EVENT)
+      await waitForMicrotasks()
+      const routesAfterFirstSnapshot = listRouteKeys(backend)
+
+      await handleActivityEvent(JOB_RUN_SNAPSHOT_EVENT)
+      await waitForMicrotasks()
+
+      expect(routesAfterFirstSnapshot).toEqual([JOB_TIME_RESULT_ROUTE])
+      expect(host.commands).toEqual([{ command: "get_current_time", args: {} }])
+      expect(listRouteKeys(backend)).toEqual([JOB_TIME_RESULT_ROUTE])
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: JOB_TIME_CALL, step: "run", answer: { status: "answered" } }
+      ])
+    })
+
+    it("runs a desktop tool call of a job once when the next snapshot still lists it while it runs", async () => {
+      const time = createControlledPromise<unknown>()
+      const host = startNativeHostFake({ get_current_time: () => time.promise })
+      const backend = startBackendFake({
+        [JOB_TIME_RESULT_ROUTE]: () =>
+          new Response(null, { status: ACCEPTED_STATUS })
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const { handleActivityEvent } = useToolCallStore.getState()
+      await handleActivityEvent(JOB_RUN_SNAPSHOT_EVENT)
+      await waitForMicrotasks()
+
+      await handleActivityEvent(JOB_RUN_SNAPSHOT_EVENT)
+      time.resolve(JOB_CURRENT_TIME)
+      await waitForMicrotasks()
+
+      expect(host.commands).toEqual([{ command: "get_current_time", args: {} }])
+      expect(listRouteKeys(backend)).toEqual([JOB_TIME_RESULT_ROUTE])
     })
 
     it("changes nothing when a job is updated", async () => {

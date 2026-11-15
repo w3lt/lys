@@ -1008,6 +1008,27 @@ function createToolCallStore(
     }
 
     /**
+     * Handles one prompt the activity stream sent, by holding it and
+     * starting to answer it.
+     *
+     * @param target - Reply that made the call, and its conversation.
+     * @param call - Call the backend shows for approval.
+     * @returns A promise that settles once the prompt is held or ignored.
+     * @remarks A prompt of a reply the stream has not announced, or has
+     * ended, is ignored, also while the store follows that reply itself,
+     * whose own follow delivers its prompts; otherwise see
+     * {@link handleToolApprovalArrival}.
+     */
+    async function handleActivityToolApproval(
+      target: ChatReplyPathParams,
+      call: ChatToolCall
+    ): Promise<void> {
+      if (!get().activityReplies.has(target.assistantMessageId)) return
+
+      await handleToolApprovalArrival(target, [call])
+    }
+
+    /**
      * Holds and runs one call the activity stream sent to run.
      *
      * @param target - Reply that made the call, and its conversation.
@@ -1100,7 +1121,7 @@ function createToolCallStore(
         case "job-updated":
           return
         case "tool-approval":
-          await handleToolApprovalArrival(event, [event.call])
+          await handleActivityToolApproval(event, event.call)
           return
         case "tool-call":
           startActivityToolRun(event, event.call)

@@ -1,11 +1,10 @@
 import type { Job } from "@lys/share"
+import { useRef, type ReactElement } from "react"
+
 import {
-  useEffectEvent,
-  useLayoutEffect,
-  useRef,
-  type ReactElement,
-  type RefObject
-} from "react"
+  useFocusedRemovalReport,
+  useFocusSuccessor
+} from "@/components/SettingsViewComponents/focus-target"
 
 import { Button } from "../ui/button"
 import {
@@ -35,7 +34,8 @@ type JobStopButtonProps = {
   /**
    * Requests that the card move focus to the button's successor, because the
    * button leaves while it has focus; called once, in the commit that
-   * removes the button, and the card moves focus in that commit.
+   * removes the button. The card moves focus in that commit, when focus fell
+   * to the document.
    */
   readonly onFocusSuccessor: () => void
 }
@@ -53,26 +53,7 @@ type JobStopButtonProps = {
  */
 function JobStopButton(props: JobStopButtonProps): ReactElement {
   const { jobNumber, onFocusSuccessor, onStopJob } = props
-  const buttonRef = useRef<HTMLElement>(null)
-
-  /**
-   * Handles the button's removal, by asking for its successor when the
-   * button has focus.
-   *
-   * @param button - The button's node, still attached, or null when it was
-   * never attached.
-   */
-  function handleButtonRemoval(button: HTMLElement | null): void {
-    if (button !== null && button === document.activeElement) {
-      onFocusSuccessor()
-    }
-  }
-  const handleRemoval = useEffectEvent(handleButtonRemoval)
-
-  useLayoutEffect(() => {
-    const button = buttonRef.current
-    return () => handleRemoval(button)
-  }, [])
+  const buttonRef = useFocusedRemovalReport(onFocusSuccessor)
 
   return (
     <Button
@@ -87,56 +68,6 @@ function JobStopButton(props: JobStopButtonProps): ReactElement {
       Stop
     </Button>
   )
-}
-
-/** Focus handling a job's card owns for its Stop button. */
-type StopFocusSuccessor = Readonly<{
-  /** Host of the card's title button, the successor of a focused Stop. */
-  titleRef: RefObject<HTMLButtonElement | null>
-  /** Records that Stop leaves while it has focus; Stop calls it. */
-  handleFocusedStopRemoval: () => void
-}>
-
-/**
- * Moves focus to a job card's title button when the card's Stop leaves while
- * it has focus.
- *
- * @param isStoppable - Whether the card shows Stop; read reactively.
- * @returns The title host for the card to attach, and the callback for Stop.
- * Both keep working for the card's lifetime.
- * @remarks A focused Stop asks for its successor in the commit that removes
- * it, and focus moves to the title in the layout phase of that commit, so it
- * never rests on the document. Nothing moves when Stop leaves without focus,
- * which leaves focus to the owner of whatever control had it, or when the
- * whole card leaves.
- */
-function useStopFocusSuccessor(isStoppable: boolean): StopFocusSuccessor {
-  const titleRef = useRef<HTMLButtonElement>(null)
-  const hasFocusedStopLeftRef = useRef(false)
-
-  /**
-   * Handles a change of whether the card shows Stop, by moving focus to the
-   * title once a focused Stop left.
-   *
-   * @param isStopShown - Whether the card shows Stop after the change.
-   */
-  function handleStopShownChange(isStopShown: boolean): void {
-    if (isStopShown || !hasFocusedStopLeftRef.current) return
-    hasFocusedStopLeftRef.current = false
-    titleRef.current?.focus()
-  }
-  const handleStoppableChange = useEffectEvent(handleStopShownChange)
-
-  /** Handles Stop's removal while it has focus, by recording it. */
-  function handleFocusedStopRemoval(): void {
-    hasFocusedStopLeftRef.current = true
-  }
-
-  useLayoutEffect(() => {
-    handleStoppableChange(isStoppable)
-  }, [isStoppable])
-
-  return { titleRef, handleFocusedStopRemoval }
 }
 
 /** Properties accepted by {@link JobCard}. */
@@ -166,8 +97,8 @@ function JobCard(props: JobCardProps): ReactElement {
   const { card, onOpenJob, onStopJob } = props
   const { job } = card
   const isStoppable = canStopJob(card.state)
-  const { titleRef, handleFocusedStopRemoval } =
-    useStopFocusSuccessor(isStoppable)
+  const titleRef = useRef<HTMLButtonElement>(null)
+  const handleFocusedStopRemoval = useFocusSuccessor(isStoppable, titleRef)
 
   return (
     <article

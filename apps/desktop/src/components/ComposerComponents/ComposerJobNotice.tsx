@@ -1,12 +1,14 @@
 import {
   useEffectEvent,
   useLayoutEffect,
-  useRef,
   type ReactElement,
   type RefObject
 } from "react"
 
-import { isDocumentFocusLost } from "@/components/SettingsViewComponents/focus-target"
+import {
+  useFocusedRemovalReport,
+  useFocusSuccessor
+} from "@/components/SettingsViewComponents/focus-target"
 import { Button } from "@/components/ui/button"
 
 /** Properties accepted by {@link ComposerJobNotice}. */
@@ -60,7 +62,7 @@ type JobNoticeBackButtonProps = {
 function JobNoticeBackButton(props: JobNoticeBackButtonProps): ReactElement {
   const { isFocusedOnMount, onFocusMessageField, onOpenParentConversation } =
     props
-  const buttonRef = useRef<HTMLElement>(null)
+  const buttonRef = useFocusedRemovalReport(onFocusMessageField)
 
   /**
    * Handles the button's appearance, by focusing it when asked.
@@ -70,27 +72,11 @@ function JobNoticeBackButton(props: JobNoticeBackButtonProps): ReactElement {
   function handleButtonAppearance(button: HTMLElement | null): void {
     if (isFocusedOnMount) button?.focus()
   }
-
-  /**
-   * Handles the button's removal, by asking for the message field when the
-   * button has focus.
-   *
-   * @param button - The button's node, still attached, or null when it was
-   * never attached.
-   */
-  function handleButtonRemoval(button: HTMLElement | null): void {
-    if (button !== null && button === document.activeElement) {
-      onFocusMessageField()
-    }
-  }
   const handleAppearance = useEffectEvent(handleButtonAppearance)
-  const handleRemoval = useEffectEvent(handleButtonRemoval)
 
   useLayoutEffect(() => {
-    const button = buttonRef.current
-    handleAppearance(button)
-    return () => handleRemoval(button)
-  }, [])
+    handleAppearance(buttonRef.current)
+  }, [buttonRef])
 
   return (
     <Button
@@ -104,55 +90,6 @@ function JobNoticeBackButton(props: JobNoticeBackButtonProps): ReactElement {
       Back to the conversation
     </Button>
   )
-}
-
-/**
- * Moves focus to the message field when the notice's Back leaves while it
- * has focus.
- *
- * @param isShown - Whether the notice shows Back; read reactively.
- * @param messageFieldRef - Host of the message field, Back's successor.
- * @returns The callback for a focused Back to ask for the field as it
- * leaves; it keeps working for the notice's lifetime.
- * @remarks Back leaves once the shown conversation is no longer a job,
- * mostly because the person pressed it. A focused Back asks for the field in
- * the commit that removes it, and focus moves to the field in the layout
- * phase of that commit, once the field the job turned off is on again, so
- * focus never rests on the document. Nothing moves when Back leaves without
- * focus, or when another element holds focus by then. A field that is still
- * off, as while generation is unavailable, takes no focus.
- */
-function useBackFocusSuccessor(
-  isShown: boolean,
-  messageFieldRef: RefObject<HTMLTextAreaElement | null>
-): () => void {
-  const hasFocusedBackLeftRef = useRef(false)
-
-  /**
-   * Handles a change of whether the notice is shown, by moving focus to the
-   * field once a focused Back left and focus fell back to the document.
-   *
-   * @param isNoticeShown - Whether the notice is shown after the change.
-   */
-  function handleShownChange(isNoticeShown: boolean): void {
-    const hasFocusedBackLeft = hasFocusedBackLeftRef.current
-    hasFocusedBackLeftRef.current = false
-    if (isNoticeShown || !hasFocusedBackLeft) return
-
-    if (isDocumentFocusLost()) messageFieldRef.current?.focus()
-  }
-  const handleNoticeShownChange = useEffectEvent(handleShownChange)
-
-  /** Handles Back's removal while it has focus, by recording it. */
-  function handleFocusedBackRemoval(): void {
-    hasFocusedBackLeftRef.current = true
-  }
-
-  useLayoutEffect(() => {
-    handleNoticeShownChange(isShown)
-  }, [isShown])
-
-  return handleFocusedBackRemoval
 }
 
 /**
@@ -179,10 +116,7 @@ export default function ComposerJobNotice({
   messageFieldRef,
   onOpenParentConversation
 }: ComposerJobNoticeProps): ReactElement {
-  const handleFocusedBackRemoval = useBackFocusSuccessor(
-    isShown,
-    messageFieldRef
-  )
+  const handleFocusedBackRemoval = useFocusSuccessor(isShown, messageFieldRef)
 
   return (
     <div className="composer__notice" data-shown={isShown ? "" : undefined}>

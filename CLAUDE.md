@@ -26,13 +26,18 @@ The reviewer decides from the changed constructs which groups a change touches, 
 | 4. Failure and timing   | [Error](docs/code_standards/ERROR.md), [Async Task and Stream](docs/code_standards/ASYNC.md), [Resource](docs/code_standards/RESOURCE.md), [Event and Message](docs/code_standards/EVENT.md)                                                                   |
 | 5. Boundaries           | [API](docs/code_standards/API.md), [Schema and Migration](docs/code_standards/SCHEMA.md)                                                                                                                                                                       |
 | 6. UI                   | [Component](docs/code_standards/COMPONENT.md), [Hook](docs/code_standards/HOOK.md)                                                                                                                                                                             |
-| 7. Tests                | [Test and Fixture](docs/code_standards/TEST.md), over the test and fixture files only                                                                                                                                                                          |
+| 7. Tests                | [Test and Fixture](docs/code_standards/TEST.md), over tests, fixtures, test doubles, harnesses, and test discovery and configuration                                                                                                                           |
 
 The reports of the exact rule checks go to the reviewer as candidate findings without a `standards-reviewer` run. The reviewer does every other part of the review, and Step 4 for every candidate, whichever agent found it.
 
 ### Self-review
 
-`change-reviewer` gets only the issue, the pull request description draft, the boundary, and the validation record at the same head. It never gets the author's plan or reasoning, and it is never started as a fork, because a fork carries the author's conversation. The author handles every finding of its report as the operation's self-review step requires.
+`change-reviewer` gets only inputs that exist when the self-review starts. It never gets the author's plan or reasoning, and it is never started as a fork, because a fork carries the author's conversation.
+
+- Work on an Issue Step 6 item 4: the issue, the description draft, the boundary `<base>..<head>`, and the validation record of Step 6 items 1 to 3. Before starting it, the author writes the description draft in `.agent-work/pr-body.md` from the template that Step 7 item 3 selects, with the spec or the approach as its design, so that the draft exists. Step 7 completes the same file.
+- Check the Reviews Step 5 item 1: the issue, the pull request number, the fix range `<reviewed head>..<head>` as the boundary, the links to the reviews of the round, the maintainer's answers that the fixes apply, quoted, and the validation record at the head.
+
+The author handles every finding of its report as the operation's self-review step requires.
 
 ### Reports
 

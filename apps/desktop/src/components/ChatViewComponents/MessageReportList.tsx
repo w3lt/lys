@@ -3,6 +3,7 @@ import type { ReactElement } from "react"
 
 import {
   formatJobReportKind,
+  formatMessageControlName,
   type JobCardPresentation
 } from "./job-presentation"
 
@@ -10,6 +11,11 @@ import {
 export type MessageReportListProps = {
   /** Summary of the disclosure, which says how the reports were delivered. */
   readonly label: string
+  /**
+   * One-based position of the message among the transcript's user messages,
+   * which the summary's name adds after the label.
+   */
+  readonly messageNumber: number
   /** Reports the message delivered, oldest first. */
   readonly reports: readonly JobReport[]
   /**
@@ -68,24 +74,33 @@ function DeliveredReport({
  * Presents the reports one message delivered as a disclosure that starts
  * collapsed.
  *
- * @remarks The parent owns the label, the reports, and the cards that name
- * their agents. Opening the disclosure shows a list named `Reports`, one
- * item per report in delivery order, each headed by its agent, its job's
- * title, and what it says, such as `Nyx · News · Result`, then its content
- * when it has any. A job wrote that content, so it is untrusted: it is shown
- * as written, line breaks kept, and never rendered as Markdown. The native
- * disclosure owns whether it is open.
- * @param props - The label, the reports, and the cards of their jobs.
+ * @remarks The parent owns the label, the message's position, the reports,
+ * and the cards that name their agents. The summary shows the label, and its
+ * name adds the message, such as `Reports · 1, message 3`, so the reports of
+ * different messages have different names. Opening the disclosure shows a
+ * list named `Reports`, one item per report in delivery order, each headed
+ * by its agent, its job's title, and what it says, such as
+ * `Nyx · News · Result`, then its content when it has any. A job wrote that
+ * content, so it is untrusted: it is shown as written, line breaks kept, and
+ * never rendered as Markdown. The native disclosure owns whether it is open.
+ * @param props - The label, the message's position, the reports, and the
+ * cards of their jobs.
  * @returns The reports disclosure.
  */
 export default function MessageReportList({
   label,
+  messageNumber,
   reports,
   jobCards
 }: MessageReportListProps): ReactElement {
   return (
     <details className="chat-view__reports">
-      <summary className="chat-view__disclosure">{label}</summary>
+      <summary
+        aria-label={formatMessageControlName(label, messageNumber)}
+        className="chat-view__disclosure"
+      >
+        {label}
+      </summary>
       <ul aria-label="Reports" className="chat-view__report-list">
         {reports.map((report) => (
           <li className="chat-view__report" key={report.id}>

@@ -36,10 +36,12 @@ type JobNoticeBackButtonProps = {
   /** Requests that the parent open the job's parent conversation. */
   readonly onOpenParentConversation: () => void
   /**
-   * Reports that the button leaves while it has focus; called once, in the
-   * commit that removes the button.
+   * Requests that the notice move focus to the message field, because the
+   * button leaves while it has focus; called once, in the commit that
+   * removes the button. The notice moves focus in that commit, when the
+   * field is on again and focus fell to the document.
    */
-  readonly onFocusedRemoval: () => void
+  readonly onFocusMessageField: () => void
 }
 
 /**
@@ -48,15 +50,16 @@ type JobNoticeBackButtonProps = {
  *
  * @remarks The notice owns whether the button is shown and where focus goes
  * once it leaves. The button takes focus as it appears when asked. When it
- * leaves while it has focus, it reports that through `onFocusedRemoval`
- * before its node is detached, the last moment its focus can be read; a
- * button that leaves without focus reports nothing.
+ * leaves while it has focus, it asks for the message field through
+ * `onFocusMessageField` before its node is detached, the last moment its
+ * focus can be read; a button that leaves without focus asks for nothing.
  * @param props - Whether the button takes focus as it appears, and the open
- * and removal callbacks.
+ * and focus requests.
  * @returns The button, named `Back to the conversation`.
  */
 function JobNoticeBackButton(props: JobNoticeBackButtonProps): ReactElement {
-  const { isFocusedOnMount, onFocusedRemoval, onOpenParentConversation } = props
+  const { isFocusedOnMount, onFocusMessageField, onOpenParentConversation } =
+    props
   const buttonRef = useRef<HTMLElement>(null)
 
   /**
@@ -69,14 +72,15 @@ function JobNoticeBackButton(props: JobNoticeBackButtonProps): ReactElement {
   }
 
   /**
-   * Handles the button's removal, by reporting it when the button has focus.
+   * Handles the button's removal, by asking for the message field when the
+   * button has focus.
    *
    * @param button - The button's node, still attached, or null when it was
    * never attached.
    */
   function handleButtonRemoval(button: HTMLElement | null): void {
     if (button !== null && button === document.activeElement) {
-      onFocusedRemoval()
+      onFocusMessageField()
     }
   }
   const handleAppearance = useEffectEvent(handleButtonAppearance)
@@ -108,10 +112,10 @@ function JobNoticeBackButton(props: JobNoticeBackButtonProps): ReactElement {
  *
  * @param isShown - Whether the notice shows Back; read reactively.
  * @param messageFieldRef - Host of the message field, Back's successor.
- * @returns The callback for Back to report its focused removal; it keeps
- * working for the notice's lifetime.
+ * @returns The callback for a focused Back to ask for the field as it
+ * leaves; it keeps working for the notice's lifetime.
  * @remarks Back leaves once the shown conversation is no longer a job,
- * mostly because the person pressed it. It reports its focused removal in
+ * mostly because the person pressed it. A focused Back asks for the field in
  * the commit that removes it, and focus moves to the field in the layout
  * phase of that commit, once the field the job turned off is on again, so
  * focus never rests on the document. Nothing moves when Back leaves without
@@ -190,7 +194,7 @@ export default function ComposerJobNotice({
       {isShown ? (
         <JobNoticeBackButton
           isFocusedOnMount={isBackFocusedOnShow}
-          onFocusedRemoval={handleFocusedBackRemoval}
+          onFocusMessageField={handleFocusedBackRemoval}
           onOpenParentConversation={onOpenParentConversation}
         />
       ) : null}

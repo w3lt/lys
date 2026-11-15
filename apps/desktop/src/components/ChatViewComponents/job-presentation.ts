@@ -254,3 +254,21 @@ export function formatDeliveredReportsLabel(reportCount: number): string {
   const noun = reportCount === 1 ? "report" : "reports"
   return `${reportCount} ${noun} delivered with this message`
 }
+
+/**
+ * Formats the accessible name of one of a user message's controls, such as
+ * the line that opens to the reports it delivered.
+ *
+ * @param label - The control's visible text.
+ * @param messageNumber - One-based position of the message among the
+ * transcript's user messages: the person's, a delegator's, and wake-up
+ * messages.
+ * @returns The visible text, then the message, such as `Reports · 1,
+ * message 3`, so the same control of different messages has different names.
+ */
+export function formatMessageControlName(
+  label: string,
+  messageNumber: number
+): string {
+  return `${label}, message ${messageNumber}`
+}

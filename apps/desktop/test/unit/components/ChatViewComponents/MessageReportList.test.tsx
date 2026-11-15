@@ -30,6 +30,7 @@ describe("MessageReportList", () => {
       <MessageReportList
         jobCards={[CARD]}
         label="Reports · 2"
+        messageNumber={1}
         reports={[
           buildJobReport({ kind: "note", content: "Reading three feeds" }),
           buildJobReport({ id: createFixtureUuidV7(69) })
@@ -48,11 +49,27 @@ describe("MessageReportList", () => {
     ])
   })
 
+  it("names its line by the label and the message's position, and shows only the label", () => {
+    render(
+      <MessageReportList
+        jobCards={[CARD]}
+        label="Reports · 1"
+        messageNumber={3}
+        reports={[buildJobReport()]}
+      />
+    )
+
+    expect(screen.getByLabelText("Reports · 1, message 3")).toHaveTextContent(
+      /^Reports · 1$/
+    )
+  })
+
   it("names the agent by its code when no card names the job", () => {
     render(
       <MessageReportList
         jobCards={[]}
         label="Reports · 1"
+        messageNumber={1}
         reports={[buildJobReport()]}
       />
     )
@@ -65,6 +82,7 @@ describe("MessageReportList", () => {
       <MessageReportList
         jobCards={[CARD]}
         label="Reports · 1"
+        messageNumber={1}
         reports={[
           buildJobReport({
             content: "**Done.**\nSee [the list](https://x.test)"
@@ -85,6 +103,7 @@ describe("MessageReportList", () => {
       <MessageReportList
         jobCards={[CARD]}
         label="Reports · 1"
+        messageNumber={1}
         reports={[buildJobReport({ kind: "stopped", content: "" })]}
       />
     )

@@ -6,6 +6,7 @@ import {
   formatDeliveredReportsLabel,
   formatJobCardState,
   formatJobReportKind,
+  formatMessageControlName,
   listMessageJobCards
 } from "@/components/ChatViewComponents/job-presentation"
 import type { AgentListState } from "@/lib/store/agents"
@@ -161,6 +162,12 @@ describe("job-presentation", () => {
       expect(formatDeliveredReportsLabel(reportCount)).toBe(line)
     }
   )
+
+  it("names a user message's control by its visible text, then the message", () => {
+    expect(formatMessageControlName("Reports · 1", 2)).toBe(
+      "Reports · 1, message 2"
+    )
+  })
 
   it.each([
     ["started it", [65], [CARD], []],

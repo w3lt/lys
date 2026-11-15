@@ -22,9 +22,15 @@ import {
   buildCompletedAssistantMessage,
   buildConversation,
   buildUserMessage,
-  FIXTURE_CONVERSATION_ID
+  FIXTURE_CONVERSATION_ID,
+  FIXTURE_JOB_REPLY_ID,
+  FIXTURE_WAKE_REPLY_ID
 } from "../../support/conversationFixtures"
-import { waitForMicrotasks } from "../../support/settlement"
+import { startNativeHostFake } from "../../support/nativeHostFake"
+import {
+  createControlledPromise,
+  waitForMicrotasks
+} from "../../support/settlement"
 import { buildToolCall, buildToolDefinition } from "../../support/toolFixtures"
 
 /** Backend whose health route answered. */
@@ -38,6 +44,15 @@ const EMPTY_SNAPSHOT_EVENT = activityEventSchema.parse({
   type: "activity-snapshot",
   replies: []
 })
+
+/** The main conversation the chat view shows, as the backend stores it. */
+const MAIN_CONVERSATION = buildConversation(FIXTURE_CONVERSATION_ID, "Main", [
+  buildUserMessage(2, "Hello"),
+  buildCompletedAssistantMessage(3, "Hi")
+])
+
+/** Route key of a read of {@link MAIN_CONVERSATION}. */
+const MAIN_READ_ROUTE = `GET /api/v1/conversations/${FIXTURE_CONVERSATION_ID}`
 
 /**
  * Loads fresh stores from one module graph, with the backend at
@@ -93,6 +108,28 @@ function createActivityStreamRoute(snapshotEvent: ActivityEvent) {
     return stream.response
   }
   return { route, streams }
+}
+
+/**
+ * Builds an activity route whose stream sends the given events in one chunk
+ * and ends right after them, as a backend that shuts down sends its last
+ * events.
+ *
+ * @param events - Events of the chunk, in order.
+ * @returns The route; each request gets its own such stream.
+ */
+function buildEndingActivityRoute(
+  events: readonly ActivityEvent[]
+): BackendRoute {
+  const chunk = events
+    .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+    .join("")
+  return () => {
+    const stream = startBackendEventStream()
+    stream.sendText(chunk)
+    stream.close()
+    return stream.response
+  }
 }
 
 /**
@@ -154,22 +191,16 @@ describe("registerActivityFollow", () => {
       type: "activity-snapshot",
       replies: [jobPromptReply]
     })
-    const mainConversation = buildConversation(
-      FIXTURE_CONVERSATION_ID,
-      "Main",
-      [buildUserMessage(2, "Hello"), buildCompletedAssistantMessage(3, "Hi")]
-    )
-    const mainReadRoute = `GET /api/v1/conversations/${FIXTURE_CONVERSATION_ID}`
     const stores = await startActivityFollow(STOPPED_BACKEND)
     const activity = createActivityStreamRoute(jobPromptSnapshotEvent)
     const heldCallCountsAtRead: number[] = []
     const backend = startBackendFake({
       [ACTIVITY_ROUTE]: activity.route,
-      [mainReadRoute]: () => {
+      [MAIN_READ_ROUTE]: () => {
         heldCallCountsAtRead.push(
           stores.useToolCallStore.getState().heldCalls.length
         )
-        return buildJsonResponse(200, mainConversation)
+        return buildJsonResponse(200, MAIN_CONVERSATION)
       }
     })
     const readTextFileTool = buildToolDefinition("read_text_file")
@@ -180,18 +211,73 @@ describe("registerActivityFollow", () => {
       unavailableTools: noUnavailableTools
     }
     stores.useToolStore.setState({ list: loadedToolList })
-    const shownConversation = createStoredChatViewConversation(mainConversation)
+    const shownConversation =
+      createStoredChatViewConversation(MAIN_CONVERSATION)
     stores.useChatViewStore.setState({ conversation: shownConversation })
 
     stores.useLysStore.setState({ backendServerInfo: RUNNING_BACKEND })
     await vi.waitFor(() => {
-      expect(listRouteKeys(backend)).toEqual([ACTIVITY_ROUTE, mainReadRoute])
+      expect(listRouteKeys(backend)).toEqual([ACTIVITY_ROUTE, MAIN_READ_ROUTE])
     })
 
     const { heldCalls } = stores.useToolCallStore.getState()
     // The tool-call store held the prompt before the chat view read again.
     expect(heldCallCountsAtRead).toEqual([1])
     expect(heldCalls.map((heldCall) => heldCall.call.id)).toEqual([jobCall.id])
+  })
+
+  it("hands the event under way to both stores when the follow stops, and to neither the next one, sent in the same chunk just before the backend closed the stream", async () => {
+    const jobCall = buildToolCall(70, "read_text_file")
+    const toolListRead = createControlledPromise<unknown>()
+    const host = startNativeHostFake({ list_tools: () => toolListRead.promise })
+    const jobPromptSnapshotEvent = activityEventSchema.parse({
+      type: "activity-snapshot",
+      replies: [buildActivityReply({ pendingToolApprovals: [jobCall] })]
+    })
+    const wakeReplyStartedEvent = activityEventSchema.parse({
+      type: "reply-started",
+      conversationId: FIXTURE_CONVERSATION_ID,
+      parentConversationId: null,
+      assistantMessageId: FIXTURE_WAKE_REPLY_ID
+    })
+    const stores = await startActivityFollow(STOPPED_BACKEND)
+    const backend = startBackendFake({
+      [ACTIVITY_ROUTE]: buildEndingActivityRoute([
+        jobPromptSnapshotEvent,
+        wakeReplyStartedEvent
+      ]),
+      "GET /api/v1/tools": () =>
+        buildJsonResponse(200, { tools: [], unavailableTools: [] }),
+      [MAIN_READ_ROUTE]: () => buildJsonResponse(200, MAIN_CONVERSATION)
+    })
+    stores.useChatViewStore.setState({
+      conversation: createStoredChatViewConversation(MAIN_CONVERSATION)
+    })
+    stores.useLysStore.setState({ backendServerInfo: RUNNING_BACKEND })
+    // The tool-call store reads the tool list for the snapshot's prompt.
+    await vi.waitFor(() => {
+      expect(host.commands).toHaveLength(1)
+    })
+
+    // The stop's abort would drop what an open stream holds, but this one
+    // has ended, so the wake-up reply's start is still read after the stop.
+    stores.stopFollow()
+    toolListRead.resolve([buildToolDefinition("read_text_file")])
+    await vi.waitFor(() => {
+      expect(listRouteKeys(backend)).toContain(MAIN_READ_ROUTE)
+    })
+    await waitForMicrotasks()
+
+    const { heldCalls, activityReplies } = stores.useToolCallStore.getState()
+    expect(heldCalls.map((heldCall) => heldCall.call.id)).toEqual([jobCall.id])
+    expect([...activityReplies.keys()]).toEqual([FIXTURE_JOB_REPLY_ID])
+    // One read of the shown conversation, for the snapshot; none for the
+    // wake-up reply's start.
+    expect(listRouteKeys(backend)).toEqual([
+      ACTIVITY_ROUTE,
+      "GET /api/v1/tools",
+      MAIN_READ_ROUTE
+    ])
   })
 
   it("opens the stream again one second after the backend closes it", async () => {

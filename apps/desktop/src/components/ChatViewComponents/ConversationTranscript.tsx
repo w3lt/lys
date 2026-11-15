@@ -83,8 +83,9 @@ type TranscriptEntryContext = Readonly<{
  * Builds the transcript entry of one message, keyed by its identifier.
  *
  * @param message - Message of the transcript.
- * @param replyNumber - One-based position of a reply among the replies; 0
- * for a user message.
+ * @param messageNumber - One-based position of the message among the
+ * messages of its role: a reply among the replies, a user message among the
+ * user messages.
  * @param context - Speaker and delegator names, sources, the numbers each
  * reply may cite, and the jobs with their callbacks, shared by every entry.
  * @returns The keyed message element; a reply gets the sources it may cite,
@@ -92,7 +93,7 @@ type TranscriptEntryContext = Readonly<{
  */
 function buildTranscriptEntry(
   message: ReadonlyConversationMessage,
-  replyNumber: number,
+  messageNumber: number,
   context: TranscriptEntryContext
 ): ReactElement {
   const citableNumbers = context.citableSourceNumbers.get(message.id)
@@ -102,9 +103,9 @@ function buildTranscriptEntry(
       jobCards={listMessageJobCards(message, context.jobCards)}
       key={message.id}
       message={message}
+      messageNumber={messageNumber}
       onOpenJob={context.onOpenJob}
       onStopJob={context.onStopJob}
-      replyNumber={replyNumber}
       sources={
         citableNumbers === undefined
           ? NO_SOURCES
@@ -122,7 +123,8 @@ function buildTranscriptEntry(
  * @param context - Speaker and delegator names, sources, the numbers each
  * reply may cite, and the jobs with their callbacks, shared by every entry.
  * @returns One element per message, as {@link buildTranscriptEntry} builds
- * it; replies are numbered from 1 in order.
+ * it; replies are numbered from 1 in order, and user messages apart from
+ * them, also from 1.
  */
 function buildTranscriptEntries(
   messages: readonly ReadonlyConversationMessage[],
@@ -130,11 +132,17 @@ function buildTranscriptEntries(
 ): ReactElement[] {
   const entries: ReactElement[] = []
   let replyCount = 0
+  let userMessageCount = 0
   for (const message of messages) {
     const isReply = message.role === "assistant"
     if (isReply) replyCount += 1
+    else userMessageCount += 1
     entries.push(
-      buildTranscriptEntry(message, isReply ? replyCount : 0, context)
+      buildTranscriptEntry(
+        message,
+        isReply ? replyCount : userMessageCount,
+        context
+      )
     )
   }
   return entries

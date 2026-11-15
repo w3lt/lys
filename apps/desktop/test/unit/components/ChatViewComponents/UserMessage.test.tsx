@@ -14,10 +14,14 @@ import {
 } from "../../support/conversationFixtures"
 import { startDecodedImageHost } from "../../support/imageHostFake"
 
-/** What a message of a main conversation that names no job is shown with. */
+/**
+ * What the first message of a main conversation that names no job is shown
+ * with.
+ */
 const MAIN_CONVERSATION = Object.freeze({
   jobCards: [],
-  delegatorName: undefined
+  delegatorName: undefined,
+  messageNumber: 1
 })
 
 /** Card of job 1, which names its agent `Nyx`. */
@@ -102,13 +106,16 @@ describe("UserMessage", () => {
           buildJobReport({ kind: "note", content: "Reading three feeds" }),
           buildJobReport({ id: createFixtureUuidV7(69) })
         ])}
+        messageNumber={4}
       />
     )
     const note = screen.getByText("Reading three feeds")
 
     expect(screen.getByRole("article")).toHaveTextContent(/^youGo on/)
     expect(note).not.toBeVisible()
-    await user.click(screen.getByText("2 reports delivered with this message"))
+    await user.click(
+      screen.getByLabelText("2 reports delivered with this message, message 4")
+    )
 
     expect(note).toBeVisible()
     expect(screen.getByText("Nyx · News · Result")).toBeVisible()
@@ -135,12 +142,13 @@ describe("UserMessage", () => {
         delegatorName={undefined}
         jobCards={[CARD]}
         message={message}
+        messageNumber={5}
       />
     )
 
     expect(screen.queryByText("you")).not.toBeInTheDocument()
     expect(screen.getByRole("article")).not.toHaveTextContent(message.content)
-    await user.click(screen.getByText("Reports · 1"))
+    await user.click(screen.getByLabelText("Reports · 1, message 5"))
 
     expect(screen.getByText("Nyx · News · Result")).toBeVisible()
     expect(screen.getByText("Done.")).toBeVisible()
@@ -153,6 +161,7 @@ describe("UserMessage", () => {
         delegatorName="Caliginia"
         jobCards={[]}
         message={buildDelegatorMessage(68, "Find the news.")}
+        messageNumber={1}
       />
     )
 

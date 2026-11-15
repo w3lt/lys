@@ -30,38 +30,41 @@ export type ReplyJobListProps = {
 type JobStopButtonProps = {
   /** Number of the job in its parent, which names the button. */
   readonly jobNumber: number
-  /** Stops the job. */
-  readonly onStop: () => void
+  /** Requests that the card stop its job. */
+  readonly onStopJob: () => void
   /**
-   * Reports that the button leaves while it has focus; called once, in the
-   * commit that removes the button.
+   * Requests that the card move focus to the button's successor, because the
+   * button leaves while it has focus; called once, in the commit that
+   * removes the button, and the card moves focus in that commit.
    */
-  readonly onFocusedRemoval: () => void
+  readonly onFocusSuccessor: () => void
 }
 
 /**
  * Renders the Stop button of a working job's card.
  *
  * @remarks The card owns whether the button is shown and where focus goes
- * once it leaves. When the button leaves while it has focus, it reports that
- * through `onFocusedRemoval` before its node is detached, the last moment
- * its focus can be read; a button that leaves without focus reports nothing.
- * @param props - The job's number and the stop and removal callbacks.
+ * once it leaves. When the button leaves while it has focus, it asks for its
+ * successor through `onFocusSuccessor` before its node is detached, the last
+ * moment its focus can be read; a button that leaves without focus asks for
+ * nothing.
+ * @param props - The job's number and the stop and focus requests.
  * @returns The button, named `Stop job <number>`.
  */
 function JobStopButton(props: JobStopButtonProps): ReactElement {
-  const { jobNumber, onFocusedRemoval, onStop } = props
+  const { jobNumber, onFocusSuccessor, onStopJob } = props
   const buttonRef = useRef<HTMLElement>(null)
 
   /**
-   * Handles the button's removal, by reporting it when the button has focus.
+   * Handles the button's removal, by asking for its successor when the
+   * button has focus.
    *
    * @param button - The button's node, still attached, or null when it was
    * never attached.
    */
   function handleButtonRemoval(button: HTMLElement | null): void {
     if (button !== null && button === document.activeElement) {
-      onFocusedRemoval()
+      onFocusSuccessor()
     }
   }
   const handleRemoval = useEffectEvent(handleButtonRemoval)
@@ -75,7 +78,7 @@ function JobStopButton(props: JobStopButtonProps): ReactElement {
     <Button
       aria-label={`Stop job ${jobNumber}`}
       className="chat-view__job-stop"
-      onClick={onStop}
+      onClick={onStopJob}
       ref={buttonRef}
       size="sm"
       type="button"
@@ -101,8 +104,8 @@ type StopFocusSuccessor = Readonly<{
  * @param isStoppable - Whether the card shows Stop; read reactively.
  * @returns The title host for the card to attach, and the callback for Stop.
  * Both keep working for the card's lifetime.
- * @remarks Stop reports its focused removal in the commit that removes it,
- * and focus moves to the title in the layout phase of that commit, so it
+ * @remarks A focused Stop asks for its successor in the commit that removes
+ * it, and focus moves to the title in the layout phase of that commit, so it
  * never rests on the document. Nothing moves when Stop leaves without focus,
  * which leaves focus to the owner of whatever control had it, or when the
  * whole card leaves.
@@ -193,8 +196,8 @@ function JobCard(props: JobCardProps): ReactElement {
       {isStoppable && (
         <JobStopButton
           jobNumber={job.number}
-          onFocusedRemoval={handleFocusedStopRemoval}
-          onStop={() => onStopJob(job)}
+          onFocusSuccessor={handleFocusedStopRemoval}
+          onStopJob={() => onStopJob(job)}
         />
       )}
     </article>

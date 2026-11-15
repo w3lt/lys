@@ -24,12 +24,19 @@ export type UserMessageProps = {
    * a main conversation.
    */
   readonly delegatorName: string | undefined
+  /**
+   * One-based position of the message among the transcript's user messages:
+   * the person's, a delegator's, and wake-up messages.
+   */
+  readonly messageNumber: number
 }
 
 /** Properties accepted by {@link AuthoredMessage}. */
 type AuthoredMessageProps = {
   /** The message, which the person or a job's delegator wrote. */
   readonly message: ReadonlyConversationUserMessage
+  /** One-based position of the message among the transcript's user messages. */
+  readonly messageNumber: number
   /** Speaker whose portrait the message shows. */
   readonly speaker: TranscriptSpeaker
   /** Label shown beside the portrait. */
@@ -42,13 +49,14 @@ type AuthoredMessageProps = {
  * Renders a message someone wrote: its speaker, its text, its files, and the
  * reports it delivered.
  *
- * @param props - The message, its speaker and label, and the cards of the
- * jobs whose reports it delivered.
+ * @param props - The message, its position, its speaker and label, and the
+ * cards of the jobs whose reports it delivered.
  * @returns The message, with a line that opens to its reports when it
  * delivered any.
  */
 function AuthoredMessage({
   message,
+  messageNumber,
   speaker,
   speakerName,
   jobCards
@@ -84,6 +92,7 @@ function AuthoredMessage({
         <MessageReportList
           jobCards={jobCards}
           label={formatDeliveredReportsLabel(reportCount)}
+          messageNumber={messageNumber}
           reports={message.reports}
         />
       )}
@@ -94,23 +103,26 @@ function AuthoredMessage({
 /**
  * Presents one user-role transcript message by who wrote it.
  *
- * @remarks The parent owns the immutable message, list identity, the cards
- * of the jobs whose reports it delivered, and the delegator's name; this
- * component owns no state or side effects. The person's message shows under
- * `you`. A job's message, which its delegator wrote, shows under the
- * delegator's name with an agent's portrait; every stored job names its
- * delegator, so the label `agent` stands in only for a name the parent did
- * not give. Either shows the files sent with it under its text, by kind and
- * name in sending order, and, when it delivered reports, a line such as
- * `2 reports delivered with this message` that opens to them. A wake-up
- * message, which the backend wrote for the model, shows only a row such as
- * `Reports · 1` that opens to the reports it delivered, never its text.
- * @param props - The message, the cards of its reports' jobs, and the
- * delegator's name.
+ * @remarks The parent owns the immutable message, its position, list
+ * identity, the cards of the jobs whose reports it delivered, and the
+ * delegator's name; this component owns no state or side effects. The
+ * person's message shows under `you`. A job's message, which its delegator
+ * wrote, shows under the delegator's name with an agent's portrait; every
+ * stored job names its delegator, so the label `agent` stands in only for a
+ * name the parent did not give. Either shows the files sent with it under
+ * its text, by kind and name in sending order, and, when it delivered
+ * reports, a line such as `2 reports delivered with this message` that opens
+ * to them. A wake-up message, which the backend wrote for the model, shows
+ * only a row such as `Reports · 1` that opens to the reports it delivered,
+ * never its text. The name of that line or row adds the message's position,
+ * such as `Reports · 1, message 3`.
+ * @param props - The message, its position, the cards of its reports' jobs,
+ * and the delegator's name.
  * @returns The rendered message or reports row.
  */
 export default function UserMessage({
   message,
+  messageNumber,
   jobCards,
   delegatorName
 }: UserMessageProps): ReactElement {
@@ -120,6 +132,7 @@ export default function UserMessage({
         <AuthoredMessage
           jobCards={jobCards}
           message={message}
+          messageNumber={messageNumber}
           speaker="you"
           speakerName="you"
         />
@@ -129,6 +142,7 @@ export default function UserMessage({
         <AuthoredMessage
           jobCards={jobCards}
           message={message}
+          messageNumber={messageNumber}
           speaker="lys"
           speakerName={delegatorName ?? "agent"}
         />
@@ -139,6 +153,7 @@ export default function UserMessage({
           <MessageReportList
             jobCards={jobCards}
             label={`Reports · ${message.reports.length}`}
+            messageNumber={messageNumber}
             reports={message.reports}
           />
         </article>

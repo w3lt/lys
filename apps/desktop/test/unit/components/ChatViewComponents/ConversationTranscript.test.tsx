@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest"
 import ConversationTranscript, {
   type ConversationTranscriptProps
 } from "@/components/ChatViewComponents/ConversationTranscript"
+import type { CompletedConversationMessage } from "@/lib/store/chat-view/conversation-transitions"
 import {
   buildCompletedChatViewReply,
   buildDelegatorMessage,
@@ -16,7 +17,9 @@ import {
   buildTextPart,
   buildToolCallPart,
   buildUserMessage,
-  buildWakeUpMessage
+  buildUserMessageWithReports,
+  buildWakeUpMessage,
+  createFixtureUuidV7
 } from "../../support/conversationFixtures"
 
 /** First user message of the fixture transcript. */
@@ -441,6 +444,53 @@ describe("ConversationTranscript", () => {
 
     expect(screen.getByText("Nyx · News · Result")).toBeVisible()
   })
+
+  it.each<[string, CompletedConversationMessage[], string, string[]]>([
+    [
+      "messages of the person",
+      [
+        buildUserMessageWithReports(QUESTION, [buildJobReport()]),
+        ANSWER,
+        buildUserMessageWithReports(FOLLOW_UP, [
+          buildJobReport({ id: createFixtureUuidV7(69) })
+        ])
+      ],
+      "1 report delivered with this message",
+      [
+        "1 report delivered with this message, message 1",
+        "1 report delivered with this message, message 2"
+      ]
+    ],
+    [
+      "wake-up messages",
+      [
+        QUESTION,
+        ANSWER,
+        buildWakeUpMessage(5, [buildJobReport()]),
+        buildCompletedChatViewReply(6, "Nyx found the news."),
+        buildWakeUpMessage(7, [buildJobReport({ id: createFixtureUuidV7(69) })])
+      ],
+      "Reports · 1",
+      ["Reports · 1, message 2", "Reports · 1, message 3"]
+    ]
+  ])(
+    "names apart by message the report lines of two %s that each delivered one report, which show the same label",
+    (_label, messages, shownLabel, names) => {
+      render(
+        <ConversationTranscript
+          {...NO_JOBS}
+          completedMessages={messages}
+          kind="completed-only"
+          speakerName={SPEAKER_NAME}
+          sources={NO_SOURCES}
+        />
+      )
+
+      expect(
+        names.map((name) => screen.getByLabelText(name).textContent)
+      ).toEqual([shownLabel, shownLabel])
+    }
+  )
 
   it("shows a job's messages under the delegator's name when that name changes", () => {
     const messages = [

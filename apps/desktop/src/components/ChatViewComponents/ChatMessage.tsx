@@ -19,10 +19,10 @@ export type ChatMessageProps = {
    */
   readonly sources: readonly ConversationSource[]
   /**
-   * One-based position of a reply among the transcript's replies; 0 for a
-   * user message.
+   * One-based position of the message among the transcript's messages of its
+   * role: a reply among the replies, a user message among the user messages.
    */
-  readonly replyNumber: number
+  readonly messageNumber: number
   /**
    * Cards of the jobs the message shows or names, in job order: for a reply,
    * those its tool calls sent a message; for a user message, those whose
@@ -65,7 +65,7 @@ function hasSameItems<Item>(
  * @param previous - Properties of the earlier render.
  * @param next - Properties of the next render.
  * @returns True when the message object, the speaker's and the delegator's
- * names, the reply's position, and the open and stop callbacks are the same,
+ * names, the message's position, and the open and stop callbacks are the same,
  * and the source and job card lists hold the same objects in the same order;
  * the transcript builds new lists for every render, so comparing the lists
  * themselves would always differ.
@@ -78,7 +78,7 @@ function isSameChatMessage(
     "message",
     "speakerName",
     "delegatorName",
-    "replyNumber",
+    "messageNumber",
     "onOpenJob",
     "onStopJob"
   ] as const
@@ -100,8 +100,8 @@ function isSameChatMessage(
  * is not rendered again when another reply finds sources, and a message that
  * shows no job is not rendered again when a job changes.
  * @param props - The message, the names its replies and a job's messages
- * are shown under, the sources a reply may cite, a reply's position, and the
- * jobs the message shows or names with their open and stop callbacks.
+ * are shown under, the sources a reply may cite, the message's position, and
+ * the jobs the message shows or names with their open and stop callbacks.
  * @returns The rendered user message, streaming reply, or ended reply.
  */
 function ChatMessage({
@@ -109,7 +109,7 @@ function ChatMessage({
   speakerName,
   delegatorName,
   sources,
-  replyNumber,
+  messageNumber,
   jobCards,
   onOpenJob,
   onStopJob
@@ -120,6 +120,7 @@ function ChatMessage({
         delegatorName={delegatorName}
         jobCards={jobCards}
         message={message}
+        messageNumber={messageNumber}
       />
     )
   if (message.status === "streaming")
@@ -130,7 +131,7 @@ function ChatMessage({
         message={message}
         onOpenJob={onOpenJob}
         onStopJob={onStopJob}
-        replyNumber={replyNumber}
+        replyNumber={messageNumber}
         sources={sources}
         speakerName={speakerName}
       />
@@ -142,7 +143,7 @@ function ChatMessage({
       message={message}
       onOpenJob={onOpenJob}
       onStopJob={onStopJob}
-      replyNumber={replyNumber}
+      replyNumber={messageNumber}
       sources={sources}
       speakerName={speakerName}
     />

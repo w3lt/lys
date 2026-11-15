@@ -1,3 +1,5 @@
+import type { Job } from "@lys/share"
+
 import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
 import type { LlmProviderTarget } from "@/lib/models/llm-provider-target"
 import { findEligibleChatModel } from "@/lib/models/model-residency"
@@ -283,6 +285,28 @@ export function formatComposerActivity(activity: ComposerActivity): string {
     case "opening-conversation":
       return "Opening…"
   }
+}
+
+/**
+ * Counts the jobs of a conversation that work.
+ *
+ * @param jobs - Jobs of the shown conversation, in number order.
+ * @returns How many of them are `working`: their latest reply streams.
+ */
+export function calculateWorkingJobCount(jobs: readonly Job[]): number {
+  return jobs.filter((job) => job.state === "working").length
+}
+
+/**
+ * Formats the sentence of the composer's jobs bar.
+ *
+ * @param workingJobCount - Number of jobs that work, from 1.
+ * @returns How many jobs work, as `1 job is working` or `3 jobs are working`.
+ */
+export function formatWorkingJobs(workingJobCount: number): string {
+  return workingJobCount === 1
+    ? "1 job is working"
+    : `${workingJobCount} jobs are working`
 }
 
 /**

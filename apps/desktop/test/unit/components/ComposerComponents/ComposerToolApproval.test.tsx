@@ -86,7 +86,8 @@ const WAITING_MCP_CALL: ShownToolCall = Object.freeze({
 } satisfies ShownToolCall)
 
 /**
- * Renders the card for one shown call.
+ * Renders the card for one shown call of the shown conversation itself, which
+ * names no job.
  *
  * @param props - Shown call, whether the composer holds a draft, and whether
  * its field routes the answer keys; the answers are recorders.
@@ -103,7 +104,7 @@ function startToolApproval(
     onRejectToolCall: vi.fn(),
     onRetryToolCallAnswer: vi.fn()
   }
-  render(<ComposerToolApproval {...props} {...answers} />)
+  render(<ComposerToolApproval {...props} {...answers} jobLine={undefined} />)
   return answers
 }
 
@@ -130,6 +131,24 @@ describe("ComposerToolApproval", () => {
           "Search file contents under /Users/fixture/project for “TODO”. Nothing is changed."
         )
       ).toBeInTheDocument()
+    })
+
+    it("names the job a call comes from above what the call will do", () => {
+      render(
+        <ComposerToolApproval
+          hasDraft={false}
+          hasKeyShortcuts
+          jobLine="From Nyx's job: News"
+          onAllowToolCall={vi.fn()}
+          onRejectToolCall={vi.fn()}
+          onRetryToolCallAnswer={vi.fn()}
+          toolCall={WAITING_SEARCH}
+        />
+      )
+
+      expect(
+        screen.getByRole("group", { name: "Tool call waiting for your answer" })
+      ).toHaveTextContent(/From Nyx's job: News.*Search file contents under/)
     })
 
     it("names the page a backend read reads, and that the backend runs it", () => {

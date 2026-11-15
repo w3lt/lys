@@ -9,6 +9,14 @@ type DelegateWorkInput = Extract<
   { readonly toolName: typeof DELEGATE_WORK_TOOL_NAME }
 >
 
+/** The job of the shown conversation a shown call comes from. */
+export type ToolCallJob = Readonly<{
+  /** Name of the agent that works on the job. */
+  agentName: string
+  /** Title of the job's latest message. */
+  title: string
+}>
+
 /** Footer hint of a waiting call while the composer is empty. */
 export const EMPTY_DRAFT_APPROVAL_HINT =
   "Or type below to say no, with a reason"
@@ -93,4 +101,19 @@ export function formatToolCallAnnouncement(
 
   const summary = formatToolCallSummary(toolCall.answer.input)
   return `${agentName} is waiting for you to allow or reject ${toolCall.call.toolName}: ${summary}`
+}
+
+/**
+ * Formats the line that says which job of the shown conversation a shown
+ * call comes from.
+ *
+ * @param job - The job, or undefined while the shown conversation does not
+ * list it yet.
+ * @returns The line naming the job's agent and title, or saying only that
+ * the call comes from a job of this conversation.
+ */
+export function formatToolCallJobLine(job: ToolCallJob | undefined): string {
+  return job === undefined
+    ? "From a job of this conversation"
+    : `From ${job.agentName}'s job: ${job.title}`
 }

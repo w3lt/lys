@@ -919,6 +919,16 @@
   background: color-mix(in oklch, var(--app-text-link) 13%, transparent);
 }
 
+/* A job's call names the job above what it will do, quieter than the summary. */
+.composer__approval-job {
+  margin: 0;
+  padding: 8px 14px 0;
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  color: var(--app-text-muted);
+}
+
 .composer__approval-summary {
   margin: 0;
   padding: 8px 14px 12px;

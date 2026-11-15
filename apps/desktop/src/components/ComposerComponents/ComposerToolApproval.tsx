@@ -9,7 +9,11 @@ import {
 } from "@/components/SettingsViewComponents/tool-presentation"
 import { Button } from "@/components/ui/button"
 import { formatToolCallArgumentValue } from "@/lib/store/chat-view/reply-parts"
-import type { HeldToolCallAnswer, ShownToolCall } from "@/lib/store/tool-calls"
+import type {
+  HeldToolCallAnswer,
+  ShownToolCall,
+  ToolCallInput
+} from "@/lib/store/tool-calls"
 
 import {
   DRAFT_APPROVAL_HINT,
@@ -28,6 +32,11 @@ type ComposerToolApprovalProps = {
    * while the field is off, as in a job.
    */
   readonly hasKeyShortcuts: boolean
+  /**
+   * Line naming the job of the shown conversation a waiting call comes
+   * from; undefined for a call of the shown conversation itself.
+   */
+  readonly jobLine: string | undefined
   /** Requests that the parent allow the waiting call once. */
   readonly onAllowToolCall: () => void
   /** Requests that the parent reject the waiting call, with the draft as reason. */
@@ -46,6 +55,11 @@ type ComposerToolCallRequestProps = {
   readonly hasDraft: boolean
   /** Whether the composer field routes Escape and Enter to the answers. */
   readonly hasKeyShortcuts: boolean
+  /**
+   * Line naming the job of the shown conversation the call comes from;
+   * undefined for a call of the shown conversation itself.
+   */
+  readonly jobLine: string | undefined
   /** Requests that the parent allow the call once. */
   readonly onAllowToolCall: () => void
   /** Requests that the parent reject the call, with the draft as reason. */
@@ -72,6 +86,17 @@ type ComposerCalledToolProps = {
   readonly access: ToolAccess
   /** Side that runs the tool, from its definition. */
   readonly runner: ToolRunner
+}
+
+/** Properties accepted by {@link ComposerToolCallSummary}. */
+type ComposerToolCallSummaryProps = {
+  /** Validated input of the waiting call. */
+  readonly input: ToolCallInput
+  /**
+   * Line naming the job of the shown conversation the call comes from;
+   * undefined for a call of the shown conversation itself.
+   */
+  readonly jobLine: string | undefined
 }
 
 /** Properties accepted by {@link ComposerToolCallArguments}. */
@@ -176,6 +201,32 @@ function ComposerCalledTool({
 }
 
 /**
+ * Presents what a waiting call will do and, for a call of a job of the shown
+ * conversation, which job it comes from.
+ *
+ * @remarks The job line comes first, so the person reads whose call it is
+ * before what it will do; a call of the shown conversation itself has no job
+ * line. The component owns no state.
+ * @param props - The call's input and its job line.
+ * @returns The job line, when given, and the summary.
+ */
+function ComposerToolCallSummary({
+  input,
+  jobLine
+}: ComposerToolCallSummaryProps): ReactElement {
+  return (
+    <>
+      {jobLine === undefined ? null : (
+        <p className="composer__approval-job">{jobLine}</p>
+      )}
+      <p className="composer__approval-summary">
+        {formatToolCallSummary(input)}
+      </p>
+    </>
+  )
+}
+
+/**
  * Presents a waiting call's arguments as a name and value list.
  *
  * @remarks Values are shown in the order the call lists them: text as it
@@ -259,8 +310,9 @@ function ComposerToolCallFooter({
 }
 
 /**
- * Presents one call that waits for the person: what it will do, its
- * arguments on request, and the Reject and Allow buttons.
+ * Presents one call that waits for the person: the job it comes from, when
+ * a job of the shown conversation made it, what it will do, its arguments on
+ * request, and the Reject and Allow buttons.
  *
  * @remarks The component owns only whether the arguments are shown, which
  * starts hidden, except for an MCP call, whose summary does not describe
@@ -270,7 +322,7 @@ function ComposerToolCallFooter({
  * including Esc and Enter in the composer field while it routes them. Reject
  * uses the draft as the reason. The card is a named group.
  * @param props - Waiting call, whether a draft exists, whether the field
- * routes the answer keys, and the answers.
+ * routes the answer keys, the job line, and the answers.
  * @returns The waiting call's card.
  */
 function ComposerToolCallRequest({
@@ -278,6 +330,7 @@ function ComposerToolCallRequest({
   answer,
   hasDraft,
   hasKeyShortcuts,
+  jobLine,
   onAllowToolCall,
   onRejectToolCall
 }: ComposerToolCallRequestProps): ReactElement {
@@ -307,9 +360,7 @@ function ComposerToolCallRequest({
         toolName={call.toolName}
       />
 
-      <p className="composer__approval-summary">
-        {formatToolCallSummary(answer.input)}
-      </p>
+      <ComposerToolCallSummary input={answer.input} jobLine={jobLine} />
 
       {hasArguments && isArgumentsExpanded ? (
         <ComposerToolCallArguments
@@ -379,18 +430,21 @@ function ComposerToolResultFailure({
  * @remarks The parent selects the call, owns every answer, and routes Esc
  * and Enter from the composer field while the field takes them; it keys
  * this component by call, so a new call starts with its arguments hidden,
- * or shown for an MCP call. A waiting call shows what it will do and offers
- * Reject and Allow once, or Allow anyway while the composer holds text;
- * while the field routes no keys, the card names none. A failed answer shows
- * the reason and Try again.
+ * or shown for an MCP call. A waiting call shows what it will do, after the
+ * line naming its job when a job of the shown conversation made it, and
+ * offers Reject and Allow once, or Allow anyway while the composer holds
+ * text; while the field routes no keys, the card names none. A failed answer
+ * shows the reason and Try again; it names no job, because the person
+ * already answered and Try again only sends that answer again.
  * @param props - Shown call, whether a draft exists, whether the field
- * routes the answer keys, and the answers.
+ * routes the answer keys, the job line, and the answers.
  * @returns The card for the call's state.
  */
 export default function ComposerToolApproval({
   toolCall,
   hasDraft,
   hasKeyShortcuts,
+  jobLine,
   onAllowToolCall,
   onRejectToolCall,
   onRetryToolCallAnswer
@@ -405,6 +459,7 @@ export default function ComposerToolApproval({
           call={toolCall.call}
           hasDraft={hasDraft}
           hasKeyShortcuts={hasKeyShortcuts}
+          jobLine={jobLine}
           onAllowToolCall={onAllowToolCall}
           onRejectToolCall={onRejectToolCall}
         />

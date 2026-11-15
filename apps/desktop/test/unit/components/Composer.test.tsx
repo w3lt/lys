@@ -45,11 +45,14 @@ import {
   buildConversation,
   buildConversationListPage,
   buildConversationMetadata,
+  buildConversationWithJobs,
   buildDelegatorMessage,
+  buildJob,
   buildJobConversation,
   buildTextPart,
   buildStreamingAssistantMessage,
   buildUserMessage,
+  createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID,
   FIXTURE_JOB_ID,
   FIXTURE_JOB_REPLY_ID
@@ -157,6 +160,17 @@ const JOB = buildJobConversation(
     ]),
     agentCode: LYSIPTERA_AGENT_CODE
   })
+)
+
+/** Identity of job 2 of the fixture conversation. */
+const SECOND_JOB_ID = createFixtureUuidV7(64)
+
+/** The fixture conversation while its jobs 1 and 2 both work. */
+const WORKING_JOBS_CONVERSATION = buildConversationWithJobs(
+  buildConversation(FIXTURE_CONVERSATION_ID, "Trip", [
+    buildUserMessage(2, "Plan the trip")
+  ]),
+  [buildJob(), buildJob({ id: SECOND_JOB_ID, number: 2 })]
 )
 
 /** Content of a file the user attaches; no character in it is escaped. */
@@ -1649,6 +1663,106 @@ describe("Composer", () => {
         ]
       ])
       expect(useChatViewStore.getState().inputDraft).toBe("later")
+    })
+  })
+
+  describe("jobs of the shown conversation", () => {
+    it("keeps Send available and shows the bar while jobs work and no reply streams", async () => {
+      const stopJobsRoute = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/jobs/stop`
+      const backend = startBackendFake({
+        ...MEASURING_BACKEND_ROUTES,
+        [stopJobsRoute]: () => new Response(null, { status: 204 })
+      })
+      const { useChatViewStore, Composer } = await loadFreshComposer()
+      useChatViewStore.setState({
+        conversation: createStoredChatViewConversation(
+          WORKING_JOBS_CONVERSATION
+        ),
+        inputDraft: "one more thing"
+      })
+      const user = userEvent.setup()
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+
+      await user.click(screen.getByRole("button", { name: "Stop all jobs" }))
+      await waitForRenderedWork()
+
+      expect(listStatusTexts()).toContain("2 jobs are working")
+      expect(screen.getByRole("button", { name: "Send" })).toBeEnabled()
+      expect(
+        listRequestsBesideMeasurements(backend).map(
+          (request) => request.routeKey
+        )
+      ).toEqual([stopJobsRoute])
+    })
+
+    it("hides the bar while a reply streams", async () => {
+      const { useChatViewStore, Composer } = await loadFreshComposer()
+      useChatViewStore.setState({
+        conversation: createStoredChatViewConversation(
+          WORKING_JOBS_CONVERSATION
+        ),
+        request: {
+          status: "reply-streaming",
+          token: 1,
+          assistantMessageId: REPLY.id
+        }
+      })
+
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+
+      expect(listStatusTexts()).not.toContain("2 jobs are working")
+      expect(
+        screen.queryByRole("button", { name: "Stop all jobs" })
+      ).not.toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Stop reply" })
+      ).toBeInTheDocument()
+    })
+
+    it("moves focus to the message field when Stop all leaves while it has focus", async () => {
+      const stoppedJobs = [
+        buildJob({ state: "stopped" }),
+        buildJob({ id: SECOND_JOB_ID, number: 2, state: "stopped" })
+      ]
+      const { useChatViewStore, Composer } = await loadFreshComposer()
+      useChatViewStore.setState({
+        conversation: createStoredChatViewConversation(
+          WORKING_JOBS_CONVERSATION
+        )
+      })
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+      act(() => screen.getByRole("button", { name: "Stop all jobs" }).focus())
+
+      act(() =>
+        useChatViewStore.setState({
+          conversation: createStoredChatViewConversation(
+            buildConversationWithJobs(WORKING_JOBS_CONVERSATION, stoppedJobs)
+          )
+        })
+      )
+
+      expect(getMessageField()).toHaveFocus()
     })
   })
 

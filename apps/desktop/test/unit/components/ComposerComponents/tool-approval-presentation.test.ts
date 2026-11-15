@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   formatToolCallAnnouncement,
+  formatToolCallJobLine,
   formatToolCallSummary
 } from "@/components/ComposerComponents/tool-approval-presentation"
 import type { ShownToolCall, ToolCallInput } from "@/lib/store/tool-calls"
@@ -171,5 +172,19 @@ describe("formatToolCallAnnouncement", () => {
 
   it("announces nothing while no call is shown", () => {
     expect(formatToolCallAnnouncement(undefined, "Caliginia")).toBe("")
+  })
+})
+
+describe("formatToolCallJobLine", () => {
+  it("names the agent and the title of the job a call comes from", () => {
+    expect(formatToolCallJobLine({ agentName: "Nyx", title: "News" })).toBe(
+      "From Nyx's job: News"
+    )
+  })
+
+  it("says only that the call comes from a job of this conversation while the job is not known", () => {
+    expect(formatToolCallJobLine(undefined)).toBe(
+      "From a job of this conversation"
+    )
   })
 })

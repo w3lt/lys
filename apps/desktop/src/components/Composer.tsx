@@ -29,6 +29,7 @@ import ComposerAttachmentTray from "./ComposerComponents/ComposerAttachmentTray"
 import ComposerContextMeter from "./ComposerComponents/ComposerContextMeter"
 import ComposerDeletedAgentNotice from "./ComposerComponents/ComposerDeletedAgentNotice"
 import ComposerJobNotice from "./ComposerComponents/ComposerJobNotice"
+import ComposerJobsBar from "./ComposerComponents/ComposerJobsBar"
 import ComposerModelMenu from "./ComposerComponents/ComposerModelMenu"
 import ComposerOfflineBanner from "./ComposerComponents/ComposerOfflineBanner"
 import ComposerPlusMenu from "./ComposerComponents/ComposerPlusMenu"
@@ -36,6 +37,7 @@ import ComposerToolCallPrompt from "./ComposerComponents/ComposerToolCallPrompt"
 import { buildContextMeterState } from "./ComposerComponents/composer-context"
 import {
   calculateComposerActivity,
+  calculateWorkingJobCount,
   formatComposerActivity,
   formatComposerModelLabel,
   formatComposerPlaceholder,
@@ -55,8 +57,9 @@ export type ComposerProps = {
    * Parent-owned ref attached to the message field.
    *
    * @remarks The parent uses it only to move focus into the field after the
-   * user opens or starts a conversation; the job notice uses it to move
-   * focus into the field after its Back leaves with focus.
+   * user opens or starts a conversation; the job notice and the jobs bar
+   * use it to move focus into the field after their Back or Stop all leaves
+   * with focus.
    */
   readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
   /**
@@ -75,6 +78,44 @@ export type ComposerProps = {
    * for that job.
    */
   readonly jobOpenedFromCardId: string | undefined
+}
+
+/** What the composer's jobs bar shows, and how it stops the jobs. */
+type JobsBar = Readonly<{
+  /**
+   * Number of the shown conversation's jobs that work, while the bar is
+   * shown; 0 while it is hidden.
+   */
+  workingJobCount: number
+  /**
+   * Asks the chat-view store to stop every working job of the shown
+   * conversation, and returns at once; the store records a failed stop as
+   * an inline error, and the jobs' new states arrive as job updates.
+   */
+  stopJobs: () => void
+}>
+
+/**
+ * Selects what the composer's jobs bar shows.
+ *
+ * @param isActivityIdle - Whether no reply is awaited and no past
+ * conversation is opening; read reactively.
+ * @returns The number of working jobs of the shown main conversation while
+ * the composer is idle, else 0, recalculated on every render; and the stop
+ * action, a new function on every render.
+ * @remarks The chat-view store owns the conversation, its jobs, and the
+ * stop. While a reply is awaited the bar is hidden, because Stop reply
+ * stops the turn; a job shows no bar, because jobs start no jobs.
+ */
+function useJobsBar(isActivityIdle: boolean): JobsBar {
+  const conversation = useChatViewStore((state) => state.conversation)
+  const stopJobs = useChatViewStore((state) => state.stopJobs)
+  const isShown = isActivityIdle && conversation?.kind === "main"
+
+  return {
+    workingJobCount: isShown ? calculateWorkingJobCount(conversation.jobs) : 0,
+    stopJobs: () => void stopJobs()
+  }
 }
 
 /**
@@ -139,6 +180,12 @@ export type ComposerProps = {
  * from its card; when it leaves while it has focus, focus moves to the
  * field.
  *
+ * While the shown conversation's jobs work and no reply is awaited, a bar
+ * above the field says how many work and offers Stop all, which asks the
+ * chat-view store to stop them; Send stays available, because jobs do not
+ * hold the request. When Stop all leaves while it has focus, as once the
+ * last job ends, focus moves to the field.
+ *
  * Above the field, the tool-call prompt shows the first tool call of the
  * shown conversation that waits for the person or whose answer failed to
  * send, and announces each call that starts waiting; the tool-call store owns
@@ -148,7 +195,10 @@ export type ComposerProps = {
  * otherwise. A rejection, from the field or the card, clears the draft; Allow
  * anyway keeps it. In a job the field is off and routes no keys, so only the
  * card's buttons answer, the card names no keys, and a rejection carries no
- * reason and keeps the draft, which was not written for the call.
+ * reason and keeps the draft, which was not written for the call. A call of
+ * one of the shown conversation's jobs waits in that conversation too, with
+ * a line naming the job's agent and title, and is announced under the job's
+ * agent.
  *
  * Files chosen through the add menu or dropped on the field are handed to
  * the store, which reads and admits them and lists them in the tray above
@@ -236,6 +286,7 @@ export function Composer({
   const isUnavailable = connection !== "ready"
   const activity = calculateComposerActivity(request, conversationOpen)
   const activityLabel = formatComposerActivity(activity)
+  const jobsBar = useJobsBar(activity === "idle")
 
   const contextMeasurement = useChatContextMeasurement(
     activity === "idle" && !isUnavailable
@@ -471,6 +522,11 @@ export function Composer({
         isShown={isJob}
         messageFieldRef={messageFieldRef}
         onOpenParentConversation={handleOpenParentConversation}
+      />
+      <ComposerJobsBar
+        messageFieldRef={messageFieldRef}
+        onStopJobs={jobsBar.stopJobs}
+        workingJobCount={jobsBar.workingJobCount}
       />
 
       <div className="composer__inner">

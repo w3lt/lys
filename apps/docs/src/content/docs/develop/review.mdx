@@ -57,6 +57,15 @@ answers with
 it verifies each finding against the code, pushes the fixes, and posts one reply
 that names what the maintainer must decide.
 
+In Claude Code, the repository's
+[`CLAUDE.md`](https://github.com/w3lt/lys/blob/main/CLAUDE.md) hands parts of
+these operations to subagents defined in `.claude/agents/`. Agents on a smaller
+model locate code, run the checks, and read CI and SonarCloud. One run per group
+of code standards reviews code quality. The self-review before a pull request is
+opened, or before review fixes are pushed, runs in a fresh context that has none
+of the author's conversation. Every finding still passes the review standard's
+verification step before it is reported.
+
 ## Coming soon
 
 This repository does not currently expose a handbook page or code-owner file

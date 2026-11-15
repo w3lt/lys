@@ -39,9 +39,8 @@ export function EmailMailboxBackButton({
       className="settings-view__mailbox-back"
       onClick={onBack}
       ref={attachBack}
-      size="sm"
       type="button"
-      variant="ghost"
+      variant="back"
     >
       <ChevronLeft aria-hidden="true" />
       Back to the mailbox

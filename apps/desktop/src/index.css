@@ -21,6 +21,36 @@
   --font-sans: "Geist Variable", sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, monospace;
 
+  /*
+   * The type scale: every font size in the renderer is one of these steps,
+   * except the `em` sizes a Markdown reply gives its code and headings
+   * relative to its text. Each step is named for its role, in Tailwind utilities (`text-meta`) and in component
+   * styles (`var(--text-meta)`) alike. Tailwind's own sizes are removed so a
+   * utility cannot step off the scale, and `cn` in `lib/utils.ts` names the
+   * same steps so it keeps a size beside a text color.
+   *   tag      key caps, state tags, counts in a chip
+   *   meta     eyebrows, field rules, statuses, mono actions and segments
+   *   note     notes under a control, labels, descriptions, code blocks
+   *   body     running text in a panel
+   *   control  the text of a control, row titles, a reply's body
+   *   lead     panel titles
+   *   title    card headings
+   *   heading  pane headings and overview values
+   *   display  the empty chat's greeting and the portrait initial
+   */
+  --text-*: initial;
+  --text-tag: 10px;
+  --text-meta: 11px;
+  --text-note: 12px;
+  --text-note--line-height: calc(1 / 0.75);
+  --text-body: 13px;
+  --text-control: 14px;
+  --text-control--line-height: calc(1.25 / 0.875);
+  --text-lead: 16px;
+  --text-title: 18px;
+  --text-heading: 24px;
+  --text-display: 32px;
+
   /* Lys brand utilities: text-lys-cyan, bg-lys-violet, etc. */
   --color-lys-violet-black: var(--lys-violet-black);
   --color-lys-violet: var(--lys-violet);
@@ -443,17 +473,5 @@
   ::selection {
     color: var(--foreground);
     background: var(--app-selection);
-  }
-}
-
-@layer components {
-  /*
-   * Current shadcn Card components expose data-slot="card". This gives their
-   * translucent token a glass-like finish without changing component markup.
-   */
-  [data-slot="card"] {
-    -webkit-backdrop-filter: blur(18px) saturate(135%);
-    backdrop-filter: blur(18px) saturate(135%);
-    box-shadow: var(--shadow-card);
   }
 }

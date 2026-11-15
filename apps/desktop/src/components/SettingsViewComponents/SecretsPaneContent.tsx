@@ -26,7 +26,6 @@ function SecretsPaneLead(): ReactElement {
       <p className="settings-view__panel-intro">
         A server&apos;s token is kept with that server under{" "}
         <Button
-          className="settings-view__inline-link"
           onClick={() => setSettingsPane("mcp")}
           type="button"
           variant="link"
@@ -35,7 +34,6 @@ function SecretsPaneLead(): ReactElement {
         </Button>
         . A mailbox&apos;s password is kept with its mailbox, in{" "}
         <Button
-          className="settings-view__inline-link"
           onClick={() => setSettingsPane("lys")}
           type="button"
           variant="link"

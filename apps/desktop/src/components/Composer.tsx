@@ -816,38 +816,41 @@ function ComposerNavigationButtons(): ReactElement {
 
   return (
     <>
-      <button
-        className="composer__icon-button"
+      <Button
         onClick={resetConversation}
+        size="icon-xs"
         title="New conversation"
         type="button"
+        variant="ghost"
       >
         <Plus aria-hidden="true" />
         <span className="sr-only">New conversation</span>
-      </button>
+      </Button>
 
-      <button
+      <Button
         aria-expanded={isHistoryOpen}
         aria-haspopup="dialog"
         aria-keyshortcuts="Meta+K Control+K"
-        className="composer__icon-button"
         onClick={handleHistoryClick}
+        size="icon-xs"
         title="Past conversations (⌘K)"
         type="button"
+        variant="ghost"
       >
         <Menu aria-hidden="true" />
         <span className="sr-only">Past conversations</span>
-      </button>
+      </Button>
 
-      <button
-        className="composer__icon-button"
+      <Button
         onClick={() => setActiveView("settings")}
+        size="icon-xs"
         title="Settings"
         type="button"
+        variant="ghost"
       >
         <Settings aria-hidden="true" />
         <span className="sr-only">Settings</span>
-      </button>
+      </Button>
     </>
   )
 }

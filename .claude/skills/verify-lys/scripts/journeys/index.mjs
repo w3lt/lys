@@ -10,6 +10,7 @@ import backendHealth from "./backendHealth.mjs"
 import backendLifecycleUi from "./backendLifecycleUi.mjs"
 import chatStreamApi from "./chatStreamApi.mjs"
 import chatStreamUi from "./chatStreamUi.mjs"
+import controlsAndTypeUi from "./controlsAndTypeUi.mjs"
 import hostLifecycleNative from "./hostLifecycleNative.mjs"
 import settingsAutostartUi from "./settingsAutostartUi.mjs"
 import settingsGenerationUi from "./settingsGenerationUi.mjs"
@@ -21,6 +22,7 @@ export const JOURNEYS = Object.freeze([
   chatStreamUi,
   settingsGenerationUi,
   settingsAutostartUi,
+  controlsAndTypeUi,
   backendLifecycleUi,
   hostLifecycleNative
 ])

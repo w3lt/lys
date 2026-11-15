@@ -13,18 +13,21 @@ body,
   scrollbar-width: thin;
 }
 
-button,
-textarea,
-input {
-  font: inherit;
-}
-
-button:focus-visible,
-textarea:focus-visible,
-input:focus-visible,
-[role="menuitem"]:focus-visible {
-  outline: 1px solid var(--app-focus);
-  outline-offset: 2px;
+/*
+ * The default focus outline of a control that draws none of its own. It sits
+ * in the base layer, under every utility, so a shared control's own focus
+ * ring replaces it instead of stacking on it. Tailwind's preflight, in the
+ * same layer, already makes controls inherit their font; a reset outside the
+ * layers would outrank the shared controls' type utilities.
+ */
+@layer base {
+  button:focus-visible,
+  textarea:focus-visible,
+  input:focus-visible,
+  [role="menuitem"]:focus-visible {
+    outline: 1px solid var(--app-focus);
+    outline-offset: 2px;
+  }
 }
 
 *::-webkit-scrollbar {

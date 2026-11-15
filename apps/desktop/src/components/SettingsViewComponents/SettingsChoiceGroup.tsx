@@ -61,11 +61,7 @@ export default function SettingsChoiceGroup<TValue extends string>({
       variant="outline"
     >
       {choices.map((choice) => (
-        <ToggleGroupItem
-          className="settings-view__tool-segment"
-          key={choice.value}
-          value={choice.value}
-        >
+        <ToggleGroupItem key={choice.value} value={choice.value}>
           {choice.label}
         </ToggleGroupItem>
       ))}

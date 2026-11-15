@@ -127,12 +127,10 @@ function AgentEditorHeader({
     <div className="settings-view__agent-editor-top">
       <Button
         aria-label="agents list"
-        className="settings-view__agent-back"
         disabled={isAgentActivityPending(editor.activity)}
         onClick={onCloseAgentEditor}
-        size="sm"
         type="button"
-        variant="ghost"
+        variant="back"
       >
         <ChevronLeft aria-hidden="true" />
         agents
@@ -290,12 +288,10 @@ function AgentCodeField({
         <span className="settings-view__agent-field-label">
           {code === "" && nameCode !== "" ? (
             <Button
-              className="settings-view__agent-use-name"
               disabled={isReadOnly}
               onClick={() => onCodeChange(nameCode)}
-              size="sm"
               type="button"
-              variant="ghost"
+              variant="text"
             >
               use name
             </Button>
@@ -752,12 +748,10 @@ export function AgentReadStatus({
       <div className="settings-view__agent-editor-top">
         <Button
           aria-label="agents list"
-          className="settings-view__agent-back"
           onClick={onCloseAgentEditor}
           ref={backButtonRef}
-          size="sm"
           type="button"
-          variant="ghost"
+          variant="back"
         >
           <ChevronLeft aria-hidden="true" />
           agents

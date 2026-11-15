@@ -3,6 +3,8 @@ import { X } from "lucide-react"
 import { useId } from "react"
 import type { KeyboardEvent, ReactElement, RefObject } from "react"
 
+import { Button } from "@/components/ui/button"
+
 /** Properties accepted by {@link ConversationSearchField}. */
 export type ConversationSearchFieldProps = {
   /** Search text owned by the parent, shown exactly as typed. */
@@ -117,14 +119,15 @@ export default function ConversationSearchField({
         value={query}
       />
       {query === "" ? null : (
-        <button
+        <Button
           aria-label="Clear search"
-          className="conversation-history__icon-button"
           onClick={handleClearClick}
+          size="icon-xs"
           type="button"
+          variant="ghost"
         >
           <X aria-hidden="true" />
-        </button>
+        </Button>
       )}
       <span
         aria-live="polite"

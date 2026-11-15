@@ -16,6 +16,7 @@ import {
 } from "react"
 
 import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
 import { Switch } from "@/components/ui/switch"
 import { findEmailPreset } from "@/lib/models/email-presets"
 import { useLysStore } from "@/lib/store"
@@ -224,9 +225,8 @@ function LysTimeZoneField({
   return (
     <div className="settings-view__panel-field">
       <label htmlFor={fieldId}>Time zone</label>
-      <select
+      <NativeSelect
         aria-describedby={`${fieldId}-help`}
-        className="settings-view__select"
         id={fieldId}
         onChange={(event) => onTimeZoneChange(event.target.value)}
         value={timeZone}
@@ -236,7 +236,7 @@ function LysTimeZoneField({
             {option.label}
           </option>
         ))}
-      </select>
+      </NativeSelect>
       <p className="settings-view__panel-help" id={`${fieldId}-help`}>
         Dates and times in Lys&apos;s messages use this zone.
       </p>
@@ -530,13 +530,12 @@ function LysMailboxFooter({
         {message.text}
       </p>
       <Button
-        className="settings-view__mailbox-remove"
         disabled={isBusy}
         onClick={removal.openRemovalQuestion}
         ref={removeAccountRef}
         size="sm"
         type="button"
-        variant="ghost"
+        variant="destructive"
       >
         <Trash2 aria-hidden="true" />
         Remove mailbox

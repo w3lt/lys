@@ -9,6 +9,7 @@ import type { LlmInfo } from "@lys/protocol"
 import type { LlmProvider } from "@lys/share"
 
 import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
 import {
   buildDefaultModelLoadConfiguration,
   buildModelLoadConfiguration
@@ -341,7 +342,7 @@ function IdleUnloadField(): ReactElement {
   return (
     <div className="settings-view__models-idle">
       <label htmlFor={selectId}>Unload when idle</label>
-      <select
+      <NativeSelect
         aria-describedby={noteId}
         defaultValue="5m"
         disabled
@@ -351,7 +352,7 @@ function IdleUnloadField(): ReactElement {
         <option value="30m">After 30 minutes</option>
         <option value="1h">After 1 hour</option>
         <option value="never">Never</option>
-      </select>
+      </NativeSelect>
       <p className="settings-view__models-note" id={noteId}>
         Frees this machine’s memory. An unloaded model can’t answer until you
         load it again. Lys can’t change it yet, so Ollama’s own setting applies.

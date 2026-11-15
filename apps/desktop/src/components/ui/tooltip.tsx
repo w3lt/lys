@@ -44,7 +44,7 @@ function Tooltip({ description, children }: TooltipProps): ReactElement {
         >
           <TooltipPrimitive.Popup
             data-slot="tooltip-content"
-            className="max-w-64 rounded-[var(--radius-control)] bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10"
+            className="max-w-64 rounded-[var(--radius-control)] bg-popover px-2.5 py-1.5 text-note text-popover-foreground shadow-md ring-1 ring-foreground/10"
           >
             {description}
           </TooltipPrimitive.Popup>

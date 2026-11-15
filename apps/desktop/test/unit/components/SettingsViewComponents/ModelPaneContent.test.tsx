@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ollamaApiKeySchema, type LlmProvider } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
@@ -638,7 +638,7 @@ describe("ModelPaneContent", () => {
     ).toBeInTheDocument()
   })
 
-  it("shows the provider the picker chose, with no model selected", async () => {
+  it("closes the picker and shows the provider it chose, with no model selected", async () => {
     const { useLysStore, user } = await startModelPane(TWO_MODELS, {
       extra: { provider: "groq", state: GROQ_MODELS }
     })
@@ -652,6 +652,9 @@ describe("ModelPaneContent", () => {
     )
     await waitForRenderedWork()
 
+    await waitFor(() => {
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument()
+    })
     expect(useLysStore.getState().modelPaneProvider).toBe("groq")
     expect(screen.getByRole("button", { name: /^Groq/ })).toBeInTheDocument()
     expect(listRowTexts("Models")).toEqual(["llama-3.3-70b128k"])

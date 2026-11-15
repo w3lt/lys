@@ -68,7 +68,7 @@ type ProviderChoiceProps = {
  * @remarks Shows the provider's name, its status beside a
  * toned dot, its model count, where Lys reaches it, and the session's
  * default model when it is the provider's; the radio item marks the shown
- * provider with a check.
+ * provider with a check. Choosing the item closes the menu.
  * @param props - The provider's summary.
  * @returns The radio item.
  */
@@ -80,6 +80,7 @@ function ProviderChoice({ summary }: ProviderChoiceProps): ReactElement {
   return (
     <DropdownMenuRadioItem
       className="settings-view__models-choice"
+      closeOnClick
       value={summary.provider}
     >
       <PlacementIcon placement={summary.placement} />
@@ -157,8 +158,8 @@ type ModelProviderPickerProps = {
  * @remarks The menu owns only its open state; the
  * parent owns the shown provider. The trigger names the shown provider and
  * where it runs models. The menu lists the providers that are on, cloud
- * ones first, as radio items, the shown one checked. Base UI supplies the
- * menu's keyboard and focus behavior.
+ * ones first, as radio items, the shown one checked; choosing one closes
+ * the menu. Base UI supplies the menu's keyboard and focus behavior.
  * @param props - Shown provider, choices, and the proposal.
  * @returns The picker's trigger and menu.
  */

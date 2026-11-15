@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils"
  * list through the component's native `className` prop.
  */
 const alertVariants = cva(
-  "group/alert relative grid w-full gap-0.5 rounded-[var(--radius-surface)] border px-2.5 py-2 text-left text-sm has-data-[slot=alert-action]:relative has-data-[slot=alert-action]:pr-18 has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-4",
+  "group/alert relative grid w-full gap-0.5 rounded-[var(--radius-surface)] border px-2.5 py-2 text-left text-sm has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -107,25 +107,4 @@ function AlertDescription({
   )
 }
 
-/**
- * Positions an action region inside an {@link Alert} over a native `div`.
- *
- * @remarks Native `div` props and
- * children are forwarded and marked with `data-slot="alert-action"`; the
- * parent alert's styling reserves space for this region. A supplied `ref`
- * targets the native `HTMLDivElement`; the adapter owns no state, effects, or
- * failure handling.
- * @param props - Native action-region props and children.
- * @returns The positioned alert action region.
- */
-function AlertAction({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="alert-action"
-      className={cn("absolute top-2 right-2", className)}
-      {...props}
-    />
-  )
-}
-
-export { Alert, AlertTitle, AlertDescription, AlertAction }
+export { Alert, AlertTitle, AlertDescription }

@@ -529,12 +529,15 @@ export const chatApiRequestBodySchema = z
  * persisted title. A generated title may arrive before, between, or after the
  * reply events because its task runs concurrently. `reply-part`,
  * `reply-part-delta`, and `sources` events carry the reply's parts and the
- * sources its tool calls read, each stored before it is sent. The stream closes after
- * both tasks settle; like every generation stream (see
- * `ChatGenerationEvent`), it can close without a final reply event.
- * `tool-approval` events ask the client to show a call to the person; see
- * the tool-approval endpoint. `tool-call` events ask the client to run a call
- * of a client tool; see the tool-result endpoint. The `type` discriminant is the compatibility boundary used by
+ * sources its tool calls read, each stored before it is sent. A `sources`
+ * event is also sent after the start event and any stored title, for
+ * the sources the reports delivered with the turn's user message cite; it is
+ * left out when they cite none. The stream closes after both tasks settle;
+ * like every generation stream (see `ChatGenerationEvent`), it can close
+ * without a final reply event. `tool-approval` events ask the client to show
+ * a call to the person; see the tool-approval endpoint. `tool-call` events
+ * ask the client to run a call of a client tool; see the tool-result
+ * endpoint. The `type` discriminant is the compatibility boundary used by
  * desktop consumers.
  */
 export const chatApiStreamEventSchema = z.discriminatedUnion("type", [

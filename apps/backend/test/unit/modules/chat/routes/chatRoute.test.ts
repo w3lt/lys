@@ -43,13 +43,19 @@ import {
   type McpServerUpdateTestApp
 } from "../../../support/chatRouteTestApp"
 import { parseSseEvents } from "../../../support/chatSseRoute"
-import { createJobSeedingHarness } from "../../../support/conversationDatabase"
+import {
+  createJobSeedingHarness,
+  saveJobReportRow,
+  saveSourceRow
+} from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 import { waitForFirstJobReplyEnd } from "../../../support/delegationTestServices"
 import {
+  createFixtureTimestamp,
   createJobFixture,
   saveJob,
-  saveMainConversation
+  saveMainConversation,
+  saveReport
 } from "../../../support/conversationRecordsContract"
 import { createDownloadedLlmModel } from "../../../support/llmFixtures"
 import { buildFakeStdioServerSettings } from "../../../support/mcpTestServers"
@@ -3081,6 +3087,137 @@ describe("updateFastifyWithChatRoute", () => {
           (request.tools ?? []).map((tool) => tool.function.name)
         )
       ).toContainEqual(["read_my_state", "report_progress"])
+    })
+  })
+
+  describe("sources of delivered reports", () => {
+    /** First source of the main conversation, which a job also read. */
+    const MOTHS_PAGE = Object.freeze({
+      number: 1,
+      url: "https://example.com/moths",
+      title: "Moths"
+    })
+
+    /** Address of a page about what moths eat, which only the job read. */
+    const DIET_URL = "https://example.com/moths/diet"
+
+    /**
+     * Stores a main conversation titled `Moths` that Caliginia answers, with
+     * {@link MOTHS_PAGE} and a page about lamps, which no report cites, as
+     * its sources 1 and 2, and one completed job of the stored agent
+     * `researcher`, whose result report waits to be delivered.
+     *
+     * @param testApp - Test application registered by
+     * {@link registerStoringChatRoute}.
+     * @param content - Text of the report, citing the job's own sources: 1
+     * is a page at {@link DIET_URL}, which the main conversation lacks, and
+     * 2 is the page at {@link MOTHS_PAGE}'s address.
+     * @returns UUIDv7 of the main conversation.
+     */
+    function saveReportingJob(
+      testApp: ChatRouteTestApp,
+      content: string
+    ): string {
+      /** Second source of the main conversation. */
+      const lampsPage = Object.freeze({
+        number: 2,
+        url: "https://example.com/lamps",
+        title: "Lamps"
+      })
+
+      const harness = createJobSeedingHarness(testApp.database)
+      testApp.app.agentService.createAgent({
+        ...WEB_RESEARCHER_DEFINITION,
+        code: "researcher"
+      })
+      const mainId = saveMainConversation(harness, 1)
+      testApp.app.conversationHistoryEditor.updateConversationTitle(
+        mainId,
+        "Moths"
+      )
+      saveSourceRow(testApp.database, mainId, MOTHS_PAGE)
+      saveSourceRow(testApp.database, mainId, lampsPage)
+      const job = saveJob(harness, createJobFixture(mainId, 1, "completed"))
+      saveSourceRow(testApp.database, job.id, {
+        number: 1,
+        url: DIET_URL,
+        title: "Moth diet"
+      })
+      saveSourceRow(testApp.database, job.id, { ...MOTHS_PAGE, number: 2 })
+      saveReport(
+        { saveJobReport: (row) => saveJobReportRow(testApp.database, row) },
+        job,
+        {
+          sequence: 200,
+          kind: "result",
+          title: "Find what moths eat",
+          content,
+          createdAt: createFixtureTimestamp(30)
+        }
+      )
+      return mainId
+    }
+
+    it("sends the sources a delivered report cites right after the start event and the stored title, numbered as the conversation stores them", async () => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      const mainId = saveReportingJob(
+        testApp,
+        "They eat wool [1], as moth pages say [2]."
+      )
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "existing", id: mainId },
+        message: "Any news?"
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(parseSseEvents(response.body).slice(0, 3)).toMatchObject([
+        {
+          event: "start-existing-conversation-turn",
+          data: {
+            userMessage: {
+              reports: [
+                {
+                  content: "They eat wool [3], as moth pages say [1].",
+                  sourceNumbers: [1, 3]
+                }
+              ]
+            }
+          }
+        },
+        { event: "title", data: { type: "title", title: "Moths" } },
+        {
+          event: "sources",
+          data: {
+            type: "sources",
+            sources: [
+              MOTHS_PAGE,
+              { number: 3, url: DIET_URL, title: "Moth diet" }
+            ]
+          }
+        }
+      ])
+    })
+
+    it("sends no sources event when the delivered reports cite nothing", async () => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      const mainId = saveReportingJob(testApp, "They eat wool.")
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "existing", id: mainId },
+        message: "Any news?"
+      })
+
+      const events = parseSseEvents(response.body)
+      expect(events[0]).toMatchObject({
+        event: "start-existing-conversation-turn",
+        data: { userMessage: { reports: [{ sourceNumbers: [] }] } }
+      })
+      expect(events.map((event) => event.event)).not.toContain("sources")
     })
   })
 })

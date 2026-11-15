@@ -10,6 +10,7 @@ import {
 import type {
   Conversation,
   ConversationMetadata,
+  ConversationSource,
   ToolDefinition
 } from "@lys/share"
 import type { FastifyInstance } from "fastify"
@@ -769,13 +770,36 @@ function buildConversationMetadata(
 }
 
 /**
+ * Lists the sources the reports a turn's user message delivers cite.
+ *
+ * @param turn - Stored pair and conversation snapshot, whose sources hold
+ * those the delivered reports added.
+ * @returns Every source of the conversation whose number a delivered report
+ * lists, in number order; empty when the message delivers no report or its
+ * reports cite nothing.
+ */
+function listDeliveredReportSources(
+  turn: ConversationTurn
+): readonly ConversationSource[] {
+  const citedNumbers = new Set(
+    turn.userMessage.reports.flatMap((report) => report.sourceNumbers)
+  )
+  return turn.conversation.sources.filter((source) =>
+    citedNumbers.has(source.number)
+  )
+}
+
+/**
  * Builds the events that open a turn's stream.
  *
  * @param turn - Stored pair and conversation snapshot.
  * @returns The turn-start event, followed by the stored title of an existing
- * titled conversation.
+ * titled conversation, then the sources the turn's delivered reports cite.
  * @remarks The stored title lets a client that missed an earlier title event
  * reconcile its metadata. New and untitled conversations get no title here.
+ * The start event carries no sources, so the `sources` event lets a client
+ * link a delivered report's citations; it is left out when the reports cite
+ * nothing. A new conversation has no jobs, so it never delivers reports.
  */
 function buildTurnStartEvents(turn: ConversationTurn): ChatApiStreamEvent[] {
   const { userMessage, assistantMessage } = turn
@@ -795,8 +819,10 @@ function buildTurnStartEvents(turn: ConversationTurn): ChatApiStreamEvent[] {
     userMessage,
     assistantMessage
   }
+  const events: ChatApiStreamEvent[] = [start]
   const { title } = turn.conversation
-  if (title === null) return [start]
-  const storedTitle: ChatApiStreamEvent = { type: "title", title }
-  return [start, storedTitle]
+  if (title !== null) events.push({ type: "title", title })
+  const sources = listDeliveredReportSources(turn)
+  if (sources.length > 0) events.push({ type: "sources", sources })
+  return events
 }

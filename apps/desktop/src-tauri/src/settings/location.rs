@@ -1,7 +1,7 @@
 //! The location the person saved, stored under the `location` settings group.
 //!
-//! The person types the location in Settings → Tools as a city, a region, and
-//! a country, each optional; Lys never detects it. A missing group, a group
+//! The person types the location in Settings → Profile as a city, a region,
+//! and a country, each optional; Lys never detects it. A missing group, a group
 //! whose parts are all `null`, and a settings file written before the group
 //! existed all mean that no location is saved. The `get_location` tool reads
 //! the group from the saved file; this module only stores it.

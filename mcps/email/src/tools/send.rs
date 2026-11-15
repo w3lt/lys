@@ -380,6 +380,7 @@ pub(crate) async fn send_composed(
     let mut session = open_smtp_session(&context.account, &context.trust)
         .await
         .map_err(|failure| ToolFailure::SignIn {
+            mailbox: context.mailbox,
             protocol: Protocol::Smtp,
             failure,
         })?;

@@ -74,8 +74,8 @@ mkdir -p "$HOME/.lys"
 ```
 
 The email MCP server is not built by these commands. Build it once before
-saving an email account in Settings → MCP, since Save signs in through it,
-and again after changing it:
+saving an email account in Settings → MCP or Settings → Lys, since Save
+signs in through it, and again after changing it:
 
 ```sh
 cargo build --manifest-path mcps/email/Cargo.toml --target-dir mcps/email/target

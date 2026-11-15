@@ -19,16 +19,18 @@ import {
 } from "../../support/settingsViewFixtures"
 import { waitForRenderedWork } from "../../support/rendering"
 
-/** Rail entries as their tabs are named, in order. */
-const RAIL_TABS = [
-  "Runtime01",
-  "Models02",
-  "Generation03",
-  "Agents04",
-  "Tools05",
-  "MCP06",
-  "Providers07",
-  "Secrets08"
+/** Rail entries as their buttons read, in order. */
+const RAIL_ENTRIES = [
+  "Lys01",
+  "Profile02",
+  "Runtime03",
+  "Models04",
+  "Generation05",
+  "Agents06",
+  "Tools07",
+  "MCP08",
+  "Providers09",
+  "Secrets10"
 ]
 
 /** A runtime the rail summarizes, and the summary at the rail's foot. */
@@ -44,18 +46,39 @@ type RailStatusCase = {
 }
 
 /**
- * Gets one rail tab.
+ * Gets one pane's rail button.
  *
  * @param label - Pane label.
  * @param ordinal - Two-digit ordinal after the label.
- * @returns The tab.
+ * @returns The button.
  * @remarks With the view's styles applied, the label and ordinal are separate
  * blocks, so the name has a space between them, as a browser computes it.
  */
-function getRailTab(label: string, ordinal: string): HTMLElement {
-  return screen.getByRole("tab", {
+function getRailButton(label: string, ordinal: string): HTMLElement {
+  return screen.getByRole("button", {
     name: new RegExp(`^${label}\\s*${ordinal}$`)
   })
+}
+
+/**
+ * Gets the settings rail.
+ *
+ * @returns The navigation landmark named Settings sections.
+ */
+function getRail(): HTMLElement {
+  return screen.getByRole("navigation", { name: "Settings sections" })
+}
+
+/**
+ * Gets the disclosure button of one section of the shown pane.
+ *
+ * @param title - Matches the section's title in its heading's name.
+ * @returns The button in the level-two heading the title names.
+ */
+function getSectionButton(title: RegExp): HTMLElement {
+  return within(
+    screen.getByRole("heading", { level: 2, name: title })
+  ).getByRole("button")
 }
 
 describe("SettingsView", () => {
@@ -66,18 +89,19 @@ describe("SettingsView", () => {
     render(<SettingsView onDone={vi.fn()} />)
 
     const settings = screen.getByRole("main", { name: "Settings" })
-    const rail = within(settings).getByRole("tablist", {
+    const rail = within(settings).getByRole("navigation", {
       name: "Settings sections"
     })
     expect(
       within(rail)
-        .getAllByRole("tab")
-        .map((tab) => tab.textContent)
-    ).toEqual(RAIL_TABS)
-    expect(getRailTab("Generation", "03")).toHaveAttribute(
-      "aria-selected",
-      "true"
+        .getAllByRole("listitem")
+        .map((entry) => entry.textContent)
+    ).toEqual(RAIL_ENTRIES)
+    expect(getRailButton("Generation", "05")).toHaveAttribute(
+      "aria-current",
+      "page"
     )
+    expect(getRailButton("Runtime", "03")).not.toHaveAttribute("aria-current")
     expect(
       screen.getByRole("heading", { level: 1, name: "Generation" })
     ).toBeInTheDocument()
@@ -108,7 +132,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup()
     render(<SettingsView onDone={vi.fn()} />)
 
-    await user.click(getRailTab("Models", "02"))
+    await user.click(getRailButton("Models", "04"))
 
     expect(useLysStore.getState().settingsPane).toBe("model")
     expect(
@@ -117,18 +141,49 @@ describe("SettingsView", () => {
     await waitForRenderedWork()
   })
 
-  it("moves through the rail with the arrow keys and selects with Enter", async () => {
+  it("lists the Lys pane's sections under its entry, and jumps to one, opening it", async () => {
     startBackendFake({ [INVENTORY_ROUTE]: buildInventoryRoute() })
-    const { useLysStore, SettingsView } = await loadFreshSettingsView("runtime")
+    const { SettingsView } = await loadFreshSettingsView("lys")
     const user = userEvent.setup()
     render(<SettingsView onDone={vi.fn()} />)
-    getRailTab("Runtime", "01").focus()
+    await user.click(
+      await screen.findByRole("button", { name: "Collapse all" })
+    )
+    const email = getSectionButton(/Set up Lys's mailbox/)
 
-    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}")
+    expect(email).toHaveAttribute("aria-expanded", "false")
+    const sections = within(getRail()).getByRole("list", {
+      name: "Lys sections"
+    })
+    expect(
+      within(sections)
+        .getAllByRole("button")
+        .map((button) => button.textContent)
+    ).toEqual(["About Lys", "EmailNot set up"])
+    await user.click(within(sections).getByRole("button", { name: /^Email/ }))
 
-    expect(getRailTab("Generation", "03")).toHaveFocus()
-    expect(useLysStore.getState().settingsPane).toBe("generation")
-    await waitForRenderedWork()
+    expect(email).toHaveAttribute("aria-expanded", "true")
+    expect(email).toHaveFocus()
+    expect(screen.getByRole("button", { name: "Collapse all" })).toBeVisible()
+  })
+
+  it("opens every section again with Expand all", async () => {
+    startBackendFake({ [INVENTORY_ROUTE]: buildInventoryRoute() })
+    const { SettingsView } = await loadFreshSettingsView("profile")
+    const user = userEvent.setup()
+    render(<SettingsView onDone={vi.fn()} />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Collapse all" })
+    )
+    await user.click(screen.getByRole("button", { name: "Expand all" }))
+
+    for (const title of ["About you", "Location", "Preferences"]) {
+      expect(getSectionButton(new RegExp(title))).toHaveAttribute(
+        "aria-expanded",
+        "true"
+      )
+    }
   })
 
   it("leaves once per press of Done", async () => {
@@ -277,9 +332,7 @@ describe("SettingsView", () => {
       render(<SettingsView onDone={vi.fn()} />)
       await waitForRenderedWork()
 
-      expect(
-        screen.getByRole("tablist", { name: "Settings sections" })
-      ).toHaveTextContent(new RegExp(`${summary}$`))
+      expect(getRail()).toHaveTextContent(new RegExp(`${summary}$`))
     }
   )
 

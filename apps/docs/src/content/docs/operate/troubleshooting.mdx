@@ -177,7 +177,7 @@ details. A save that changes the server also tries again.
 | `unreachable`     | No connection could be made: the host or port is wrong, the name does not resolve, or the server is not running. A server on `localhost` must be started before Lys connects.                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `http-error`      | The server answered another HTTP error, or a redirect, which Lys does not follow. Check the URL's path, such as a missing `/mcp`, and use the address a redirect points to.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `protocol-error`  | The server's answers are not valid MCP, or an answer is larger than 16 MiB while connecting, or it refused to connect or to list its tools; a `refused` failure in the log carries its message. Check that the URL is the server's MCP endpoint, not a web page, and that it speaks Streamable HTTP.                                                                                                                                                                                                                                                                                                         |
-| `account-missing` | A mailbox of the email server Lys ships is switched on, but its email account is not saved. Save it on the mailbox's card, or switch the mailbox off there; see [the email account cannot be saved](#the-email-account-cannot-be-saved).                                                                                                                                                                                                                                                                                                                                                                     |
+| `account-missing` | A mailbox of the email server Lys ships is switched on, but its email account is not saved. Save it on the mailbox's card, yours in Settings → MCP and Lys's in Settings → Lys, or switch the mailbox off there; see [the email account cannot be saved](#the-email-account-cannot-be-saved).                                                                                                                                                                                                                                                                                                                |
 | `account-invalid` | The saved email account of a mailbox that is on, or its password, fails its rules, the two accounts open one mailbox, or the settings file could not be read. Save the account again on its card, or fix a hand edit of the `email` or `secrets` group; see the [configuration reference](/reference/configuration/#email-account).                                                                                                                                                                                                                                                                          |
 
 Lys speaks only Streamable HTTP to a URL server. A server that offers only the
@@ -214,7 +214,7 @@ unchanged.
 ## An MCP server's tools are missing or skipped
 
 - The backend lists a server's tools only while the server is connected, so
-  the Tools pane has an `MCP · <server>` group only then.
+  its details in Settings → MCP list its tools only then.
 - The backend reads a server's tool list once, when it connects. A server
   that adds tools later needs **Restart** or **Reconnect**
   ([#256](https://github.com/w3lt/lys/issues/256)).
@@ -235,11 +235,16 @@ unchanged.
 
 ## The email account cannot be saved
 
-Save on an email account card, yours or Lys's, first signs in to the IMAP and
+Save on an email account card, yours in Settings → MCP or Lys's in
+Settings → Lys, first signs in to the IMAP and
 the SMTP server through the backend, so the backend must be running; the card's status
 line then says what each server answered, as
 `IMAP: accepted · SMTP: the user name or password was refused`, and nothing is
-saved until both accept.
+saved until both accept. Switching Server keeps a copy of sent mail under
+Lys's saved mailbox in Settings → Lys saves her account the same way; when a
+server refuses, the line under the mailbox says "A server refused the latest
+check. Edit servers to see why.", and Edit servers opens the card with what
+each server answered.
 
 | The status line says                     | Cause and what to do                                                                                                                                                                                                                                                                                                                                             |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

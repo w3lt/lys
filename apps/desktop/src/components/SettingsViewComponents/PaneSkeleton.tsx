@@ -59,6 +59,29 @@ type PaneSkeletonShape = {
 
 /** Authoritative placeholder geometry keyed by every supported settings pane. */
 const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
+  lys: {
+    cards: [
+      { id: "about-lys", title: "180px", meta: "320px" },
+      { id: "lys-email", title: "140px", meta: "280px" }
+    ],
+    heading: false,
+    rows: [],
+    list: [],
+    block: false
+  },
+  profile: {
+    cards: [
+      { id: "model-view", title: "220px", meta: "300px" },
+      { id: "about-you", title: "96px", meta: "240px" },
+      { id: "location", title: "88px", meta: "260px" },
+      { id: "preferences", title: "112px", meta: "320px" },
+      { id: "notes", title: "116px", meta: "220px" }
+    ],
+    heading: false,
+    rows: [],
+    list: [],
+    block: false
+  },
   runtime: {
     cards: [
       {

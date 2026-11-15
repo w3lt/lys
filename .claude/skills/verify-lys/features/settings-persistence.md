@@ -40,8 +40,9 @@ node .claude/skills/verify-lys/scripts/verify-lys.mjs run --journey settings-gen
 
 Both journeys are built by `scripts/journeys/settingsSwitchJourney.mjs` with
 the pane, switch label, and field. Each opens the renderer, waits for the
-composer to be ready, clicks `button[title="Settings"]`, clicks the tab under
-`[aria-label="Settings sections"]` whose text starts with the pane name,
+composer to be ready, clicks `button[title="Settings"]`, clicks the pane's
+entry in the `[aria-label="Settings sections"]` rail, the button whose text
+starts with the pane name,
 waits for the pane (Generation: the switch; Runtime: the
 `[aria-label="Backend status"]` heading), reads
 `[role="switch"][aria-label="<label>"]` and requires `aria-checked="true"`

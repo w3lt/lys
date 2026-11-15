@@ -52,6 +52,7 @@ async fn build_smtp_context(
 /// The failure of a sign-in to the SMTP server that took too long.
 fn build_sign_in_timeout() -> ToolFailure {
     ToolFailure::SignIn {
+        mailbox: email::mailbox::Mailbox::Person,
         protocol: Protocol::Smtp,
         failure: SignInFailure::TimedOut,
     }

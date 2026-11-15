@@ -46,6 +46,16 @@ impl Mailbox {
         }
     }
 
+    /// Where the person edits the mailbox's account in Lys: the email
+    /// server's details in Settings → MCP for the person's, the Lys pane
+    /// for Lys's.
+    pub fn settings_place(self) -> &'static str {
+        match self {
+            Self::Person => "Settings → MCP",
+            Self::Lys => "Settings → Lys",
+        }
+    }
+
     /// The name the logs give the mailbox: `person` or `lys`.
     pub fn log_name(self) -> &'static str {
         match self {
@@ -60,8 +70,8 @@ mod tests {
     use super::*;
 
     /// Checks that each mailbox has its own variable, tool prefix, id
-    /// prefix, and log name, the person's keeping those from before Lys
-    /// had a mailbox.
+    /// prefix, settings place, and log name, the person's keeping those
+    /// from before Lys had a mailbox.
     #[test]
     fn names_each_mailbox_s_variable_tools_ids_and_log() {
         let names = |mailbox: Mailbox| {
@@ -69,17 +79,24 @@ mod tests {
                 mailbox.variable_name(),
                 mailbox.tool_prefix(),
                 mailbox.id_prefix(),
+                mailbox.settings_place(),
                 mailbox.log_name(),
             )
         };
 
         assert_eq!(
             names(Mailbox::Person),
-            ("LYS_EMAIL_ACCOUNT", "", "", "person")
+            ("LYS_EMAIL_ACCOUNT", "", "", "Settings → MCP", "person")
         );
         assert_eq!(
             names(Mailbox::Lys),
-            ("LYS_EMAIL_LYS_ACCOUNT", "lys_", "lys.", "lys")
+            (
+                "LYS_EMAIL_LYS_ACCOUNT",
+                "lys_",
+                "lys.",
+                "Settings → Lys",
+                "lys"
+            )
         );
     }
 }

@@ -476,6 +476,7 @@ async fn reports_a_refused_recipient_and_a_refused_sign_in_without_a_sent_copy()
     assert_eq!(
         not_signed_in,
         Err(ToolFailure::SignIn {
+            mailbox: email::mailbox::Mailbox::Person,
             protocol: Protocol::Smtp,
             failure: SignInFailure::WrongPassword
         })

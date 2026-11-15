@@ -188,7 +188,7 @@ seconds. Quitting Lys stops vmo and the backend together.
    sending would make: `conversation` (`{ kind: "existing", id }` for the
    shown conversation, `{ kind: "new", agentCode }` otherwise), the
    conversation's `model` as `{ provider, modelKey }` while it is loaded, and
-   the `tools` the Tools pane would offer.
+   the `tools` sending would offer.
 2. The desktop sends `POST /api/v1/chat/context`. A newer request abandons an
    older one.
 3. The backend finds the agent and the conversation as the chat route does,

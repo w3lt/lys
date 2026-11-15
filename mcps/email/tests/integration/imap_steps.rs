@@ -41,6 +41,7 @@ fn build_imap_context(
 /// The failure of a sign-in to the IMAP server that took too long.
 fn build_sign_in_timeout() -> ToolFailure {
     ToolFailure::SignIn {
+        mailbox: email::mailbox::Mailbox::Person,
         protocol: Protocol::Imap,
         failure: SignInFailure::TimedOut,
     }

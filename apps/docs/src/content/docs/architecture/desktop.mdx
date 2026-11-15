@@ -1617,7 +1617,13 @@ looks; each view's stylesheet lays out its controls and its own text.
   from an editor to its list. Button sizes run from `icon-xs`, 24 px, to
   `lg` and `icon-lg`, 36 px. Toggle-group items are 11 px mono segments, and
   fields are 32 px tall with 14 px text. A view's stylesheet does not set a
-  primitive's size, padding, or font, except the mono family for code.
+  primitive's text size or weight, or a one-line control's height. It may set
+  the mono family for code; layout such as width, alignment, and wrapping; a
+  multi-line field's minimum height and line spacing; the inset that makes
+  room for an icon drawn inside a field; and a decoration that sets no size,
+  such as the gradient edge of the MCP pane's Add server button. The
+  composer's message field is the one exception: it has no frame of its own
+  inside the composer, so it sets its own border and padding.
 - **Cascade.** Tailwind's preflight, its utilities, and the default focus
   outline in `App.scss` sit in cascade layers. A view's stylesheet sits
   outside them and outranks every utility whatever its specificity, so a

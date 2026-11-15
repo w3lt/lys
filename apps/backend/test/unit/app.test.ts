@@ -3,7 +3,11 @@ import {
   stopChatReplyApi,
   stopConversationJobsApi
 } from "@lys/protocol"
-import type { Job, McpServerSettings } from "@lys/share"
+import {
+  DELEGATE_WORK_TOOL_NAME,
+  type Job,
+  type McpServerSettings
+} from "@lys/share"
 import { once } from "node:events"
 import {
   existsSync,
@@ -417,6 +421,26 @@ describe("buildApp", () => {
       storedCount: 1,
       conversations: [
         { title: "Greeting", preview: { role: "assistant", content: "Hi" } }
+      ]
+    })
+  })
+
+  it("decorates the agent tools Settings lists, which the tool list serves after the built-in tools", async () => {
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(new CapturedLogDestination())
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+
+    const response = await app.inject({ method: "GET", url: "/api/v1/tools" })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      tools: [
+        { name: "read_page" },
+        { name: "web_search" },
+        { name: DELEGATE_WORK_TOOL_NAME, runner: "backend" }
       ]
     })
   })

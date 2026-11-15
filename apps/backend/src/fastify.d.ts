@@ -1,5 +1,6 @@
 /// <reference types="fastify" />
 
+import type { ToolDefinition } from "@lys/share"
 import type ActivityHub from "./modules/activity/activityHub"
 import type AgentRuntimeService from "./modules/agent/agentRuntimeService"
 import type AgentService from "./modules/agent/agentService"
@@ -49,8 +50,13 @@ declare module "fastify" {
      * learn about themselves and each other.
      */
     agentRuntimeService: AgentRuntimeService
-    /** Every tool the backend runs, in the order Settings lists them. */
+    /** Every built-in tool, in the order Settings lists them. */
     builtInTools: readonly BuiltInToolEntry[]
+    /**
+     * Definitions of the agent tools Settings lists after the built-in
+     * tools: `delegate_work` only.
+     */
+    listedAgentTools: readonly ToolDefinition[]
     /**
      * Application-scoped lookup of the web search tool and checks of the
      * saved Tavily key.

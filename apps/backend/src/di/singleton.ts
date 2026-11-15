@@ -1,4 +1,5 @@
 import type { LoggerInterface } from "@lmstudio/sdk"
+import type { ToolDefinition } from "@lys/share"
 import type { FastifyBaseLogger } from "fastify"
 import { homedir } from "node:os"
 import type { BackendConfig } from "../config"
@@ -15,6 +16,7 @@ import AgentRuntimeService, {
 } from "../modules/agent/agentRuntimeService"
 import AgentService from "../modules/agent/agentService"
 import { buildBuiltInAgents } from "../modules/agent/builtInAgents"
+import { buildListedDelegationDefinitions } from "../modules/agent/delegationTools"
 import ChatService, {
   type ChatServiceCreationOptions
 } from "../modules/chat/chatService"
@@ -202,10 +204,15 @@ export type SingletonServices = Readonly<{
    */
   agentRuntimeService: AgentRuntimeService
   /**
-   * Every tool the backend runs, in the order Settings lists them; they own
-   * nothing to release.
+   * Every built-in tool, in the order Settings lists them; they own nothing
+   * to release.
    */
   builtInTools: readonly BuiltInToolEntry[]
+  /**
+   * Definitions of the agent tools Settings lists after the built-in tools:
+   * `delegate_work` only, since the other delegation tools have no switch.
+   */
+  listedAgentTools: readonly ToolDefinition[]
   /**
    * Finds the web search tool for each turn and checks the saved Tavily
    * key; it owns nothing to release.
@@ -387,6 +394,7 @@ type SingletonBundleContext = Readonly<{
 type ToolServices = Pick<
   SingletonServices,
   | "builtInTools"
+  | "listedAgentTools"
   | "webSearchToolProvider"
   | "toolApprovalService"
   | "mcpServerRegistry"
@@ -440,25 +448,26 @@ type DatabaseServices = Pick<
  * Sqlite records, and the runtime service over the agent service, the chat
  * service, the LLM service, and the history reader; they read nothing at
  * creation and own nothing to release.
- * The web search tool provider, the built-in tools, the tool approval
- * service, the MCP server registry, the email account checker, and the
- * attachment file store are created next; they read and contact nothing at
- * creation. The reply generation registry and the turn start are created
- * next, over the services before them, then the activity hub, and last
- * delegation's wake settings, stop requests, and job records, over the
- * database, with the hooks of its runtime and the person's stops over the
- * services before them; they read nothing at creation and own nothing to
- * release. Only the MCP server registry, the email account checker, the
- * reply generation registry, and the activity hub own resources: the
- * connections and the check process the first two open later, the
- * generations the turn start starts later, and the activity streams clients
- * open later. The bundle's cleanup closes delegation's wake settings first,
- * so no wake-up turn starts any more, then disposes of the activity hub,
- * which ends every activity stream, then of the reply generation registry,
- * which ends every generation, then closes the email account checker, then
- * the MCP server registry. Creation stops at the first failure. The database is
- * not part of the returned bundle: the bundle's cleanup closes it last,
- * after the chat service and the LLM runtime service.
+ * The web search tool provider, the built-in tools, the listed agent tools,
+ * the tool approval service, the MCP server registry, the email account
+ * checker, and the attachment file store are created next; they read and
+ * contact nothing at creation. The reply generation registry and the turn
+ * start are created next, over the services before them, then the activity
+ * hub, and last delegation's wake settings, stop requests, and job records,
+ * over the database, with the hooks of its runtime and the person's stops
+ * over the services before them; they read nothing at creation and own
+ * nothing to release. Only the MCP server registry, the email account
+ * checker, the reply generation registry, and the activity hub own
+ * resources: the connections and the check process the first two open later,
+ * the generations the turn start starts later, and the activity streams
+ * clients open later. The bundle's cleanup closes delegation's wake settings
+ * first, so no wake-up turn starts any more, then disposes of the activity
+ * hub, which ends every activity stream, then of the reply generation
+ * registry, which ends every generation, then closes the email account
+ * checker, then the MCP server registry. Creation stops at the first
+ * failure. The database is not part of the returned bundle: the bundle's
+ * cleanup closes it last, after the chat service and the LLM runtime
+ * service.
  */
 export async function createSingletonServices(
   config: BackendConfig,
@@ -776,8 +785,9 @@ function createAgentServices(
  * @param logReporters - Receive the causes of read failures the model
  * learns only by kind, the MCP servers' events, the failures to save
  * their process groups file, and the email account checks.
- * @returns The web search tool provider, every built-in tool, the tool
- * approval service, the MCP server registry, whose stdio servers start in
+ * @returns The web search tool provider, every built-in tool, the
+ * definitions of the agent tools Settings lists, the tool approval
+ * service, the MCP server registry, whose stdio servers start in
  * the person's home folder and whose only built-in server is the email
  * server, the holder of those servers' process groups, which the registry
  * borrows, and the email account checker, which runs the same email
@@ -838,6 +848,7 @@ function createToolServices(
   })
   return {
     builtInTools,
+    listedAgentTools: buildListedDelegationDefinitions(),
     webSearchToolProvider,
     toolApprovalService,
     mcpServerRegistry,

@@ -163,6 +163,7 @@ function registerSingletonServices(
   app.decorate("agentService", singletonServices.agentService)
   app.decorate("agentRuntimeService", singletonServices.agentRuntimeService)
   app.decorate("builtInTools", singletonServices.builtInTools)
+  app.decorate("listedAgentTools", singletonServices.listedAgentTools)
   app.decorate("webSearchToolProvider", singletonServices.webSearchToolProvider)
   app.decorate("toolApprovalService", singletonServices.toolApprovalService)
   app.decorate("mcpServerRegistry", singletonServices.mcpServerRegistry)

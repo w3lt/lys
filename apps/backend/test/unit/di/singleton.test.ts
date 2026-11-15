@@ -2,7 +2,11 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ActivityEvent } from "@lys/protocol"
-import { groqApiKeySchema, type ConversationAttachmentDraft } from "@lys/share"
+import {
+  DELEGATE_WORK_TOOL_NAME,
+  groqApiKeySchema,
+  type ConversationAttachmentDraft
+} from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
 import ActivityHub from "../../../src/modules/activity/activityHub"
@@ -550,6 +554,21 @@ describe("createSingletonServices", () => {
       status: "unavailable",
       reason: "api-key-missing"
     })
+  })
+
+  it("lists delegate_work as the only agent tool Settings lists, apart from the built-in tools", async () => {
+    const { factories } = createRecordedFactories()
+
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+
+    expect(services.listedAgentTools.map((tool) => tool.name)).toEqual([
+      DELEGATE_WORK_TOOL_NAME
+    ])
   })
 
   it("offers read_page once vmo at the configured host and port answers its health route", async () => {

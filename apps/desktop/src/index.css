@@ -23,7 +23,8 @@
 
   /*
    * The type scale: every font size in the renderer is one of these steps,
-   * named for its role, in Tailwind utilities (`text-meta`) and in component
+   * except the `em` sizes a Markdown reply gives its code and headings
+   * relative to its text. Each step is named for its role, in Tailwind utilities (`text-meta`) and in component
    * styles (`var(--text-meta)`) alike. Tailwind's own sizes are removed so a
    * utility cannot step off the scale, and `cn` in `lib/utils.ts` names the
    * same steps so it keeps a size beside a text color.
@@ -472,17 +473,5 @@
   ::selection {
     color: var(--foreground);
     background: var(--app-selection);
-  }
-}
-
-@layer components {
-  /*
-   * Current shadcn Card components expose data-slot="card". This gives their
-   * translucent token a glass-like finish without changing component markup.
-   */
-  [data-slot="card"] {
-    -webkit-backdrop-filter: blur(18px) saturate(135%);
-    backdrop-filter: blur(18px) saturate(135%);
-    box-shadow: var(--shadow-card);
   }
 }

@@ -913,11 +913,7 @@ function EmailSecurityChoice({
         variant="outline"
       >
         {EMAIL_SECURITIES.map((way) => (
-          <ToggleGroupItem
-            className="settings-view__tool-segment"
-            key={way}
-            value={way}
-          >
+          <ToggleGroupItem key={way} value={way}>
             {formatEmailSecurityLabel(way)}
           </ToggleGroupItem>
         ))}
@@ -1391,13 +1387,12 @@ function EmailAccountFooter({
         <div className="settings-view__email-actions">
           {isRemovalOffered ? (
             <Button
-              className="settings-view__mcp-remove"
               disabled={isBusy}
               onClick={removal.openRemovalQuestion}
               ref={removeAccountRef}
               size="sm"
               type="button"
-              variant="outline"
+              variant="destructive"
             >
               Remove account
             </Button>

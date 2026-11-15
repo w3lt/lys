@@ -110,7 +110,6 @@ function ModelViewSection(): ReactElement {
             Your location, when a model calls <code>get_location</code>. Switch
             that tool in{" "}
             <Button
-              className="settings-view__inline-link"
               onClick={() => setSettingsPane("tools")}
               type="button"
               variant="link"
@@ -397,7 +396,6 @@ export default function ProfilePane(): ReactElement {
         conversations keep what they were sent. Lys&apos;s own name and
         signature are under{" "}
         <Button
-          className="settings-view__inline-link"
           onClick={() => setSettingsPane("lys")}
           type="button"
           variant="link"

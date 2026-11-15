@@ -66,13 +66,11 @@ function BuiltInAgentHeader({
     <div className="settings-view__agent-editor-top">
       <Button
         aria-label="agents list"
-        className="settings-view__agent-back"
         onClick={onCloseAgentView}
         onKeyDown={(event) => handleControlKeyDown(event, onCloseAgentView)}
         ref={backButtonRef}
-        size="sm"
         type="button"
-        variant="ghost"
+        variant="back"
       >
         <ChevronLeft aria-hidden="true" />
         agents

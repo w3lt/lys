@@ -80,17 +80,18 @@ function McpSkippedTools({
 
   return (
     <div className="settings-view__mcp-skipped">
-      <button
+      <Button
         aria-controls={isExpanded ? listId : undefined}
         aria-expanded={isExpanded}
         aria-label={`Skipped tools of ${serverName}`}
         className="settings-view__mcp-skipped-toggle"
         onClick={() => setIsExpanded((wasExpanded) => !wasExpanded)}
         type="button"
+        variant="text"
       >
         <ChevronRight aria-hidden="true" />
         Skipped tools
-      </button>
+      </Button>
       {isExpanded ? (
         <div id={listId}>
           <ul className="settings-view__mcp-skipped-list">
@@ -588,11 +589,7 @@ function McpServerApprovalRow({
         variant="outline"
       >
         {TOOL_APPROVALS.map((option) => (
-          <ToggleGroupItem
-            className="settings-view__tool-segment"
-            key={option}
-            value={option}
-          >
+          <ToggleGroupItem key={option} value={option}>
             {formatToolApprovalLabel(option)}
           </ToggleGroupItem>
         ))}
@@ -768,13 +765,12 @@ function McpServerDetailActions({
       ) : (
         <Button
           aria-label={`Remove ${server.name}`}
-          className="settings-view__mcp-remove"
           disabled={isSaving}
           onClick={handleRequestRemoval}
           ref={hasConfirmationOpened ? handleFocusTargetAttach : undefined}
           size="sm"
           type="button"
-          variant="outline"
+          variant="destructive"
         >
           Remove
         </Button>

@@ -459,7 +459,6 @@ export default function ToolPane(): ReactElement {
           Lys&apos;s own tools cannot be added or removed here; MCP servers add
           theirs under{" "}
           <Button
-            className="settings-view__inline-link"
             onClick={() => setSettingsPane("mcp")}
             type="button"
             variant="link"
@@ -470,7 +469,6 @@ export default function ToolPane(): ReactElement {
           The Tool calls switch resets when Lys restarts. Your location for{" "}
           <code>get_location</code> is kept in{" "}
           <Button
-            className="settings-view__inline-link"
             onClick={() => setSettingsPane("profile")}
             type="button"
             variant="link"

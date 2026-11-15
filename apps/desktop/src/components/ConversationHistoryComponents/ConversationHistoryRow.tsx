@@ -1,6 +1,7 @@
 import { Pencil, X } from "lucide-react"
 import type { KeyboardEvent, ReactElement, Ref } from "react"
 
+import { Button } from "@/components/ui/button"
 import type {
   ConversationHistoryEntry,
   ConversationHistoryMutation
@@ -135,26 +136,60 @@ export default function ConversationHistoryRow({
       {isPending ? (
         <span className="conversation-history__pending">{pendingLabel}</span>
       ) : (
-        <span className="conversation-history__actions">
-          <button
-            aria-label={`Rename ${title}`}
-            className="conversation-history__icon-button"
-            onClick={onStartTitleEdit}
-            type="button"
-          >
-            <Pencil aria-hidden="true" />
-          </button>
-          <button
-            aria-label={`Delete ${title}`}
-            className="conversation-history__icon-button"
-            data-tone="danger"
-            onClick={onRequestDelete}
-            type="button"
-          >
-            <X aria-hidden="true" />
-          </button>
-        </span>
+        <ConversationRowActions
+          onRequestDelete={onRequestDelete}
+          onStartTitleEdit={onStartTitleEdit}
+          title={title}
+        />
       )}
     </li>
+  )
+}
+
+/** Properties accepted by {@link ConversationRowActions}. */
+type ConversationRowActionsProps = {
+  /** Shown title of the row's conversation, which names both actions. */
+  readonly title: string
+  /** Requests that the parent start editing the conversation's title. */
+  readonly onStartTitleEdit: () => void
+  /** Requests that the parent ask whether to delete the conversation. */
+  readonly onRequestDelete: () => void
+}
+
+/**
+ * Presents a row's rename and delete buttons.
+ *
+ * @remarks Primary category: presentational. The row's parent owns both
+ * requests; the component owns no state, effect, or resource. Each button is
+ * named after the title, so a screen reader tells the rows' actions apart.
+ * @param props - The title and the two requests.
+ * @returns The row's actions.
+ */
+function ConversationRowActions({
+  title,
+  onStartTitleEdit,
+  onRequestDelete
+}: ConversationRowActionsProps): ReactElement {
+  return (
+    <span className="conversation-history__actions">
+      <Button
+        aria-label={`Rename ${title}`}
+        onClick={onStartTitleEdit}
+        size="icon-xs"
+        type="button"
+        variant="ghost"
+      >
+        <Pencil aria-hidden="true" />
+      </Button>
+      <Button
+        aria-label={`Delete ${title}`}
+        onClick={onRequestDelete}
+        size="icon-xs"
+        type="button"
+        variant="ghost"
+      >
+        <X aria-hidden="true" />
+      </Button>
+    </span>
   )
 }

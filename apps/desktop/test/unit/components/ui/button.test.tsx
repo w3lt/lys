@@ -19,6 +19,40 @@ describe("Button", () => {
     expect(ref.current).toBe(button)
   })
 
+  it("exposes its variant and size on the host, `default` when omitted", () => {
+    render(
+      <>
+        <Button>Save</Button>
+        <Button size="icon-xs" title="Settings" variant="ghost" />
+      </>
+    )
+
+    const save = screen.getByRole("button", { name: "Save" })
+    const settings = screen.getByRole("button", { name: "Settings" })
+    expect(save).toHaveAttribute("data-variant", "default")
+    expect(save).toHaveAttribute("data-size", "default")
+    expect(settings).toHaveAttribute("data-variant", "ghost")
+    expect(settings).toHaveAttribute("data-size", "icon-xs")
+  })
+
+  it("keeps native button behavior in a frameless variant", async () => {
+    const onClick = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <Button onClick={onClick} variant="back">
+        agents
+      </Button>
+    )
+
+    await user.click(screen.getByRole("button", { name: "agents" }))
+    await user.keyboard("{Enter}")
+
+    expect(screen.getByRole("button", { name: "agents" }).tagName).toBe(
+      "BUTTON"
+    )
+    expect(onClick).toHaveBeenCalledTimes(2)
+  })
+
   it("activates once per press by pointer, Enter, or Space", async () => {
     const onClick = vi.fn()
     const user = userEvent.setup()

@@ -491,10 +491,9 @@ function McpEntryRow({
       />
       <Button
         aria-label={`Remove ${itemLabel}`}
-        className="settings-view__mcp-entry-remove"
         disabled={isReadOnly}
         onClick={() => onRemoveEntry(entry.id)}
-        size="icon-sm"
+        size="icon"
         type="button"
         variant="outline"
       >
@@ -778,16 +777,17 @@ function McpEntryListField({
         namePlaceholder={presentation.namePlaceholder}
         rowProblem={rowProblem}
       />
-      <button
+      <Button
         className="settings-view__mcp-entry-add"
         disabled={isReadOnly}
         onClick={editing.addEntry}
         ref={addButtonRef}
         type="button"
+        variant="text"
       >
         <Plus aria-hidden="true" />
         add {presentation.itemName}
-      </button>
+      </Button>
       <McpFieldProblem id={problemId} problem={problem} />
     </fieldset>
   )
@@ -846,11 +846,7 @@ function McpSignInToggle({
       variant="outline"
     >
       {MCP_SIGN_INS.map((option) => (
-        <ToggleGroupItem
-          className="settings-view__tool-segment"
-          key={option}
-          value={option}
-        >
+        <ToggleGroupItem key={option} value={option}>
           {formatMcpSignInLabel(option)}
         </ToggleGroupItem>
       ))}

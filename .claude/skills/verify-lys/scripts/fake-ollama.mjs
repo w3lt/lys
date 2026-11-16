@@ -6,11 +6,12 @@
  * @remarks The user's machine cannot run a local model, and the backend's
  * provider boundary is HTTP, so this server answers the four Ollama routes
  * the backend's Ollama runtime calls and the OpenAI-compatible chat
- * completion route its reply model streams from. The reply is sent one
- * word at a time with a pause between words, so a streamed reply is
- * observably different from one that arrived whole. Every request is
- * appended to an NDJSON log a journey can read. Mocking happens only here,
- * at the production boundary; the backend code path is unchanged.
+ * completion route its reply model streams from. A streamed request gets the
+ * answer `findScriptedAnswer` picks: a text sent one word at a time with a
+ * pause between words, so a streamed reply is observably different from one
+ * that arrived whole, or one tool call sent in a single chunk. Every request
+ * is appended to an NDJSON log a journey can read. Mocking happens only
+ * here, at the production boundary; the backend code path is unchanged.
  *
  * Usage: `node fake-ollama.mjs --port-file <path> --request-log <path>`.
  * The server listens on a free loopback port and writes it to the port
@@ -27,6 +28,8 @@ import {
   VERIFICATION_REPLY_TEXT,
   VERIFICATION_TITLE,
   VERIFICATION_TOKEN_INTERVAL_MS,
+  findScriptedAnswer,
+  listOfferedToolNames,
   listReplyFragments
 } from "./lib/verificationProvider.mjs"
 
@@ -131,14 +134,16 @@ function buildRunningAnswer() {
 /**
  * Builds one streamed chat completion chunk.
  *
- * @param {{model: string, content?: string, finishReason?: string, isFirst?: boolean}} chunk -
- * The fragment, or the finish reason of the last chunk.
+ * @param {{model: string, content?: string, toolCalls?: object[], finishReason?: string, isFirst?: boolean}} chunk -
+ * The text fragment or the tool calls, or the finish reason of the last
+ * chunk.
  * @returns {string} The `data:` line with its blank-line terminator.
  */
-function formatChunk({ model, content, finishReason, isFirst }) {
+function formatChunk({ model, content, toolCalls, finishReason, isFirst }) {
   const delta = {
     ...(isFirst ? { role: "assistant" } : {}),
-    ...(content === undefined ? {} : { content })
+    ...(content === undefined ? {} : { content }),
+    ...(toolCalls === undefined ? {} : { tool_calls: toolCalls })
   }
   const body = {
     id: "chatcmpl-lys-verify",
@@ -156,20 +161,17 @@ function formatChunk({ model, content, finishReason, isFirst }) {
 }
 
 /**
- * Streams the reply one word at a time, then the stop chunk and `[DONE]`.
+ * Streams a text one word at a time, then the stop chunk and `[DONE]`.
  *
  * @param {import("node:http").IncomingMessage} request - The request, whose
  * close stops the stream.
- * @param {import("node:http").ServerResponse} response - The response.
- * @param {string} model - Model name echoed in every chunk.
+ * @param {import("node:http").ServerResponse} response - The response, whose
+ * event-stream head is already written.
+ * @param {{model: string, text: string}} reply - Model name echoed in every
+ * chunk, and the text.
  */
-function sendStreamedReply(request, response, model) {
-  response.writeHead(200, {
-    "content-type": "text/event-stream",
-    "cache-control": "no-cache",
-    connection: "keep-alive"
-  })
-  const fragments = listReplyFragments()
+function sendStreamedText(request, response, { model, text }) {
+  const fragments = listReplyFragments(text)
   let index = 0
   const timer = setInterval(() => {
     if (index < fragments.length) {
@@ -184,6 +186,54 @@ function sendStreamedReply(request, response, model) {
     response.end("data: [DONE]\n\n")
   }, VERIFICATION_TOKEN_INTERVAL_MS)
   request.on("close", () => clearInterval(timer))
+}
+
+/**
+ * Streams one tool call in a single chunk, then the `tool_calls` finish
+ * chunk and `[DONE]`.
+ *
+ * @param {import("node:http").ServerResponse} response - The response, whose
+ * event-stream head is already written.
+ * @param {string} model - Model name echoed in every chunk.
+ * @param {{name: string, arguments: object}} toolCall - The called tool and
+ * its arguments, sent as JSON text the way a model writes them.
+ */
+function sendStreamedToolCall(response, model, toolCall) {
+  const toolCalls = [
+    {
+      index: 0,
+      id: "call_lys_verify",
+      type: "function",
+      function: {
+        name: toolCall.name,
+        arguments: JSON.stringify(toolCall.arguments)
+      }
+    }
+  ]
+  response.write(formatChunk({ model, toolCalls, isFirst: true }))
+  response.write(formatChunk({ model, finishReason: "tool_calls" }))
+  response.end("data: [DONE]\n\n")
+}
+
+/**
+ * Streams the answer the delegation script picks for a streamed chat
+ * request.
+ *
+ * @param {import("node:http").IncomingMessage} request - The request, whose
+ * close stops a text stream.
+ * @param {import("node:http").ServerResponse} response - The response.
+ * @param {{model: string, answer: import("./lib/verificationProvider.mjs").ScriptedAnswer}} reply -
+ * Model name echoed in every chunk, and the answer.
+ */
+function sendStreamedAnswer(request, response, { model, answer }) {
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive"
+  })
+  if (answer.kind === "tool-call")
+    return sendStreamedToolCall(response, model, answer)
+  sendStreamedText(request, response, { model, text: answer.text })
 }
 
 /**
@@ -235,8 +285,11 @@ function findLastUserContent(body) {
  * @param {string} logPath - Absolute path of the log.
  * @param {import("node:http").IncomingMessage} request - The request.
  * @param {unknown} body - Its parsed body.
+ * @remarks A chat request's record also names the tools it offers and the
+ * role of its last message, and a streamed one the answer the fake sends.
  */
 function appendRequestRecord(logPath, request, body) {
+  const messages = Array.isArray(body?.messages) ? body.messages : undefined
   const record = {
     at: new Date().toISOString(),
     method: request.method,
@@ -244,10 +297,11 @@ function appendRequestRecord(logPath, request, body) {
     model: body?.model,
     stream: body?.stream,
     hasResponseFormat: body?.response_format !== undefined,
-    messageCount: Array.isArray(body?.messages)
-      ? body.messages.length
-      : undefined,
-    lastUserContent: findLastUserContent(body)
+    messageCount: messages?.length,
+    lastUserContent: findLastUserContent(body),
+    lastMessageRole: messages?.at(-1)?.role,
+    offeredToolNames: listOfferedToolNames(body),
+    scriptedAnswer: body?.stream === true ? findScriptedAnswer(body) : undefined
   }
   appendFileSync(logPath, `${JSON.stringify(record)}\n`)
 }
@@ -273,7 +327,10 @@ function handleProviderRequest(request, response, body) {
     const model =
       typeof body?.model === "string" ? body.model : VERIFICATION_MODEL_NAME
     if (body?.stream === true)
-      return sendStreamedReply(request, response, model)
+      return sendStreamedAnswer(request, response, {
+        model,
+        answer: findScriptedAnswer(body)
+      })
     return sendJson(
       response,
       200,

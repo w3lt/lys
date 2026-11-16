@@ -6,6 +6,7 @@
  * while it runs.
  */
 
+import agentDelegationUi from "./agentDelegationUi.mjs"
 import backendHealth from "./backendHealth.mjs"
 import backendLifecycleUi from "./backendLifecycleUi.mjs"
 import chatStreamApi from "./chatStreamApi.mjs"
@@ -19,6 +20,7 @@ export const JOURNEYS = Object.freeze([
   backendHealth,
   chatStreamApi,
   chatStreamUi,
+  agentDelegationUi,
   settingsGenerationUi,
   settingsAutostartUi,
   backendLifecycleUi,

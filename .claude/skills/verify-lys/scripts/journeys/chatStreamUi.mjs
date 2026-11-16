@@ -9,7 +9,11 @@ import { ESCAPE_KEY } from "../lib/rendererPage.mjs"
 import {
   COMPOSER_TEXTAREA,
   LAST_ASSISTANT_TEXT,
+  PAST_CONVERSATIONS_BUTTON,
+  PAST_CONVERSATIONS_DIALOG,
+  REPLY_FINISHED,
   SEND_BUTTON,
+  SEND_ENABLED,
   waitForComposerReady
 } from "../lib/rendererSteps.mjs"
 import {
@@ -21,9 +25,6 @@ import { VERIFICATION_MESSAGE } from "./chatStreamApi.mjs"
 
 /** Expression that is truthy while the reply streams. */
 const STREAMING_CARET_PRESENT = `document.querySelector('[data-testid="streaming-caret"]') !== null`
-
-/** Expression that is truthy once the reply finished. */
-const REPLY_FINISHED = `document.querySelector('[data-testid="streaming-caret"]') === null && ${SEND_BUTTON}?.textContent.trim() === "Send"`
 
 /** Opening words of the reply, expected in the mid-stream text. */
 const REPLY_OPENING = "Lys verification reply:"
@@ -54,7 +55,7 @@ export default Object.freeze({
         await page.typeText(VERIFICATION_MESSAGE)
         await page.waitForPageCondition({
           description: "the Send button to enable",
-          expression: `${SEND_BUTTON} !== null && !${SEND_BUTTON}.disabled && ${SEND_BUTTON}.textContent.trim() === "Send"`,
+          expression: SEND_ENABLED,
           timeoutMs: 5000
         })
         await page.click(SEND_BUTTON)
@@ -126,14 +127,12 @@ export default Object.freeze({
       await steps.step(
         "Past conversations lists the conversation under its generated title",
         async (evidence) => {
-          await page.click(
-            `document.querySelector('button[title="Past conversations (⌘K)"]')`
-          )
+          await page.click(PAST_CONVERSATIONS_BUTTON)
           await page.waitForPageCondition({
             description:
               "the Past conversations dialog to list the titled conversation",
             expression: `(() => {
-            const dialog = document.querySelector('[aria-label="Past conversations"]');
+            const dialog = ${PAST_CONVERSATIONS_DIALOG};
             return dialog !== null && dialog.textContent.includes(${JSON.stringify(VERIFICATION_TITLE)});
           })()`,
             timeoutMs: 15_000

@@ -22,8 +22,8 @@ route definitions.
 | `POST`   | `/api/v1/llm/runtime/connect`                                                     | none                                                                                                 | Settled `{ status }`, or service-busy Problem Details                      |
 | `GET`    | `/api/v1/conversations`                                                           | none; optional `query`, `cursor`, `limit` query parameters                                           | Conversation list page                                                     |
 | `GET`    | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Conversation with ordered messages and numbered sources                    |
-| `PATCH`  | `/api/v1/conversations/:conversationId`                                           | `{ title: string }`                                                                                  | Conversation metadata                                                      |
-| `DELETE` | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Bodyless `204`                                                             |
+| `PATCH`  | `/api/v1/conversations/:conversationId`                                           | `{ title: string }`                                                                                  | Conversation metadata, or `409` for a job                                  |
+| `DELETE` | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Bodyless `204` once its work has ended, or `409` for a job                 |
 | `GET`    | `/api/v1/agents`                                                                  | none; optional `cursor`, `limit` query parameters                                                    | Built-in agents and a page of stored agents                                |
 | `POST`   | `/api/v1/agents`                                                                  | `{ code?, name, bio, systemPrompt }`                                                                 | `201` agent with `Location`, or `409` Problem Details                      |
 | `GET`    | `/api/v1/agents/:agentCode`                                                       | none                                                                                                 | Agent with its system prompt                                               |
@@ -41,6 +41,8 @@ route definitions.
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                   | none                                                                                                 | Bodyless `204`, or `409` Problem Details                                   |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`   | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                                   |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId` | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                                   |
+| `POST`   | `/api/v1/chat/:conversationId/jobs/stop`                                          | none                                                                                                 | Bodyless `204`, or `404` Problem Details                                   |
+| `GET`    | `/api/v1/activity/events`                                                         | none                                                                                                 | `text/event-stream` (activity snapshot, then live events)                  |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
@@ -214,11 +216,13 @@ shape `toolDefinitionSchema` from `@lys/share` validates, each with `runner`
 backend runs, each once, as [`GET /api/v1/tools`](#tool-list) lists them; it is
 optional and holds at most 2,112 names (16 MCP servers of 128 tools each, plus
 64 for the backend's own tools). These include the tools of connected [MCP servers](#mcp-servers),
-named `mcp__<server>__<tool>`. Together they offer at least one tool, and no name appears in both.
+named `mcp__<server>__<tool>`, and `delegate_work`, which lets the agent give
+work to another agent; see [jobs](#jobs). Together they offer at least one tool, and no name appears in both.
 A request that breaks these rules, names a backend tool the backend does not
-run, or offers `read_attachment`, `read_my_state`, `find_agents`, or
-`read_agent_state` as a client or backend tool, returns `400` before anything
-is stored; the backend adds those tools to a turn itself. A
+run, or offers `read_attachment`, `read_my_state`, `find_agents`,
+`read_agent_state`, `report_progress`, or `stop_job` as a client or backend
+tool, returns `400` before anything is stored; the backend adds those tools
+to a turn itself. A
 request that offers a
 backend tool that cannot run now, such as `web_search` without a usable
 Tavily API key, `read_page` while vmo is not ready, or an MCP tool whose
@@ -229,9 +233,14 @@ tool name that no applied server lists, such as one of a removed server or a
 tool its server no longer lists, returns `400`. The model is offered client
 tools first, then Lys's own backend tools, each in request order, then
 `read_attachment` for a model trained for tool use while the conversation
-holds a text file, then MCP tools in request order, then the
-[agent state tools](/architecture/backend/#agent-state-tools) for a model
-trained for tool use. A turn keeps the MCP tools it was offered; each call
+holds a text file, then MCP tools in request order, then, for a model
+trained for tool use, the
+[agent state tools](/architecture/backend/#agent-state-tools) and the
+[delegation tools](/architecture/backend/#delegation-tools) the turn may use:
+`delegate_work` when the request offers it, the conversation is a main
+conversation, and the agent is a leader; `stop_job` with `delegate_work` and
+in every turn of a conversation that has jobs; and `report_progress` in
+every turn of a job. A turn keeps the MCP tools it was offered; each call
 runs on the tool's server as it is connected when the call runs, and fails
 for the model when the server is no longer connected or no longer lists the
 tool. Without `tools`, a turn of a model that is not trained for tool use is
@@ -277,8 +286,9 @@ All three fields are optional:
 
 A tool appears at most once across `tools`, `switchedOffToolNames`, and
 `unavailableTools`, and neither list names `read_attachment`,
-`read_my_state`, `find_agents`, or `read_agent_state`, which have no switch
-and which the backend adds to a turn itself. A request that breaks these
+`read_my_state`, `find_agents`, `read_agent_state`, `report_progress`, or
+`stop_job`, which have no switch and which the backend adds to a turn
+itself. A request that breaks these
 rules returns `400` before anything is stored.
 
 Every round of the turn sends the agent's system prompt followed by the notes
@@ -310,15 +320,16 @@ with the list's reason. It does not name switched-off MCP tools, because one
 server can list up to 128 tools, more than `switchedOffToolNames` holds. With
 tool calls off, it sends `areToolCallsSwitchedOff` without reading the tool
 list. The tools the backend adds are still offered while tool calls are off:
-`read_attachment` while the conversation holds a text file, and the agent
-state tools.
+`read_attachment` while the conversation holds a text file, the agent
+state tools, and `stop_job` in a conversation that has jobs. `delegate_work`
+is not, because only the request offers it.
 
 ## Chat response shape
 
 Accepted chat turns respond as SSE. A missing conversation, a new
 conversation naming a code no agent has, a stored conversation whose agent no
-longer exists, an offered backend tool that cannot run now, an attachment Lys
-cannot send, an image for a model without vision, or a model-capability read
+longer exists, a continued conversation that is a job, an offered backend
+tool that cannot run now, an attachment Lys cannot send, an image for a model without vision, or a model-capability read
 the provider cannot answer returns JSON Problem Details before the stream
 starts, and nothing is stored or written: no message, no file, and no failed
 reply. Each event payload must match one of
@@ -328,9 +339,9 @@ An accepted turn's reply starts once its agent has a free
 [request slot](/architecture/backend/#request-slots): while the agent is
 working on as many replies as it has slots, the stream sends the turn-start
 event and then nothing until a slot frees, and Stop ends the waiting reply
-as `interrupted`. A waiting reply that a newer turn supersedes, or whose
-conversation is deleted, ends as `interrupted` once it gets its slot, without
-reaching the model. When the agent's line of waiting replies is full too, the
+as `interrupted`. A waiting reply that a newer turn supersedes ends as
+`interrupted` once it gets its slot, without reaching the model; deleting its
+conversation ends it at once. When the agent's line of waiting replies is full too, the
 turn is still stored and its reply fails at once with an `error` event; no
 Problem Details is returned.
 
@@ -339,7 +350,11 @@ generating and storing the reply and its title. To stop a reply, send
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/stop`; it
 answers `204` after the reply is stored final (`interrupted`, or `completed`
 or `failed` when the reply ended before the stop) and does not cancel title
-generation. When no
+generation. It also stops every working job of the reply's conversation and
+answers once each of them is stored final too, and no
+[wake-up turn](/architecture/backend/#wake-up-turns) starts in that
+conversation until the person writes there again. Stopping a job's reply
+stops only that job. When no
 generation is running for the reply it answers `409` with
 `urn:lys:problem:chat:reply-not-generating`.
 
@@ -458,7 +473,10 @@ order Settings shows them, and the listed tools that cannot run now:
 (Definitions shortened.) Lys's own tools come first, each with `runner`
 `backend`. Their definitions are fixed for one backend build: `read_page`, which reads one
 public web page through vmo, and `web_search`, which searches the web through Tavily
-(both group and access `network`). The tools of the connected
+(both group and access `network`). `delegate_work` follows them, with group
+and access `agents` and `runner` `backend`: it gives work to another agent
+inside Lys and sends nothing off the machine itself, so it starts switched
+on, and it is never named in `unavailableTools`. The tools of the connected
 [MCP servers](#mcp-servers) follow, server by server, the servers Lys ships
 first and then the settings group's in its order, each server's tools in its
 own order. A server that is connecting,
@@ -470,11 +488,13 @@ document). For `read_page`, it is `page-reader-not-ready`: vmo did not answer
 `GET /health` at `127.0.0.1:8080` with `200` within one second. Each name in
 `unavailableTools` is a listed tool, once. The list reads the settings file
 and asks vmo's health route, contacts nothing else, and never contains the
-key. `read_attachment`, the attachment reader, and the agent state tools,
-`read_my_state`, `find_agents`, and `read_agent_state`, are not listed and
-cannot be offered by name: the chat route adds them to a turn by itself; see
-[attachments](#attachments) and
-[agent state tools](/architecture/backend/#agent-state-tools).
+key. `read_attachment`, the attachment reader, the agent state tools,
+`read_my_state`, `find_agents`, and `read_agent_state`, and the delegation
+tools `report_progress` and `stop_job` are not listed and cannot be offered
+by name: the chat route adds them to a turn by itself; see
+[attachments](#attachments),
+[agent state tools](/architecture/backend/#agent-state-tools), and
+[delegation tools](/architecture/backend/#delegation-tools).
 
 An MCP tool's definition has `runner` and `group` `mcp`, and `access`
 `unknown`, because Lys cannot tell what a server's tool reaches:
@@ -536,9 +556,11 @@ fraction Tavily reports is rounded up. The answer never contains the key.
 ## Tool approvals
 
 The backend decides which tool calls need the person: every call of a tool
-that is not saved as Just run, client, backend, and MCP tools alike, except
-`read_attachment` and the agent state tools, which run without approval. It
-shows such a
+that is not saved as Just run, client, backend, and MCP tools alike,
+`delegate_work` included, except `read_attachment`, the agent state tools,
+`report_progress`, and `stop_job`, which run without approval. A call of a
+job's reply asks the person like any other; its prompt arrives on the
+[activity stream](/reference/sse-events/#activity-stream). It shows such a
 call with a `tool-approval` event, and the client answers it with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`,
 where `callId` is the `id` of the event's call or of its entry in
@@ -607,9 +629,10 @@ approval instead, or whose reply ended returns `409` with
 `urn:lys:problem:chat:tool-call-not-pending` and changes nothing, so repeating
 a request whose response was lost is harmless. The backend sets no time limit
 on a pending call.
-It waits until the call is answered, the reply is stopped, or the backend
-shuts down. A newer turn in the conversation or deleting the conversation does
-not end the wait yet ([#137](https://github.com/w3lt/lys/issues/137)).
+It waits until the call is answered, the reply is stopped, the reply's
+conversation is deleted (for a job's reply, the main conversation the job
+belongs to), or the backend shuts down. A newer turn in the conversation does not end the wait
+yet ([#137](https://github.com/w3lt/lys/issues/137)).
 
 ## MCP servers
 
@@ -875,12 +898,16 @@ the desktop saves both only after both servers accepted the sign-in.
 ## Conversation history
 
 All conversation identifiers must be UUIDv7; malformed identifiers return `400`.
-List responses have exactly `conversations`, `storedCount`, `matchCount`, and
-`nextCursor`. Counts include all stored conversations and all matches before
+The list holds main conversations only: a [job](#jobs) is never listed,
+counted, or searched, and is found through the conversation it was started
+from. List responses have exactly `conversations`, `storedCount`, `matchCount`, and
+`nextCursor`. Counts include all stored main conversations and all matches before
 pagination, respectively. Each summary contains `id`, nullable `title`,
 `createdAt`, `updatedAt`, and nullable `preview`; it does not expose `agentCode`.
 A preview contains only `role` and full `content`: a user message, or one text
-part of a reply shown with the role `assistant`.
+part of a reply shown with the role `assistant`. The message of a
+[wake-up turn](/architecture/backend/#wake-up-turns), which the backend
+writes, is never searched or previewed.
 
 | Parameter | Contract                                                                                                                                                                                               |
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -901,15 +928,48 @@ code of the agent that answers it,
 messages ordered by creation time then identifier, each user message with its
 `attachments` and each reply with its `parts` in stored order, and `sources`,
 the conversation's numbered sources in number order. The code stays after its
-agent is deleted, so it may name no agent. `PATCH` accepts
+agent is deleted, so it may name no agent. Metadata, here and in every other
+answer and event that carries it, has a `kind`:
+
+- `main`, a conversation the person started, with `parentConversationId`,
+  `jobNumber`, and `delegatorAgentCode` all `null`. Its full record also has
+  `jobs`, the jobs started from it in number order.
+- `job`, with `parentConversationId`, the conversation it was started from,
+  `jobNumber`, its number there from 1, and `delegatorAgentCode`, the code
+  of the parent's agent, which wrote its messages. Its `agentCode` is the
+  agent that does the work, and its `jobs` is always empty.
+
+Each user message also has an `origin`, who wrote it: `person`, `delegator`
+for a job message, or `wake-up` for the message of a wake-up turn; and
+`reports`, the [job reports](#jobs) it delivered, oldest first, empty for most
+messages. `PATCH` accepts
 only `title`, trims it to 1–120 UTF-16 code units, and returns updated metadata. Repeating
 a rename is idempotent; renaming never changes activity time or list position.
-`DELETE` cascades to messages, reply parts, attachment records, and sources,
-then removes the conversation's attachment folder, and returns `204` without
-a body; a folder that cannot be removed is logged and the delete still
-succeeds. Late generation
+`DELETE` cascades to messages, reply parts, attachment records, sources, and
+the conversation's jobs with their messages and reports. Right after the rows
+are gone, it cancels the work that was running in the conversation and in
+its jobs, and waits until it has ended: each working reply's model request,
+the tool calls and approval prompts it waited on, and its title request.
+Then it removes the conversation's attachment folder and returns `204`
+without a body; a folder that cannot be removed is logged and the delete
+still succeeds. A delete that fails or finds no conversation cancels
+nothing. Late generation
 writes after deletion do not recreate the conversation. Allowed development and
 Tauri origins support DELETE preflights.
+
+The person reads and stops a job, nothing else. A chat request that continues
+a job, and a `PATCH` or `DELETE` of one, change nothing and return `409` with
+`Content-Type: application/problem+json`:
+
+```json
+{
+  "type": "urn:lys:problem:conversation:is-job",
+  "title": "Conversation is a job",
+  "status": 409,
+  "detail": "Conversation 0199c8a1-2f4e-7c3b-9a1d-5e6f7a8b9c0d is a job. A job can be read and stopped, and nothing else.",
+  "instance": "/api/v1/conversations/0199c8a1-2f4e-7c3b-9a1d-5e6f7a8b9c0d"
+}
+```
 
 A user message's `attachments` lists the files sent with it, in sending order,
 empty when none: each with its `number`, which counts up across the
@@ -953,6 +1013,84 @@ conditional database write succeeds. On startup,
 remaining streaming assistants become interrupted with refreshed
 timestamps, and their waiting and running calls become interrupted with their
 timestamps kept; conversation activity time and history order do not change.
+
+## Jobs
+
+A job is a conversation an agent started to give work to another agent; see
+[delegation](/architecture/backend/#delegation). It is stored and read like
+any conversation, with `kind` `job`. A main conversation lists its jobs in
+`jobs`, each in the state its card shows:
+
+```json
+{
+  "id": "0199c8a1-2f4e-7c3b-9a1d-5e6f7a8b9c0d",
+  "number": 1,
+  "agentCode": "news-reader",
+  "title": "News",
+  "state": "working",
+  "latestNote": "Read three sites, two to go.",
+  "replyId": "0199c8a1-3a10-7d2e-8b4c-1f2e3d4c5b6a",
+  "jobCallIds": ["0199c8a0-ff01-7a2b-9c3d-4e5f6a7b8c9d"],
+  "createdAt": "2026-11-15T10:00:02.000Z",
+  "updatedAt": "2026-11-15T10:00:40.000Z"
+}
+```
+
+`title` is the title of the latest job message, at most 80 characters on one
+line. `state` is read from the job's latest reply, `replyId`: `working` while
+it streams, `replied` once it completed, `failed` once it failed, `stopped`
+once the person or the delegator stopped it, and `interrupted` once the
+backend stopped, or restarted, while it was working. A job that
+waits for the person's approval reads as `working`. `latestNote` is the
+newest progress note of that reply, or `null`. `jobCallIds` holds the
+`delegate_work` calls, in the parent conversation, that sent the job's
+messages, oldest first; the first one started the job.
+
+A user message of the parent conversation carries in `reports` what it
+delivered:
+
+```json
+{
+  "id": "0199c8a1-5b20-7e3f-9a4b-2c3d4e5f6a7b",
+  "jobId": "0199c8a1-2f4e-7c3b-9a1d-5e6f7a8b9c0d",
+  "jobNumber": 1,
+  "agentCode": "news-reader",
+  "title": "News",
+  "kind": "result",
+  "content": "Two reviews came out this week [3].",
+  "sourceNumbers": [3],
+  "createdAt": "2026-11-15T10:01:10.000Z"
+}
+```
+
+`kind` is `note` for a progress note, never empty; `result` for a reply that
+completed, with its last round's text, possibly empty, and a line saying
+`(The reply was cut off at the model's length limit.)` when it was; `failed`,
+with the sentence of the reply's `error` event, or `The agent's reply
+failed.`; `stopped`, when the person stopped the reply; or `interrupted`,
+when the backend stopped, or restarted, while the reply was working. A reply
+the delegator stopped gets no report, since it stopped the job itself. `stopped` and
+`interrupted` have empty `content` and `sourceNumbers`. `title` is the title
+of the job message the report answers, which a later job message does not
+change. The citation markers in `content`, and `sourceNumbers` in ascending
+order, use the parent conversation's source numbers, so the sources are in
+the parent's `sources`.
+
+The person follows a job's reply, stops it, and answers its prompts with the
+routes of any reply, using the job's `id` as `conversationId`. Stopping a
+job's reply stops only that job.
+
+`POST /api/v1/chat/:conversationId/jobs/stop` stops every working job of a
+conversation. It takes no body and answers a bodyless `204` once each stopped
+reply is stored final, also when no job was working. No wake-up turn starts
+in the conversation afterwards until the person writes there again, also
+when a job completed by itself as it was asked to stop. A missing
+conversation returns `404` with the conversation-not-found problem and stops
+nothing.
+
+`GET /api/v1/activity/events` follows the replies the backend started, the
+replies of jobs and of wake-up turns, and the jobs they belong to; see the
+[activity stream](/reference/sse-events/#activity-stream).
 
 ## Agents
 
@@ -1291,9 +1429,10 @@ disconnecting the client does not cancel an accepted query. The runtime's
 inventory RPC has no enforced completion deadline, so an unresponsive engine
 can keep the query and shutdown pending.
 
-Chat inference is cancelled only by the reply-stop route or by backend
-shutdown; closing a chat stream does not cancel it. A newer turn or a deletion
-also ends a reply's inference, once the model sends its next content. A reply
+Chat inference is cancelled only by the reply-stop route, the
+[jobs-stop route](#jobs), a `stop_job` call, deleting the conversation, or
+backend shutdown; closing a chat stream does not cancel it. A newer turn also
+ends a reply's inference, once the model sends its next content. A reply
 waiting for a tool result writes nothing, so it is not ended this way
 ([#137](https://github.com/w3lt/lys/issues/137)). See the
 [provider cancellation policy](/architecture/providers/#cancellation-policy).

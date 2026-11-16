@@ -129,10 +129,11 @@ seconds. Quitting Lys stops vmo and the backend together.
    stays connected to that provider. It
    then writes the attachment files under
    `$LYS_HOME/attachments/<conversation id>/<message id>/`, creates or reuses
-   the conversation, inserts the user message with its numbered attachments,
+   the conversation, inserts the user message with its numbered attachments
+   and the job reports waiting for the conversation, if any,
    and inserts an empty streaming assistant message. When an attachment is
    neither text nor an image Lys sends, no agent has the requested code, the
-   conversation is not stored, its agent was deleted, an image is attached
+   conversation is not stored or is a job, its agent was deleted, an image is attached
    for a model without vision, or the connected provider cannot answer about
    the model, the backend answers with a problem instead and stores nothing.
 5. The backend emits a `start-new-conversation-turn` or
@@ -141,8 +142,8 @@ seconds. Quitting Lys stops vmo and the backend together.
    [request slots](/architecture/backend/#request-slots). When the agent is
    already working on as many replies as it has slots, the reply waits in
    line, first come first served, and sends nothing until a slot frees; Stop
-   ends it as `interrupted`, and so does a newer turn or a deletion once the
-   reply gets its slot, before anything is sent. When the line is full too,
+   or a deletion ends it as `interrupted` at once, and a newer turn does once
+   the reply gets its slot, before anything is sent. When the line is full too,
    the reply is stored failed and the backend emits `error` with the reason.
    Before each round of the reply, the backend builds the round's context,
    in which each user message carries its text, the list of its attachments,
@@ -202,10 +203,15 @@ seconds. Quitting Lys stops vmo and the backend together.
    Stop pressed before the turn-start event is sent as soon as that event
    names the reply, unless the user opens another conversation or starts a new
    one first; the reply then generates to its end.
-3. The backend aborts the reply's upstream request to the provider. Title
-   generation continues.
+3. The backend aborts the reply's upstream request to the provider, and that of
+   every working job of the conversation. Title generation continues. It
+   forgets the conversation's wake settings, so no
+   [wake-up turn](/architecture/backend/#wake-up-turns) starts there until
+   the person writes again.
 4. The reply task stores the reply as `interrupted` and sends `interrupted` to
-   every stream following it; the stop request then answers `204`.
+   every stream following it; each stopped job stores a `stopped` report for
+   its delegator. Once all of them are stored final, the stop request answers
+   `204`.
 5. The desktop marks the assistant message `interrupted` when that event
    arrives and shows Send again. A title may still arrive before the stream
    closes.
@@ -291,11 +297,65 @@ calls it stored are part of the new turn's context.
    linked, and the sources the answer cites under it.
 
 The backend sets no time limit on a prompt or a pending call. It waits until
-the call is answered, the reply is stopped, or the backend shuts down; a newer
-turn or a deletion does not end it yet
+the call is answered, the reply is stopped, its conversation is deleted, or
+the backend shuts down; a newer turn does not end it yet
 ([#137](https://github.com/w3lt/lys/issues/137)). A client that was not
 following when a prompt or call was sent finds it in the next
 `reply-snapshot`'s `pendingToolApprovals` or `pendingToolCalls`.
+
+## Delegation flow
+
+A leader, Caliginia or Lysiptera, gives work to the person's own agents, and
+reads their reports later; see [delegation](/architecture/backend/#delegation).
+
+1. The person sends "Collect information about holograms" to Caliginia. With
+   `delegate_work` switched on in the Tools pane of Settings, the desktop offers it among
+   the backend tools.
+2. Caliginia calls `find_agents`, then `delegate_work` twice. On Ask me, each
+   call shows a prompt above the composer, such as
+   `Give news-reader the job “News”. It gets only these instructions: …`. Once
+   the person allows it, the backend stores a job with the instructions as its
+   first message, starts the member's reply, and answers the call with
+   `Job 1 started: …`. Each job shows as a card in her reply, with its agent,
+   title, and state.
+3. Caliginia writes "Two agents are working on it", and her reply ends. Send is
+   available again, and a bar above the composer says `2 jobs are working`,
+   with Stop all.
+4. The news agent calls `report_progress`. The note is stored and shows on its
+   card. Caliginia is not woken.
+5. The news agent calls `web_search`. The call asks the person, as the tool's
+   setting says. The prompt arrives on the
+   [activity stream](/reference/sse-events/#activity-stream) and shows above
+   the main conversation's composer, with the line
+   `From News Reader's job: News`, and the card reads `Needs your approval`.
+6. The news agent's reply ends. Its text is stored as a `result` report. No
+   reply runs in the main conversation, so the backend starts a wake-up turn
+   there, whose message delivers the report. The desktop learns of the turn on
+   the activity stream, reads the conversation again, keeping the person's
+   draft, and follows the new reply. The transcript shows the delivery as a
+   `Reports · 1` row that opens to the report. Caliginia reads the result and
+   the research job's latest note, and answers "News is in. Waiting for
+   research."
+7. The research job ends, and a second wake-up turn starts. Caliginia writes
+   the final answer, sends job 1 more work with `delegate_work` and `job`, or
+   stops a job she no longer needs with `stop_job`.
+
+Reports that arrive while a reply of the main conversation runs wait until
+it ends; a reply that completed or failed then starts the wake-up turn they
+call for. A note, a stop, or an interruption never starts a wake-up turn: it
+reaches the leader with her next turn. When the person writes while jobs
+work, their message delivers the waiting reports, and their turn's settings
+become those of the next wake-up turns.
+
+Stop in the main conversation stops its reply and every job below it, and no
+wake-up turn starts until the person writes again. Stop all in the jobs bar
+stops the jobs alone, and Stop on a card stops one job. Opening a card shows
+the job read-only: a notice says `This is a job from Caliginia. You can read
+it and stop it.`, with Back to the conversation, and the composer's field and
+attach menu are off. Deleting the main conversation stops and deletes its
+jobs with it. A backend restart marks the jobs that were working as
+interrupted, and the leader learns it with her next turn; nothing starts by
+itself.
 
 ## Open a past conversation
 

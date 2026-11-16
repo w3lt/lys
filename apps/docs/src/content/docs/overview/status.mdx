@@ -60,7 +60,8 @@ repository today; it is not a promise of unreleased work.
   and Lysiptera, which can be read and duplicated but not changed or deleted,
   and creates, edits, duplicates, and deletes the user's agents through the
   backend. The Tools pane lists the desktop's file tools, the backend's
-  `read_page` and `web_search`, and the tools of the connected MCP servers;
+  `read_page` and `web_search`, `delegate_work`, and the tools of the
+  connected MCP servers;
   each tool's switch and its Ask me or Just run choice are saved, and the Tool calls switch lasts for the session only.
   `read_page` is
   off and cannot be switched on while vmo is not ready. The MCP pane lists
@@ -97,6 +98,21 @@ repository today; it is not a promise of unreleased work.
   conversations hold: each tool call's arguments, such as a sent message's
   recipients, subject, and body, and its result; and a switch turns a server
   on or off for every conversation, not for one.
+- The built-in agents can give work to the user's agents through LICP, the
+  Lys Internal Communication Protocol. When Caliginia or Lysiptera calls
+  `delegate_work`, and the person allows the call or set the tool to Just
+  run, the backend starts a job: a conversation of its own in which the
+  user's agent works on the instructions, with the model and tools of the
+  turn that gave the work. The job shows as a card in the reply that started
+  it, with its state, its latest progress note, and Stop, and opens for
+  reading. The job's approval prompts show in the main conversation, and the
+  composer shows how many jobs are working, with Stop all. When a job ends,
+  its report goes to the leader in the person's next message, or in a
+  wake-up turn the backend starts when no reply of that conversation is
+  running. A job cannot pass work on, the person cannot write to it, and
+  deleting the main conversation deletes its jobs. A backend restart marks
+  working jobs as interrupted and starts nothing by itself. See
+  [delegation](/architecture/backend/#delegation).
 - A message can carry up to eight files. A model with vision sees an attached
   image with its message, on that turn and on every later one; every message
   lists its files for the model, and a model trained for tool use reads an
@@ -134,6 +150,9 @@ The current repository does not yet provide:
 - replay or reconnect semantics for chat streams
 - a production desktop release workflow
 - evidenced ADR and RFC records, and a canonical release log
+- delegation more than one level deep: a job's agent cannot give work to
+  another agent, because only the built-in agents may give work and only the
+  user's agents take it
 - for MCP servers: OAuth sign-in
   ([#253](https://github.com/w3lt/lys/issues/253)), the older HTTP+SSE
   transport ([#254](https://github.com/w3lt/lys/issues/254)), resources,

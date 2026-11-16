@@ -10,36 +10,38 @@ Lys currently shares contracts through two TypeScript workspace packages.
 
 ## Shared packages
 
-| Package         | Owns                                                                                                                                                                                                                                           |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@lys/protocol` | API prefix constants, loopback host and port constants, route paths, request bodies, response schemas, Problem Details bodies, and chat SSE event variants                                                                                     |
-| `@lys/share`    | Conversation, conversation metadata, conversation message, reply part, and conversation source schemas shared between backend and desktop, the agent schemas, tool definitions (Lys's own and MCP tools), MCP server settings, and JSON values |
+| Package         | Owns                                                                                                                                                                                                                                                                                                  |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@lys/protocol` | API prefix constants, loopback host and port constants, route paths, request bodies, response schemas, Problem Details bodies, and chat and activity SSE event variants                                                                                                                               |
+| `@lys/share`    | Conversation, conversation metadata, conversation message, reply part, conversation source, job, and job report schemas shared between backend and desktop, the agent schemas, tool definitions (Lys's own and MCP tools), the delegation tool names and limits, MCP server settings, and JSON values |
 
 ## Current protocol surface
 
 The public backend surface is small and explicit:
 
-| Concern                                                                                   | Contract source                                |
-| ----------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| API prefix and loopback constants                                                         | `packages/protocol/src/constant.ts`            |
-| Chat and reply routes, requests, and SSE payloads                                         | `packages/protocol/src/apis/chat/*.ts`         |
-| Tool offer, tool-approval and tool-call events, and tool-approval and tool-result routes  | `packages/protocol/src/apis/chat/*.ts`         |
-| Model list, health, load, and unload routes                                               | `packages/protocol/src/apis/llm/*.ts`          |
-| LM Studio connection status and reconnect routes                                          | `packages/protocol/src/apis/llm/*.ts`          |
-| Conversation list, get, rename, and delete routes                                         | `packages/protocol/src/apis/conversation/*.ts` |
-| Agent list, create, get, update, and delete routes                                        | `packages/protocol/src/apis/agent/*.ts`        |
-| MCP server list, sync, and reconnect routes, server states, and the email account check   | `packages/protocol/src/apis/mcp/*.ts`          |
-| Problem Details error bodies                                                              | `packages/protocol/src/http/errors/*.ts`       |
-| Health route path                                                                         | `packages/protocol/src/apis/health/routes.ts`  |
-| Shared conversation shapes                                                                | `packages/share/src/models/conversation.ts`    |
-| Shared agent shapes                                                                       | `packages/share/src/models/agent.ts`           |
-| Shared tool definitions, Lys's own and those of MCP servers                               | `packages/share/src/models/tool.ts`            |
-| Shared MCP server settings, the switches of the servers Lys ships, and the `mcp__` prefix | `packages/share/src/models/mcp.ts`             |
-| Shared email account and mail server rules                                                | `packages/share/src/models/email.ts`           |
-| Shared API key and email password rules                                                   | `packages/share/src/models/secrets.ts`         |
-| Shared host name and TCP port rule                                                        | `packages/share/src/models/hostName.ts`        |
-| Shared JSON values and their nesting bound                                                | `packages/share/src/models/json.ts`            |
-| Distinct-value check shared by those rules                                                | `packages/share/src/models/values.ts`          |
+| Concern                                                                                                                           | Contract source                                    |
+| --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| API prefix and loopback constants                                                                                                 | `packages/protocol/src/constant.ts`                |
+| Chat and reply routes, requests, and SSE payloads                                                                                 | `packages/protocol/src/apis/chat/*.ts`             |
+| Tool offer, tool-approval and tool-call events, and tool-approval and tool-result routes                                          | `packages/protocol/src/apis/chat/*.ts`             |
+| Jobs-stop route                                                                                                                   | `packages/protocol/src/apis/chat/stopJobsRoute.ts` |
+| Activity stream route and its events                                                                                              | `packages/protocol/src/apis/activity/*.ts`         |
+| Model list, health, load, and unload routes                                                                                       | `packages/protocol/src/apis/llm/*.ts`              |
+| LM Studio connection status and reconnect routes                                                                                  | `packages/protocol/src/apis/llm/*.ts`              |
+| Conversation list, get, rename, and delete routes                                                                                 | `packages/protocol/src/apis/conversation/*.ts`     |
+| Agent list, create, get, update, and delete routes                                                                                | `packages/protocol/src/apis/agent/*.ts`            |
+| MCP server list, sync, and reconnect routes, server states, and the email account check                                           | `packages/protocol/src/apis/mcp/*.ts`              |
+| Problem Details error bodies                                                                                                      | `packages/protocol/src/http/errors/*.ts`           |
+| Health route path                                                                                                                 | `packages/protocol/src/apis/health/routes.ts`      |
+| Shared conversation shapes, main conversations and jobs, job reports, and the citation marker pattern                             | `packages/share/src/models/conversation.ts`        |
+| Shared agent shapes, the delegation tool names, the job title rule, and the progress note limit                                   | `packages/share/src/models/agent.ts`               |
+| Shared tool definitions, Lys's own and those of MCP servers, the `agents` access, and the tools the backend adds to a turn itself | `packages/share/src/models/tool.ts`                |
+| Shared MCP server settings, the switches of the servers Lys ships, and the `mcp__` prefix                                         | `packages/share/src/models/mcp.ts`                 |
+| Shared email account and mail server rules                                                                                        | `packages/share/src/models/email.ts`               |
+| Shared API key and email password rules                                                                                           | `packages/share/src/models/secrets.ts`             |
+| Shared host name and TCP port rule                                                                                                | `packages/share/src/models/hostName.ts`            |
+| Shared JSON values and their nesting bound                                                                                        | `packages/share/src/models/json.ts`                |
+| Distinct-value check shared by those rules                                                                                        | `packages/share/src/models/values.ts`              |
 
 ## Why the packages are split
 
@@ -58,9 +60,15 @@ the same schemas when reading backend event payloads.
 - A tool call's argument values are any JSON value, since MCP tools can take
   arrays and objects; a desktop built before that change rejects an event
   that carries such a value.
+- Every conversation and every conversation's metadata on the wire has a
+  `kind`, `main` or `job`, which selects its variant, so a desktop and a
+  backend built on either side of
+  [delegation](/architecture/backend/#delegation) reject each other's
+  conversation bodies.
 - The only current chat event variants are the eleven chat-route variants and
   the reply-events `reply-snapshot` documented in
-  [SSE events](/reference/sse-events/).
+  [SSE events](/reference/sse-events/). The activity stream has six variants
+  of its own, documented on the same page.
 
 ## Coming soon
 

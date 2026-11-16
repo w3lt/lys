@@ -44,8 +44,9 @@ Terms that mean something specific inside Lys.
   It answers chats with the system prompt it has when each turn starts.
   Deleting it only marks it deleted, so its code is never free again.
 - **Leader** and **member**: the role of an agent, fixed by its kind. The
-  built-in agents are leaders, which can find every agent and read any
-  agent's state; stored agents are members, which can read only their own.
+  built-in agents are leaders, which can find every agent, read any agent's
+  state, and give work to members; stored agents are members, which can read
+  only their own state and take that work.
 - **Live agent**: the one instance of an agent that answers all of its
   turns while the backend runs and knows the requests it is working on.
 - **Request slot**: one of the replies a live agent works on at once, two
@@ -75,6 +76,32 @@ Terms that mean something specific inside Lys.
   every reply. A built-in agent's comes from its backend prompt file
   (`caliginia.txt`, `lysiptera.txt`) and a stored agent's from its record; it
   is not stored with conversations.
+
+## Delegation terms
+
+- **LICP**: the Lys Internal Communication Protocol: the rules by which Lys's
+  agents give each other work and report back. It is internal: it works
+  between the agents of one Lys backend and nowhere else. Issue #246 called
+  it ACP until 2026-11-10; it has nothing to do with the ACP or A2A projects
+  under the Linux Foundation.
+- **Main conversation**: a conversation the person started. Only main
+  conversations are listed in history.
+- **Job**: a conversation an agent started to give work to another agent.
+  It belongs to the conversation it was started from, its **parent**, has a
+  number there from 1, and is not listed in history. The person can open
+  it, read it, and stop it, but not write to, rename, or delete it.
+- **Delegator**: the agent of a job's parent conversation. In the job it
+  takes the place of the person.
+- **Job message**: one set of instructions the delegator sends to a job
+  with `delegate_work`. The first one starts the job; a later one continues
+  it.
+- **Report**: what a job sends back to its delegator. A **progress note** is
+  sent with `report_progress` while the job's agent works; an **end report**
+  is written when a reply of the job ends: its result, a failure, a stop,
+  or an interruption.
+- **Wake-up turn**: a turn the backend starts in a main conversation so the
+  delegator reads reports that arrived while no reply of that conversation
+  was running.
 
 ## MCP terms
 

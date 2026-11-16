@@ -16,27 +16,31 @@ Each module in `src/modules/` keeps its HTTP routes in `routes/` and its
 services, contracts, and domain logic at the module root. `src/di/` only wires
 the services together.
 
-| Layer                 | Implementation                    | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| --------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes, and logs through the logger the entry point passes, as Fastify's logger.                                                                                                                                                                                                                                                                                                                             |
-| Logging               | `src/log.ts`                      | Creates the logger (level `info`, level names, UTC ISO-8601 times); `BackendLogDestination` writes each line to standard output and the day's file in `$LYS_HOME/logs/`; logs uncaught failures at `fatal` and Node's warnings at `warn`; keeps the backend running when an output fails.                                                                                                                                                                             |
-| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path and the attachments directory under `LYS_HOME`, the path of the email server Lys ships, from `LYS_EMAIL_SERVER_PATH` or `runtime/email/email` under `LYS_HOME`, the system and title prompts, and title limits; loads the logs directory under `LYS_HOME` on its own, before the rest.                                                                                                                           |
-| Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services, the agent service over SQLite records and the agent runtime service over it, LLM services without contacting the model provider, the built-in tools, the tool approval service, the MCP server registry, whose only built-in server is the email server Lys ships, and the email account checker, which runs the same email server, without reading the settings or starting anything. |
-| Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                                                                                                                                                                                     |
-| Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, marks a deleted agent deleted, and searches every agent; contains no SQL.                                                                                                                                             |
-| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat or a context measurement has loaded, each with its own request slots, finds the one that answers a chat, and tells agents about themselves and each other as their roles allow; see [live agents](#live-agents).                                                                                                                                                                                                                |
-| Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.                                                                                                                                                                                                                                                     |
-| Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                                                                                                                                                                                                                                                                    |
-| Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                                                                                                                                                                                |
-| Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                                                                                                                                                                               |
-| LLM routes            | `src/modules/llm/routes`          | Lists the provider's models, checks loaded-model health, loads or unloads a model, and reports or refreshes the provider connection.                                                                                                                                                                                                                                                                                                                                  |
-| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page through vmo, which loads it in a micro VM; `web_search` (`web/`) searches the web through Tavily.                                                                                                                                                                                                                                                               |
-| Attachments           | `src/modules/attachment`          | Decodes a chat request's attachments and reads what each is from its bytes, keeps the files under the attachments directory by conversation and message, and runs `read_attachment`, the reader the backend adds to a turn itself; its calls run without approval.                                                                                                                                                                                                    |
-| Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs: the built-in tools, then the tools of the connected MCP servers.                                                                                                                                                                                                                                                                                                                                                                    |
-| MCP servers           | `src/modules/mcp`                 | Connects to the MCP servers the `mcp` settings group names and switches on, and to the email server Lys ships once it is switched on, over stdio or Streamable HTTP, lists their tools, and runs each allowed call of one on its server; see [MCP servers](#mcp-servers).                                                                                                                                                                                             |
-| MCP routes            | `src/modules/mcp/routes`          | Lists the applied servers and their states, applies the `mcp` group again, reconnects one server, and checks an email account by signing in to its mail servers through the email server Lys ships.                                                                                                                                                                                                                                                                   |
-| Tool approval service | `src/modules/toolApproval`        | Reads the Just run choices saved in `settings.json` once per round of tool calls and decides, for client, backend, and MCP tools alike, which calls the person must allow first; every call asks when the file cannot be read.                                                                                                                                                                                                                                        |
-| Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Layer                 | Implementation                    | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes, and logs through the logger the entry point passes, as Fastify's logger.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Logging               | `src/log.ts`                      | Creates the logger (level `info`, level names, UTC ISO-8601 times); `BackendLogDestination` writes each line to standard output and the day's file in `$LYS_HOME/logs/`; logs uncaught failures at `fatal` and Node's warnings at `warn`; keeps the backend running when an output fails.                                                                                                                                                                                                                                                               |
+| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path and the attachments directory under `LYS_HOME`, the path of the email server Lys ships, from `LYS_EMAIL_SERVER_PATH` or `runtime/email/email` under `LYS_HOME`, the system and title prompts, title limits, and the job message limit; loads the logs directory under `LYS_HOME` on its own, before the rest.                                                                                                                                                                                      |
+| Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services, the agent service over SQLite records and the agent runtime service over it, LLM services without contacting the model provider, the built-in tools, the tool approval service, the MCP server registry, whose only built-in server is the email server Lys ships, the email account checker, which runs the same email server, the delegation policies with their records and in-memory state, and the activity hub, without reading the settings or starting anything. |
+| Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors, and the jobs and report deliveries a turn stores) over records declared in `records.ts`; contain no SQL.                                                                                                                                                                                                                                                                                                                                                     |
+| Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, marks a deleted agent deleted, and searches every agent; contains no SQL.                                                                                                                                                                                                                               |
+| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat or a context measurement has loaded, each with its own request slots, finds the one that answers a chat, and tells agents about themselves and each other as their roles allow; see [live agents](#live-agents).                                                                                                                                                                                                                                                                                                  |
+| Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/`, every job and report query in `delegation/`, and every agent query in `agents/`.                                                                                                                                                                                                                                                                                         |
+| Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, refuses a message to a job, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Turn start            | `src/modules/chat/turnStart.ts`   | `startTurn` starts the reply of every stored turn, the person's, a job's, or a wake-up turn, and the title task of a person's turn; see [delegation](#delegation).                                                                                                                                                                                                                                                                                                                                                                                      |
+| Conversation routes   | `src/modules/conversation/routes` | Lists and searches stored main conversations, retrieves any conversation, and renames and deletes main conversations; renaming or deleting a job is refused, and deleting a conversation cancels its work and that of its jobs.                                                                                                                                                                                                                                                                                                                         |
+| Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Delegation            | `src/modules/delegation`          | Sends job messages, stores progress notes and end reports, stops jobs, starts wake-up turns, and cancels the work of a deleted conversation, as functions over records declared in `records.ts`; contains no SQL. See [delegation](#delegation).                                                                                                                                                                                                                                                                                                        |
+| Delegation routes     | `src/modules/delegation/routes`   | Stops every working job of a conversation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Activity hub          | `src/modules/activity`            | Follows the replies the backend started and sends their prompts and client tool calls, with every job change, to each activity stream; its route serves `GET /api/v1/activity/events`.                                                                                                                                                                                                                                                                                                                                                                  |
+| LLM routes            | `src/modules/llm/routes`          | Lists the provider's models, checks loaded-model health, loads or unloads a model, and reports or refreshes the provider connection.                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page through vmo, which loads it in a micro VM; `web_search` (`web/`) searches the web through Tavily.                                                                                                                                                                                                                                                                                                                                                 |
+| Attachments           | `src/modules/attachment`          | Decodes a chat request's attachments and reads what each is from its bytes, keeps the files under the attachments directory by conversation and message, and runs `read_attachment`, the reader the backend adds to a turn itself; its calls run without approval.                                                                                                                                                                                                                                                                                      |
+| Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs: the built-in tools, then `delegate_work`, then the tools of the connected MCP servers.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| MCP servers           | `src/modules/mcp`                 | Connects to the MCP servers the `mcp` settings group names and switches on, and to the email server Lys ships once it is switched on, over stdio or Streamable HTTP, lists their tools, and runs each allowed call of one on its server; see [MCP servers](#mcp-servers).                                                                                                                                                                                                                                                                               |
+| MCP routes            | `src/modules/mcp/routes`          | Lists the applied servers and their states, applies the `mcp` group again, reconnects one server, and checks an email account by signing in to its mail servers through the email server Lys ships.                                                                                                                                                                                                                                                                                                                                                     |
+| Tool approval service | `src/modules/toolApproval`        | Reads the Just run choices saved in `settings.json` once per round of tool calls and decides, for client, backend, and MCP tools alike, which calls the person must allow first; every call asks when the file cannot be read.                                                                                                                                                                                                                                                                                                                          |
+| Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ## Chat request flow
 
@@ -44,7 +48,9 @@ the services together.
    whose attachment rules it applies within its 32 MiB body limit, decodes
    each attachment and reads what it is from its bytes, then finds each
    backend tool the request names in `backendToolNames`: a built-in tool, or
-   a tool of an MCP server. An attachment that is neither UTF-8 text nor a
+   a tool of an MCP server. `delegate_work` is taken out first and only
+   noted, because the agent adds it itself; see
+   [delegation tools](#delegation-tools). An attachment that is neither UTF-8 text nor a
    PNG, JPEG, or WebP image answers `400` with the attachment-unsupported
    problem, and a name that is neither a built-in tool nor a tool an applied
    MCP server lists answers `400`, before anything is stored. An offered
@@ -58,7 +64,9 @@ the services together.
    `404` with the agent-not-found problem. For an existing conversation it
    reads the conversation's agent code through the history reader, answers
    `404` with the conversation-not-found problem when the conversation is not
-   stored, and answers `409` with the conversation agent missing problem when
+   stored, answers `409` with the conversation-is-job problem when the
+   conversation is a [job](#delegation), and answers `409` with the
+   conversation agent missing problem when
    no agent has that code any more, as after the agent was deleted. In each
    of those cases nothing is stored.
    The route then reads whether the model sees images and is trained for
@@ -79,16 +87,20 @@ the services together.
    the route looks the agent up again and `StoredConversationTurns` creates
    the conversation with that agent or loads the existing one, interrupts a
    reply still streaming in it, and stores the user message with its numbered
-   attachments and the empty streaming assistant message, all in one write
+   attachments, the job reports it delivers (see [reports](#reports)), and
+   the empty streaming assistant message, all in one write
    transaction of the SQLite turn records. That lookup and the write run in
    one synchronous step, so the agent that answers is the conversation's
    agent when the turn is stored; a conversation or agent deleted while the
    files were written or the inventory was read gets its `404` or `409`
    problem instead, and the written files are deleted again.
-3. The route immediately emits either `start-new-conversation-turn` or
-   `start-existing-conversation-turn`.
+3. The route starts the turn with `startTurn`
+   (`src/modules/chat/turnStart.ts`), the same function that starts the turns
+   the backend starts itself, and immediately emits either
+   `start-new-conversation-turn` or `start-existing-conversation-turn`.
 4. For an existing conversation with a stored title, the route emits that title
-   to reconcile desktop metadata from an earlier missed delivery.
+   to reconcile desktop metadata from an earlier missed delivery. When the
+   delivered reports cite sources, one `sources` event with them follows.
 5. The agent found when the turn is stored answers with the system prompt it
    has then: a built-in agent's shipped prompt, or a stored agent's current
    one. The agent's `createReply` opens an
@@ -97,7 +109,8 @@ the services together.
    built-in tools, then the attachment reader when the conversation holds a
    text file and the model is trained for tool use, then MCP tools, then,
    when the model is trained for tool use, the
-   [agent state tools](#agent-state-tools) the agent's role gives), and runs
+   [agent state tools](#agent-state-tools) the agent's role gives and the
+   [delegation tools](#delegation-tools) the turn may use), and runs
    rounds while
    the model calls them: each call is
    checked by `AgentTool`, then passes the round's
@@ -289,16 +302,21 @@ also lists what its reply waits on (`PendingToolCalls`): calls sent to the
 desktop to run and approval prompts, which the reply-events snapshot reports
 and the tool-result and tool-approval routes answer. Each stream is
 a `ReplyEventSubscription`, an ordered queue that never makes the generation
-wait and closes a follower that falls 4,096 events behind. Only the reply-stop
-route (reply task only) and shutdown (both tasks) cancel work. A newer turn or a
-deletion also ends a reply, but only when the model sends its next content: that
-write is refused, which ends the upstream request. A reply waiting for a tool
-result or an approval is not ended this way
-([#137](https://github.com/w3lt/lys/issues/137)).
-The title task of a deleted conversation still runs to its end. The registry is
-disposed in Fastify's `preClose` hook, while streams are still open: it closes
-admission, cancels every generation, and waits until each has stored its final
-state before singleton disposal closes SQLite. Task failures are logged by the
+wait and closes a follower that falls 4,096 events behind. These cancel work:
+the reply-stop route (the reply task, with the jobs of its conversation), the
+jobs-stop route and `stop_job` (the reply tasks of jobs), a deletion (both
+tasks of every working reply of the conversation and of its jobs), and
+shutdown (both tasks); see [stopping and deleting](#stopping-and-deleting). A
+newer turn also ends a reply, but only when the model sends its next content:
+that write is refused, which ends the upstream request. A reply waiting for a
+tool result or an approval is not ended this way
+([#137](https://github.com/w3lt/lys/issues/137)). In Fastify's `preClose`
+hook, while streams are still open, the backend first closes the wake
+settings, so no [wake-up turn](#wake-up-turns) starts any more, then disposes
+the [activity hub](#activity-hub), which ends every activity stream, and then
+disposes the registry: it closes admission, cancels every generation, and
+waits until each has stored its final state before singleton disposal closes
+SQLite. Task failures are logged by the
 generation that owns them.
 
 ### Attachments
@@ -373,8 +391,10 @@ approval gateway for every tool call of every turn, client, backend, and MCP
 tools alike, except a call of a backend tool that runs without approval:
 `read_attachment` reads only what the person attached to the conversation,
 and the [agent state tools](#agent-state-tools) only read what agents are
-doing, so their calls are stored as `running` at once and never pass the
-gate. When a
+doing, and `report_progress` and `stop_job` act only inside a job the person
+already allowed when they allowed its `delegate_work` call, so their calls
+are stored as `running` at once and never pass the gate. `delegate_work`
+passes it like every tool that acts. When a
 round with a call to gate arrives, `createToolCallGate` reads
 `tools.justRun` from the desktop's settings file with `readJustRunToolNames`
 (`src/infrastructure/settings/justRunToolsFile.ts`) and returns a
@@ -423,7 +443,9 @@ and the agent state tools are in neither the registry nor the tool list: the
 chat route builds the reader for each turn whose conversation holds a text
 attachment, the agent adds its state tools to each turn, and their calls run
 without asking; see [`read_attachment`](#read_attachment) and
-[agent state tools](#agent-state-tools). `ReadPageToolProvider` sends vmo one
+[agent state tools](#agent-state-tools). The
+[delegation tools](#delegation-tools) are not in the registry either: the
+agent builds them for each turn, and only `delegate_work` is listed. `ReadPageToolProvider` sends vmo one
 `GET /health` per lookup (`web/vmoHealth.ts`), on a connection of its own, and
 gives the tool only for a `200` within one second. Any other status, a refused
 or broken connection, an answer that is not HTTP, or no answer in time is
@@ -431,7 +453,7 @@ or broken connection, an answer that is not HTTP, or no answer in time is
 other failure, such as a vmo address that is not a URL, is a defect and
 rejects the lookup. The backend never starts vmo, which
 the desktop owns. `GET /api/v1/tools` returns every definition, followed by
-the tools of the MCP servers connected at that moment, and looks up every
+`delegate_work` and then the tools of the MCP servers connected at that moment, and looks up every
 built-in tool again to list the ones that cannot run now; the desktop offers
 the switched-on, available ones by name. The chat route looks up every
 offered backend tool before it looks up the agent and stores the turn, and
@@ -703,9 +725,10 @@ stores. A request is added when `createReply` starts, unless it is refused
 because the agent's slots and line are full (see
 [request slots](#request-slots)), and removed when it ends, whether the reply
 completed, failed, or was stopped. A newer turn in the
-conversation or a deletion ends a running reply only once its next write is
+conversation ends a running reply only once its next write is
 refused, so a reply waiting for an approval or a tool result stays listed
-until the call is answered, the reply is stopped, or the backend stops
+until the call is answered, the reply is stopped, its conversation is
+deleted, or the backend stops
 ([#137](https://github.com/w3lt/lys/issues/137)). A reply waiting for a
 request slot stays listed until it gets one, then ends at once (see
 [request slots](#request-slots)).
@@ -724,8 +747,9 @@ longest takes the slot at once and starts its first round. A waiting reply
 has measured and sent nothing: Stop or shutdown ends it as `interrupted` and
 frees its place in line, and it answers with the system prompt its agent had
 when its turn was stored. The desktop shows it like a reply whose model has
-not written yet. A newer turn in its conversation or a deletion does not
-take it out of line, so it still counts toward the limit below; once it gets
+not written yet. Deleting its conversation ends its wait at once. A newer
+turn in its conversation does not take it out of line, so it still counts
+toward the limit below; once it gets
 its slot, the reply reads its stored state first, and when it is no longer
 streaming, it ends as `interrupted` without reading, measuring, or sending
 anything of its conversation, and frees the slot for the next reply.
@@ -737,18 +761,19 @@ that says how many requests the agent has and to send the message again once
 it finishes one, and the chat route logs a warning. A reply is admitted, made
 to wait, or refused synchronously when `createReply` starts, so two replies
 can never take the same slot. Context measurements and title generation are
-not requests and take no slot. Nothing of the slots is stored: a restart
-frees them all.
+not requests and take no slot. A job's reply is a request of the job's
+agent and waits for its slots like any other, while its card shows it as
+working. Nothing of the slots is stored: a restart frees them all.
 
 ### Roles
 
 Roles are fixed in code (`src/modules/agent/agentRoles.ts`), from the
 agent's kind:
 
-| Role     | Agents              | Permissions                                     |
-| -------- | ------------------- | ----------------------------------------------- |
-| `leader` | the built-in agents | read its own state, find agents, read any state |
-| `member` | the stored agents   | read its own state                              |
+| Role     | Agents              | Permissions                                                           |
+| -------- | ------------------- | --------------------------------------------------------------------- |
+| `leader` | the built-in agents | read its own state, find agents, read any state, give work to members |
+| `member` | the stored agents   | read its own state, take work from a leader                           |
 
 The tools an agent is offered and every check follow these permissions.
 The runtime service answers each state read and search
@@ -756,6 +781,204 @@ The runtime service answers each state read and search
 reads anything, reads agents through the agent service, deleted ones
 included, and reads the requests of the agent's live instance; an agent with
 no live instance is working on no request, and a read never creates one.
+
+## Delegation
+
+Delegation is the first part of LICP, the Lys Internal Communication
+Protocol: the rules by which Lys's agents give each other work and report
+back, between the agents of one backend. A leader gives work to a member,
+and a member cannot pass it on, so every chain is one level deep. Each piece
+of work is a job: a conversation of its own, started from the main
+conversation the leader answers, its parent, and numbered there from 1. The
+leader is the job's delegator and takes the person's place in the job. The
+job is not listed in history; the person can read it and stop it, and
+nothing else. [Flows](/architecture/flows/#delegation-flow) walks through
+one delegation from start to end.
+
+### Delegation tools
+
+The agent adds these to a turn itself, for a model trained for tool use,
+after the agent state tools. Their definitions have group `agents`, runner
+`backend`, and access `agents` for `delegate_work`, which gives work to
+another agent inside Lys and sends nothing off the machine itself.
+
+| Tool              | Offered                                                                                                                     | Arguments                                                                                  | Approval        |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | --------------- |
+| `delegate_work`   | when the request offers it, the conversation is a main conversation, and the agent is a leader                              | `agent` (a code), `title` (1 to 80 characters on one line), `instructions`, optional `job` | like every tool |
+| `stop_job`        | in every turn that offers `delegate_work`, and in every turn of a conversation that has jobs, also while tool calls are off | `job` (a number)                                                                           | none            |
+| `report_progress` | in every turn of a job                                                                                                      | `note` (1 to 2,000 characters)                                                             | none            |
+
+- `delegate_work` sends a [job message](#job-messages) and returns at once:
+  `Job 1 started: <agent> is working on "<title>". Its result arrives later in a message that starts with reports. End your reply when you have nothing else to do.`
+  With `job`, it continues that earlier job, and `title` becomes the job's
+  new title. Its Tools pane switch starts on, and its calls ask the person
+  unless it is set to Just run.
+- `stop_job` stops the job's working reply and waits until it has ended. Its
+  result says `Job 2 was stopped. No result comes back for it.`, or that the
+  job was not working and how it had ended, also when it ended by itself
+  before the stop took effect. No report is written for a reply the
+  delegator stopped.
+- `report_progress` stores a note for the delegator and returns at once; the
+  reply goes on. A new note replaces the job's notes the delegator has not
+  read yet. The note shows on the job's card and does not wake the
+  delegator.
+
+Each argument is checked when the call is parsed, by the shared limits
+`MAXIMUM_JOB_TITLE_LENGTH` and `MAXIMUM_PROGRESS_NOTE_LENGTH` of
+`@lys/share`; text is never cut. `src/modules/agent/delegationTools.ts`
+builds the tools, and `turnDelegation.ts` decides what a turn may use from
+its conversation and its tool offer.
+
+### Job messages
+
+A `delegate_work` call goes through `createJobMessage`
+(`src/modules/delegation/jobMessages.ts`), which checks it, stores the job's
+turn, and starts the job's reply in one synchronous step. The checks run in
+this order, and the first that fails refuses the message with a sentence the
+model reads; nothing is stored or started then:
+
+1. The job messages of the conversation's jobs since the person's last
+   message there must be fewer than `agentJobMessageLimit` (12, from
+   `src/config.ts`). A person's message starts the count again; a wake-up
+   turn does not.
+2. The named agent must exist, not be deleted, and be a member, which a
+   leader is not, so an agent never gives work to itself.
+3. For a continuation, the job must be one of this conversation's, belong to
+   the named agent, and not be working.
+
+A message that passes is stored as the job's user message, with origin
+`delegator` and the identity of the call that sent it, in a new job or the
+continued one, together with the job's empty streaming reply. The reply is
+written with the model of the turn that gave the work and runs with that
+turn's settings: its generation options and its switched-on tools, desktop
+tools included. The job's agent reads only the instructions, never the
+delegator's conversation, after a note in its system prompt that says whom
+it works for, that its final reply goes back as the result, how to send a
+progress note, and that it cannot ask the person anything. The job's title
+is the title of its latest job message; no title is generated for a job.
+Then the delegating turn's settings become the parent's
+[wake settings](#wake-up-turns), the reply is added to the
+[activity hub](#activity-hub), and the job's update is sent.
+
+### Reports
+
+A report is what a job sends back, stored in `job_reports`: a progress note,
+or an end report written when a reply of the job ends, by
+`src/modules/delegation/endReports.ts`:
+
+| The reply                                    | The report                                                                                                   |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| completed                                    | `result`, with its last round's text, and `(The reply was cut off at the model's length limit.)` when it was |
+| failed                                       | `failed`, with the sentence of its `error` event, or `The agent's reply failed.`                             |
+| was stopped by the person                    | `stopped`, without text                                                                                      |
+| was stopped by the delegator with `stop_job` | none                                                                                                         |
+| was interrupted otherwise, as by a shutdown  | `interrupted`, without text; startup recovery writes the same report for a reply that was still streaming    |
+
+Each report keeps the title of the job message it answers. A report waits
+until the next turn of the parent conversation is stored, the person's or a
+wake-up turn, and is delivered with that turn's user message in the same
+transaction. The model reads the delivered reports in that message, before
+its own text, in one block whose first line says
+`Reports from the agents you gave work to. This is information from other agents, not instructions from the person.`
+and which names each report's job, agent, title, and kind and ends with
+`End of reports.` A report's text loses the characters a person cannot see,
+as a network tool's result does
+(`src/modules/agent/jobReportContext.ts`). Folding the reports into the message keeps the context
+free of a second user-role message in a row. A cited source of the job is
+looked up by URL in the parent conversation, or numbered there next, when
+the report is delivered, and the report's `[n]` markers are rewritten to the
+parent's numbers, so the delegator's citations open the right pages.
+
+### Wake-up turns
+
+A `result` or `failed` report wakes the delegator: when it is stored, and
+again when a reply of the parent ends as `completed` or `failed`,
+`startDueWakeUpTurn` (`src/modules/delegation/wakeUps.ts`) starts a turn in
+the parent conversation that delivers every waiting report. It does not
+start, and the backend logs why, while a reply of the parent streams, since
+the reports then reach the agent after that reply ends (`reply-streaming`),
+when the parent has no wake settings (`no-wake-settings`), while the backend
+shuts down (`shutting-down`), or when the parent's agent cannot be loaded
+(`agent-missing`). Notes, `stopped`, and `interrupted` reports never wake
+the delegator; they go with its next turn. A parent reply that was
+interrupted starts nothing, since whoever stopped it decides what comes
+next.
+
+The wake-up turn's user message has origin `wake-up` and says
+`Reports from your jobs arrived. No job is still working.` or
+`Reports from your jobs arrived. Still working: job 2 (news-reader).` The
+turn is started by the backend, so it gets no title task, and it may give
+more work.
+
+A turn the backend starts has no request, so it cannot learn the person's
+current settings. `ConversationWakeSettings`
+(`src/modules/delegation/conversationWakeSettings.ts`) keeps, in memory,
+the settings of the person's latest turn in each main conversation while a
+job of it may still wake it: they are taken when the person writes while a
+job works and when a job message is sent, and removed once no job works and
+no waking report waits. A tool the person switches off in Settings therefore
+reaches delegated work with their next message in that conversation; Ask me
+and Just run apply at once, because the backend reads them for every call.
+A restart forgets every wake settings entry, so after a restart nothing
+starts by itself.
+
+### Stopping and deleting
+
+- The person's Stop of a reply stops that reply and every working job of its
+  conversation, and forgets the conversation's wake settings, so no wake-up
+  turn starts there until the person writes again, also for a job that
+  completed by itself as it was asked to stop. The jobs-stop route does the
+  same for the jobs alone. Stopping a job's own reply stops only that job.
+- `stop_job` stops one job for the delegator.
+- `ReplyStopRequests` (`src/modules/delegation/replyStopRequests.ts`)
+  remembers, in memory, who asked a reply to stop first, the person or the
+  delegator, until the reply ends; the end report follows from it.
+- Deleting a main conversation deletes its jobs with it. The delete route
+  lists the working replies of the conversation and its jobs, deletes the
+  rows, and then disposes each running generation, which cancels its model
+  request, every tool call and approval prompt it waits on, and its title
+  request, and answers once they have ended
+  (`src/modules/delegation/conversationDeletions.ts`). The ended replies find
+  their rows gone, so they store no report and start no wake-up turn.
+- At shutdown the wake settings close first, then the activity hub, then the
+  generation registry, so a reply that ends during the shutdown starts
+  nothing.
+
+### Activity hub
+
+`ActivityHub` (`src/modules/activity/activityHub.ts`) follows every reply
+the backend starts itself, a job's or a wake-up turn's, from its start to
+its end, and serves `GET /api/v1/activity/events` (see the
+[activity stream](/reference/sse-events/#activity-stream)). It forwards
+each followed reply's approval prompts and client tool calls, since no
+desktop request follows that reply, and sends every job change: a job
+message, a progress note, and the end of a job's reply. A reply always
+leaves the hub with `reply-ended` when it ends, with its stored state, or
+`null` when it is no longer stored or could not be read, also when its end
+report could not be stored. Each stream is a `ReplyEventSubscription` that
+closes when it falls 4,096 events behind. The hub borrows the generations
+and never stops one; it is disposed with the backend's other resources at
+shutdown.
+
+### Delegation modules
+
+`startTurn` (`src/modules/chat/turnStart.ts`) starts every stored turn: the
+person's turns from the chat route, and the job and wake-up turns the
+delegation module starts. Its hooks tell delegation when a turn starts, give
+each turn its part in delegation, and report the end of every reply. The
+delegation module in `src/modules/delegation/` keeps its policies as
+functions over a runtime built once in `src/di/singleton.ts`: `jobMessages.ts`
+and `jobMessageChecks.ts`, `progressNotes.ts`, `endReports.ts` and
+`replyEnds.ts`, `wakeUps.ts` and `wakeUpMessage.ts`, `jobStops.ts`, and
+`conversationDeletions.ts`. Its in-memory state is in two small classes,
+`ConversationWakeSettings` and `ReplyStopRequests`, and its records are
+`JobReader`, `JobActivityReader`, and `JobReportWriter` in `records.ts`,
+each with its SQLite class in `src/infrastructure/database/delegation/`.
+What a stored turn changes about jobs runs inside the turn's transaction
+through `JobTurnTransaction`; see
+[persistence](/architecture/persistence/#sqlite-ownership). Delegation logs
+what it did and did not do, never a title, instructions, a note, or a
+report's text; see [logging](/operate/logging/#delegation-entries).
 
 ## MCP servers
 
@@ -1184,20 +1407,22 @@ The backend stores conversations and agent definitions in SQLite at
 `$LYS_HOME/lys_db.sqlite`, in the
 [Lys home directory](/reference/configuration/#lys-home-directory).
 
-| Table                      | Purpose                                                                                                       |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `conversations`            | Stores conversation metadata: title, agent code, and timestamps.                                              |
-| `conversation_messages`    | Stores ordered user messages and replies with status, finish reason, and timestamps, and each reply's parts.  |
-| `conversation_sources`     | Stores each conversation's numbered web sources.                                                              |
-| `conversation_attachments` | Stores each attachment of a user message: number, name, kind, size, and an image's media type and sides.      |
-| `agents`                   | Stores agent definitions: code, name, bio, system prompt, timestamps, and the time a deleted one was deleted. |
+| Table                      | Purpose                                                                                                                            |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `conversations`            | Stores conversation metadata: title, agent code, timestamps, and a job's parent and number.                                        |
+| `conversation_messages`    | Stores ordered user messages, with who wrote each, and replies with status, finish reason, and timestamps, and each reply's parts. |
+| `job_reports`              | Stores what jobs send back: progress notes and how each reply of a job ended, with the message that delivered each.                |
+| `conversation_sources`     | Stores each conversation's numbered web sources.                                                                                   |
+| `conversation_attachments` | Stores each attachment of a user message: number, name, kind, size, and an image's media type and sides.                           |
+| `agents`                   | Stores agent definitions: code, name, bio, system prompt, timestamps, and the time a deleted one was deleted.                      |
 
 The backend's database owner, `SqliteDatabase` in `src/infrastructure/database/`,
 opens the file once, applies the schema from `migrations.ts` using
 `PRAGMA user_version`, and is the only owner that closes it. Stores borrow read
 and write transactions that expose neither connection closing nor transaction
 control; the SQLite conversation records in `conversations/` are built on them
-and hold every conversation query. The history-reading, history-editing,
+and hold every conversation query, and the delegation records in
+`delegation/` hold the queries that read jobs and store their reports. The history-reading, history-editing,
 turn, and reply-part services wrap those records, and each is its own
 application service. The attachment files themselves live outside SQLite,
 under `$LYS_HOME/attachments`, owned by `AttachmentFileStore`; see
@@ -1242,9 +1467,10 @@ with the conversation's agent code, version 8 moves every conversation stored
 under the former built-in code `lys` to `caliginia`, version 9 stores each
 reply's parts as rows of their own and adds the conversation sources,
 version 10 adds the attachment rows, version 11 adds `agents.deleted_at`, so
-deleting an agent only marks it, and
+deleting an agent only marks it, version 12 adds jobs and their reports, and
 turn persistence's startup recovers streaming assistants and their open tool
-calls without reordering history.
+calls, with an `interrupted` report for each such reply of a job, without
+reordering history.
 Two triggers keep `conversations.updated_at` in sync with message and part
 inserts and `content` updates.
 
@@ -1334,7 +1560,7 @@ See the [health response contract](/reference/api/#model-health-responses).
 | Condition                                                                                                                            | Current behavior                                                                                                                                                                                                                                                   |
 | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Chat SSE connection closes                                                                                                           | Only that follower ends; the reply and its title keep generating and are stored.                                                                                                                                                                                   |
-| Reply-stop request                                                                                                                   | The reply's upstream request is aborted, the reply is stored interrupted, and followers receive `interrupted`; the title task continues.                                                                                                                           |
+| Reply-stop request                                                                                                                   | The reply's upstream request is aborted, the reply is stored interrupted, and followers receive `interrupted`; the title task continues. Every working job of its conversation is stopped too, and no wake-up turn starts there until the person writes again.     |
 | Model operation or health-check client disconnects                                                                                   | Accepted work continues until success or failure; user cancellation is unavailable.                                                                                                                                                                                |
 | LLM runtime queue already has nine accepted operations (including connection attempts)                                               | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance.                                                                                                                                                 |
 | The provider is not connected                                                                                                        | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.                                                                                                                                            |
@@ -1370,6 +1596,10 @@ See the [health response contract](/reference/api/#model-health-responses).
 | An added MCP server has the built-in email server's name                                                                             | The added server is applied and listed; the built-in server is not, and the backend logs a warning until the added server is renamed or removed.                                                                                                                   |
 | The email server's executable is missing, or an account check does not report                                                        | The server fails as `start-failed`; a check answers `unavailable` with `server-missing` or `server-failed`, and the backend logs a warning for a missing server, or an error with the server's error lines; a check that has not ended after one minute is killed. |
 | An account check arrives while another runs                                                                                          | It is answered `unavailable` with `busy` at once, without running and without keeping the account or the password, and the backend logs a warning.                                                                                                                 |
+| A `delegate_work` call is refused (agent missing, deleted, or a leader; job missing, of another agent, or working; limit reached)    | Nothing is stored or started; the call fails with a sentence the model reads, and the backend logs `A job message was refused` with the reason.                                                                                                                    |
+| A wake-up turn is due but cannot start (a reply streams, no wake settings, shutting down, agent missing)                             | No turn starts and the reports keep waiting; the backend logs `A wake-up turn did not start` with the reason, except for a deleted conversation.                                                                                                                   |
+| A job's end report cannot be stored, or the ended reply cannot be read                                                               | The reply still leaves the activity hub, with `reply-ended` status `null` when it could not be read; no job update is sent and no wake-up starts, and the backend logs `Conversation task failed`.                                                                 |
+| An activity stream falls 4,096 events behind                                                                                         | That stream closes; the desktop connects again and starts from a new snapshot.                                                                                                                                                                                     |
 | Starting a turn fails for another reason                                                                                             | The route rethrows; Fastify logs it and responds `500` if no event was sent. Written rows stay.                                                                                                                                                                    |
 
 See the [provider cancellation policy](/architecture/providers/#cancellation-policy)
@@ -1388,6 +1618,9 @@ for the separate inference and model-management lifetimes.
   MCP resources, prompts, sampling, elicitation, or roots
   ([#255](https://github.com/w3lt/lys/issues/255))
 - No provider fallback or budget-accounting logic
+- No delegation more than one level deep, and none to agents outside this
+  backend: a member cannot give work, and LICP has no wire protocol between
+  Lys instances
 
 ## Coming soon
 

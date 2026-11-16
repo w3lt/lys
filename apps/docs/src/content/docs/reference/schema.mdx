@@ -13,13 +13,19 @@ JSON schema for runtime, model, and generation settings.
 
 ### `conversations`
 
-| Column       | Type            | Notes                                                                                                                                |
-| ------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `id`         | `TEXT`          | Primary key                                                                                                                          |
-| `title`      | `TEXT`          | Null until the first title assignment; untitled turns request one, titled turns reconcile it to the client, and a rename replaces it |
-| `agent_code` | `TEXT NOT NULL` | Code of the agent that answers the conversation; every turn sends that agent's current system prompt                                 |
-| `created_at` | `TEXT NOT NULL` | ISO timestamp                                                                                                                        |
-| `updated_at` | `TEXT NOT NULL` | ISO timestamp                                                                                                                        |
+| Column                   | Type            | Notes                                                                                                                                                                                                       |
+| ------------------------ | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                     | `TEXT`          | Primary key                                                                                                                                                                                                 |
+| `title`                  | `TEXT`          | Null until the first title assignment; untitled turns request one, titled turns reconcile it to the client, and a rename replaces it. A job's title is the title of its latest job message, never generated |
+| `agent_code`             | `TEXT NOT NULL` | Code of the agent that answers the conversation; every turn sends that agent's current system prompt. For a job, the agent that does the work                                                               |
+| `created_at`             | `TEXT NOT NULL` | ISO timestamp                                                                                                                                                                                               |
+| `updated_at`             | `TEXT NOT NULL` | ISO timestamp                                                                                                                                                                                               |
+| `parent_conversation_id` | `TEXT`          | Jobs only: foreign key to the conversation the job was started from, `conversations(id)` with `ON DELETE CASCADE`; `NULL` for a main conversation                                                           |
+| `job_number`             | `INTEGER`       | Jobs only: the job's number in its parent, from 1, unique there; `NULL` for a main conversation                                                                                                             |
+
+A row with a parent is a [job](/architecture/backend/#delegation); a row
+without one is a main conversation, the person's. The agent that gave a job
+its work is the parent's agent and is not stored again.
 
 ### `conversation_messages`
 
@@ -44,6 +50,8 @@ under it. The table is `STRICT`.
 | `source_numbers`  | `TEXT`          | Succeeded tool calls only: JSON array of the numbers of the sources the result shows, in its order; null when it shows none                           |
 | `created_at`      | `TEXT NOT NULL` | ISO timestamp                                                                                                                                         |
 | `updated_at`      | `TEXT`          | Required for reply and part rows                                                                                                                      |
+| `origin`          | `TEXT`          | User rows only: who wrote the message. `NULL` for the person, `delegator` for a job message, `wake-up` for the message of a wake-up turn              |
+| `job_call_id`     | `TEXT`          | Job messages only: foreign key to the `delegate_work` call part that sent the message, in the parent conversation, with `ON DELETE CASCADE`           |
 
 ### `conversation_sources`
 
@@ -77,6 +85,23 @@ ignoring case. The table is `STRICT`.
 The file itself is at
 `$LYS_HOME/attachments/<conversation_id>/<message_id>/<name>`; see
 [Data and storage](/operate/data/).
+
+### `job_reports`
+
+What jobs send back to their delegators: progress notes, and at most one
+end report for each reply of a job. The table is `STRICT`.
+
+| Column                 | Type            | Notes                                                                                                                                                                             |
+| ---------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                   | `TEXT`          | Primary key, a UUIDv7                                                                                                                                                             |
+| `job_conversation_id`  | `TEXT NOT NULL` | Foreign key to the job's `conversations(id)` with `ON DELETE CASCADE`                                                                                                             |
+| `reply_id`             | `TEXT NOT NULL` | Foreign key to the job's reply that sent the note or whose end the report tells, `conversation_messages(id)` with `ON DELETE CASCADE`                                             |
+| `kind`                 | `TEXT NOT NULL` | `note`, `result`, `failed`, `stopped`, or `interrupted`                                                                                                                           |
+| `title`                | `TEXT NOT NULL` | Non-empty title of the job message the reply answers, kept because a later job message replaces the job's title                                                                   |
+| `content`              | `TEXT NOT NULL` | The note, the reply's last text for a result, or the failure sentence; `''` for `stopped` and `interrupted`. Once delivered, its citation markers use the parent's source numbers |
+| `source_numbers`       | `TEXT NOT NULL` | JSON array of the parent conversation's numbers of the sources the content cites, in ascending order; `[]` until delivery and for `stopped` and `interrupted`                     |
+| `created_at`           | `TEXT NOT NULL` | ISO timestamp                                                                                                                                                                     |
+| `delivered_message_id` | `TEXT`          | Foreign key to the user-role message, in the parent conversation, of the turn that delivered the report, `conversation_messages(id)` with `ON DELETE CASCADE`; `NULL` until then  |
 
 ### `agents`
 
@@ -125,6 +150,18 @@ The file itself is at
   every row the backend writes and reads. A row added without the column gets
   `lys`, the default version 7 declared; the backend always writes the code,
   so that default is never used.
+- A conversation has a `job_number` exactly when it has a
+  `parent_conversation_id`; that number is at least 1, and such a row must
+  have a non-empty title.
+- `origin` is `NULL` on every row but a user row, where it is `NULL`,
+  `delegator`, or `wake-up`. A row has a `job_call_id` exactly when its
+  origin is `delegator`.
+- Job report rows must have a known kind and a non-empty title, and
+  `source_numbers` must be valid JSON. A `note` or `failed` report must have
+  content; a `stopped` or `interrupted` report must have empty content and
+  `source_numbers` exactly `[]`. SQLite checks only that; the shared report
+  schema checks the rest on every row the backend reads, such as ascending
+  source numbers.
 - Agent rows must have every column but `deleted_at`, and a non-empty `code`,
   `name`, `bio`, and `system_prompt`. SQLite checks only that, comparing each
   of the four with `''`, so text that starts with a NUL character still
@@ -162,6 +199,12 @@ its source rows in `number` order.
 | ------------------------------------------ | ------- | ---------------------------------------------------------------------------- |
 | `conversation_messages_conversation_idx`   | index   | Orders messages by conversation, creation time, and id                       |
 | `conversation_messages_reply_part_idx`     | index   | Unique: one part per position of a reply                                     |
+| `conversations_job_number_idx`             | index   | Unique, jobs only: one job per number in a parent                            |
+| `conversation_messages_job_call_idx`       | index   | Job messages only: finds the messages a `delegate_work` call sent            |
+| `job_reports_reply_end_idx`                | index   | Unique, end reports only: at most one end report per reply                   |
+| `job_reports_reply_idx`                    | index   | Finds a reply's reports                                                      |
+| `job_reports_job_idx`                      | index   | Finds a job's reports                                                        |
+| `job_reports_delivered_idx`                | index   | Delivered reports only: finds the reports a message delivered                |
 | `update_conversation_after_message_insert` | trigger | Updates `conversations.updated_at` after inserts, parts included             |
 | `update_conversation_updated_at`           | trigger | Keeps explicit activity updates monotonic; title-only updates do not fire it |
 | `update_conversation_after_message_update` | trigger | Updates `conversations.updated_at` after a row's `content` changes           |
@@ -202,10 +245,19 @@ Version 11 adds `agents.deleted_at`, `NULL` for every stored agent, because
 deleting an agent now only marks it: the row stays, so its code is never
 free again. Agents deleted before version 11 are gone, and their codes stay
 free. Builds that support only version 10 refuse a version-11 database.
+Version 12 adds jobs: `conversations.parent_conversation_id` and
+`job_number`, `conversation_messages.origin` and `job_call_id`, the
+`job_reports` table, and their indexes. It only adds: no stored row or
+column changes, and no table is rebuilt. Every existing row gets `NULL` in
+the new columns, which keeps its meaning: a main conversation, and a
+message the person wrote. Builds that support only version 11 refuse a
+version-12 database.
 Versions 1–3 are unchanged. Missing migrations
 and the version marker commit together. At startup, streaming replies
 become interrupted with a refreshed `updated_at`; their waiting and running
-tool calls become interrupted too and keep their own `updated_at`. Parts,
+tool calls become interrupted too and keep their own `updated_at`. In the
+same transaction, each streaming reply of a job gets an `interrupted` report
+for its delegator, unless it already has an end report. Parts,
 conversation `updated_at`, and history order are preserved.
 
 ## Settings JSON

@@ -175,7 +175,7 @@ function cleanInline(text: string): string {
   return text
     .replace(CITATION_MARKERS, "")
     .replace(/\s+/g, " ")
-    .replace(/\s+(?=[.,;:!?)\]])/g, "")
+    .replace(/ ([.,;:!?)\]])/g, "$1")
     .trim()
 }
 

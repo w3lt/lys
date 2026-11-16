@@ -155,8 +155,38 @@ pub fn build_sent_message(
     composition: &Composition,
     stamp: MessageStamp,
 ) -> Result<ComposedMessage, CompositionProblem> {
+    let body = append_signature(&composition.body, &account.signature);
     let (builder, message_id) = build_message_header(account, composition, stamp)?;
-    build_message_body(builder, composition, message_id)
+    build_message_body(builder, composition, message_id, &body)
+}
+
+/// Adds a mailbox's signature after the message body, separated by a blank
+/// line; leaves the body unchanged when the signature is empty.
+///
+/// # Arguments
+///
+/// * `body` - The composed body.
+/// * `signature` - The mailbox's current signature.
+///
+/// # Returns
+///
+/// The body with the signature appended when non-empty.
+fn append_signature(body: &str, signature: &str) -> String {
+    if signature.is_empty() {
+        return body.to_owned();
+    }
+    if body.is_empty() {
+        return signature.to_owned();
+    }
+    let line_ending = if body.ends_with("\r\n") { "\r\n" } else { "\n" };
+    let separator = if body.ends_with("\n\n") || body.ends_with("\r\n\r\n") {
+        ""
+    } else if body.ends_with('\n') {
+        line_ending
+    } else {
+        return format!("{body}{line_ending}{line_ending}{signature}");
+    };
+    format!("{body}{separator}{signature}")
 }
 
 /// Builds a draft from a composition: its bytes keep the `Bcc` field, so
@@ -177,7 +207,12 @@ pub fn build_draft_message(
     stamp: MessageStamp,
 ) -> Result<ComposedMessage, CompositionProblem> {
     let (builder, message_id) = build_message_header(account, composition, stamp)?;
-    build_message_body(builder.keep_bcc(), composition, message_id)
+    build_message_body(
+        builder.keep_bcc(),
+        composition,
+        message_id,
+        &composition.body,
+    )
 }
 
 /// Builds the header fields of a message: sender, recipients, subject,
@@ -232,6 +267,7 @@ fn build_message_header(
 /// * `builder` - The header fields.
 /// * `composition` - The text and the attachments.
 /// * `message_id` - The message's identifier, without angle brackets.
+/// * `body` - The exact text body to serialize.
 ///
 /// # Returns
 ///
@@ -242,13 +278,14 @@ fn build_message_body(
     builder: MessageBuilder,
     composition: &Composition,
     message_id: String,
+    body: &str,
 ) -> Result<ComposedMessage, CompositionProblem> {
     let message = if composition.attachments.is_empty() {
         builder
             .header(ContentType::TEXT_PLAIN)
-            .body(composition.body.clone())
+            .body(body.to_owned())
     } else {
-        let mut parts = MultiPart::mixed().singlepart(SinglePart::plain(composition.body.clone()));
+        let mut parts = MultiPart::mixed().singlepart(SinglePart::plain(body.to_owned()));
         for attachment in &composition.attachments {
             let content_type = ContentType::parse(&attachment.content_type).map_err(|_| {
                 CompositionProblem::InvalidAttachmentType(attachment.content_type.clone())

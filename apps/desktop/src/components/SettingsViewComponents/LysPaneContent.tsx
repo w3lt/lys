@@ -3,20 +3,12 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   ArrowUpRight,
-  Check,
   Mail,
   Trash2
 } from "lucide-react"
-import {
-  useId,
-  useState,
-  type ChangeEvent,
-  type KeyboardEvent,
-  type ReactElement
-} from "react"
+import { useId, useState, type KeyboardEvent, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
-import { NativeSelect } from "@/components/ui/native-select"
 import { Switch } from "@/components/ui/switch"
 import { findEmailPreset } from "@/lib/models/email-presets"
 import { useLysStore } from "@/lib/store"
@@ -24,7 +16,6 @@ import {
   isEmailAccountCheckRunning,
   isEmailAccountSaveRunning
 } from "@/lib/store/email-settings"
-import { useLocalProfileStore } from "@/lib/store/local-profile"
 
 import {
   isRemovalQuestionShown,
@@ -46,31 +37,10 @@ import { useEmailMailboxView } from "./email-mailbox-view"
 import { formatEmailSecurityLabel } from "./email-presentation"
 import { handleFocusTargetAttach } from "./focus-target"
 import {
-  formatClockTime,
-  formatLysIdentitySummary,
   formatLysMailboxCheckMessage,
-  formatLysMailboxSummary,
-  formatTimeZoneOffset,
-  listTimeZones
+  formatLysMailboxSummary
 } from "./lys-presentation"
-import SettingsPanelField from "./SettingsPanelField"
 import SettingsPanelSection from "./SettingsPanelSection"
-
-/** One option of the time zone field. */
-type TimeZoneOption = {
-  /** IANA time zone. */
-  readonly zone: string
-  /** The zone with its offset from UTC. */
-  readonly label: string
-}
-
-/** Properties accepted by {@link LysTimeZoneField}. */
-type LysTimeZoneFieldProps = {
-  /** IANA time zone chosen now. */
-  readonly timeZone: string
-  /** Proposes another time zone. */
-  readonly onTimeZoneChange: (timeZone: string) => void
-}
 
 /** Properties accepted by {@link LysMailboxAside}. */
 type LysMailboxAsideProps = {
@@ -138,202 +108,6 @@ const SERVER_TITLES = Object.freeze({
   imap: "Incoming · IMAP",
   smtp: "Outgoing · SMTP"
 } satisfies Readonly<Record<LysMailboxServerProps["side"], string>>)
-
-/**
- * Presents Lys's portrait and the control that replaces it.
- *
- * @remarks The local profile store owns the portrait; the component owns no
- * state. Without a picked image the portrait shows the first letter of
- * Lys's name. The file input is inside its label, so the label's text
- * names it and activating the label opens the picker.
- * @returns The portrait column.
- */
-function LysPortrait(): ReactElement {
-  const name = useLocalProfileStore((state) => state.lysIdentity.name)
-  const portraitUrl = useLocalProfileStore((state) => state.lysPortraitUrl)
-  const replaceLysPortrait = useLocalProfileStore(
-    (state) => state.replaceLysPortrait
-  )
-
-  /**
-   * Replaces the portrait with the picked image, when one was picked.
-   *
-   * @param event - Change of the file input.
-   */
-  function handlePortraitPick(event: ChangeEvent<HTMLInputElement>): void {
-    const portrait = event.target.files?.[0]
-    if (portrait !== undefined) replaceLysPortrait(portrait)
-  }
-
-  return (
-    <div className="settings-view__portrait-column">
-      <div aria-hidden="true" className="settings-view__portrait">
-        {portraitUrl === null ? (
-          <span className="settings-view__portrait-initial">
-            {name.trim().charAt(0).toUpperCase()}
-          </span>
-        ) : (
-          <img alt="" src={portraitUrl} />
-        )}
-      </div>
-      <label className="settings-view__portrait-change">
-        <span>Change portrait</span>
-        <input
-          accept="image/*"
-          className="sr-only"
-          onChange={handlePortraitPick}
-          type="file"
-        />
-      </label>
-    </div>
-  )
-}
-
-/**
- * Builds the options of the time zone field.
- *
- * @param currentTimeZone - The zone chosen now.
- * @returns Each zone with its offset from UTC now.
- */
-function buildTimeZoneOptions(
-  currentTimeZone: string
-): readonly TimeZoneOption[] {
-  const now = new Date()
-  return listTimeZones(currentTimeZone).map((zone) => ({
-    zone,
-    label: `${zone} · ${formatTimeZoneOffset(zone, now)}`
-  }))
-}
-
-/**
- * Presents the choice of Lys's time zone.
- *
- * @remarks The parent owns the zone; the field owns only its list. Each
- * zone is listed with its offset from UTC when the field mounted; the list
- * is built once, with the zone chosen then, and every other zone it shows
- * comes from it.
- * @param props - The zone and the change proposal.
- * @returns The field.
- */
-function LysTimeZoneField({
-  timeZone,
-  onTimeZoneChange
-}: LysTimeZoneFieldProps): ReactElement {
-  const fieldId = useId()
-  const [options] = useState(() => buildTimeZoneOptions(timeZone))
-
-  return (
-    <div className="settings-view__panel-field">
-      <label htmlFor={fieldId}>Time zone</label>
-      <NativeSelect
-        aria-describedby={`${fieldId}-help`}
-        id={fieldId}
-        onChange={(event) => onTimeZoneChange(event.target.value)}
-        value={timeZone}
-      >
-        {options.map((option) => (
-          <option key={option.zone} value={option.zone}>
-            {option.label}
-          </option>
-        ))}
-      </NativeSelect>
-      <p className="settings-view__panel-help" id={`${fieldId}-help`}>
-        Dates and times in Lys&apos;s messages use this zone.
-      </p>
-    </div>
-  )
-}
-
-/**
- * Presents the fields of how Lys introduces itself: name, full name, time
- * zone, languages, and signature.
- *
- * @remarks The local profile store owns the values; the fields own no
- * state. Each change is kept at once.
- * @returns The fields.
- */
-function AboutLysFields(): ReactElement {
-  const identity = useLocalProfileStore((state) => state.lysIdentity)
-  const update = useLocalProfileStore((state) => state.updateLysIdentity)
-
-  return (
-    <div className="settings-view__panel-fields">
-      <SettingsPanelField
-        help="Used in the From line and when Lys introduces itself."
-        isOptional={false}
-        label="Name"
-        onValueChange={(name) => update({ name })}
-        rows={null}
-        value={identity.name}
-      />
-      <SettingsPanelField
-        help="Given when someone asks Lys for its full name."
-        isOptional
-        label="Full name"
-        onValueChange={(fullName) => update({ fullName })}
-        rows={null}
-        value={identity.fullName}
-      />
-      <LysTimeZoneField
-        onTimeZoneChange={(timeZone) => update({ timeZone })}
-        timeZone={identity.timeZone}
-      />
-      <SettingsPanelField
-        help="The first is used unless a message is in another."
-        isOptional={false}
-        label="Writes in"
-        onValueChange={(writesIn) => update({ writesIn })}
-        rows={null}
-        value={identity.writesIn}
-      />
-      <SettingsPanelField
-        help="Added under every email Lys sends from its own address."
-        isOptional={false}
-        label="Signature"
-        onValueChange={(signature) => update({ signature })}
-        rows={3}
-        value={identity.signature}
-      />
-    </div>
-  )
-}
-
-/**
- * Presents the About Lys section: how Lys introduces itself.
- *
- * @remarks The local profile store owns the values and when they last
- * changed; the section owns no state. Each change is kept at once; the
- * header says when the latest one was made.
- * @returns The section.
- */
-function AboutLysSection(): ReactElement {
-  const identity = useLocalProfileStore((state) => state.lysIdentity)
-  const editedAt = useLocalProfileStore((state) => state.lysIdentityEditedAt)
-
-  return (
-    <SettingsPanelSection
-      aside={
-        editedAt === null ? null : (
-          <span className="settings-view__saved-at">
-            <Check aria-hidden="true" />
-            Saved at {formatClockTime(editedAt)}
-          </span>
-        )
-      }
-      description={null}
-      eyebrow="About Lys"
-      leading={null}
-      section="about-lys"
-      summary={formatLysIdentitySummary(identity)}
-      title="How Lys introduces itself"
-    >
-      <div className="settings-view__about-lys">
-        <LysPortrait />
-        <AboutLysFields />
-      </div>
-    </SettingsPanelSection>
-  )
-}
 
 /**
  * Presents the Email section's header aside: the mailbox's status and,
@@ -911,7 +685,6 @@ function LysEmailSection(): ReactElement {
 export default function LysPane(): ReactElement {
   return (
     <div className="settings-view__panels">
-      <AboutLysSection />
       <LysEmailSection />
     </div>
   )

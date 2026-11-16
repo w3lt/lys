@@ -18,8 +18,10 @@ import {
   buildEmailServerCommand,
   buildEmailServerSettings,
   EMAIL_ACCOUNT_VARIABLE_NAME,
+  EMAIL_SIGNATURE_VARIABLE_NAME,
   EmailMcpServer,
-  LYS_EMAIL_ACCOUNT_VARIABLE_NAME
+  LYS_EMAIL_ACCOUNT_VARIABLE_NAME,
+  LYS_EMAIL_SIGNATURE_VARIABLE_NAME
 } from "../../../../../../src/modules/mcp/builtIn/email/emailServer"
 import {
   buildEmailAccount,
@@ -40,6 +42,7 @@ const INSTALLED_COMMAND = buildEmailServerCommand(
 /** The person's mailbox, served. */
 const PERSON_MAILBOX = Object.freeze({
   variableName: EMAIL_ACCOUNT_VARIABLE_NAME,
+  signatureVariableName: EMAIL_SIGNATURE_VARIABLE_NAME,
   account: ACCOUNT,
   password: SYNTHETIC_EMAIL_PASSWORD
 })
@@ -47,6 +50,7 @@ const PERSON_MAILBOX = Object.freeze({
 /** Lys's own mailbox, served. */
 const LYS_MAILBOX = Object.freeze({
   variableName: LYS_EMAIL_ACCOUNT_VARIABLE_NAME,
+  signatureVariableName: LYS_EMAIL_SIGNATURE_VARIABLE_NAME,
   account: LYS_ACCOUNT,
   password: SYNTHETIC_EMAIL_PASSWORD
 })
@@ -57,10 +61,22 @@ const PERSON_VARIABLE = Object.freeze({
   value: buildEmailAccountVariable(ACCOUNT, SYNTHETIC_EMAIL_PASSWORD)
 })
 
+/** The variable that holds the person's JSON-encoded signature. */
+const PERSON_SIGNATURE_VARIABLE = Object.freeze({
+  name: EMAIL_SIGNATURE_VARIABLE_NAME,
+  value: JSON.stringify(ACCOUNT.signature)
+})
+
 /** The variable that holds Lys's account and its password. */
 const LYS_VARIABLE = Object.freeze({
   name: LYS_EMAIL_ACCOUNT_VARIABLE_NAME,
   value: buildEmailAccountVariable(LYS_ACCOUNT, SYNTHETIC_EMAIL_PASSWORD)
+})
+
+/** The variable that holds Lys's JSON-encoded signature. */
+const LYS_SIGNATURE_VARIABLE = Object.freeze({
+  name: LYS_EMAIL_SIGNATURE_VARIABLE_NAME,
+  value: JSON.stringify(LYS_ACCOUNT.signature)
 })
 
 /** Read of both accounts, saved and usable. */
@@ -185,9 +201,22 @@ describe("buildEmailAccountVariable", () => {
 
 describe("buildEmailServerSettings", () => {
   it.each([
-    ["the person's", [PERSON_MAILBOX], [PERSON_VARIABLE]],
-    ["Lys's", [LYS_MAILBOX], [LYS_VARIABLE]],
-    ["both", [PERSON_MAILBOX, LYS_MAILBOX], [PERSON_VARIABLE, LYS_VARIABLE]]
+    [
+      "the person's",
+      [PERSON_MAILBOX],
+      [PERSON_VARIABLE, PERSON_SIGNATURE_VARIABLE]
+    ],
+    ["Lys's", [LYS_MAILBOX], [LYS_VARIABLE, LYS_SIGNATURE_VARIABLE]],
+    [
+      "both",
+      [PERSON_MAILBOX, LYS_MAILBOX],
+      [
+        PERSON_VARIABLE,
+        PERSON_SIGNATURE_VARIABLE,
+        LYS_VARIABLE,
+        LYS_SIGNATURE_VARIABLE
+      ]
+    ]
   ])(
     "builds switched-on stdio settings named email with a variable for each of %s mailboxes",
     (_label, mailboxes, environment) => {
@@ -223,9 +252,26 @@ describe("EmailMcpServer", () => {
   })
 
   it.each([
-    ["the person's", buildMcpSettings(true, false), [PERSON_VARIABLE]],
-    ["Lys's", buildMcpSettings(false, true), [LYS_VARIABLE]],
-    ["both", buildMcpSettings(true, true), [PERSON_VARIABLE, LYS_VARIABLE]]
+    [
+      "the person's",
+      buildMcpSettings(true, false),
+      [PERSON_VARIABLE, PERSON_SIGNATURE_VARIABLE]
+    ],
+    [
+      "Lys's",
+      buildMcpSettings(false, true),
+      [LYS_VARIABLE, LYS_SIGNATURE_VARIABLE]
+    ],
+    [
+      "both",
+      buildMcpSettings(true, true),
+      [
+        PERSON_VARIABLE,
+        PERSON_SIGNATURE_VARIABLE,
+        LYS_VARIABLE,
+        LYS_SIGNATURE_VARIABLE
+      ]
+    ]
   ])(
     "reads the saved accounts again on each read, and starts the server with only %s mailboxes, those switched on",
     async (_label, settings, environment) => {

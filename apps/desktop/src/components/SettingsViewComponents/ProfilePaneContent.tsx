@@ -393,8 +393,7 @@ export default function ProfilePane(): ReactElement {
       <NotesSection />
       <p className="settings-view__closing-note">
         Kept on this machine. A change applies from the next request; past
-        conversations keep what they were sent. Lys&apos;s own name and
-        signature are under{" "}
+        conversations keep what they were sent. Lys&apos;s own name is under{" "}
         <Button
           onClick={() => setSettingsPane("lys")}
           type="button"

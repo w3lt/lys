@@ -77,8 +77,7 @@ describe("formatLysIdentitySummary", () => {
         name: "Lys",
         fullName: " ",
         timeZone: "Europe/Paris",
-        writesIn: "English, French",
-        signature: "Lys"
+        writesIn: "English, French"
       })
     ).toBe("Lys · Europe/Paris · English, French")
   })

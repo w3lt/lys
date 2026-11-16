@@ -1,7 +1,7 @@
 //! Which mailbox a tool works on: the person's own, or Lys's own.
 //!
 //! One process serves either mailbox or both. Each mailbox has its own
-//! account variable, its own tool names, and its own form of message id, so
+//! account and signature variables, its own tool names, and its own form of message id, so
 //! that a call never reaches the other mailbox by mistake. Logs name the
 //! mailbox, never its address.
 
@@ -24,6 +24,20 @@ impl Mailbox {
         match self {
             Self::Person => "LYS_EMAIL_ACCOUNT",
             Self::Lys => "LYS_EMAIL_LYS_ACCOUNT",
+        }
+    }
+
+    /// The environment variable that holds this mailbox's optional
+    /// JSON-encoded signature.
+    ///
+    /// # Returns
+    ///
+    /// `LYS_EMAIL_SIGNATURE` for the person's mailbox and
+    /// `LYS_EMAIL_LYS_SIGNATURE` for Lys's.
+    pub fn signature_variable_name(self) -> &'static str {
+        match self {
+            Self::Person => "LYS_EMAIL_SIGNATURE",
+            Self::Lys => "LYS_EMAIL_LYS_SIGNATURE",
         }
     }
 

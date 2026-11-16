@@ -1205,7 +1205,7 @@
           "security": "tls"
         },
         "serverKeepsSentCopy": true,
-        "signature": "Regards"
+        "unknown": "value"
       }
     },
     "accepted": false

@@ -1,4 +1,4 @@
-import { MAXIMUM_SETTINGS_FILE_BYTES } from "@lys/share"
+import { emailAccountSchema, MAXIMUM_SETTINGS_FILE_BYTES } from "@lys/share"
 import { readFileSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { describe, expect, it } from "vitest"
@@ -23,6 +23,7 @@ const ACCOUNT = Object.freeze({
   address: "person@example.com",
   displayName: "A Person",
   userName: "person@example.com",
+  signature: "",
   imap: { host: "imap.example.com", port: 993, security: "tls" },
   smtp: { host: "smtp.example.com", port: 587, security: "starttls" },
   serverKeepsSentCopy: true
@@ -33,6 +34,7 @@ const LYS_ACCOUNT = Object.freeze({
   address: "lys@example.net",
   displayName: "Lys",
   userName: "lys@example.net",
+  signature: "",
   imap: { host: "imap.example.net", port: 993, security: "tls" },
   smtp: { host: "smtp.example.net", port: 465, security: "tls" },
   serverKeepsSentCopy: false
@@ -221,7 +223,7 @@ describe("readEmailAccounts", () => {
   it.each([
     ["an account without an address", { ...ACCOUNT, address: undefined }],
     ["an account with an address without @", { ...ACCOUNT, address: "person" }],
-    ["an account with an unknown field", { ...ACCOUNT, signature: "Regards" }],
+    ["an account with an unknown field", { ...ACCOUNT, unknown: "value" }],
     [
       "an account with a plain connection to a remote host",
       { ...ACCOUNT, imap: { ...ACCOUNT.imap, security: "plain" } }
@@ -411,7 +413,7 @@ describe("readEmailAccounts on the groups shared with the desktop host", () => {
   ): Readonly<Record<string, unknown>> {
     return account === null
       ? { status: "missing" }
-      : { status: "read", account, password }
+      : { status: "read", account: emailAccountSchema.parse(account), password }
   }
 
   it.each(sharedEmailGroupCases.filter((sharedCase) => sharedCase.accepted))(

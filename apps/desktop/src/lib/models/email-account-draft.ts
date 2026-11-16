@@ -33,6 +33,8 @@ export type EmailAccountDraft = {
   readonly address: string
   /** Display name as typed. */
   readonly displayName: string
+  /** Plain-text signature as typed; line breaks are kept. */
+  readonly signature: string
   /** User name as typed. */
   readonly userName: string
   /** Password as typed; empty keeps the saved password. */
@@ -56,6 +58,7 @@ export type EmailAccountDraft = {
 export type EmailAccountDraftField =
   | "address"
   | "displayName"
+  | "signature"
   | "userName"
   | "password"
   | "imapHost"
@@ -106,6 +109,7 @@ export const EMAIL_ACCOUNT_DRAFT_FIELDS: readonly EmailAccountDraftField[] =
   Object.freeze([
     "address",
     "displayName",
+    "signature",
     "userName",
     "password",
     "imapHost",
@@ -125,6 +129,7 @@ const EMPTY_SERVER_DRAFT: EmailServerDraft = Object.freeze({
 const EMPTY_ACCOUNT_DRAFT: EmailAccountDraft = Object.freeze({
   address: "",
   displayName: "",
+  signature: "",
   userName: "",
   password: "",
   imap: EMPTY_SERVER_DRAFT,
@@ -229,6 +234,7 @@ export function buildEmailAccountDraft(
   return {
     address: account.address,
     displayName: account.displayName,
+    signature: account.signature,
     userName: account.userName,
     password: "",
     imap: buildServerDraft(account.imap),
@@ -417,6 +423,7 @@ function buildAccountCandidate(
   return {
     address: draft.address.trim(),
     displayName: draft.displayName.trim(),
+    signature: draft.signature,
     userName: draft.userName.trim(),
     imap: buildServerCandidate(draft.imap),
     smtp: buildServerCandidate(draft.smtp),
@@ -480,6 +487,7 @@ function findPlacedAccountProblem(
   switch (group) {
     case "address":
     case "displayName":
+    case "signature":
     case "userName":
       return [group, issue.message]
     case "imap":
@@ -596,6 +604,7 @@ function isEmailAccountEqual(
     savedAccount !== null &&
     account.address === savedAccount.address &&
     account.displayName === savedAccount.displayName &&
+    account.signature === savedAccount.signature &&
     account.userName === savedAccount.userName &&
     account.serverKeepsSentCopy === savedAccount.serverKeepsSentCopy &&
     isEmailServerEqual(account.imap, savedAccount.imap) &&
@@ -676,6 +685,7 @@ export function isEmailAccountDraftDifferent(
   return !(
     draft.address === shown.address &&
     draft.displayName === shown.displayName &&
+    draft.signature === shown.signature &&
     draft.userName === shown.userName &&
     draft.password === shown.password &&
     hasEmailServerChoices(draft, shown)

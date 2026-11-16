@@ -2,7 +2,6 @@ import {
   LOOPBACK_EMAIL_HOSTS,
   MAXIMUM_EMAIL_ADDRESS_LENGTH,
   MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH,
-  MAXIMUM_EMAIL_LOCAL_PART_LENGTH,
   MAXIMUM_EMAIL_PASSWORD_LENGTH,
   MAXIMUM_EMAIL_USER_NAME_LENGTH,
   MAXIMUM_TCP_PORT,
@@ -10,7 +9,7 @@ import {
   type EmailPassword,
   type EmailSecurity
 } from "@lys/share"
-import { Eye } from "lucide-react"
+import { Eye, EyeOff } from "lucide-react"
 import {
   useEffectEvent,
   useId,
@@ -26,6 +25,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   buildEmailAccountDraft,
@@ -102,11 +102,15 @@ type EmailAccountCardProps = {
   readonly onMailboxOnChange: (isOn: boolean) => void
 }
 
-/** Host of one field's input, which the card moves focus to. */
+/** Host of a single-line field's input, which the card moves focus to. */
 type EmailFieldRef = RefObject<HTMLInputElement | null>
 
 /** Hosts of the card's inputs, by field. */
-type EmailFieldRefs = Readonly<Record<EmailAccountDraftField, EmailFieldRef>>
+type EmailFieldRefs = Readonly<
+  Record<Exclude<EmailAccountDraftField, "signature">, EmailFieldRef> & {
+    signature: RefObject<HTMLTextAreaElement | null>
+  }
+>
 
 /** What a field's label names. */
 type EmailFieldLabelTarget =
@@ -132,8 +136,16 @@ type EmailFieldTopProps = {
   /** Whether the account needs a value here, shown beside the label. */
   readonly isRequired: boolean
   /** Identifier the hint takes, which the input or group refers to. */
-  readonly hintId: string
+  readonly hintId?: string
   /** Rule of the field, shown beside the label before entry. */
+  readonly hint?: string
+}
+
+/** Properties accepted by {@link EmailFieldHint}. */
+type EmailFieldHintProps = {
+  /** Identifier referenced by the input or group the rule describes. */
+  readonly id: string
+  /** Rule the input or group must follow. */
   readonly hint: string
 }
 
@@ -340,6 +352,52 @@ type EmailAccountFieldsProps = {
    * edit, which leaves Escape its native action.
    */
   readonly onDiscardEdit?: () => void
+}
+
+/** Properties accepted by {@link EmailSignatureField}. */
+type EmailSignatureFieldProps = {
+  /** Plain-text signature as typed. */
+  readonly text: string
+  /** Why the text breaks a rule, or undefined. */
+  readonly problem: string | undefined
+  /** Host of the textarea, which the card moves focus to. */
+  readonly fieldRef: RefObject<HTMLTextAreaElement | null>
+  /** Proposes new text for the field. */
+  readonly onTextChange: (text: string) => void
+  /** Proposes discarding the card's edit on Escape. */
+  readonly onDiscardEdit?: () => void
+}
+
+/** Properties accepted by {@link EmailSignatureControl}. */
+type EmailSignatureControlProps = {
+  /** Identifier of the textarea. */
+  readonly id: string
+  /** Identifier of the textarea hint. */
+  readonly hintId: string
+  /** Identifier of the validation problem. */
+  readonly problemId: string
+  /** Identifier of the note under the textarea. */
+  readonly noteId: string
+  /** Plain-text signature as typed. */
+  readonly text: string
+  /** Why the text breaks a rule, or undefined. */
+  readonly problem: string | undefined
+  /** Host of the textarea, which the card moves focus to. */
+  readonly fieldRef: RefObject<HTMLTextAreaElement | null>
+  /** Proposes new text for the field. */
+  readonly onTextChange: (text: string) => void
+  /** Proposes discarding the card's edit on Escape. */
+  readonly onDiscardEdit?: () => void
+}
+
+/** Properties accepted by {@link EmailAccountProblemSummary}. */
+type EmailAccountProblemSummaryProps = {
+  /** Problems in the account fields, in their display order. */
+  readonly problems: readonly McpDraftProblemListing<EmailAccountDraftField>[]
+  /** Host the parent moves focus to when a save is rejected. */
+  readonly summaryRef: RefObject<HTMLFieldSetElement | null>
+  /** Requests that the parent move focus to one field. */
+  readonly onSelectField: (field: EmailAccountDraftField) => void
 }
 
 /** Properties accepted by {@link EmailMailboxSwitch}. */
@@ -561,8 +619,8 @@ function buildDescriptionIds(
  * @param onDiscardEdit - Proposes discarding the card's edit; undefined
  * while there is no edit, which leaves Escape its native action.
  */
-function handleFieldKeyDown(
-  event: KeyboardEvent<HTMLInputElement>,
+function handleFieldKeyDown<TField extends HTMLElement>(
+  event: KeyboardEvent<TField>,
   onDiscardEdit: (() => void) | undefined
 ): void {
   if (event.key !== "Escape" || event.nativeEvent.isComposing) return
@@ -573,16 +631,32 @@ function handleFieldKeyDown(
 }
 
 /**
- * Presents a field's label, whether the account needs a value there, and
- * the field's rule, on one line.
+ * Presents the rule that an input or group must follow.
+ *
+ * @remarks The parent owns the rule and its identifier; the component owns
+ * no state or effects. Its identifier lets the input or group refer to the
+ * rule as an accessible description.
+ * @param props - The identifier and rule.
+ * @returns The field rule.
+ */
+function EmailFieldHint({ id, hint }: EmailFieldHintProps): ReactElement {
+  return (
+    <span className="settings-view__email-field-rule" id={id}>
+      {hint}
+    </span>
+  )
+}
+
+/**
+ * Presents a field's label and whether the account needs a value there.
  *
  * @remarks The field owns every value; the component owns no state or
  * effects. An input's label is a `label` element; a group's is a plain span
  * that the group refers to. The required marker is text beside the label,
  * outside it, so the name stays the label; the input itself carries the
- * required state. The hint takes `hintId`, so that the input or group whose
- * rule it states refers to it.
- * @param props - Label target, label, requirement, and hint.
+ * required state. An optional hint is shown beside the label and takes
+ * `hintId`, so that the input or group whose rule it states refers to it.
+ * @param props - Label target, label, requirement, and optional hint.
  * @returns The label line.
  */
 function EmailFieldTop({
@@ -600,9 +674,9 @@ function EmailFieldTop({
           <span className="settings-view__email-field-rule">required</span>
         ) : null}
       </span>
-      <span className="settings-view__email-field-rule" id={hintId}>
-        {hint}
-      </span>
+      {hintId === undefined || hint === undefined ? null : (
+        <EmailFieldHint hint={hint} id={hintId} />
+      )}
     </div>
   )
 }
@@ -703,8 +777,6 @@ function EmailTextField({
   return (
     <div className="settings-view__email-field">
       <EmailFieldTop
-        hint={hint}
-        hintId={hintId}
         isRequired={isRequired}
         label={label}
         target={{ kind: "control", controlId: fieldId }}
@@ -727,8 +799,99 @@ function EmailTextField({
         type="text"
         value={text}
       />
+      <EmailFieldHint hint={hint} id={hintId} />
       <EmailFieldProblem id={problemId} problem={problem} />
     </div>
+  )
+}
+
+/**
+ * Presents the account's optional plain-text signature.
+ *
+ * @remarks The card owns the text; the textarea owns no state or effects.
+ * Line breaks are preserved and the textarea is described by its hint,
+ * problem, and note. Escape proposes discarding the card's edit, except
+ * when it ends text composition.
+ * @param props - Text, problem, textarea ref, and change proposals.
+ * @returns The signature textarea and its descriptions.
+ */
+function EmailSignatureField({
+  text,
+  problem,
+  fieldRef,
+  onTextChange,
+  onDiscardEdit
+}: EmailSignatureFieldProps): ReactElement {
+  const fieldId = useId()
+  const hintId = `${fieldId}-hint`
+  const problemId = `${fieldId}-problem`
+  const noteId = `${fieldId}-note`
+  return (
+    <div className="settings-view__email-field">
+      <div className="settings-view__email-signature-top">
+        <span className="settings-view__email-field-label">
+          <label htmlFor={fieldId}>Signature</label>
+          <span className="settings-view__email-field-rule">optional</span>
+        </span>
+        <EmailFieldHint hint="Plain text, line breaks kept." id={hintId} />
+      </div>
+      <EmailSignatureControl
+        fieldRef={fieldRef}
+        id={fieldId}
+        hintId={hintId}
+        noteId={noteId}
+        onDiscardEdit={onDiscardEdit}
+        onTextChange={onTextChange}
+        problem={problem}
+        problemId={problemId}
+        text={text}
+      />
+    </div>
+  )
+}
+
+/**
+ * Presents the signature textarea and its problem and explanatory note.
+ *
+ * @remarks The parent owns the text and identifiers; the textarea owns no
+ * state or effects. Escape proposes discarding the card's edit, except
+ * when it ends text composition.
+ * @param props - Text, descriptions, textarea ref, and change proposals.
+ * @returns The multiline input and its descriptions.
+ */
+function EmailSignatureControl({
+  id,
+  hintId,
+  problemId,
+  noteId,
+  text,
+  problem,
+  fieldRef,
+  onTextChange,
+  onDiscardEdit
+}: EmailSignatureControlProps): ReactElement {
+  const note =
+    "Added under every email sent from this mailbox, new messages and replies alike."
+
+  return (
+    <>
+      <Textarea
+        aria-describedby={buildDescriptionIds([
+          hintId,
+          problem === undefined ? undefined : problemId,
+          noteId
+        ])}
+        aria-invalid={problem === undefined ? undefined : true}
+        id={id}
+        onChange={(event) => onTextChange(event.target.value)}
+        onKeyDown={(event) => handleFieldKeyDown(event, onDiscardEdit)}
+        ref={fieldRef}
+        rows={4}
+        value={text}
+      />
+      <EmailFieldProblem id={problemId} problem={problem} />
+      <EmailFieldNote id={noteId} note={note} />
+    </>
   )
 }
 
@@ -784,7 +947,11 @@ function EmailPasswordInput({
         type="button"
         variant="ghost"
       >
-        <Eye aria-hidden="true" />
+        {isPasswordShown ? (
+          <EyeOff aria-hidden="true" />
+        ) : (
+          <Eye aria-hidden="true" />
+        )}
       </Button>
     </div>
   )
@@ -795,13 +962,13 @@ function EmailPasswordInput({
  * text breaks a rule, what to change.
  *
  * @remarks The card owns the text and whether the password is shown; the
- * field owns no state or effects. It starts empty, and a hint beside the
- * label states the password's rule before entry. While a password is
- * saved, bullets stand for it and a note says an empty field keeps it;
- * otherwise the field says beside the label that it is required and is
- * marked required. The input is described by its hint, then by its
- * problem, when it has one, then by the note while a password is saved.
- * The saved password is never put in the field.
+ * field owns no state or effects. A hint under the input states the
+ * password's rule before entry. While a password is saved, bullets stand
+ * for it and a note says an empty field keeps it; otherwise the field says
+ * beside the label that it is required and is marked required. The input
+ * is described by its hint, then by its problem, when it has one, then by
+ * the note while a password is saved. The saved password is never put in
+ * the field.
  * @param props - Text, problem, saved state, shown state, ref, and the
  * proposals.
  * @returns The field.
@@ -819,7 +986,7 @@ function EmailPasswordField({
   /** Note of the password field while a password is saved. */
   const emailPasswordKeptNote = "Leave empty to keep the saved password."
 
-  /** Rule of a password, shown beside its label before entry. */
+  /** Rule of a password, shown under its input before entry. */
   const emailPasswordHint = `up to ${MAXIMUM_EMAIL_PASSWORD_LENGTH}`
 
   const fieldId = useId()
@@ -830,8 +997,6 @@ function EmailPasswordField({
   return (
     <div className="settings-view__email-field">
       <EmailFieldTop
-        hint={emailPasswordHint}
-        hintId={hintId}
         isRequired={!hasSavedPassword}
         label="Password"
         target={{ kind: "control", controlId: fieldId }}
@@ -852,6 +1017,7 @@ function EmailPasswordField({
         onTextChange={onTextChange}
         text={text}
       />
+      <EmailFieldHint hint={emailPasswordHint} id={hintId} />
       <EmailFieldProblem id={problemId} problem={problem} />
       <EmailFieldNote
         id={noteId}
@@ -947,7 +1113,7 @@ function EmailServerFields({
   const emailHostHint = "ASCII host name, IPv4, or [IPv6]"
 
   /** Rule of a port, shown beside its label before entry. */
-  const emailPortHint = `1–${MAXIMUM_TCP_PORT}`
+  const emailPortHint = `1-${MAXIMUM_TCP_PORT}`
 
   return (
     <fieldset className="settings-view__email-server">
@@ -1025,19 +1191,18 @@ function EmailSentCopyField({
 }
 
 /**
- * Presents who the account is: its address, with the note of the preset
- * that applies, its display name, and its user name.
+ * Presents the account address with its preset note, the display name, and
+ * the optional signature.
  *
  * @remarks The card owns the fields; the component owns no state or
  * effects. Typing an address proposes the fields with the address's preset
  * filled in where {@link updateEmailAccountAddress} allows it. The address
- * and the user name are required, and each field's hint states its rule
- * before entry. The note under the address says which preset applies and
- * describes the address. Escape in an input proposes discarding the card's
- * edit.
+ * is required, and each field's hint states its rule before entry. The note
+ * under the address says which preset applies and describes the address.
+ * Escape in an input proposes discarding the card's edit.
  * @param props - Fields, problems, refs, and the proposals.
- * @returns The address, its note, the display name, and the user name, in
- * that order and in no wrapper.
+ * @returns The address and display name side by side, the preset note, and
+ * the signature field.
  */
 function EmailIdentityFields({
   draft,
@@ -1048,57 +1213,54 @@ function EmailIdentityFields({
 }: EmailIdentityFieldsProps): ReactElement {
   /**
    * Rule of an address, shown beside its label before entry: its shape, in
-   * ASCII, the length of the name before `@`, and its length in all.
+   * ASCII and its length in all.
    */
-  const emailAddressHint = `name@host in ASCII · name up to ${MAXIMUM_EMAIL_LOCAL_PART_LENGTH} · up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} in all`
+  const emailAddressHint = `name@host in ASCII · up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} in all`
 
   /** Rule of a display name, shown beside its label before entry. */
   const emailDisplayNameHint = `optional · up to ${MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH}`
-
-  /** Rule of a user name, shown beside its label before entry. */
-  const emailUserNameHint = `up to ${MAXIMUM_EMAIL_USER_NAME_LENGTH}`
 
   const presetId = useId()
   const presetNote = formatEmailPresetNote(draft)
 
   return (
     <>
-      <EmailTextField
-        autoComplete="email"
-        fieldRef={fieldRefs.address}
-        hint={emailAddressHint}
-        isRequired
-        label="Address"
-        noteId={presetNote === "" ? undefined : presetId}
-        onDiscardEdit={onDiscardEdit}
-        onTextChange={(address) =>
-          onDraftChange(updateEmailAccountAddress(draft, address))
-        }
-        problem={problems.address}
-        text={draft.address}
-      />
+      <div className="flex flex-row gap-4 justify-baseline">
+        <EmailTextField
+          autoComplete="email"
+          fieldRef={fieldRefs.address}
+          hint={emailAddressHint}
+          isRequired
+          label="Address"
+          noteId={presetNote === "" ? undefined : presetId}
+          onDiscardEdit={onDiscardEdit}
+          onTextChange={(address) =>
+            onDraftChange(updateEmailAccountAddress(draft, address))
+          }
+          problem={problems.address}
+          text={draft.address}
+        />
+        <EmailTextField
+          autoComplete="name"
+          fieldRef={fieldRefs.displayName}
+          hint={emailDisplayNameHint}
+          isRequired={false}
+          label="Display name"
+          onDiscardEdit={onDiscardEdit}
+          onTextChange={(displayName) =>
+            onDraftChange({ ...draft, displayName })
+          }
+          problem={problems.displayName}
+          text={draft.displayName}
+        />
+      </div>
       <EmailFieldNote id={presetId} note={presetNote} />
-      <EmailTextField
-        autoComplete="name"
-        fieldRef={fieldRefs.displayName}
-        hint={emailDisplayNameHint}
-        isRequired={false}
-        label="Display name"
+      <EmailSignatureField
+        fieldRef={fieldRefs.signature}
         onDiscardEdit={onDiscardEdit}
-        onTextChange={(displayName) => onDraftChange({ ...draft, displayName })}
-        problem={problems.displayName}
-        text={draft.displayName}
-      />
-      <EmailTextField
-        autoComplete="username"
-        fieldRef={fieldRefs.userName}
-        hint={emailUserNameHint}
-        isRequired
-        label="User name"
-        onDiscardEdit={onDiscardEdit}
-        onTextChange={(userName) => onDraftChange({ ...draft, userName })}
-        problem={problems.userName}
-        text={draft.userName}
+        onTextChange={(signature) => onDraftChange({ ...draft, signature })}
+        problem={problems.signature}
+        text={draft.signature}
       />
     </>
   )
@@ -1157,6 +1319,33 @@ function EmailAccountServers({
 }
 
 /**
+ * Presents the account-field problem summary when multiple fields have
+ * problems.
+ *
+ * @remarks The parent owns the problems, host, and focus move; the
+ * component owns no state. It returns no element while fewer than two
+ * fields have problems.
+ * @param props - Problems, the host, and the focus move.
+ * @returns The summary, or no element while it is not needed.
+ */
+function EmailAccountProblemSummary({
+  problems,
+  summaryRef,
+  onSelectField
+}: EmailAccountProblemSummaryProps): ReactElement | null {
+  if (problems.length < 2) return null
+
+  return (
+    <McpDraftProblemSummary
+      headingLevel={4}
+      onSelectField={onSelectField}
+      problems={problems}
+      summaryRef={summaryRef}
+    />
+  )
+}
+
+/**
  * Presents the account's fields, after the summary of their problems while
  * two or more have one.
  *
@@ -1166,8 +1355,8 @@ function EmailAccountServers({
  * heading, under the card's, whose buttons, one per input with a problem in
  * the card's order, ask the card to move focus to their input. The fields
  * form one group, disabled while a check, save, or removal runs: the
- * address with its preset note, the display name, the user name, the
- * password, the two servers, and the Sent copy switch.
+ * address and display name, the signature, the user name and password side
+ * by side, the two servers, and the Sent copy switch.
  * @param props - Fields, problems, hosts, saved and shown password, busy
  * state, and the proposals.
  * @returns The summary, while shown, and the group of fields.
@@ -1185,18 +1374,16 @@ function EmailAccountFields({
   onSelectField,
   onDiscardEdit
 }: EmailAccountFieldsProps): ReactElement {
-  const problemListings = listEmailDraftProblems(problems)
+  /** Rule of a user name, shown beside its label before entry. */
+  const emailUserNameHint = `up to ${MAXIMUM_EMAIL_USER_NAME_LENGTH}`
 
   return (
     <>
-      {problemListings.length > 1 ? (
-        <McpDraftProblemSummary
-          headingLevel={4}
-          onSelectField={onSelectField}
-          problems={problemListings}
-          summaryRef={summaryRef}
-        />
-      ) : null}
+      <EmailAccountProblemSummary
+        onSelectField={onSelectField}
+        problems={listEmailDraftProblems(problems)}
+        summaryRef={summaryRef}
+      />
       <fieldset className="settings-view__email-fields" disabled={isBusy}>
         <EmailIdentityFields
           draft={draft}
@@ -1205,16 +1392,29 @@ function EmailAccountFields({
           onDraftChange={onDraftChange}
           problems={problems}
         />
-        <EmailPasswordField
-          fieldRef={fieldRefs.password}
-          hasSavedPassword={hasSavedPassword}
-          isPasswordShown={isPasswordShown}
-          onDiscardEdit={onDiscardEdit}
-          onIsPasswordShownChange={onIsPasswordShownChange}
-          onTextChange={(password) => onDraftChange({ ...draft, password })}
-          problem={problems.password}
-          text={draft.password}
-        />
+        <div className="flex flex-row gap-4 justify-baseline">
+          <EmailTextField
+            autoComplete="username"
+            fieldRef={fieldRefs.userName}
+            hint={emailUserNameHint}
+            isRequired
+            label="User name"
+            onDiscardEdit={onDiscardEdit}
+            onTextChange={(userName) => onDraftChange({ ...draft, userName })}
+            problem={problems.userName}
+            text={draft.userName}
+          />
+          <EmailPasswordField
+            fieldRef={fieldRefs.password}
+            hasSavedPassword={hasSavedPassword}
+            isPasswordShown={isPasswordShown}
+            onDiscardEdit={onDiscardEdit}
+            onIsPasswordShownChange={onIsPasswordShownChange}
+            onTextChange={(password) => onDraftChange({ ...draft, password })}
+            problem={problems.password}
+            text={draft.password}
+          />
+        </div>
         <EmailAccountServers
           draft={draft}
           fieldRefs={fieldRefs}
@@ -1450,6 +1650,7 @@ function useEmailFieldHosts(
   const problemListings = listEmailDraftProblems(problems)
   const addressRef = useRef<HTMLInputElement>(null)
   const displayNameRef = useRef<HTMLInputElement>(null)
+  const signatureRef = useRef<HTMLTextAreaElement>(null)
   const userNameRef = useRef<HTMLInputElement>(null)
   const passwordRef = useRef<HTMLInputElement>(null)
   const imapHostRef = useRef<HTMLInputElement>(null)
@@ -1460,6 +1661,7 @@ function useEmailFieldHosts(
   const fieldRefs: EmailFieldRefs = {
     address: addressRef,
     displayName: displayNameRef,
+    signature: signatureRef,
     userName: userNameRef,
     password: passwordRef,
     imapHost: imapHostRef,

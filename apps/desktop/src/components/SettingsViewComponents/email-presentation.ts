@@ -122,6 +122,7 @@ function listEmailDraftFieldProblem(
   const emailDraftFieldLabels = Object.freeze({
     address: "Address",
     displayName: "Display name",
+    signature: "Signature",
     userName: "User name",
     password: "Password",
     imapHost: "IMAP host",

@@ -53,6 +53,9 @@ export const MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH = 100
  */
 export const MAXIMUM_EMAIL_USER_NAME_LENGTH = 254
 
+/** Most Unicode code points an email account's plain-text signature may hold. */
+export const MAXIMUM_EMAIL_SIGNATURE_LENGTH = 1_000
+
 /**
  * Hosts a mail server may be reached on without TLS, in lowercase: the
  * machine Lys runs on.
@@ -221,6 +224,23 @@ const emailUserNameSchema = z
   )
 
 /**
+ * Validates a plain-text signature up to 1,000 Unicode code points.
+ *
+ * @remarks Line feeds and tabs are allowed; other control characters are
+ * rejected, and the input text is preserved without trimming.
+ */
+export const emailSignatureSchema = z
+  .string()
+  .refine(
+    (value) => Array.from(value).length <= MAXIMUM_EMAIL_SIGNATURE_LENGTH,
+    `A signature is up to ${MAXIMUM_EMAIL_SIGNATURE_LENGTH} characters.`
+  )
+  .refine(
+    (value) => !/\p{Cc}/u.test(value.replaceAll("\n", "").replaceAll("\t", "")),
+    "A signature has no control characters other than line breaks and tabs."
+  )
+
+/**
  * Validates how Lys secures its connection to a mail server: `tls` connects
  * with TLS from the first byte, `starttls` connects in plain text and then
  * upgrades with STARTTLS, which Lys requires to succeed, and `plain` never
@@ -288,11 +308,12 @@ export type EmailServerSettings = z.infer<typeof emailServerSettingsSchema>
 
 /**
  * Validates the email account Lys's email server works with: who the
- * person is, how it signs in, and the servers it reaches. The output is
- * frozen; unknown fields are rejected.
+ * person is, the mailbox signature, how it signs in, and the servers it
+ * reaches. The output is frozen; unknown fields are rejected.
  *
  * @remarks The password is not here: it lives in the `secrets` group as
- * `emailPassword`. The account is personal data.
+ * `emailPassword`. A signature missing from older settings defaults to
+ * empty. The account is personal data.
  */
 export const emailAccountSchema = z
   .strictObject({
@@ -302,6 +323,8 @@ export const emailAccountSchema = z
     displayName: emailDisplayNameSchema,
     /** Name the account signs in with. */
     userName: emailUserNameSchema,
+    /** Plain-text signature added after every message sent from this mailbox. */
+    signature: emailSignatureSchema.default(""),
     /** Server mail is read from. */
     imap: emailServerSettingsSchema,
     /** Server mail is sent through. */

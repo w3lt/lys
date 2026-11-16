@@ -10,8 +10,6 @@ export type LysIdentity = {
   readonly timeZone: string
   /** Languages Lys writes in, the first one by default. */
   readonly writesIn: string
-  /** Signature added under every email Lys sends from its own address. */
-  readonly signature: string
 }
 
 /** How Lys addresses the person, as the Profile pane's About you edits it. */
@@ -143,8 +141,7 @@ function buildInitialState(machineTimeZone: string): LocalProfileState {
       name: "Lys",
       fullName: "",
       timeZone: machineTimeZone,
-      writesIn: "English",
-      signature: "Lys"
+      writesIn: "English"
     },
     lysPortraitUrl: null,
     lysIdentityEditedAt: null,

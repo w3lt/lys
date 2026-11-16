@@ -41,8 +41,7 @@ describe("createLocalProfileStore", () => {
         name: "Lys",
         fullName: "",
         timeZone: "Europe/Paris",
-        writesIn: "English",
-        signature: "Lys"
+        writesIn: "English"
       },
       lysPortraitUrl: null,
       lysIdentityEditedAt: null,
@@ -70,7 +69,7 @@ describe("createLocalProfileStore", () => {
 
     expect(store.getState().lysIdentity).toMatchObject({
       name: "Iris",
-      signature: "Lys"
+      fullName: ""
     })
     expect(store.getState().lysIdentityEditedAt).toBe(FIRST_READ)
   })

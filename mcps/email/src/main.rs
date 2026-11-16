@@ -1,6 +1,7 @@
 //! The entry point: serves MCP over standard input and output for the
 //! mailboxes whose accounts are in `LYS_EMAIL_ACCOUNT` and
-//! `LYS_EMAIL_LYS_ACCOUNT`, or runs the account check for the account in
+//! `LYS_EMAIL_LYS_ACCOUNT`, with optional signatures in their matching
+//! signature variables, or runs the account check for the account in
 //! `LYS_EMAIL_ACCOUNT`, whichever mailbox it is for.
 
 use std::io::{self, Write};

@@ -519,6 +519,7 @@ mod tests {
                 "address": "person@example.com",
                 "displayName": "A Person",
                 "userName": "person@example.com",
+                "signature": "",
                 "imap": { "host": "imap.example.com", "port": 993, "security": "tls" },
                 "smtp": { "host": "smtp.example.com", "port": 587, "security": "starttls" },
                 "serverKeepsSentCopy": true
@@ -527,6 +528,7 @@ mod tests {
                 "address": "lys@example.net",
                 "displayName": "Lys",
                 "userName": "lys@example.net",
+                "signature": "",
                 "imap": { "host": "imap.example.net", "port": 993, "security": "tls" },
                 "smtp": { "host": "smtp.example.net", "port": 465, "security": "tls" },
                 "serverKeepsSentCopy": false
@@ -592,6 +594,7 @@ mod tests {
             account["address"],
             account["displayName"],
             account["userName"],
+            account["signature"],
             account["imap"],
             account["smtp"],
             account["serverKeepsSentCopy"]
@@ -922,7 +925,7 @@ mod tests {
         let mut newer_email_field = get_complete_settings();
         newer_email_field["email"]["signature"] = json!("Regards");
         let mut newer_account_field = get_complete_settings();
-        newer_account_field["email"]["account"]["signature"] = json!("Regards");
+        newer_account_field["email"]["account"]["unknown"] = json!("value");
         let mut control_character_password = get_complete_settings();
         control_character_password["secrets"]["emailPassword"] = json!("email-synthetic\n");
         let mut same_mailbox_twice = get_complete_settings();

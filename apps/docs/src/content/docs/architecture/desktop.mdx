@@ -406,8 +406,9 @@ person, in five sections:
   header, which starts on.
 
 The pane ends with "Kept on this machine. A change applies from the next
-request; past conversations keep what they were sent. Lys's own name and
-signature are under Lys.", the last word a link to the Lys pane. Only the
+request; past conversations keep what they were sent. Lys's own name is
+under Lys.", the last word a link to the Lys pane. Email signatures are set
+on each mailbox's email account card. Only the
 location is saved and reaches a model. About you, Preferences, and Notes for
 Lys are kept in the local profile store, and the estimate is computed from
 them; no request carries them, though the badges, the estimate, and the
@@ -1644,7 +1645,7 @@ sizes in a browser on every pane.
 - Parts of the Lys and Profile panes are interface only
   ([#379](https://github.com/w3lt/lys/issues/379)). The renderer's local
   profile store (`src/lib/store/local-profile.ts`) holds Lys's portrait, name,
-  full name, time zone, Writes in, and signature, About you, Preferences, and
+  full name, time zone, and Writes in, About you, Preferences, and
   Notes for Lys with its switch, in memory only: they are never saved to
   `settings.json`, never sent to the backend or a model, and start over when
   the window reloads or Lys restarts. No agent or request reads them, though

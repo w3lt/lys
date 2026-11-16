@@ -438,18 +438,22 @@ person's under the MCP pane's email server and Lys's in the Lys pane
 `lysAccount`, each or `null`, validated on load with the rules of
 `emailSettingsSchema` in `@lys/share`, which the renderer and the backend also
 check; the [configuration reference](/reference/configuration/#email-account)
-lists them. A missing group or a missing field means no account. A `null`
-group, an unknown field, or a broken rule makes loading fail, and an error
-about an account names the rule without quoting a value; an error about the
-group itself can quote the value. The two accounts must not open one
+lists them. A missing group or a missing account field means no account. A
+missing signature means an empty signature, as in settings written before
+the field existed. A signature is plain text, limited to 1,000 Unicode code
+points, and allows line feeds and tabs. A `null` group, an unknown field, or
+a broken rule makes loading fail, and an error about an account names the
+rule without quoting a value; an error about the group itself can quote the
+value. The two accounts must not open one
 mailbox: the same address, ignoring case, or the same user name on the same
 IMAP host and port, ignoring the case of the user name and the host, makes
 loading and saving fail with an error that says so without quoting either
 account, because Lys's tools, which the person may put on Just run, would
-then read the person's mailbox. The accounts are personal data:
-`Debug` output shows placeholders for the addresses, the names, and the mail
-servers' hosts. The passwords are not in this group but in `secrets`, and the
-host only stores them; the backend starts the email server with them.
+then read the person's mailbox. The accounts and signatures are personal
+data: `Debug` output shows placeholders for the addresses, names, signatures,
+and mail servers' hosts. The passwords are not in this group but in
+`secrets`, and the host only stores them; the backend starts the email server
+with them.
 
 The host only stores the `loadConfiguration` group. A settings file written
 before load configurations existed has no such group; `load_settings` reads it

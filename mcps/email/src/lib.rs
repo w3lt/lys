@@ -4,7 +4,9 @@
 //! The backend starts the `email` binary over stdio with each saved account
 //! and its password in an environment variable of its own,
 //! `LYS_EMAIL_ACCOUNT` for the person's mailbox and `LYS_EMAIL_LYS_ACCOUNT`
-//! for Lys's, and runs `email check` to sign in to both servers of either
+//! for Lys's; each mailbox's optional signature has a separate JSON-string
+//! variable, `LYS_EMAIL_SIGNATURE` or `LYS_EMAIL_LYS_SIGNATURE`. It runs
+//! `email check` to sign in to both servers of either
 //! account, given in `LYS_EMAIL_ACCOUNT`, before it is saved. One process
 //! serves either mailbox or both: Lys's tools are named with `lys_` before
 //! them and its ids with `lys.`, so that no call reaches the other mailbox,

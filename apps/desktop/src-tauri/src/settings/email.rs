@@ -102,6 +102,8 @@ struct EmailAccount {
     display_name: DisplayName,
     /// Name the account signs in with, often the address itself.
     user_name: UserName,
+    /// Plain-text signature added to every message sent from this mailbox.
+    signature: EmailSignature,
     /// Server mail is read from.
     imap: MailServer,
     /// Server mail is sent through.
@@ -163,6 +165,9 @@ struct StoredEmailAccount {
     display_name: String,
     /// User name text.
     user_name: String,
+    /// Signature text; missing means empty for settings written by older versions.
+    #[serde(default)]
+    signature: String,
     /// IMAP server object.
     #[serde(deserialize_with = "parse_json_object")]
     imap: StoredMailServer,
@@ -191,14 +196,44 @@ impl TryFrom<StoredEmailAccount> for EmailAccount {
         /// Rule of a user name, as an error message.
         const USER_NAME_RULE: &str = "a user name must be 1 to 254 characters, without control characters or white space at either end";
 
+        /// Rule of an email signature, as an error message.
+        const SIGNATURE_RULE: &str = "a signature must be at most 1000 characters and have no control characters other than line breaks and tabs";
+
+        let signature = EmailSignature::new(stored.signature).ok_or(SIGNATURE_RULE)?;
+
         Ok(Self {
             address: EmailAddress::new(stored.address).ok_or(ADDRESS_RULE)?,
             display_name: DisplayName::new(stored.display_name).ok_or(DISPLAY_NAME_RULE)?,
             user_name: UserName::new(stored.user_name).ok_or(USER_NAME_RULE)?,
+            signature,
             imap: MailServer::try_from(stored.imap)?,
             smtp: MailServer::try_from(stored.smtp)?,
             server_keeps_sent_copy: stored.server_keeps_sent_copy,
         })
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+/// Plain-text signature of one mailbox, kept out of diagnostic output.
+struct EmailSignature(String);
+
+impl EmailSignature {
+    /// Creates a signature when its length and characters follow the shared
+    /// account rules; line feeds and tabs are allowed.
+    fn new(value: String) -> Option<Self> {
+        let is_valid = value.chars().count() <= 1_000
+            && !value
+                .chars()
+                .any(|character| character.is_control() && character != '\n' && character != '\t');
+        is_valid.then_some(Self(value))
+    }
+}
+
+impl fmt::Debug for EmailSignature {
+    /// Writes a placeholder instead of the signature.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("EmailSignature(<redacted>)")
     }
 }
 
@@ -621,9 +656,17 @@ mod tests {
             (Err(_), false) => None,
             (Ok(settings), true) => {
                 let written = serde_json::to_value(&settings).expect("serialize");
+                let mut expected = case.written.expect("accepted case has written output");
+                for account_name in ["account", "lysAccount"] {
+                    if let Some(account) = expected
+                        .get_mut(account_name)
+                        .and_then(Value::as_object_mut)
+                    {
+                        account.entry("signature").or_insert(json!(""));
+                    }
+                }
 
-                (case.written.as_ref() != Some(&written))
-                    .then(|| format!("{}: writes {written}", case.case))
+                (expected != written).then(|| format!("{}: writes {written}", case.case))
             }
         }
     }
@@ -732,7 +775,7 @@ mod tests {
             assert_account_refused(build_account_with(field, Value::Null), "person@example.com");
         }
         assert_account_refused(
-            build_account_with("signature", json!("Regards")),
+            build_account_with("unknown", json!("Regards")),
             "person@example.com",
         );
         assert_account_refused(
@@ -1124,7 +1167,7 @@ mod tests {
                 "a mail server security must be",
             ),
             (
-                build_account_with("signature", json!("Regards")),
+                build_account_with("unknown", json!("Regards")),
                 "an email account must be an object",
             ),
         ] {

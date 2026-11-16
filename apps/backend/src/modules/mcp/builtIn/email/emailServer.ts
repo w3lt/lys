@@ -45,6 +45,12 @@ export const EMAIL_ACCOUNT_VARIABLE_NAME = "LYS_EMAIL_ACCOUNT"
  */
 export const LYS_EMAIL_ACCOUNT_VARIABLE_NAME = "LYS_EMAIL_LYS_ACCOUNT"
 
+/** Environment variable the email server reads the person's signature from. */
+export const EMAIL_SIGNATURE_VARIABLE_NAME = "LYS_EMAIL_SIGNATURE"
+
+/** Environment variable the email server reads Lys's signature from. */
+export const LYS_EMAIL_SIGNATURE_VARIABLE_NAME = "LYS_EMAIL_LYS_SIGNATURE"
+
 /** How the email server Lys ships is run, before any subcommand. */
 export type EmailServerCommand = Readonly<{
   /**
@@ -61,6 +67,10 @@ export type EmailServerMailbox = Readonly<{
   /** Environment variable the server reads the mailbox's account from. */
   variableName:
     typeof EMAIL_ACCOUNT_VARIABLE_NAME | typeof LYS_EMAIL_ACCOUNT_VARIABLE_NAME
+  /** Environment variable that holds this mailbox's JSON-encoded signature. */
+  signatureVariableName:
+    | typeof EMAIL_SIGNATURE_VARIABLE_NAME
+    | typeof LYS_EMAIL_SIGNATURE_VARIABLE_NAME
   /** Account the server signs in with; personal data. */
   account: EmailAccount
   /** Its password; a secret. */
@@ -71,6 +81,8 @@ export type EmailServerMailbox = Readonly<{
 type SwitchedOnMailbox = Readonly<{
   /** Environment variable the server would read the account from. */
   variableName: EmailServerMailbox["variableName"]
+  /** Environment variable used for this mailbox's signature. */
+  signatureVariableName: EmailServerMailbox["signatureVariableName"]
   /** Read of the mailbox's saved account and password. */
   read: EmailAccountRead
 }>
@@ -225,11 +237,13 @@ function listSwitchedOnMailboxes(
   if (switches.enabled)
     mailboxes.push({
       variableName: EMAIL_ACCOUNT_VARIABLE_NAME,
+      signatureVariableName: EMAIL_SIGNATURE_VARIABLE_NAME,
       read: accounts.person
     })
   if (switches.lysEnabled)
     mailboxes.push({
       variableName: LYS_EMAIL_ACCOUNT_VARIABLE_NAME,
+      signatureVariableName: LYS_EMAIL_SIGNATURE_VARIABLE_NAME,
       read: accounts.lys
     })
   return Object.freeze(mailboxes)
@@ -280,7 +294,14 @@ function listServedMailbox(
   const { variableName, read } = mailbox
   if (read.status !== "read") return NO_MAILBOXES
   const { account, password } = read
-  return [Object.freeze({ variableName, account, password })]
+  return [
+    Object.freeze({
+      variableName,
+      signatureVariableName: mailbox.signatureVariableName,
+      account,
+      password
+    })
+  ]
 }
 
 /**
@@ -304,8 +325,8 @@ function findLysAddress(
  * @param serverCommand - How the email server is run.
  * @param mailboxes - The mailboxes it serves, each variable once.
  * @returns Frozen stdio settings named `email`, switched on, whose
- * environment holds one variable per mailbox, in the order given, with its
- * account and password; they pass the shared MCP server rules, as every
+ * environment holds each mailbox's account and password plus its
+ * JSON-encoded signature; they pass the shared MCP server rules, as every
  * command the backend starts does.
  * @throws {z.ZodError} If the command fails the shared rules, such as a
  * path longer than a command may be, which the backend configuration
@@ -315,11 +336,14 @@ export function buildEmailServerSettings(
   serverCommand: EmailServerCommand,
   mailboxes: readonly EmailServerMailbox[]
 ): McpServerSettings {
-  const environment: McpEnvironmentVariable[] = mailboxes.map(
-    ({ variableName, account, password }) => ({
-      name: variableName,
-      value: buildEmailAccountVariable(account, password)
-    })
+  const environment: McpEnvironmentVariable[] = mailboxes.flatMap(
+    ({ variableName, signatureVariableName, account, password }) => [
+      {
+        name: variableName,
+        value: buildEmailAccountVariable(account, password)
+      },
+      { name: signatureVariableName, value: JSON.stringify(account.signature) }
+    ]
   )
   return mcpServerSettingsSchema.parse({
     name: EMAIL_SERVER_NAME,

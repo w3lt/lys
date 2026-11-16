@@ -1436,11 +1436,12 @@ and it reads both saved accounts and their passwords with `readEmailAccounts`
 only the `email` and `secrets` groups of `settings.json` and reports each
 account as `read`, `missing`, `invalid`, or `unreadable`; two accounts that
 open one mailbox read as `invalid` for both. It then builds the server's
-settings: the executable as the command, no argument, and one environment
-variable for each mailbox switched on, `LYS_EMAIL_ACCOUNT` for the person's
-and `LYS_EMAIL_LYS_ACCOUNT` for Lys's, each holding that account and its
-password as one line of JSON. A mailbox that is off never puts its account or
-password in the environment. Those settings pass the shared server rules like
+settings: the executable as the command, no argument, and two environment
+variables for each mailbox switched on: `LYS_EMAIL_ACCOUNT` or
+`LYS_EMAIL_LYS_ACCOUNT` holds the account and password as one line of JSON;
+`LYS_EMAIL_SIGNATURE` or `LYS_EMAIL_LYS_SIGNATURE` holds its signature as a
+JSON string. A mailbox that is off never puts its account, password, or
+signature in the environment. Those settings pass the shared server rules like
 any command the backend starts, so the server runs through the same session,
 process group, log line, message line, and stop code as an added stdio
 server, and a changed switch, account, or password of either mailbox is a

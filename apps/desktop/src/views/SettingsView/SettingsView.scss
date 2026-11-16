@@ -3435,6 +3435,7 @@ legend.settings-view__mcp-field-label {
 .settings-view__email-field {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-width: 0;
   gap: 6px;
 
@@ -3445,6 +3446,13 @@ legend.settings-view__mcp-field-label {
 
 /* The label, whether the field is required, and its rule share one line. */
 .settings-view__email-field-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-view__email-signature-top {
   display: flex;
   align-items: baseline;
   justify-content: space-between;

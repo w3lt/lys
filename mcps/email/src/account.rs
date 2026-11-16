@@ -1,16 +1,16 @@
 //! The accounts the server signs in with: the person's, read from
 //! `LYS_EMAIL_ACCOUNT`, and Lys's own, read from `LYS_EMAIL_LYS_ACCOUNT`.
+//! Their optional signatures are read from `LYS_EMAIL_SIGNATURE` and
+//! `LYS_EMAIL_LYS_SIGNATURE` respectively.
 //!
-//! The backend starts the server with one environment variable per mailbox
-//! it serves, each holding the saved account and its password as one line
-//! of JSON, the only channel a stdio MCP launch offers. Each mailbox has a
-//! variable of its own because one variable may hold at most 4,096
-//! characters, which one account can nearly fill. The rules here repeat those of
-//! `emailAccountSchema` in `@lys/share`: the backend checked them before
-//! starting the server, and the server checks them again, because anyone
-//! on the machine can start the binary with a variable of their own, and
-//! the rule that a plain connection reaches only the machine itself is a
-//! security rule.
+//! The backend starts the server with one account-and-password JSON
+//! variable per mailbox and a separate JSON-string variable for its optional
+//! signature. The account variable uses the only channel a stdio MCP launch
+//! offers and may hold at most 4,096 characters, which one account can
+//! nearly fill. The rules here repeat those of `emailAccountSchema` in
+//! `@lys/share`; the server checks them again because anyone on the machine
+//! can start the binary with variables of their own. The plain-connection
+//! rule is a security rule: it allows cleartext only to the local machine.
 //!
 //! A failed rule is reported by name only, never with the value that broke
 //! it: the report goes to standard error, which the backend keeps as a log.
@@ -121,6 +121,8 @@ pub struct Account {
     /// Whether the SMTP server stores sent mail itself, so no copy is
     /// appended to the Sent folder.
     pub server_keeps_sent_copy: bool,
+    /// Plain-text signature appended to messages sent from this mailbox.
+    pub signature: String,
 }
 
 impl fmt::Debug for Account {
@@ -136,6 +138,7 @@ impl fmt::Debug for Account {
             .field("imap", &self.imap)
             .field("smtp", &self.smtp)
             .field("server_keeps_sent_copy", &self.server_keeps_sent_copy)
+            .field("signature", &"<redacted>")
             .finish()
     }
 }
@@ -324,6 +327,14 @@ pub enum ServeProblem {
         /// Why it gives no account.
         problem: AccountProblem,
     },
+    /// The mailbox's optional signature variable is malformed or breaks
+    /// the signature limits.
+    Signature {
+        /// The mailbox whose variable it is.
+        mailbox: Mailbox,
+        /// Why the signature cannot be used, without its value.
+        problem: &'static str,
+    },
     /// Lys's account signs in to the person's mailbox, as
     /// [`is_same_mailbox`] tells.
     SameMailbox,
@@ -342,6 +353,13 @@ impl fmt::Display for ServeProblem {
             ),
             Self::Account { mailbox, problem } => {
                 write!(formatter, "{}: {problem}", mailbox.variable_name())
+            }
+            Self::Signature { mailbox, problem } => {
+                write!(
+                    formatter,
+                    "{}: {problem}",
+                    mailbox.signature_variable_name()
+                )
             }
             Self::SameMailbox => write!(
                 formatter,
@@ -366,7 +384,11 @@ pub fn read_served_accounts() -> Result<Vec<(Mailbox, Account)>, ServeProblem> {
     let mut accounts = Vec::new();
     for mailbox in [Mailbox::Person, Mailbox::Lys] {
         match read_account(mailbox) {
-            Ok(account) => accounts.push((mailbox, account)),
+            Ok(mut account) => {
+                account.signature = read_signature_variable(mailbox)
+                    .map_err(|problem| ServeProblem::Signature { mailbox, problem })?;
+                accounts.push((mailbox, account));
+            }
             Err(AccountProblem::Missing) => {}
             Err(problem) => return Err(ServeProblem::Account { mailbox, problem }),
         }
@@ -376,6 +398,34 @@ pub fn read_served_accounts() -> Result<Vec<(Mailbox, Account)>, ServeProblem> {
         [(_, person), (_, lys)] if is_same_mailbox(person, lys) => Err(ServeProblem::SameMailbox),
         _ => Ok(accounts),
     }
+}
+
+/// Reads and validates a mailbox's optional signature variable.
+///
+/// # Arguments
+///
+/// * `mailbox` - The mailbox whose signature is read.
+///
+/// # Returns
+///
+/// The signature, empty when the variable is missing, or why its text is
+/// invalid without quoting it.
+fn read_signature_variable(mailbox: Mailbox) -> Result<String, &'static str> {
+    let Some(value) = env::var_os(mailbox.signature_variable_name()) else {
+        return Ok(String::new());
+    };
+    let value = value.into_string().map_err(|_| "is not Unicode text")?;
+    let signature: String = serde_json::from_str(&value).map_err(|_| "is not a JSON string")?;
+    let is_valid = signature.chars().count() <= 1_000
+        && !signature
+            .chars()
+            .any(|character| character.is_control() && character != '\n' && character != '\t');
+    if !is_valid {
+        return Err(
+            "breaks the signature rule: at most 1000 characters, with no control characters other than line breaks and tabs",
+        );
+    }
+    Ok(signature)
 }
 
 /// Tells whether two accounts sign in to the same mailbox: the same
@@ -462,6 +512,7 @@ pub fn parse_account_variable(text: &str) -> Result<Account, AccountProblem> {
         imap,
         smtp,
         server_keeps_sent_copy: stored.server_keeps_sent_copy,
+        signature: String::new(),
     })
 }
 

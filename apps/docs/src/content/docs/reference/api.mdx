@@ -1,46 +1,48 @@
 ---
 title: Backend API contracts
-description: The current loopback HTTP and SSE endpoints exposed by the Fastify backend.
+description: The current loopback HTTP, SSE, and WebSocket endpoints exposed by the Fastify backend.
 docType: reference
 sidebar:
   order: 1
 ---
 
 The current backend surface is small and lives entirely under the `@lys/protocol`
-route definitions.
+route definitions. Two of the routes are WebSockets, marked `WS` below.
 
 ## Routes
 
-| Method   | Path                                                                              | Request body                                                                                         | Response                                                                   |
-| -------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `GET`    | `/api/v1/heath`                                                                   | none                                                                                                 | `{ ok: true }`                                                             |
-| `GET`    | `/api/v1/llm/:provider/list`                                                      | none                                                                                                 | `{ llms: LlmInfo[], modelLoading: "lys" \| "provider" }`                   |
-| `GET`    | `/api/v1/llm/:provider/:modelId/health`                                           | none                                                                                                 | Loaded-state health observation                                            |
-| `POST`   | `/api/v1/llm/:provider/load`                                                      | `{ modelId: string, configuration?: ModelLoadConfiguration }`                                        | `LlmInfo`                                                                  |
-| `PATCH`  | `/api/v1/llm/:provider/unload`                                                    | `{ modelId: string }`                                                                                | `204` or typed Problem Details                                             |
-| `GET`    | `/api/v1/llm/:provider/runtime`                                                   | none                                                                                                 | `{ status: "connecting" \| "connected" \| "unreachable" \| "off" }`        |
-| `POST`   | `/api/v1/llm/:provider/runtime/connect`                                           | none                                                                                                 | Settled `{ status }`, or service-busy Problem Details                      |
-| `GET`    | `/api/v1/conversations`                                                           | none; optional `query`, `cursor`, `limit` query parameters                                           | Conversation list page                                                     |
-| `GET`    | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Conversation with ordered messages and numbered sources                    |
-| `PATCH`  | `/api/v1/conversations/:conversationId`                                           | `{ title: string }`                                                                                  | Conversation metadata                                                      |
-| `DELETE` | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Bodyless `204`                                                             |
-| `GET`    | `/api/v1/agents`                                                                  | none; optional `cursor`, `limit` query parameters                                                    | Built-in agents and a page of stored agents                                |
-| `POST`   | `/api/v1/agents`                                                                  | `{ code?, name, bio, systemPrompt }`                                                                 | `201` agent with `Location`, or `409` Problem Details                      |
-| `GET`    | `/api/v1/agents/:agentCode`                                                       | none                                                                                                 | Agent with its system prompt                                               |
-| `PATCH`  | `/api/v1/agents/:agentCode`                                                       | at least one of `{ name, bio, systemPrompt }`                                                        | Changed agent, or `409` for a built-in agent                               |
-| `DELETE` | `/api/v1/agents/:agentCode`                                                       | none                                                                                                 | Bodyless `204`, or `409` for a built-in agent                              |
-| `GET`    | `/api/v1/tools`                                                                   | none                                                                                                 | `{ tools: ToolDefinition[], unavailableTools }`                            |
-| `POST`   | `/api/v1/tools/web_search/key-check`                                              | `{}`                                                                                                 | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }`     |
-| `GET`    | `/api/v1/mcp/servers`                                                             | none                                                                                                 | `{ settings, servers: McpServerStatus[] }`                                 |
-| `POST`   | `/api/v1/mcp/servers/sync`                                                        | `{}`                                                                                                 | The server list right after applying the `mcp` settings group              |
-| `POST`   | `/api/v1/mcp/servers/:serverName/reconnect`                                       | `{}`                                                                                                 | The server list, or `404` or `409` Problem Details                         |
-| `POST`   | `/api/v1/mcp/email/account-check`                                                 | `{ account, password }`                                                                              | `{ status: "checked", imap, smtp }` or `{ status: "unavailable", reason }` |
-| `POST`   | `/api/v1/chat`                                                                    | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` and `attachments` | `text/event-stream`                                                        |
-| `POST`   | `/api/v1/chat/context`                                                            | `conversation`, `model`, optional `tools`                                                            | `ChatContextMeasurement`, or typed Problem Details                         |
-| `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`                 | none                                                                                                 | `text/event-stream` (reply snapshot, then live events)                     |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                   | none                                                                                                 | Bodyless `204`, or `409` Problem Details                                   |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`   | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                                   |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId` | `{ status, reason?, content?, approvalToken }`                                                       | Bodyless `204`, or `409` Problem Details                                   |
+| Method   | Path                                                                                  | Request body                                                                                         | Response                                                                   |
+| -------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `GET`    | `/api/v1/heath`                                                                       | none                                                                                                 | `{ ok: true }`                                                             |
+| `GET`    | `/api/v1/llm/:provider/list`                                                          | none                                                                                                 | `{ llms: LlmInfo[], modelLoading: "lys" \| "provider" }`                   |
+| `GET`    | `/api/v1/llm/:provider/:modelId/health`                                               | none                                                                                                 | Loaded-state health observation                                            |
+| `POST`   | `/api/v1/llm/:provider/load`                                                          | `{ modelId: string, configuration?: ModelLoadConfiguration }`                                        | `LlmInfo`                                                                  |
+| `PATCH`  | `/api/v1/llm/:provider/unload`                                                        | `{ modelId: string }`                                                                                | `204` or typed Problem Details                                             |
+| `GET`    | `/api/v1/llm/:provider/runtime`                                                       | none                                                                                                 | `{ status: "connecting" \| "connected" \| "unreachable" \| "off" }`        |
+| `POST`   | `/api/v1/llm/:provider/runtime/connect`                                               | none                                                                                                 | Settled `{ status }`, or service-busy Problem Details                      |
+| `GET`    | `/api/v1/conversations`                                                               | none; optional `query`, `cursor`, `limit` query parameters                                           | Conversation list page                                                     |
+| `GET`    | `/api/v1/conversations/:conversationId`                                               | none                                                                                                 | Conversation with ordered messages and numbered sources                    |
+| `PATCH`  | `/api/v1/conversations/:conversationId`                                               | `{ title: string }`                                                                                  | Conversation metadata                                                      |
+| `DELETE` | `/api/v1/conversations/:conversationId`                                               | none                                                                                                 | Bodyless `204`                                                             |
+| `GET`    | `/api/v1/agents`                                                                      | none; optional `cursor`, `limit` query parameters                                                    | Built-in agents and a page of stored agents                                |
+| `POST`   | `/api/v1/agents`                                                                      | `{ code?, name, bio, systemPrompt }`                                                                 | `201` agent with `Location`, or `409` Problem Details                      |
+| `GET`    | `/api/v1/agents/:agentCode`                                                           | none                                                                                                 | Agent with its system prompt                                               |
+| `PATCH`  | `/api/v1/agents/:agentCode`                                                           | at least one of `{ name, bio, systemPrompt }`                                                        | Changed agent, or `409` for a built-in agent                               |
+| `DELETE` | `/api/v1/agents/:agentCode`                                                           | none                                                                                                 | Bodyless `204`, or `409` for a built-in agent                              |
+| `GET`    | `/api/v1/tools`                                                                       | none                                                                                                 | `{ tools: ToolDefinition[], unavailableTools }`                            |
+| `POST`   | `/api/v1/tools/web_search/key-check`                                                  | `{}`                                                                                                 | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }`     |
+| `GET`    | `/api/v1/mcp/servers`                                                                 | none                                                                                                 | `{ settings, servers: McpServerStatus[] }`                                 |
+| `POST`   | `/api/v1/mcp/servers/sync`                                                            | `{}`                                                                                                 | The server list right after applying the `mcp` settings group              |
+| `POST`   | `/api/v1/mcp/servers/:serverName/reconnect`                                           | `{}`                                                                                                 | The server list, or `404` or `409` Problem Details                         |
+| `POST`   | `/api/v1/mcp/email/account-check`                                                     | `{ account, password }`                                                                              | `{ status: "checked", imap, smtp }` or `{ status: "unavailable", reason }` |
+| `POST`   | `/api/v1/chat`                                                                        | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` and `attachments` | `text/event-stream`                                                        |
+| `POST`   | `/api/v1/chat/context`                                                                | `conversation`, `model`, optional `tools`                                                            | `ChatContextMeasurement`, or typed Problem Details                         |
+| `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`                     | none                                                                                                 | `text/event-stream` (reply snapshot, then live events)                     |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                       | none                                                                                                 | Bodyless `204`, or `409` Problem Details                                   |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`       | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                                   |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`     | `{ status, reason?, content?, approvalToken }`                                                       | Bodyless `204`, or `409` Problem Details                                   |
+| `WS`     | `/api/v1/chat/:conversationId/replies/:assistantMessageId/speech?from=start\|current` | none; the `from` query parameter is required                                                         | Binary PCM audio (24 kHz, mono, 16-bit little-endian) with text frames     |
+| `WS`     | `/api/v1/chat/:conversationId/replies/:assistantMessageId/notification`               | none                                                                                                 | Binary PCM audio with text frames                                          |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
@@ -375,6 +377,36 @@ title, and the conversation's sources; live events follow while the
 generation runs. A missing conversation
 returns the conversation-not-found problem and a missing reply returns `404`
 with `urn:lys:problem:chat:reply-not-found`.
+
+## Speech sockets
+
+`GET /api/v1/chat/:conversationId/replies/:assistantMessageId/speech?from=start|current`
+is a WebSocket for Lys's desktop. The backend accepts the upgrade only from
+a desktop `Origin`; other origins are refused before the upgrade. `from=start`
+reads the reply from its first word; `from=current` joins at the sentence
+being written and is refused once the reply is no longer being written. The
+reply's sentences are synthesized by the voice service and relayed as binary
+messages of raw 24 kHz mono 16-bit little-endian PCM. There are no text
+messages: the close code is the whole signal.
+
+Opening a socket for a reply closes any older socket open for the same
+reply, whichever endpoint it was opened on. The socket closes with:
+
+| Code   | Meaning                                                                                                   |
+| ------ | --------------------------------------------------------------------------------------------------------- |
+| `1000` | The reply finished and its whole audio was sent.                                                          |
+| `1008` | The client did not consume the audio and the buffer overflowed.                                           |
+| `1011` | The voice service failed, or the reply failed.                                                            |
+| `4404` | The conversation or reply does not exist.                                                                 |
+| `4409` | A newer socket opened for the same reply.                                                                 |
+| `4410` | The reply ended, was interrupted, or failed before `1000`; or `from=current` names a reply that finished. |
+| `4503` | Voice is not ready; nothing was sent.                                                                     |
+
+`GET /api/v1/chat/:conversationId/replies/:assistantMessageId/notification`
+is the same socket without the `from` query, and speaks one short line chosen
+by the backend at random, for a reply that finished in the background. Its
+line is never stored, and the close codes match. Neither socket accepts a
+message from the client; the PCM frames are the only payload, one direction.
 
 ## Chat context measurement
 

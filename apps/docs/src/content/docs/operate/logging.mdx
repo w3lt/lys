@@ -253,7 +253,7 @@ password.
 | `The email account check was ended because the backend is closing`                                   | `warn`  | `failure`                               | The backend closed while a check ran, and killed it, or a check arrived after it closed and was not run                                                                                                                                                                                                                                                                                                                     |
 | `The email server's account check failed`                                                            | `error` | `failure`, and `err` for `start-failed` | The server could not be started (`start-failed`, with Node's error as `err`, such as for a file that is not a program or no file descriptor left), did not end within one minute (`timed-out`, with the error lines it wrote before it was killed), ended without a report (`exited`, with how it ended and its own error lines), or printed something that is not a report (`unreadable-output`, with its own error lines) |
 
-vmo's output is not kept in a release build
+vmo's and voice's output is not kept in a release build
 ([#229](https://github.com/w3lt/lys/issues/229)).
 
 ## Desktop runtime status

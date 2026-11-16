@@ -73,7 +73,8 @@ ownership is how the system is built, but the handbook is candid about
 
 ## Still becoming
 
-She can listen and answer today. A turn reaches the local model, streams back a
+She can answer today, and, with the voice server started in Settings, read her
+answers aloud as she writes them. A turn reaches the local model, streams back a
 word at a time, and is recorded in SQLite as it arrives.
 
 She can return to it, too. Past conversations can be searched, renamed,

@@ -25,10 +25,12 @@ Toolchain versions, platform prerequisites, and first build.
   MCP server Lys ships is a Rust crate in `mcps/email`, and the repository
   validation list includes Cargo-based checks for both.
 - **Swift 6.3 or later** (Xcode or the Command Line Tools): required to build
-  vmo, the page reader `read_page` uses, which the desktop starts with
-  `apps/vmo/run.sh` and `build.sh` installs. vmo builds and runs only on
-  macOS 26 on Apple silicon; see
-  [Runtime dependencies](/operate/dependencies/#vmo).
+  vmo, the page reader `read_page` uses, and voice, the speech server Lys
+  reads her replies with. The desktop starts both with
+  `apps/vmo/run.sh` and `apps/voice/run.sh`, and `build.sh` installs both.
+  vmo builds and runs only on macOS 26 on Apple silicon; voice does too; see
+  [Runtime dependencies](/operate/dependencies/#vmo) and
+  [voice's](/operate/dependencies/#voice).
 - **A model provider**: one or several of LM Studio, a local Ollama server,
   Ollama Cloud, and Groq, turned on in Settings → Providers; required for the
   model inventory, chat, and title-generation paths, and LM Studio also for
@@ -89,7 +91,8 @@ configuration sets `build.target`, which adds the target's name to the path.
 Desktop settings initialization creates the Lys home directory for the
 desktop-managed path. Choose one backend launch path: desktop auto-start is
 enabled by default, and starting another backend on the same port can conflict.
-The same holds for vmo, which the desktop starts by default.
+The same holds for vmo, which the desktop starts by default; voice is off by
+default and starts only from Settings → Runtime.
 See [Running Lys locally](/develop/running/) for process ownership and
 readiness.
 
@@ -100,6 +103,8 @@ readiness.
   saved address for LM Studio and a local Ollama server; with nothing saved,
   only LM Studio is on, on `127.0.0.1:1234`.
 - vmo listens on `127.0.0.1:8080`.
+- voice listens on `127.0.0.1:9090` for health and `127.0.0.1:9091` for its
+  speech sockets.
 
 Backend startup does not wait for the providers: the backend opens its HTTP
 listener, then tries once to connect to each provider that is on. If a

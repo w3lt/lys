@@ -386,6 +386,53 @@ state and context lengths the model list adds. A model the inventory does
 not list has neither capability: an image attached for it is refused, and no
 reader is offered.
 
+## Speech sockets
+
+The backend relays a reply's audio to the UI over two WebSocket routes, both
+on the same Fastify server as the HTTP API and registered by the same chat
+plugin, under
+`/api/v1/chat/:conversationId/replies/:assistantMessageId/`:
+
+- `speech?from=start|current`, `chatSpeechApi`: streams the reply as audio.
+- `notification`, `chatNotificationApi`: speaks one short line announcing
+  that a reply finished, for a reply that ended unheard in the background;
+  the backend picks the line at random and never stores it.
+
+Only the desktop origin may open either socket: requests whose `Origin`
+header is not one of the backend's HTTP origins are refused before the
+upgrade with `403`, as with CORS on the HTTP routes. A socket is bound to one
+reply for its whole life; opening a second socket for the same reply closes
+the first with `4409`.
+
+`from=start` speaks the reply from its first word, even one that already
+finished; `from=current` speaks from the sentence being written and is
+refused with `4410` while the reply is not being written. The speech
+follow reads the stored reply the way the reply event stream does — snapshot
+first, then the live events from the reply's generation — and turns it into
+speech: markdown becomes plain text (links read as their text, code blocks,
+math, tables, citation markers, images, and bare URLs are dropped, list
+items, paragraphs, and headings end a sentence), code speaks verbatim, and
+sentences are cut with `Intl.Segmenter`. Completed sentences are sent to
+voice in order; an unterminated code fence holds speech back until it
+closes. Audio arrives from voice as binary frames of 24 kHz mono 16-bit
+little-endian PCM and is relayed to the socket unchanged. Reasoning, tool
+calls, and their results are never spoken.
+
+Before the socket upgrades anything, the backend asks voice's `GET /health`;
+a voice that is not ready closes the socket at once with `4503`. A slow UI
+that falls behind by a megabyte of unsent audio is disconnected with `1008`.
+Voice's own close codes map to the UI's: `1000` stays `1000`, anything else
+becomes `1011`. A reply that stops, fails, or is deleted closes the speech
+socket with `4410`; a `done` event lets the socket finish with `1000`. The
+backend keeps no audio and no per-socket audio buffer beyond the one frame
+in flight per send, so a burst of sentences waits on voice's pace, not the
+other way round.
+
+Codes the UI understands: `1000` everything was sent, `1011` voice failed,
+`4404` no such conversation or reply, `4409` a newer socket replaced this
+one, `4410` the reply stopped or is not being written, and `4503` voice is
+not ready. The constants live in `@lys/protocol` next to the routes.
+
 ## Tool call policy
 
 Every checked call of every turn passes one gateway step, `startToolCall` in

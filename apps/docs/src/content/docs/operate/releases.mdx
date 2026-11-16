@@ -48,7 +48,8 @@ The script stops at the first failing step. In order, it:
 
 1. Runs `pnpm install --frozen-lockfile`.
 2. Builds vmo, the page reader `read_page` uses, in release with
-   `swift build -c release --package-path apps/vmo`. It stops first when the
+   `swift build -c release --package-path apps/vmo`, then voice, the speech
+   server, the same way. It stops first when the
    Swift toolchain is missing. Nothing is installed yet, so a machine that
    cannot build vmo keeps its current install.
 3. Builds the email MCP server Lys ships in release with
@@ -71,7 +72,8 @@ The script stops at the first failing step. In order, it:
    previously installed backend.
 8. Replaces `$LYS_HOME/runtime/vmo` with a directory holding only the new
    `vmo` executable, and signs it ad hoc with the virtualization entitlement
-   in `apps/vmo/vmo.entitlements`.
+   in `apps/vmo/vmo.entitlements`; and `$LYS_HOME/runtime/voice` with only the
+   new `voice` executable.
 9. Installs the `email` executable step 3 built at
    `$LYS_HOME/runtime/email/email`, replacing the previously installed email
    MCP server.
@@ -83,16 +85,17 @@ The script stops at the first failing step. In order, it:
 
 The script needs the toolchain from [Environment setup](/develop/setup/),
 including the Swift toolchain and the Rust toolchain, plus `curl`, `jq`, and
-network access to `nodejs.org`, to `github.com` for vmo's Swift packages
+network access to `nodejs.org`, to `github.com` for vmo's and voice's Swift packages
 until `apps/vmo/.build` holds them, and to `crates.io` for the email server's
 crates until Cargo's cache holds them. vmo builds and runs only on Apple silicon with
 macOS 26; see [Runtime dependencies](/operate/dependencies/#vmo).
 
 :::caution[Desktop runtime is still under development]
-Release builds of the desktop app start the backend and vmo from a runtime
+Release builds of the desktop app start the backend, vmo, and voice from a runtime
 installed in the [Lys home directory](/reference/configuration/#lys-home-directory):
 `$LYS_HOME/runtime/node/bin/node` running
-`$LYS_HOME/runtime/backend/backend.mjs`, `$LYS_HOME/runtime/vmo/vmo`, and
+`$LYS_HOME/runtime/backend/backend.mjs`, `$LYS_HOME/runtime/vmo/vmo`,
+`$LYS_HOME/runtime/voice/voice`, and
 `$LYS_HOME/runtime/email/email`, the email MCP server the backend starts.
 Only `build.sh` installs that runtime, and only on the machine that runs it,
 so a copied `Lys.app` cannot start its backend, vmo, or email server on a

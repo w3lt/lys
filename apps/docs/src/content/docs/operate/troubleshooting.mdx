@@ -130,9 +130,34 @@ didn't stop in time and was killed. It may have left VMs running."
 Lys cannot remove those VMs yet; a restart of the Mac ends them. Quitting Lys
 waits for vmo the same way, so quitting can take up to a minute.
 
+## Voice is not speaking
+
+Replies are always shown as text; voice only adds the sound. The speech
+socket closes with `4503` when voice is not ready, and the card in
+Settings → Runtime says why:
+
+- **voice starting**: its models are loading, or downloading on the first
+  start (about 780 MB into `~/.lys/voice/models`). Lys waits up to ten
+  minutes.
+- **voice not responding**: the process stayed up for ten minutes without
+  answering, or a start or stop failed while voice still ran or its status
+  could not be read. Press **Stop**, then **Start**. voice needs the same
+  macOS 26 on Apple silicon as vmo; see
+  [voice's requirements](/operate/dependencies/#voice).
+- **voice stopped** right after Start: the process exited before it answered.
+  In development, voice's build and error output appear in the terminal that
+  runs `pnpm dev`. If the model download was interrupted, delete
+  `~/.lys/voice/models` and start voice again.
+
+Sound also depends on the window's focus: Lys reads a reply aloud while the
+window is focused, waits silently if it loses focus before the first word,
+joins at the sentence being written when it regains focus, and says one
+short line instead of the reply when it finishes in the background. A reply
+that stops or is interrupted stops the sound at once; the text is unaffected.
+
 ## A vmo or backend keeps running after Lys died
 
-Lys stops vmo and the backend when it quits. When it dies without quitting,
+Lys stops vmo, voice, and the backend when it quits. When it dies without quitting,
 after a crash, Force Quit, or `kill -9`, or when a development rebuild restarts
 the desktop host, both keep running
 ([#202](https://github.com/w3lt/lys/issues/202)). The next Lys cannot start its

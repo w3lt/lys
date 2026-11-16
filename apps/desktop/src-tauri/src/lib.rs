@@ -17,6 +17,7 @@ mod settings;
 mod tools;
 mod utils;
 mod vmo;
+mod voice;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -81,6 +82,7 @@ pub fn run() {
         .manage(credential_files)
         .manage(backend)
         .manage(vmo::Vmo::new(vmo::VMO_STOP_TIMEOUT))
+        .manage(voice::Voice::new(voice::VOICE_STOP_TIMEOUT))
         .invoke_handler(tauri::generate_handler![
             greet,
             backend::start_backend,
@@ -90,6 +92,10 @@ pub fn run() {
             vmo::stop_vmo,
             vmo::get_vmo_status,
             vmo::get_vmo_health,
+            voice::start_voice,
+            voice::stop_voice,
+            voice::get_voice_status,
+            voice::get_voice_health,
             settings::commands::load_settings,
             settings::commands::save_settings,
             tools::client_tools::list_tools,
@@ -105,28 +111,34 @@ pub fn run() {
 }
 
 /// Handles one event of the running application: on `Exit`, it stops the
-/// managed backend and vmo, and it leaves every other event to Tauri.
+/// managed backend, vmo, and voice, and it leaves every other event to Tauri.
 fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunEvent) {
     if let tauri::RunEvent::Exit = event {
         stop_runtime_processes_at_exit(app_handle);
     }
 }
 
-/// Stops the managed backend and vmo during application exit, writing each
-/// failure and a killed vmo to stderr.
+/// Stops the managed backend, vmo, and voice during application exit,
+/// writing each failure and a killed vmo to stderr.
 ///
 /// vmo can take up to [`vmo::VMO_STOP_TIMEOUT`] to delete its VMs, so its stop
-/// runs on a scoped thread while the backend stops, rather than after it. The
-/// call returns once both stops have ended.
+/// runs on a scoped thread while the backend stops, rather than after it;
+/// voice stops on the same thread. The call returns once all three stops have
+/// ended.
 fn stop_runtime_processes_at_exit(app_handle: &tauri::AppHandle) {
     let backend = app_handle.state::<backend::Backend>();
     let vmo = app_handle.state::<vmo::Vmo>().inner();
-    let vmo_stop = thread::scope(|scope| {
+    let voice = app_handle.state::<voice::Voice>().inner();
+    let (vmo_stop, voice_stop) = thread::scope(|scope| {
         let vmo_stop = scope.spawn(|| vmo.stop());
+        let voice_stop = scope.spawn(|| voice.stop());
         stop_backend_at_exit(&backend);
-        vmo_stop.join()
+        (vmo_stop.join(), voice_stop.join())
     });
     if let Some(problem) = format_vmo_stop_problem_at_exit(vmo_stop) {
+        eprintln!("{problem}");
+    }
+    if let Some(problem) = format_voice_stop_problem_at_exit(voice_stop) {
         eprintln!("{problem}");
     }
 }
@@ -159,18 +171,67 @@ fn format_vmo_stop_problem_at_exit(
     }
 }
 
+/// Formats what went wrong when voice stopped during application exit, or
+/// returns `None` when voice exited within its stop timeout.
+///
+/// `stop` is the joined stop thread's result, whose outer error means that
+/// the stop panicked.
+fn format_voice_stop_problem_at_exit(
+    stop: thread::Result<Result<voice::VoiceStopOutcome, String>>,
+) -> Option<String> {
+    match stop {
+        Ok(Ok(voice::VoiceStopOutcome::Stopped)) => None,
+        Ok(Ok(voice::VoiceStopOutcome::Killed)) => Some(String::from(
+            "voice did not stop in time during app exit and was killed",
+        )),
+        Ok(Err(error)) => Some(format!("Failed to stop voice during app exit: {error}")),
+        Err(_panic) => Some(String::from(
+            "Failed to stop voice during app exit: the stop panicked",
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::any::Any;
 
-    use super::format_vmo_stop_problem_at_exit;
-    use crate::vmo::VmoStopOutcome;
+    use super::{format_voice_stop_problem_at_exit, format_vmo_stop_problem_at_exit};
+    use crate::{vmo::VmoStopOutcome, voice::VoiceStopOutcome};
 
     #[test]
     fn a_vmo_that_stopped_in_time_at_exit_is_not_reported() {
         assert_eq!(
             format_vmo_stop_problem_at_exit(Ok(Ok(VmoStopOutcome::Stopped))),
             None
+        );
+    }
+
+    #[test]
+    fn a_voice_that_stopped_in_time_at_exit_is_not_reported() {
+        assert_eq!(
+            format_voice_stop_problem_at_exit(Ok(Ok(VoiceStopOutcome::Stopped))),
+            None
+        );
+    }
+
+    #[test]
+    fn a_killed_failed_or_panicked_voice_stop_at_exit_is_reported() {
+        let panic: Box<dyn Any + Send> = Box::new("stop panicked");
+
+        assert_eq!(
+            format_voice_stop_problem_at_exit(Ok(Ok(VoiceStopOutcome::Killed))).as_deref(),
+            Some("voice did not stop in time during app exit and was killed")
+        );
+        assert_eq!(
+            format_voice_stop_problem_at_exit(Ok(Err(String::from(
+                "Failed to inspect voice process: Interrupted system call (os error 4)"
+            ))))
+            .as_deref(),
+            Some("Failed to stop voice during app exit: Failed to inspect voice process: Interrupted system call (os error 4)")
+        );
+        assert_eq!(
+            format_voice_stop_problem_at_exit(Err(panic)).as_deref(),
+            Some("Failed to stop voice during app exit: the stop panicked")
         );
     }
 

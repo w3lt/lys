@@ -6,6 +6,7 @@ import ModelResidencyCard from "./ModelResidencyCard"
 import ProviderStatusCard from "./ProviderStatusCard"
 import StartupSwitchSaveStatus from "./StartupSwitchSaveStatus"
 import VmoStatusCard from "./VmoStatusCard"
+import VoiceStatusCard from "./VoiceStatusCard"
 import { useBackendUptimeMs } from "@/lib/hooks/backendRuntime"
 import { useNewConversationModel } from "@/lib/hooks/conversationModel"
 import { calculateProviderAvailability } from "@/lib/models/provider-connection"
@@ -18,22 +19,24 @@ import {
 import { useSettingsContext } from "./SettingsContext"
 
 /**
- * Presents the cards of the two processes the desktop host runs for Lys, the
- * backend and then vmo, and under them the save status of their startup
- * switches.
+ * Presents the cards of the three processes the desktop host runs for Lys,
+ * the backend, then vmo, then voice, and under them the save status of their
+ * startup switches.
  *
- * @remarks The application store owns both processes' status, their start
- * and stop commands, and the save of the switches; the settings context owns
- * the switches and the backend address. Start and Stop intentionally discard
- * their command promises with `void`. The backend's failures are not awaited
- * or rendered here, so a rejection surfaces as an unhandled rejection and
- * backend status is not a completion owner when a command rejects; vmo's
- * start and stop never reject and publish their problem in the vmo card.
- * Each startup switch proposes one runtime patch per change, which the
- * application store saves. The backend's uptime ticks each second, which
- * re-renders this group but not the model runtime cards. The group renders
- * no host of its own, so each card takes its place in the pane's stack.
- * @returns The backend card, the vmo card, and the save status.
+ * @remarks The application store owns all three processes' status, their
+ * start and stop commands, and the save of the switches; the settings
+ * context owns the switches and the backend address. Start and Stop
+ * intentionally discard their command promises with `void`. The backend's
+ * failures are not awaited or rendered here, so a rejection surfaces as an
+ * unhandled rejection and backend status is not a completion owner when a
+ * command rejects; vmo's and voice's start and stop never reject and publish
+ * their problem in their cards. Each startup switch proposes one runtime
+ * patch per change, which the application store saves. The backend's uptime
+ * ticks each second, which re-renders this group but not the model runtime
+ * cards. The group renders no host of its own, so each card takes its place
+ * in the pane's stack.
+ * @returns The backend card, the vmo card, the voice card, and the save
+ * status.
  */
 function ProcessCardGroup(): ReactElement {
   const backendStatus = useLysStore((state) => state.backendServerInfo.status)
@@ -42,6 +45,9 @@ function ProcessCardGroup(): ReactElement {
   const vmoServerInfo = useLysStore((state) => state.vmoServerInfo)
   const startVmo = useLysStore((state) => state.startVmo)
   const stopVmo = useLysStore((state) => state.stopVmo)
+  const voiceServerInfo = useLysStore((state) => state.voiceServerInfo)
+  const startVoice = useLysStore((state) => state.startVoice)
+  const stopVoice = useLysStore((state) => state.stopVoice)
   const runtimeAutoStartSave = useLysStore(
     (state) => state.runtimeAutoStartSave
   )
@@ -77,6 +83,19 @@ function ProcessCardGroup(): ReactElement {
           void stopVmo()
         }}
         vmoServerInfo={vmoServerInfo}
+      />
+      <VoiceStatusCard
+        isAutoStartOn={settings.runtime.autoStartVoice}
+        onIsAutoStartOnChange={(isAutoStartOn) =>
+          onRuntimeChange({ autoStartVoice: isAutoStartOn })
+        }
+        onStartVoice={() => {
+          void startVoice()
+        }}
+        onStopVoice={() => {
+          void stopVoice()
+        }}
+        voiceServerInfo={voiceServerInfo}
       />
       <StartupSwitchSaveStatus autoStartSave={runtimeAutoStartSave} />
     </>
@@ -160,15 +179,15 @@ function ModelRuntimeCardGroup(): ReactElement {
 }
 
 /**
- * Presents the Runtime pane: Lys's backend and vmo with their startup
- * switches, then the turned-on providers and the weights of the model a new
- * conversation uses.
+ * Presents the Runtime pane: Lys's backend, vmo, and voice with their
+ * startup switches, then the turned-on providers and the weights of the model
+ * a new conversation uses.
  *
  * @remarks The pane accepts no props and is loaded lazily by the settings
  * view, under the settings context. It owns the stack and the order of its
- * parts: the backend card, the vmo card under it, the save status of both
- * startup switches, the provider connections card, which owns the only
- * reconnect action, and the model card. Each group selects only the
+ * parts: the backend card, the vmo card under it, the voice card under that,
+ * the save status of the startup switches, the provider connections card,
+ * which owns the only reconnect action, and the model card. Each group selects only the
  * application store and settings context state its cards show.
  * @returns The Runtime pane body.
  */

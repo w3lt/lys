@@ -43,18 +43,19 @@ function createRuntimeAutoStartStore() {
  * Replaces the startup switches the store holds, as the Runtime pane does.
  *
  * @param store - Store under test.
- * @param switches - Switches to apply in memory.
+ * @param switches - Switches to apply in memory; omitted ones stay as they are.
  */
 function applyStartupSwitches(
   store: ReturnType<typeof createRuntimeAutoStartStore>,
-  switches: Pick<RuntimeSettings, "autoStartBackend" | "autoStartVmo">
+  switches: Partial<
+    Pick<
+      RuntimeSettings,
+      "autoStartBackend" | "autoStartVmo" | "autoStartVoice"
+    >
+  >
 ): void {
   const { settings } = store.getState()
-  const runtime: RuntimeSettings = {
-    ...settings.runtime,
-    autoStartBackend: switches.autoStartBackend,
-    autoStartVmo: switches.autoStartVmo
-  }
+  const runtime: RuntimeSettings = { ...settings.runtime, ...switches }
   const nextSettings: LysSettings = { ...settings, runtime }
   store.setState({ settings: nextSettings })
 }
@@ -99,13 +100,19 @@ function listSettingsWrites(
  *
  * @param autoStartBackend - Backend startup switch.
  * @param autoStartVmo - vmo startup switch.
+ * @param autoStartVoice - voice startup switch.
  * @returns The expected `save_settings` arguments.
  */
-function buildRuntimeWrite(autoStartBackend: boolean, autoStartVmo: boolean) {
+function buildRuntimeWrite(
+  autoStartBackend: boolean,
+  autoStartVmo: boolean,
+  autoStartVoice: boolean
+) {
   const runtime: SettingsDocument["runtime"] = {
     ...STORED_SETTINGS_DOCUMENT.runtime,
     autoStartBackend,
-    autoStartVmo
+    autoStartVmo,
+    autoStartVoice
   }
   const newSettings: SettingsDocument = {
     ...STORED_SETTINGS_DOCUMENT,
@@ -115,7 +122,7 @@ function buildRuntimeWrite(autoStartBackend: boolean, autoStartVmo: boolean) {
 }
 
 describe("isRuntimeAutoStartSettingsEqual", () => {
-  it("compares only the two startup switches", () => {
+  it("compares only the three startup switches", () => {
     const runtime = STORED_SETTINGS.runtime
     const otherSessionFields: RuntimeSettings = {
       ...runtime,
@@ -138,6 +145,12 @@ describe("isRuntimeAutoStartSettingsEqual", () => {
         autoStartVmo: true
       })
     ).toBe(false)
+    expect(
+      isRuntimeAutoStartSettingsEqual(runtime, {
+        ...runtime,
+        autoStartVoice: true
+      })
+    ).toBe(false)
   })
 })
 
@@ -151,7 +164,11 @@ describe("createRuntimeAutoStartSettingsSlice", () => {
   it("saves the current switches with the rest of the document as it is on disk, and reports the save", async () => {
     const { host, writes } = startControlledSettingsHost()
     const store = createRuntimeAutoStartStore()
-    applyStartupSwitches(store, { autoStartBackend: true, autoStartVmo: false })
+    applyStartupSwitches(store, {
+      autoStartBackend: true,
+      autoStartVmo: false,
+      autoStartVoice: true
+    })
 
     const save = store.getState().saveRuntimeAutoStartSettings()
     await waitForMicrotasks()
@@ -162,18 +179,22 @@ describe("createRuntimeAutoStartSettingsSlice", () => {
     expect(whileWriting).toEqual({ status: "saving" })
     expect(store.getState().runtimeAutoStartSave).toEqual({ status: "saved" })
     expect(listSettingsWrites(host.commands)).toEqual([
-      buildRuntimeWrite(true, false)
+      buildRuntimeWrite(true, false, true)
     ])
   })
 
   it("saves a change made while an earlier save is written, after it, so the latest switches win", async () => {
     const { host, writes } = startControlledSettingsHost()
     const store = createRuntimeAutoStartStore()
-    applyStartupSwitches(store, { autoStartBackend: true, autoStartVmo: false })
+    applyStartupSwitches(store, {
+      autoStartBackend: true,
+      autoStartVmo: false,
+      autoStartVoice: false
+    })
 
     const save = store.getState().saveRuntimeAutoStartSettings()
     await waitForMicrotasks()
-    applyStartupSwitches(store, { autoStartBackend: true, autoStartVmo: true })
+    applyStartupSwitches(store, { autoStartVmo: true, autoStartVoice: true })
     const joined = store.getState().saveRuntimeAutoStartSettings()
     const writesDuringFirst = writes.length
     writes[0]?.resolve(null)
@@ -183,8 +204,8 @@ describe("createRuntimeAutoStartSettingsSlice", () => {
 
     expect(writesDuringFirst).toBe(1)
     expect(listSettingsWrites(host.commands)).toEqual([
-      buildRuntimeWrite(true, false),
-      buildRuntimeWrite(true, true)
+      buildRuntimeWrite(true, false, false),
+      buildRuntimeWrite(true, true, true)
     ])
     expect(store.getState().runtimeAutoStartSave).toEqual({ status: "saved" })
   })
@@ -192,7 +213,11 @@ describe("createRuntimeAutoStartSettingsSlice", () => {
   it("keeps the switches for the session and reports the failure when they cannot be saved", async () => {
     const { writes } = startControlledSettingsHost()
     const store = createRuntimeAutoStartStore()
-    applyStartupSwitches(store, { autoStartBackend: false, autoStartVmo: true })
+    applyStartupSwitches(store, {
+      autoStartBackend: false,
+      autoStartVmo: true,
+      autoStartVoice: true
+    })
 
     const save = store.getState().saveRuntimeAutoStartSettings()
     await waitForMicrotasks()

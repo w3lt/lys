@@ -24,7 +24,7 @@ function formatRuntimeAutoStartSaveStatus(
 
 /** Properties accepted by {@link StartupSwitchSaveStatus}. */
 type StartupSwitchSaveStatusProps = {
-  /** Lifecycle of the latest save of the two startup switches. */
+  /** Lifecycle of the latest save of the startup switches. */
   readonly autoStartSave: RuntimeAutoStartSaveState
 }
 

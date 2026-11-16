@@ -23,6 +23,7 @@ import "./App.scss"
 import { useLysStore } from "./lib/store"
 import { registerMcpServerRefresh } from "./lib/store/mcp-servers"
 import { registerToolListRefresh } from "./lib/store/tools"
+import { startSpeech } from "./lib/speech"
 
 /**
  * Composes the initialized desktop shell and switches between its main views.
@@ -50,6 +51,7 @@ export default function App() {
   }, [initialize])
   useEffect(() => registerToolListRefresh(), [])
   useEffect(() => registerMcpServerRefresh(), [])
+  useEffect(() => startSpeech(), [])
 
   const { activeView, setActiveView } = useLysStore((state) => state)
 

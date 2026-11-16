@@ -22,6 +22,7 @@ fi
 swift build -c release --package-path apps/vmo
 VMO_BUILD_DIR=$(swift build -c release --package-path apps/vmo --show-bin-path)
 
+
 # Step 2b: Build the email MCP server Lys ships, in release. It needs the Rust
 # toolchain; the backend starts it from $LYS_HOME/runtime/email/email. Cargo's
 # JSON output names the binary this build produced, wherever CARGO_TARGET_DIR,
@@ -32,6 +33,13 @@ if ! command -v cargo >/dev/null 2>&1; then
 fi
 EMAIL_BUILD_BINARY=$(cargo build --release --locked --manifest-path mcps/email/Cargo.toml --message-format=json-render-diagnostics |
   jq -er 'select(.reason == "compiler-artifact" and .target.name == "email" and .executable != null) | .executable')
+
+# Step 2c: Build voice, Lys's speech server, in release. It runs before
+# anything is installed, so a machine that cannot build it keeps its current
+# install. voice needs the Swift toolchain and builds only on Apple silicon
+# with macOS 26 or later, as vmo does.
+swift build -c release --package-path apps/voice
+VOICE_BUILD_DIR=$(swift build -c release --package-path apps/voice --show-bin-path)
 
 # Step 3: Build backend
 pnpm run backend:build
@@ -157,6 +165,13 @@ rm -rf "$VMO_DIR"
 mkdir -p "$VMO_DIR"
 cp "$VMO_BUILD_DIR/vmo" "$VMO_DIR/vmo"
 codesign --force --sign - --entitlements apps/vmo/vmo.entitlements "$VMO_DIR/vmo"
+
+# Step 8b-voice. Install voice to $LYS_HOME/runtime/voice, where the desktop
+# starts it. voice needs no entitlements, so the binary is installed as built.
+VOICE_DIR="$LYS_HOME/runtime/voice"
+rm -rf "$VOICE_DIR"
+mkdir -p "$VOICE_DIR"
+cp "$VOICE_BUILD_DIR/voice" "$VOICE_DIR/voice"
 
 # Step 8c. Install the email MCP server to $LYS_HOME/runtime/email, where the
 # backend starts it

@@ -10,6 +10,7 @@ import type {
 } from "@/lib/store/settings"
 import { INITIAL_PROVIDER_MODEL_STATES } from "@/lib/store/model-runtime"
 import type { VmoServerInfo } from "@/lib/store/vmo-runtime"
+import type { VoiceServerInfo } from "@/lib/store/voice-runtime"
 import {
   buildJsonResponse,
   createTransportFailure,
@@ -45,6 +46,7 @@ const BACKEND_URL = "http://127.0.0.1:12345"
 const DISK_RUNTIME_DOCUMENT: SettingsDocument["runtime"] = Object.freeze({
   autoStartBackend: false,
   autoStartVmo: false,
+  autoStartVoice: false,
   defaultModel: "on-disk",
   backendAddress: BACKEND_URL
 })
@@ -108,6 +110,33 @@ const BOTH_AUTOSTART_RUNTIME_SETTINGS: SettingsDocument["runtime"] =
     autoStartBackend: true,
     autoStartVmo: true
   })
+
+/** Runtime group on disk with only voice autostart on. */
+const VOICE_AUTOSTART_RUNTIME_SETTINGS: SettingsDocument["runtime"] =
+  Object.freeze({
+    ...DISK_RUNTIME_DOCUMENT,
+    autoStartBackend: true,
+    autoStartVoice: true
+  })
+
+/** Settings document on disk with only voice autostart on. */
+const VOICE_AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
+  ...DISK_SETTINGS_DOCUMENT,
+  runtime: VOICE_AUTOSTART_RUNTIME_SETTINGS
+})
+
+/** Runtime group on disk with voice autostart on and the backend off. */
+const VOICE_ONLY_AUTOSTART_RUNTIME_SETTINGS: SettingsDocument["runtime"] =
+  Object.freeze({
+    ...DISK_RUNTIME_DOCUMENT,
+    autoStartVoice: true
+  })
+
+/** Settings document on disk with voice autostart on and the backend off. */
+const VOICE_ONLY_AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
+  ...DISK_SETTINGS_DOCUMENT,
+  runtime: VOICE_ONLY_AUTOSTART_RUNTIME_SETTINGS
+})
 
 /** Settings document on disk with backend and vmo autostart on. */
 const BOTH_AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
@@ -198,8 +227,8 @@ async function loadFreshLysStore() {
 }
 
 /**
- * Starts a native host whose backend process and vmo are stopped until
- * started; a started vmo answers its health route at once.
+ * Starts a native host whose backend process, vmo, and voice are stopped
+ * until started; a started vmo or voice answers its health route at once.
  *
  * @param settingsDocument - Settings document `load_settings` returns.
  * @param commands - Commands replacing the defaults.
@@ -211,6 +240,7 @@ function startDesktopHost(
 ) {
   let isRunning = false
   let isVmoRunning = false
+  let isVoiceRunning = false
   return startNativeHostFake({
     load_settings: () => settingsDocument,
     get_backend_status: () => ({ running: isRunning }),
@@ -229,6 +259,17 @@ function startDesktopHost(
       return { status: "running", pid: 4343 }
     },
     get_vmo_health: () => "ready",
+    get_voice_status: () =>
+      isVoiceRunning ? { status: "running", pid: 4344 } : { status: "stopped" },
+    start_voice: () => {
+      isVoiceRunning = true
+      return { status: "running", pid: 4344 }
+    },
+    stop_voice: () => {
+      isVoiceRunning = false
+      return { status: "stopped" }
+    },
+    get_voice_health: () => "ready",
     ...commands
   })
 }
@@ -492,16 +533,19 @@ describe("useLysStore", () => {
 
       const stoppedBackend: BackendServerInfo = { status: "stopped" }
       const stoppedVmo: VmoServerInfo = { status: "stopped", problem: null }
+      const stoppedVoice: VoiceServerInfo = { status: "stopped", problem: null }
       expect(useLysStore.getState()).toMatchObject({
         initializing: false,
         settings: DISK_SETTINGS,
         backendServerInfo: stoppedBackend,
-        vmoServerInfo: stoppedVmo
+        vmoServerInfo: stoppedVmo,
+        voiceServerInfo: stoppedVoice
       })
       expect(listCommandNames(host)).toEqual([
         "load_settings",
         "get_backend_status",
-        "get_vmo_status"
+        "get_vmo_status",
+        "get_voice_status"
       ])
     })
 
@@ -603,6 +647,78 @@ describe("useLysStore", () => {
         "Failed to inspect vmo process"
       )
       expect(useLysStore.getState().vmoServerInfo).toEqual({
+        status: "stopped",
+        problem: null
+      })
+    })
+
+    it("starts voice with its autostart alongside the backend, and the backend does not wait for voice", async () => {
+      startBackendFake(CONNECTED_BACKEND)
+      const voiceHealth = createControlledPromise<unknown>()
+      const host = startDesktopHost(VOICE_AUTOSTART_SETTINGS_DOCUMENT, {
+        get_voice_health: () => voiceHealth.promise
+      })
+      const useLysStore = await loadFreshLysStore()
+
+      const initialization = useLysStore.getState().initialize()
+      const getSettlement = createSettlementReader(initialization)
+      await vi.waitFor(() => {
+        expect(useLysStore.getState().backendServerInfo.status).toBe("running")
+      })
+      const whileVoiceStarts = useLysStore.getState().voiceServerInfo
+      const settlementWhileVoiceStarts = getSettlement()
+      voiceHealth.resolve("ready")
+      await initialization
+
+      expect(whileVoiceStarts).toEqual({ status: "starting", problem: null })
+      expect(settlementWhileVoiceStarts).toBe("pending")
+      expect(useLysStore.getState().voiceServerInfo).toEqual({
+        status: "running",
+        problem: null
+      })
+      expect(listCommandNames(host)).toContain("start_voice")
+    })
+
+    it("adopts a voice the desktop already owns, without autostart", async () => {
+      const host = startDesktopHost(DISK_SETTINGS_DOCUMENT, {
+        get_voice_status: () => ({ status: "running", pid: 4344 })
+      })
+      const useLysStore = await loadFreshLysStore()
+
+      await useLysStore.getState().initialize()
+
+      expect(useLysStore.getState().voiceServerInfo.status).toBe("running")
+      expect(listCommandNames(host)).not.toContain("start_voice")
+    })
+
+    it("joins a voice stop still in progress after a reload instead of starting voice, even with its autostart on", async () => {
+      const host = startDesktopHost(VOICE_ONLY_AUTOSTART_SETTINGS_DOCUMENT, {
+        get_voice_status: () => ({ status: "stopping", pid: 4344 }),
+        stop_voice: () => ({ status: "stopped" })
+      })
+      const useLysStore = await loadFreshLysStore()
+
+      await useLysStore.getState().initialize()
+
+      expect(useLysStore.getState().voiceServerInfo).toEqual({
+        status: "stopped",
+        problem: null
+      })
+      expect(listCommandNames(host)).toContain("stop_voice")
+      expect(listCommandNames(host)).not.toContain("start_voice")
+    })
+
+    it("rejects with the voice status rejection when it cannot be read", async () => {
+      startDesktopHost(VOICE_ONLY_AUTOSTART_SETTINGS_DOCUMENT, {
+        get_voice_status: () =>
+          Promise.reject("Failed to inspect voice process")
+      })
+      const useLysStore = await loadFreshLysStore()
+
+      await expect(useLysStore.getState().initialize()).rejects.toBe(
+        "Failed to inspect voice process"
+      )
+      expect(useLysStore.getState().voiceServerInfo).toEqual({
         status: "stopped",
         problem: null
       })

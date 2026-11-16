@@ -17,8 +17,9 @@ import type {
  * @remarks Mirrors Rust's `RunTimeSettings`, field names in the camelCase
  * wire representation. The settings file names the default model by its bare
  * key; the Tauri settings adapter reads it as a reference, so only
- * `defaultModel` differs from the file. The two startup switches are saved
- * when the Runtime pane changes them and are read when Lys opens. Edits of
+ * `defaultModel` differs from the file. The three startup switches are saved
+ * when the Runtime pane changes them and are read when Lys opens; voice's
+ * switch is off by default, the others on. Edits of
  * `defaultModel` and `backendAddress` remain session-only; the desktop never
  * writes the file's default model.
  */
@@ -27,6 +28,8 @@ export type RuntimeSettings = {
   autoStartBackend: boolean
   /** Whether desktop initialization starts vmo, Lys's page reader. */
   autoStartVmo: boolean
+  /** Whether desktop initialization starts voice, Lys's speech server. */
+  autoStartVoice: boolean
   /**
    * Model a new conversation uses, or `null` when none is set.
    *
@@ -41,11 +44,11 @@ export type RuntimeSettings = {
 }
 
 /**
- * The two startup switches of the runtime group: the part of it the desktop
- * saves.
+ * The three startup switches of the runtime group: the part of it the
+ * desktop saves.
  */
 export type RuntimeAutoStartSettings = Readonly<
-  Pick<RuntimeSettings, "autoStartBackend" | "autoStartVmo">
+  Pick<RuntimeSettings, "autoStartBackend" | "autoStartVmo" | "autoStartVoice">
 >
 
 /**
@@ -370,6 +373,7 @@ export const initialSettingsState: LysSettings = {
   runtime: {
     autoStartBackend: true,
     autoStartVmo: true,
+    autoStartVoice: false,
     defaultModel: null,
     backendAddress: "http://127.0.0.1:12345"
   },

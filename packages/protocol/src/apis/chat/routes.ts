@@ -12,6 +12,26 @@ import { API_PREFIX_V1 } from "../../constant"
 export const apiChatReplyEventsRoute = `${API_PREFIX_V1}/chat/:conversationId/replies/:assistantMessageId/events`
 
 /**
+ * Versioned GET path for the speech WebSocket that speaks one reply.
+ *
+ * @remarks This path is transmitted in HTTP upgrade requests and is not
+ * persisted. Consumers substitute percent-encoded UUIDv7 identifiers for
+ * `:conversationId` and `:assistantMessageId`. Changing it requires
+ * coordinated route registration.
+ */
+export const apiChatSpeechRoute = `${API_PREFIX_V1}/chat/:conversationId/replies/:assistantMessageId/speech`
+
+/**
+ * Versioned GET path for the WebSocket that speaks one notification line.
+ *
+ * @remarks This path is transmitted in HTTP upgrade requests and is not
+ * persisted. Consumers substitute percent-encoded UUIDv7 identifiers for
+ * `:conversationId` and `:assistantMessageId`. Changing it requires
+ * coordinated route registration.
+ */
+export const apiChatNotificationRoute = `${API_PREFIX_V1}/chat/:conversationId/replies/:assistantMessageId/notification`
+
+/**
  * Versioned POST path for stopping one assistant reply's running generation.
  *
  * @remarks This path is transmitted in HTTP requests and is not persisted.

@@ -31,6 +31,14 @@ export type {
   ChatToolCallPathParams
 } from "./_share"
 export {
+  chatNotificationApi,
+  chatSpeechApi,
+  chatSpeechQuerySchema,
+  type ChatNotificationApiRoute,
+  type ChatSpeechApiRoute,
+  type ChatSpeechQuery
+} from "./speechRoute"
+export {
   chatReplyEventSchema,
   chatReplyEventsApi,
   type ChatReplyEvent,

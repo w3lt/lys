@@ -5,6 +5,7 @@ import registerChatRoute, { type ChatRouteOptions } from "./chatRoute"
 import { createLlmModelCapabilitiesLookup } from "./modelCapabilities"
 import ReplyGenerationRegistry from "../replyGenerationRegistry"
 import updateFastifyWithChatReplyRoutes from "./replyRoutes"
+import updateFastifyWithVoiceRoutes from "../../voice/routes"
 
 /**
  * Registers all chat routes and the registry that owns their generations.
@@ -58,4 +59,5 @@ function registerChatRouteGroup(
   registerChatRoute(app, { ...options, generations, findModelCapabilities })
   registerChatContextRoute(app, findModelCapabilities)
   updateFastifyWithChatReplyRoutes(app, generations)
+  updateFastifyWithVoiceRoutes(app, generations)
 }

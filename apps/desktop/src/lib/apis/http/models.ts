@@ -1,4 +1,5 @@
 import {
+  buildLlmProviderApiPath,
   llmListModelsApi,
   llmLoadModelApi,
   llmTestModelApi,
@@ -10,13 +11,18 @@ import {
   type LlmListModelsApiResponse,
   type LlmTestModelApiResponse
 } from "@lys/protocol"
-import type { ModelLoadConfiguration } from "@lys/share"
+import type {
+  LlmModelReference,
+  LlmProvider,
+  ModelLoadConfiguration
+} from "@lys/share"
 
-/** Private error cause marking a model request refused because no LLM runtime is connected. */
+/** Private error cause marking a model request refused because the provider's runtime is not connected. */
 const MODEL_RUNTIME_UNAVAILABLE_CAUSE = Symbol("model-runtime-unavailable")
 
 /**
- * Determines whether a model request failed because the backend has no connected LLM runtime.
+ * Determines whether a model request failed because the backend has no
+ * connected runtime for the request's provider.
  *
  * @param failure - Untrusted rejection from a model request.
  * @returns Whether the error carries the private runtime-unavailable cause.
@@ -129,18 +135,22 @@ async function parseModelResponse<TPayload>(
 }
 
 /**
- * Lists the downloaded models, their observed loaded state, and who loads them.
+ * Lists one provider's models, their observed loaded state, and who loads
+ * them.
+ * @param provider - Provider whose models are listed.
  * @param connection - Backend origin and local cancellation signal.
  * @returns A validated immutable inventory, with whether Lys or the provider
  * loads the models, after the response is consumed.
- * @throws On transport, HTTP, JSON, or protocol validation failure.
+ * @throws On transport, HTTP, JSON, or protocol validation failure, including
+ * the runtime-unavailable refusal while the provider is not connected.
  */
 export async function listModels(
+  provider: LlmProvider,
   connection: ModelApiConnection
 ): Promise<LlmListModelsApiResponse> {
   const response = await getModelResponse({
     ...connection,
-    path: llmListModelsApi.path,
+    path: buildLlmProviderApiPath(llmListModelsApi.path, provider),
     method: llmListModelsApi.method
   })
   const inventory = await parseModelResponse(
@@ -156,29 +166,29 @@ export async function listModels(
 
 /**
  * Loads weights with the given load settings.
- * @param modelKey - Model key or alias to resolve at the runtime.
+ * @param model - Provider to load on, and the model key or alias it resolves.
  * @param configuration - Load settings sent with this load; LM Studio decides
  * each setting that is absent.
  * @param connection - Backend origin and local cancellation signal.
  * @returns Canonical model metadata after the backend confirms loading.
  * @throws On invalid input, including a load setting outside its accepted
  * range, before any request is sent; or on transport, HTTP, JSON, or protocol
- * failure, including the backend's refusal when the connected provider loads
- * its own models.
+ * failure, including the backend's refusal when the provider loads its own
+ * models.
  * @remarks Accepted loads can finish after local cancellation; no automatic retry occurs.
  */
 export async function loadModel(
-  modelKey: string,
+  model: LlmModelReference,
   configuration: ModelLoadConfiguration,
   connection: ModelApiConnection
 ): Promise<LlmInfo> {
   const payload = llmLoadModelApi.body.parse({
-    modelId: modelKey,
+    modelId: model.modelKey,
     configuration
   })
   const response = await getModelResponse({
     ...connection,
-    path: llmLoadModelApi.path,
+    path: buildLlmProviderApiPath(llmLoadModelApi.path, model.provider),
     method: llmLoadModelApi.method,
     body: JSON.stringify(payload)
   })
@@ -187,21 +197,21 @@ export async function loadModel(
 
 /**
  * Stops every loaded instance matching one canonical model key.
- * @param modelKey - Canonical inventory key to unload.
+ * @param model - Provider to unload on, and the canonical inventory key.
  * @param connection - Backend origin and local cancellation signal.
  * @returns Resolves only for the protocol's bodyless 204 acknowledgement.
  * @throws On invalid input, transport, declared failure, including the
- * backend's refusal when the connected provider loads its own models, or an
- * unexpected success status.
+ * backend's refusal when the provider loads its own models, or an unexpected
+ * success status.
  */
 export async function unloadModel(
-  modelKey: string,
+  model: LlmModelReference,
   connection: ModelApiConnection
 ): Promise<void> {
-  const payload = llmUnloadModelApi.body.parse({ modelId: modelKey })
+  const payload = llmUnloadModelApi.body.parse({ modelId: model.modelKey })
   const response = await getModelResponse({
     ...connection,
-    path: llmUnloadModelApi.path,
+    path: buildLlmProviderApiPath(llmUnloadModelApi.path, model.provider),
     method: llmUnloadModelApi.method,
     body: JSON.stringify(payload)
   })
@@ -220,20 +230,27 @@ export async function unloadModel(
 
 /**
  * Observes loaded-state health without generating a completion.
- * @param modelKey - Canonical key within the shared route's decoded length limit.
+ * @param model - Provider to ask, and the canonical key within the shared
+ * route's decoded length limit.
  * @param connection - Backend origin and local cancellation signal.
  * @returns A validated ready or not-ready observation for the requested key.
  * @throws On invalid input, transport, HTTP, JSON, protocol, or identity mismatch.
  */
 export async function getModelHealth(
-  modelKey: string,
+  model: LlmModelReference,
   connection: ModelApiConnection
 ): Promise<LlmTestModelApiResponse> {
-  const { modelId } = llmTestModelApi.params.parse({ modelId: modelKey })
+  const { provider, modelId } = llmTestModelApi.params.parse({
+    provider: model.provider,
+    modelId: model.modelKey
+  })
   const response = await getModelResponse({
     ...connection,
     method: llmTestModelApi.method,
-    path: llmTestModelApi.path.replace(":modelId", encodeURIComponent(modelId))
+    path: buildLlmProviderApiPath(llmTestModelApi.path, provider).replace(
+      ":modelId",
+      encodeURIComponent(modelId)
+    )
   })
   const health = await parseModelResponse(
     response,

@@ -11,14 +11,16 @@ const MAXIMUM_PROVIDER_ADDRESS_LENGTH = 259
 const PORT_PATTERN = /^[1-9]\d{0,4}$/
 
 /**
- * Validates which model provider every request goes to: `lmStudio`, a
- * server the person runs; `ollama`, a local Ollama server the person runs;
- * `ollamaCloud`, Ollama's hosted service, reached with an API key; or
- * `groq`, Groq's hosted API, reached with an API key.
+ * Validates a model provider: `lmStudio`, a server the person runs;
+ * `ollama`, a local Ollama server the person runs; `ollamaCloud`, Ollama's
+ * hosted service, reached with an API key; or `groq`, Groq's hosted API,
+ * reached with an API key.
  *
- * @remarks Persisted in the settings file's `providers` group as `active`.
- * The desktop host declares the same four values. Removing or renaming one
- * changes which settings files load and requires a coordinated desktop and
+ * @remarks The values are in provider order, the order Lys lists and saves
+ * providers in. Persisted in the settings file's `providers.enabled` list, in
+ * each stored reply, and sent in model routes and chat requests. The desktop
+ * host declares the same four values. Removing or renaming one changes which
+ * settings files and databases load and requires a coordinated desktop and
  * backend release.
  */
 export const llmProviderSchema = z.enum([
@@ -28,8 +30,55 @@ export const llmProviderSchema = z.enum([
   "groq"
 ])
 
-/** Model provider every request goes to. */
+/** A model provider Lys can reach. */
 export type LlmProvider = z.infer<typeof llmProviderSchema>
+
+/** Every provider, in provider order. */
+export const LLM_PROVIDERS: readonly LlmProvider[] = Object.freeze([
+  ...llmProviderSchema.options
+])
+
+/** Name of each provider, as the person reads it. */
+export const LLM_PROVIDER_NAMES = Object.freeze({
+  lmStudio: "LM Studio",
+  ollama: "Ollama",
+  ollamaCloud: "Ollama Cloud",
+  groq: "Groq"
+} satisfies Readonly<Record<LlmProvider, string>>)
+
+/**
+ * Validates one model on one provider: the provider, and the key that
+ * provider lists the model under.
+ *
+ * @remarks The same key on two providers names two models, so a model is
+ * never named by its key alone. Sent in chat requests; the key is not
+ * checked against the provider's list here.
+ */
+export const llmModelReferenceSchema = z
+  .strictObject({
+    /** Provider that serves the model. */
+    provider: llmProviderSchema,
+    /** Key the provider lists the model under; non-empty. */
+    modelKey: z.string().min(1)
+  })
+  .readonly()
+
+/** One model on one provider. */
+export type LlmModelReference = z.infer<typeof llmModelReferenceSchema>
+
+/**
+ * Answers whether two references name the same model.
+ *
+ * @param left - First reference.
+ * @param right - Second reference.
+ * @returns True when the provider and the key are both equal.
+ */
+export function isSameLlmModelReference(
+  left: LlmModelReference,
+  right: LlmModelReference
+): boolean {
+  return left.provider === right.provider && left.modelKey === right.modelKey
+}
 
 /**
  * Answers whether a text follows the provider address rule: a host name or
@@ -81,17 +130,36 @@ export const providerAddressSchema = z
 export type ProviderAddress = z.infer<typeof providerAddressSchema>
 
 /**
- * Validates the provider choice and server addresses saved in the settings
- * file's `providers` group.
+ * Answers whether a list names each provider at most once.
+ *
+ * @param providers - Providers to inspect.
+ * @returns True when no provider appears twice.
+ */
+function hasDistinctProviders(providers: readonly LlmProvider[]): boolean {
+  return new Set(providers).size === providers.length
+}
+
+/**
+ * Validates the providers that are on and the server addresses saved in the
+ * settings file's `providers` group.
  *
  * @remarks A `null` address means the provider's default address, which
  * `@lys/protocol` owns, so the file never holds a copy of a default. API keys
- * are not here: they live in the `secrets` group.
+ * are not here: they live in the `secrets` group. The desktop host reads a
+ * file saved before several providers could be on, which names one `active`
+ * provider instead of `enabled`, as that one provider on; this schema sees
+ * the document after that reading.
  */
 export const llmProviderSettingsSchema = z
   .strictObject({
-    /** Provider every request goes to. */
-    active: llmProviderSchema,
+    /**
+     * Providers that are on, each once, in any order; empty when none is.
+     * Every provider that is on answers requests for its own models.
+     */
+    enabled: z
+      .array(llmProviderSchema)
+      .readonly()
+      .refine(hasDistinctProviders, "A provider is listed more than once."),
     /** LM Studio's server. */
     lmStudio: z
       .strictObject({
@@ -109,5 +177,5 @@ export const llmProviderSettingsSchema = z
   })
   .readonly()
 
-/** Provider choice and server addresses saved in the settings file. */
+/** Providers that are on and server addresses saved in the settings file. */
 export type LlmProviderSettings = z.infer<typeof llmProviderSettingsSchema>

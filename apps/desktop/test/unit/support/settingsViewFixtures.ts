@@ -8,8 +8,8 @@ import {
   type RuntimeArrangement
 } from "./runtimeFixtures"
 
-/** Route key of the model inventory read. */
-export const INVENTORY_ROUTE = "GET /api/v1/llm/list"
+/** Route key of LM Studio's model inventory read. */
+export const INVENTORY_ROUTE = "GET /api/v1/llm/lmStudio/list"
 
 /**
  * Imports of the pane bodies the settings view loads lazily, by pane.
@@ -18,6 +18,9 @@ export const INVENTORY_ROUTE = "GET /api/v1/llm/list"
  * missing here would only make its cases wait for the view's import again.
  */
 const SETTINGS_PANE_BODY_IMPORTS = Object.freeze({
+  lys: () => import("@/components/SettingsViewComponents/LysPaneContent"),
+  profile: () =>
+    import("@/components/SettingsViewComponents/ProfilePaneContent"),
   runtime: () =>
     import("@/components/SettingsViewComponents/RuntimePaneContent"),
   model: () => import("@/components/SettingsViewComponents/ModelPaneContent"),

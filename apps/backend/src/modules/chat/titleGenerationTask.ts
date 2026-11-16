@@ -1,4 +1,5 @@
 import type { ChatGenerationEvent } from "@lys/protocol"
+import type { LlmModelReference } from "@lys/share"
 import type { FastifyBaseLogger } from "fastify"
 import type { TitleGenerationOptions } from "./chatService"
 import { waitForSettlementOrAbort } from "../../utils/abort"
@@ -9,17 +10,19 @@ export type CreateTitleGenerationTaskOptions = {
   /** Starts one external title request, borrowing the application adapter. */
   generateTitle: (options: TitleGenerationOptions) => Promise<string>
   /**
-   * Observes the context length a model is loaded with, through the
-   * model-operation queue; resolves to undefined when the model is not
-   * loaded, and rejects when the runtime cannot be reached or is busy. It
-   * never loads the model. Completion-only: the queue keeps an accepted
-   * observation until it settles.
+   * Observes the context length a model is loaded with on its provider,
+   * through that provider's model-operation queue; resolves to undefined
+   * when the model is not loaded, and rejects when the runtime cannot be
+   * reached or is busy. It never loads the model. Completion-only: the queue
+   * keeps an accepted observation until it settles.
    */
-  findLoadedContextLength: (model: string) => Promise<number | undefined>
+  findLoadedContextLength: (
+    model: LlmModelReference
+  ) => Promise<number | undefined>
   /** User content used as the title-generation prompt. */
   userMessageContent: string
-  /** Model identifier passed to the chat service. */
-  model: string
+  /** Model passed to the chat service; the request goes to its provider. */
+  model: LlmModelReference
   /** Signal owned by the generation and aborted only at backend shutdown. */
   abortSignal: AbortSignal
   /** Queues the title event for every stream following the turn; never waits. */

@@ -11,6 +11,7 @@ import type {
 } from "@lys/share"
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import type { GetAttachmentImageFileStatus } from "../../agent/agentContext"
+import { listAgentMcpTools } from "../../agent/builtInAgents"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
 import type { AttachmentFileStatus } from "../../attachment/attachmentFileStore"
 import { buildAttachmentImageFileStatusLookup } from "../../attachment/attachmentImageReader"
@@ -25,7 +26,7 @@ import type { McpTurnToolLookup } from "../../mcp/mcpServerRegistry"
 import type { BuiltInToolEntry } from "../../tool/builtIn/builtInTool"
 import {
   findListedModelCapabilities,
-  type FindModelCapabilities
+  type FindLlmModelCapabilities
 } from "./modelCapabilities"
 import {
   loadRequestedAgent,
@@ -52,10 +53,10 @@ type ChatContextRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findMcpTool: (toolName: string) => McpTurnToolLookup
     /**
-     * Capabilities of the model a request names, read from the connected
-     * provider's inventory.
+     * Capabilities of the model a request names, read from its provider's
+     * inventory.
      */
-    findModelCapabilities: FindModelCapabilities
+    findModelCapabilities: FindLlmModelCapabilities
     /** Examines stored attachment files without reading them. */
     attachmentFiles: Pick<AttachmentFileStore, "getAttachmentFileStatus">
   }>
@@ -95,19 +96,19 @@ const NEW_CONVERSATION_HISTORY: MeasuredHistory = Object.freeze({
 
 /** Explanation sent when no loaded instance matches the requested model. */
 const MODEL_NOT_LOADED_DETAIL =
-  "The provider has not loaded the model. Load it, or choose a model the provider serves, in Settings → Model to measure the conversation."
+  "The provider has not loaded the model. Load it, or choose a model the provider serves, in Settings → Models to measure the conversation."
 
 /**
  * Registers the endpoint that measures the context a conversation's next
  * message would be sent with.
  *
  * @param app - Backend with validation, the Zod response serializer, the
- * agent runtime service, the conversation reader, the LLM service behind the
- * agents, the built-in tools, the MCP server registry, and the attachment
- * file store installed.
+ * agent runtime service, the conversation reader, the providers' LLM
+ * services behind the agents, the built-in tools, the MCP server registry,
+ * and the attachment file store installed.
  * @param findModelCapabilities - Capabilities of the model a request names,
- * read from the connected provider's inventory and remembered by the lookup
- * while that provider stays connected; shared with
+ * read from its provider's inventory and remembered by the lookup while that
+ * provider stays connected; shared with
  * the chat route, so a measurement offers what a turn would.
  * @throws If route registration fails.
  * @remarks Every response prevents caching, because a measurement observes
@@ -116,7 +117,7 @@ const MODEL_NOT_LOADED_DETAIL =
  */
 export default function registerChatContextRoute(
   app: FastifyInstance,
-  findModelCapabilities: FindModelCapabilities
+  findModelCapabilities: FindLlmModelCapabilities
 ): void {
   const dependencies = {
     loadChatAgent: (code: string) =>
@@ -166,7 +167,9 @@ export default function registerChatContextRoute(
  * inventory does not list sees no image and is offered no reader. Image
  * files are looked up, never read: an image counts from its stored sides.
  * An offered MCP tool whose server is not connected is left out, because
- * its definition is known only while the server is connected.
+ * its definition is known only while the server is connected, and so is a
+ * tool only Lys may use when the agent is neither Caliginia nor Lysiptera,
+ * as its turn would not offer it.
  */
 async function handleChatContextRequest(
   request: FastifyRequest<ChatContextApiRoute>,
@@ -192,6 +195,7 @@ async function handleChatContextRequest(
     sendUnansweredTurnProblem(reply, requestedAgent, request.url)
     return
   }
+  const { agent } = requestedAgent
   const measured = buildMeasuredHistory(
     storedConversation,
     dependencies.attachmentFiles
@@ -204,8 +208,8 @@ async function handleChatContextRequest(
     capabilities.trainedForToolUse,
     measured.attachments
   )
-  const tools = buildOfferedDefinitions(body, requestedTools)
-  const measurement = await requestedAgent.agent.findContextMeasurement({
+  const tools = buildOfferedDefinitions(body, requestedTools, agent.code)
+  const measurement = await agent.findContextMeasurement({
     history: measured.history,
     model: body.model,
     canSeeImages: capabilities.vision,
@@ -290,21 +294,25 @@ function buildMeasuredHistory(
 }
 
 /**
- * Builds the definitions of the tools the request offers, as a turn orders
- * them.
+ * Builds the definitions of the tools the request offers, as the agent's
+ * turn orders and offers them.
  *
  * @param body - Validated chat-context input.
  * @param requestedTools - The offered backend tools, in offer order.
+ * @param agentCode - Code of the agent the turn would run.
  * @returns The client definitions first, then the built-in tools', then the
- * connected MCP tools'.
+ * connected MCP tools' the agent may use: a tool only Lys may use is left
+ * out unless the agent is Caliginia or Lysiptera.
  */
 function buildOfferedDefinitions(
   body: ChatContextApiRequestBody,
-  requestedTools: RequestedBackendTools
+  requestedTools: RequestedBackendTools,
+  agentCode: string
 ): readonly ToolDefinition[] {
+  const mcpTools = listAgentMcpTools(agentCode, requestedTools.mcpTools)
   return [
     ...(body.tools?.definitions ?? []),
     ...requestedTools.builtInTools.map((entry) => entry.definition),
-    ...requestedTools.mcpTools.map((tool) => tool.definition)
+    ...mcpTools.map((tool) => tool.definition)
   ]
 }

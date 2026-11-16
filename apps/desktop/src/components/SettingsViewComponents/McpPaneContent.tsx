@@ -1,7 +1,6 @@
 import {
   BUILT_IN_MCP_SERVER_NAMES,
   type EmailAccount,
-  type EmailPassword,
   type McpServerName,
   type McpServerSettings
 } from "@lys/share"
@@ -14,13 +13,10 @@ import {
 } from "react"
 
 import { Button } from "@/components/ui/button"
+import { useNewConversationModel } from "@/lib/hooks/conversationModel"
+import { findLoadedModelInfo } from "@/lib/models/model-availability"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
-import { useLysStore, type BackendServerStatus } from "@/lib/store"
-import {
-  isEmailAccountSaved,
-  type EmailAccountRemovalOutcome,
-  type EmailAccountSaveOutcome
-} from "@/lib/store/email-settings"
+import { useLysStore } from "@/lib/store"
 import {
   useMcpServerStore,
   type McpServerListState
@@ -32,7 +28,18 @@ import {
 import type { ToolApproval } from "@/lib/store/tool-settings"
 import { useToolStore } from "@/lib/store/tools"
 
-import EmailAccountCard from "./EmailAccountCard"
+import {
+  formatEmailMailboxConnection,
+  type EmailMailboxConnection
+} from "./email-mailbox-connection"
+import EmailMailboxCardView, {
+  EmailMailboxBackButton
+} from "./EmailMailboxCardView"
+import {
+  isBackendServerRunning,
+  useEmailMailboxFacts
+} from "./email-mailbox-state"
+import { useEmailMailboxView } from "./email-mailbox-view"
 import { McpServerEditor, type McpEditorTarget } from "./McpServerEditor"
 import {
   McpServerSection,
@@ -43,12 +50,16 @@ import { ToolApprovalSaveFeedback } from "./ToolApprovalSaveFeedback"
 import {
   buildMcpListedServerKey,
   findMcpPaneRetry,
+  formatMcpServerOverviewNote,
   formatMcpToolOfferWarning,
   isMcpListedServerOn,
   listMcpPaneNotes,
   listMcpServers,
+  summarizeMcpServers,
+  summarizeMcpTools,
   type McpListedServer,
-  type McpPaneNote
+  type McpPaneNote,
+  type McpToolOverview
 } from "./mcp-presentation"
 
 /** Focus target that leaves focus where it is. */
@@ -320,18 +331,17 @@ function McpPaneStatus({ notes, onRetry }: McpPaneStatusProps): ReactElement {
  * @remarks The tool store owns whether tool calls are on, and the
  * application store owns the model state and which settings pane is shown;
  * the component owns no state. The warning shows while tool calls are off,
- * or while the loaded model is not trained for tool use; Open Tools selects
- * the Tools pane.
+ * or while the model a new conversation uses is loaded and not trained for
+ * tool use; Open Tools selects the Tools pane.
  * @returns The warning, or null while the tools are offered.
  */
 function McpToolOfferNotice(): ReactElement | null {
   const areToolCallsOn = useToolStore((state) => state.areToolCallsOn)
-  const modelRuntime = useLysStore((state) => state.modelRuntime)
-  const modelInventory = useLysStore((state) => state.modelInventory)
+  const { availability } = useNewConversationModel()
   const setSettingsPane = useLysStore((state) => state.setSettingsPane)
   const text = formatMcpToolOfferWarning(
     areToolCallsOn,
-    calculateToolModelSupport(modelRuntime, modelInventory)
+    calculateToolModelSupport(findLoadedModelInfo(availability))
   )
 
   if (text === "") return null
@@ -487,7 +497,8 @@ type McpServerListViewProps = {
  * an added server's own switch or the switch of a server Lys ships; a
  * server's approval sets every listed tool of the server; and a server is
  * removed once its removal is saved, which the parent is told with the
- * server's name. The email server's panel is the account card.
+ * server's name. The email server's panel holds the person's mailbox;
+ * Lys's own is in the Lys pane.
  * @param props - Backend status, the list, expansion, focus, and the
  * parent-owned changes.
  * @returns The warning, when one is due, and the section of the servers.
@@ -519,7 +530,9 @@ function McpServerListView({
     <>
       {servers.some(isMcpListedServerOn) ? <McpToolOfferNotice /> : null}
       <McpServerSection
-        builtInPanels={{ email: <EmailAccountCardView /> }}
+        builtInPanels={{
+          email: <PersonMailboxPanel />
+        }}
         expandedServerKey={expandedServerKey}
         focusTarget={focusTarget}
         isBackendRunning={isBackendRunning}
@@ -545,105 +558,199 @@ function McpServerListView({
   )
 }
 
-/**
- * Answers whether the backend answers requests.
- *
- * @param status - The backend's lifecycle state.
- * @returns True while it runs.
- */
-function isBackendServerRunning(status: BackendServerStatus): boolean {
-  switch (status) {
-    case "running":
-      return true
-    case "starting":
-    case "stopping":
-    case "stopped":
-    case "unresponsive":
-      return false
-    default: {
-      const unhandledStatus: never = status
-      return unhandledStatus
-    }
-  }
+/** Properties accepted by {@link McpToolChoiceTile}. */
+type McpToolChoiceTileProps = {
+  /** How many MCP tools ask, run, and are off. */
+  readonly tools: McpToolOverview
 }
 
 /**
- * Presents the email account card and saves, checks, and removes the
- * account.
+ * Presents the overview tile of what MCP tools are set to before they run.
  *
- * @remarks The application store owns the saved account and password, the
- * save, the check, the removal, the email server's switch, and the
- * backend's status; the MCP server store owns the switch's save and the
- * sync that applies the group. Saving signs in through the backend first,
- * which the store does; once the account is saved while the email server
- * is on, the backend is asked to apply the group, so the server starts
- * again with the account. The store's removal switches the email server
- * off first, because the server cannot run without an account, through the
- * MCP server store's switch save, which has the backend apply it, and
- * removes nothing when that save fails.
- * @returns The account card.
+ * @remarks The overview owns the counts; the tile owns no state. The share
+ * of tools that ask, run, and are off is drawn as one bar, an image named
+ * by its counts, shown only when some tool is listed; each count is also
+ * written beside its swatch.
+ * @param props - The counts.
+ * @returns The tile.
  */
-function EmailAccountCardView(): ReactElement {
-  const savedAccount = useLysStore((state) => state.settings.email.account)
-  const savedPassword = useLysStore(
-    (state) => state.settings.secrets.emailPassword
-  )
-  const saveState = useLysStore((state) => state.emailAccountSave)
-  const checkState = useLysStore((state) => state.emailAccountCheck)
-  const isBackendRunning = useLysStore((state) =>
-    isBackendServerRunning(state.backendServerInfo.status)
-  )
-  const saveEmailAccount = useLysStore((state) => state.saveEmailAccount)
-  const deleteEmailAccount = useLysStore((state) => state.deleteEmailAccount)
-  const saveBuiltInMcpServerSwitch = useMcpServerStore(
-    (state) => state.saveBuiltInMcpServerSwitch
-  )
-  const sendMcpServerSync = useMcpServerStore(
-    (state) => state.sendMcpServerSync
-  )
-
-  /**
-   * Saves the account and, once saved while the email server is on, asks
-   * the backend to apply the group.
-   *
-   * @param account - Valid account.
-   * @param password - Its password.
-   * @returns The save outcome.
-   * @remarks The switch is read once the save settled, not when the save
-   * started: the person can switch the server on while the check runs, and
-   * that switch's sync starts the server with the account saved before.
-   */
-  async function handleSaveEmailAccount(
-    account: EmailAccount,
-    password: EmailPassword
-  ): Promise<EmailAccountSaveOutcome> {
-    const outcome = await saveEmailAccount(account, password)
-    const isOnAfterSave =
-      useLysStore.getState().settings.mcp.builtIn.email.enabled
-    if (isEmailAccountSaved(outcome) && isOnAfterSave) void sendMcpServerSync()
-    return outcome
-  }
-
-  /**
-   * Removes the account, switching the email server off first while it is
-   * on.
-   *
-   * @returns The removal outcome: `failed` when the switch or the removal
-   * could not be saved, in which case the account stays.
-   */
-  function handleRemoveEmailAccount(): Promise<EmailAccountRemovalOutcome> {
-    return deleteEmailAccount(() => saveBuiltInMcpServerSwitch("email", false))
-  }
+function McpToolChoiceTile({ tools }: McpToolChoiceTileProps): ReactElement {
+  const toolCount = tools.offeredCount + tools.offCount
 
   return (
-    <EmailAccountCard
-      checkState={checkState}
-      isBackendRunning={isBackendRunning}
-      onRemoveEmailAccount={handleRemoveEmailAccount}
-      onSaveEmailAccount={handleSaveEmailAccount}
-      savedAccount={savedAccount}
-      savedPassword={savedPassword}
-      saveState={saveState}
+    <div className="settings-view__overview-tile">
+      <span className="settings-view__eyebrow">Before a tool runs</span>
+      <span className="settings-view__overview-value">
+        {tools.askCount} <span>ask you first</span>
+      </span>
+      {toolCount === 0 ? null : (
+        <div
+          aria-label={`${tools.askCount} ask, ${tools.runCount} run, ${tools.offCount} off`}
+          className="settings-view__overview-bar"
+          role="img"
+        >
+          <span data-choice="ask" style={{ flexGrow: tools.askCount }} />
+          <span data-choice="run" style={{ flexGrow: tools.runCount }} />
+          <span data-choice="off" style={{ flexGrow: tools.offCount }} />
+        </div>
+      )}
+      <span className="settings-view__overview-legend" aria-hidden="true">
+        <span data-choice="ask">{tools.askCount} ask</span>
+        <span data-choice="run">{tools.runCount} run</span>
+        <span data-choice="off">{tools.offCount} off</span>
+      </span>
+      <span className="settings-view__overview-note">
+        An unanswered prompt ends after 5 minutes.
+      </span>
+    </div>
+  )
+}
+
+/**
+ * Presents the MCP pane's overview: how many servers run, how many tools
+ * the agents can be offered, and what those tools are set to before they
+ * run.
+ *
+ * @remarks The MCP server store owns the servers' states, the tool store
+ * the listed tools, and the application store the saved servers and the
+ * tool choices; the overview owns no state. The total counts the servers
+ * the pane lists, also while the backend is stopped.
+ * @returns The overview.
+ */
+function McpOverview(): ReactElement {
+  const list = useMcpServerStore((state) => state.list)
+  const toolList = useToolStore((state) => state.list)
+  const toolSettings = useLysStore((state) => state.settings.tools)
+  const listedServerCount = useLysStore(
+    (state) => listMcpServers(state.settings).length
+  )
+  const servers = summarizeMcpServers(list, listedServerCount)
+  const serverNote = formatMcpServerOverviewNote(servers)
+  const tools = summarizeMcpTools(toolList, toolSettings)
+
+  return (
+    <div className="settings-view__overview">
+      <div className="settings-view__overview-tile">
+        <span className="settings-view__eyebrow">Servers</span>
+        <span className="settings-view__overview-value">
+          {servers.runningCount} of {servers.totalCount} running
+        </span>
+        <span className="settings-view__overview-note">
+          <span
+            aria-hidden="true"
+            className="settings-view__status-dot"
+            data-tone={serverNote.tone}
+          />
+          {serverNote.text}
+        </span>
+      </div>
+      <div className="settings-view__overview-tile">
+        <span className="settings-view__eyebrow">Armitage can offer</span>
+        <span className="settings-view__overview-value">
+          {tools.offeredCount} <span>tools</span>
+        </span>
+        <span className="settings-view__overview-note">
+          From servers that are running. A tool set to Off is never offered.
+        </span>
+      </div>
+      <McpToolChoiceTile tools={tools} />
+    </div>
+  )
+}
+
+/** Properties accepted by {@link PersonMailboxRow}. */
+type PersonMailboxRowProps = {
+  /** The person's saved account. */
+  readonly account: EmailAccount
+  /** Whether the mailbox is set up, switched on, and served. */
+  readonly connection: EmailMailboxConnection
+  /** Attaches Edit while it must take focus; undefined otherwise. */
+  readonly editRef: ((element: HTMLButtonElement | null) => void) | undefined
+  /** Requests the card of the saved account. */
+  readonly onEditAccount: () => void
+}
+
+/**
+ * Presents the row of the person's saved mailbox: its address, its state,
+ * and Edit.
+ *
+ * @remarks The panel owns the account, the state, and the request; the row
+ * owns no state. The state is named in words beside its dot.
+ * @param props - The account, its state, the focus ref, and the request.
+ * @returns The row.
+ */
+function PersonMailboxRow({
+  account,
+  connection,
+  editRef,
+  onEditAccount
+}: PersonMailboxRowProps): ReactElement {
+  const status = formatEmailMailboxConnection(connection)
+
+  return (
+    <div className="settings-view__mcp-mailboxes">
+      <span className="settings-view__eyebrow">Mailboxes</span>
+      <div className="settings-view__panel-row">
+        <div className="settings-view__row-lines">
+          <span className="settings-view__row-title">Your mailbox</span>
+          <span>{account.address}</span>
+        </div>
+        <span className="settings-view__mailbox-status">
+          <span
+            aria-hidden="true"
+            className="settings-view__status-dot"
+            data-tone={status.tone}
+          />
+          {status.label}
+        </span>
+        <Button
+          aria-label="Edit your mailbox"
+          onClick={onEditAccount}
+          ref={editRef}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Edit
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Presents the person's mailbox in the email server's panel: a row with
+ * its address, state, and Edit, or the account card while it is edited or
+ * set up.
+ *
+ * @remarks The stores own the account, its saves, and the mailbox's
+ * switch; the panel owns, through {@link useEmailMailboxView}, whether the
+ * card shows for a saved account and which control takes focus. Lys's own
+ * mailbox is in the Lys pane.
+ * @returns The panel.
+ */
+function PersonMailboxPanel(): ReactElement {
+  const facts = useEmailMailboxFacts("person")
+  const account = facts.savedAccount
+  const { isCardShown, openCard, closeCard, attachBack, attachEdit } =
+    useEmailMailboxView(account !== null)
+
+  if (account === null || isCardShown) {
+    return (
+      <div className="settings-view__mailbox-setup">
+        {account === null ? null : (
+          <EmailMailboxBackButton attachBack={attachBack} onBack={closeCard} />
+        )}
+        <EmailMailboxCardView mailbox="person" />
+      </div>
+    )
+  }
+  return (
+    <PersonMailboxRow
+      account={account}
+      editRef={attachEdit}
+      connection={facts.connection}
+      onEditAccount={openCard}
     />
   )
 }
@@ -858,6 +965,7 @@ export default function McpPane(): ReactElement {
         isEditing={editor !== null}
         list={list}
       />
+      {editor === null ? <McpOverview /> : null}
       {editor === null ? (
         <McpServerListView
           expandedServerKey={listView.expandedServerKey}

@@ -25,7 +25,8 @@ images vmo runs its page-reading VMs from.
 Only the backend reads or writes the database directly.
 `SqliteDatabase` (`apps/backend/src/infrastructure/database/`) owns the
 connection, its schema version, and closing it; the composition root opens it
-once and closes it after the LLM runtime service and before the chat service.
+once and closes it last, after the chat service and every provider's LLM
+runtime service.
 Stores borrow read and write transactions that cannot close the connection or
 end a transaction early. The conversation records in
 `src/infrastructure/database/conversations/` own every query on the
@@ -43,7 +44,7 @@ operation cannot change data.
 | Table                      | Owned by                    | Notes                                                                                                                                                                                                              |
 | -------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `conversations`            | SQLite conversation records | One row per conversation, including `title`, `agent_code`, `created_at`, and `updated_at`.                                                                                                                         |
-| `conversation_messages`    | SQLite conversation records | Ordered user messages and replies, with each reply's `status`, `finish_reason`, and `model`, and each reply's reasoning, text, and tool-call parts as rows under it.                                               |
+| `conversation_messages`    | SQLite conversation records | Ordered user messages and replies, with each reply's `status`, `finish_reason`, `model`, and `provider`, and each reply's reasoning, text, and tool-call parts as rows under it.                                   |
 | `conversation_sources`     | SQLite conversation records | One row per numbered web source of a conversation: `number`, `url`, and `title`, each number and URL once.                                                                                                         |
 | `conversation_attachments` | SQLite conversation records | One row per attachment of a user message: `number`, `name`, `kind`, `size_bytes`, and an image's `media_type`, `width`, and `height`; each number once per conversation, each name once per message ignoring case. |
 | `agents`                   | SQLite agent records        | One row per agent definition, keyed by its `code`, with `name`, `bio`, `system_prompt`, `created_at`, `updated_at`, and `deleted_at`, the time a deleted agent was deleted; a deleted agent's row stays.           |
@@ -93,7 +94,7 @@ On startup the database owner:
 1. Opens the SQLite file with foreign keys enabled.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
-4. Records the latest version, 17, and commits; a migration failure rolls back
+4. Records the latest version, 18, and commits; a migration failure rolls back
    all pending work.
 5. Switches to write-ahead logging with `synchronous = NORMAL`. A database from
    a newer version was refused in step 3, before anything changed its file.
@@ -133,6 +134,10 @@ with a trigger that marks the search's calls still running as interrupted
 when that call stops running. Version 17 creates both decision tables again,
 copying every row, so a record may store the identity of the policy's rule
 set and the policy's usage, budget, open-world, and paid-tool reasons.
+Version 18 adds `conversation_messages.provider`, the provider of the model
+that wrote each reply, because the same model key on two providers names two
+models; replies stored before it have none (`NULL`), since which provider
+wrote them was never stored.
 Turn creation is atomic and first interrupts a reply still streaming in the same
 conversation: the turn service runs it as one callback inside one write
 transaction of the turn records, which refuse every call once the callback
@@ -157,7 +162,8 @@ the same transaction.
 ## Settings ownership
 
 The settings JSON is a separate host-managed artifact. The backend reads only
-the Tavily API key, the Just run list (`tools.justRun`), the approved folders
+the `providers` group with the Ollama Cloud and Groq keys, the Tavily API
+key, the Just run list (`tools.justRun`), the approved folders
 (`tools.approvedFolders`), and the `mcp` group from it, and never writes it. The desktop reaches it through Tauri commands.
 
 Generation, load configuration, tool approval, and runtime startup switch

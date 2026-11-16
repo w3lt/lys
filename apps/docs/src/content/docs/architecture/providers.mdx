@@ -1,13 +1,16 @@
 ---
 title: LLM provider integration
-description: How the backend reaches LM Studio, Ollama, Ollama Cloud, or Groq for model inventory, lifecycle operations, and streamed chat generation.
+description: How the backend reaches LM Studio, Ollama, Ollama Cloud, and Groq, every provider that is on at once, for model inventory, lifecycle operations, and streamed chat generation.
 docType: architecture
 sidebar:
   order: 7
 ---
 
-Lys answers every request through one model provider at a time, chosen in
-the desktop's Providers pane:
+Lys reaches every model provider the person turned on in the desktop's
+Providers pane, all at the same time, and sends each request to the provider
+of the model it names. A model is named by its provider and the key that
+provider lists it under (`{ provider, modelKey }`), so the same key on two
+providers names two models:
 
 | Provider     | Where it runs                                                       | How Lys reaches it                                        |
 | ------------ | ------------------------------------------------------------------- | --------------------------------------------------------- |
@@ -18,27 +21,28 @@ the desktop's Providers pane:
 
 LM Studio and a local Ollama server are reached over plain HTTP, without a
 key. Ollama Cloud and Groq are reached over HTTPS with the API key the
-person saved for them, and receive the conversations they answer. The
-choice, the addresses, and the keys live in the
-[settings file](/reference/configuration/#persisted-settings-json).
+person saved for them, and receive the conversations they answer. Which
+providers are on, the addresses, and the keys live in the
+[settings file](/reference/configuration/#providers). A provider that is off
+is never contacted.
 
 A local Ollama server and Ollama Cloud are two providers, `ollama` and
 `ollamaCloud`, each with only what reaching it needs: an address, or a key.
-The Providers pane shows them on one Ollama card, whose Local and Cloud
-buttons switch between them. Both answer Ollama's native API, so one
+The Providers pane gives each its own card and switch, so both can be on at
+once. Both answer Ollama's native API, so one
 `OllamaRuntime` serves either, aimed at the local server or at Ollama
 Cloud.
 
 ## Current stack
 
-| Concern          | Current implementation                                                                                                                                                                                                               |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Model inventory  | `LlmService.listLlmModels()` lists the provider's models, annotates which model keys have loaded instances, and the context length each is loaded with.                                                                              |
-| Model health     | `LlmService.getLlmModelHealth()` checks one fresh loaded-inventory snapshot for the requested key without generating text.                                                                                                           |
-| Model loading    | `POST /api/v1/llm/load` uses the application service to load one model with the request's load settings and return its metadata.                                                                                                     |
-| Model unloading  | `PATCH /api/v1/llm/unload` stops every observed loaded instance matching one key, then reconciles the loaded-instance inventory.                                                                                                     |
-| Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against the connected provider's OpenAI-compatible endpoint, sending the reply ceiling as `max_tokens` to Ollama and Ollama Cloud and as `max_completion_tokens` otherwise. |
-| Title generation | `ChatService.generateTitle()` calls the same endpoint with a separate prompt and a length-limited JSON-schema response format, then validates the reply.                                                                             |
+| Concern          | Current implementation                                                                                                                                                                                                                                                                   |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model inventory  | `LlmService.listLlmModels()` lists one provider's models, annotates which model keys have loaded instances, and the context length each is loaded with.                                                                                                                                  |
+| Model health     | `LlmService.getLlmModelHealth()` checks one fresh loaded-inventory snapshot of one provider for the requested key without generating text.                                                                                                                                               |
+| Model loading    | `POST /api/v1/llm/:provider/load` uses that provider's service to load one model with the request's load settings and return its metadata.                                                                                                                                               |
+| Model unloading  | `PATCH /api/v1/llm/:provider/unload` stops every observed loaded instance of that provider matching one key, then reconciles the loaded-instance inventory.                                                                                                                              |
+| Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against the OpenAI-compatible endpoint of the provider the request's model is on, naming the model by its key, and sends the reply ceiling as `max_tokens` to Ollama and Ollama Cloud and as `max_completion_tokens` otherwise. |
+| Title generation | `ChatService.generateTitle()` calls the endpoint of the turn's model's provider with a separate prompt and a length-limited JSON-schema response format, then validates the reply.                                                                                                       |
 
 Loading and unloading apply to LM Studio only: its runtime alone implements
 `LlmModelInstanceController`. Ollama, Ollama Cloud, and Groq decide which models are in
@@ -57,8 +61,8 @@ for the fields.
 
 Before each round of a reply, and for the composer's context meter, the
 backend measures a context against the loaded model with
-`LlmService.findLlmContextMeasurement()`, which runs through the same model
-operation queue. `LmStudioRuntime` finds the instances `client.llm.listLoaded()`
+`LlmService.findLlmContextMeasurement()` of the model's provider, which runs
+through that provider's model operation queue. `LmStudioRuntime` finds the instances `client.llm.listLoaded()`
 reports for the model a chat request names, matching an instance identifier
 or a model key, reports the smallest of their `getContextLength()` answers,
 and counts each text with the first instance's `countTokens()`, one SDK
@@ -92,34 +96,47 @@ request.
 ## Request path
 
 ```text
-Desktop chat store -> Fastify /api/v1/chat -> ChatService -> connected provider's OpenAI-compatible endpoint
-Fastify /api/v1/llm/* -> LlmService -> LlmRuntimeService -> LlmRuntime -> LmStudioRuntime | OllamaRuntime | GroqRuntime
-Agent (each round), Fastify /api/v1/chat/context -> LlmReplyContextMeter -> LlmService -> ... -> LlmRuntime
+Desktop chat store -> Fastify /api/v1/chat -> ChatService -> OpenAI-compatible endpoint of the model's provider
+Fastify /api/v1/llm/:provider/* -> that provider's LlmService -> its LlmRuntimeService -> LlmRuntime -> LmStudioRuntime | OllamaRuntime | GroqRuntime
+Agent (each round), Fastify /api/v1/chat/context -> LlmReplyContextMeter -> LlmService of the model's provider -> ... -> LlmRuntime
 ```
 
-The desktop settings view supplies the shared context for its Runtime, Model,
-and Generation panes; the Agents pane reads the agent store instead. Model controls call the inventory, health, load, and
-unload routes through the application store only while the provider is
-connected; the Runtime pane's provider card reads and refreshes the
-connection. The model routes use the application-scoped `llmService` through
-provider-neutral capabilities, and `LlmService` sends each operation through
-the queue owned by `llmRuntimeService`.
+The desktop settings view supplies the shared context for its Runtime, Models,
+and Generation panes; the Agents pane reads the agent store instead. Model
+controls call the inventory, health, load, and unload routes of a provider
+through the application store only while that provider is connected; the
+Runtime pane's Provider connections card reads and refreshes every turned-on
+provider's connection.
 
-Each connection attempt reads the saved provider from the settings file
-again. `LlmRuntimeService` keeps a held runtime while the saved provider,
-address, and key are unchanged; otherwise it releases it before acquiring a
-runtime for the saved provider through `acquireLlmProviderRuntime()`. A
-saved provider that needs a key without one, or a settings file that cannot
-be read, fails the attempt, and the status becomes `unreachable`. The
-service owns the runtime until it releases it, and consumes the full
-`LlmRuntime`: the three engine queries, the availability probe, and
-disposal, with the model-loading capability of a runtime whose models Lys
-loads. Concrete runtime selection belongs in composition.
+The backend keeps one `LlmRuntimeService` and one `LlmService` for each of
+the four providers, whether it is on or not, in the application-scoped
+`llmProviderServices` record, so each provider has its own connection, its
+own model operation queue, and its own failures. A model route takes the
+provider from its `:provider` path segment and uses that provider's
+`LlmService` through provider-neutral capabilities; `LlmService` sends each
+operation through the queue owned by its provider's `LlmRuntimeService`.
 
-`ChatService` sends chat and title requests to the provider the runtime
-service is connected to, keeping one `openai` client per endpoint, so chat
-reaches the same provider as the model operations. While no provider is
-connected, a chat request fails as runtime-unavailable.
+Each connection attempt reads the service's provider from the settings file
+again: whether it is on, its address, and its key. `LlmRuntimeService` keeps
+a held runtime while the provider stays on with the same address and key;
+otherwise it releases it before acquiring a new runtime through
+`acquireLlmProviderRuntime()`. A provider that is off is not contacted: the
+attempt releases a held runtime, acquires none, and leaves the status `off`,
+which is not a failure and is not logged. A provider that is on but needs a
+key without one, or a settings file that cannot be read, fails the attempt,
+and the status becomes `unreachable`. The service owns the runtime until it
+releases it, and consumes the full `LlmRuntime`: the three engine queries,
+the availability probe, and disposal, with the model-loading capability of a
+runtime whose models Lys loads. Concrete runtime selection belongs in
+composition.
+
+`ChatService` sends each chat and title request to the provider of the model
+the request names, at the endpoint that provider's runtime service is
+connected to, and names the model there by its key. It keeps one `openai`
+client per provider, replaced when that provider's endpoint changes, so chat
+reaches the same provider as that model's operations. While the model's
+provider is not connected, a chat or title request fails as
+runtime-unavailable; no request goes to another provider instead.
 
 `LmStudioRuntime` owns SDK calls, vendor-data validation, immutable runtime
 snapshots, and client cleanup. `LlmService` owns canonical metadata lookup after
@@ -168,7 +185,10 @@ Connection, authentication, and query errors reported by the SDK reject
 acquisition with a retained diagnostic cause; acquired resources are released
 before rejection. Empty downloaded and loaded inventories are valid. The
 runtime service calls it for the startup attempt and for each refresh that needs
-a new runtime, never before the backend listens.
+a new runtime, never before the backend listens. Once the backend listens, it
+starts the first connection attempt of every provider at once; a provider
+that is off becomes `off` without being contacted, and one provider's failed
+attempt never stops another's.
 
 The runtime keeps its admission and cleanup state (`ready`, `active`,
 `closing`, or `closed`) private; callers observe it only through which
@@ -182,9 +202,11 @@ availability query releases admission so a later check can succeed. Its result
 is an observation, not a guarantee that the next model operation will succeed.
 The runtime service uses it to verify a held runtime on refresh and after a
 failed runtime call. The resulting connection status, not the raw observation,
-is exposed through `GET /api/v1/llm/runtime` and the desktop's provider card.
+is exposed through `GET /api/v1/llm/:provider/runtime` and the desktop's
+Provider connections card.
 
-The model-specific `GET /api/v1/llm/:modelId/health` endpoint uses the existing
+The model-specific `GET /api/v1/llm/:provider/:modelId/health` endpoint uses
+the existing
 `listLoadedLlmModelInstances()` operation. A successful query establishes that
 the engine answered, and a matching canonical key establishes observed loaded
 presence. It needs no additional availability request or runtime capability.
@@ -205,18 +227,20 @@ WebSocket authentication and are not used as a substitute.
 
 ## Model operation queue
 
-The `LlmRuntimeService` queue accepts one active operation and up to eight
-waiting operations across inventory, health, loading, unloading, context
-measurement, and connection attempts together. A reply round's measurement
-therefore waits behind a load in progress. Accepted operations run in arrival
-order. A full queue rejects a new request immediately with HTTP `503` and the
+Each provider's `LlmRuntimeService` queue accepts one active operation and
+up to eight waiting operations across that provider's inventory, health,
+loading, unloading, context measurement, and connection attempts together. A
+reply round's measurement therefore waits behind a load in progress on the
+same provider, while another provider's operations never wait for it.
+Accepted operations run in arrival order. A full queue rejects a new request immediately with HTTP `503` and the
 Problem Details type `urn:lys:problem:llm:service-busy`; rejected work never
 reaches the runtime. Finishing an operation releases its capacity on either
 success or failure.
 
 The first accepted operation reserves the active position before execution starts,
 so a burst arriving in the same event-loop turn cannot exceed nine accepted
-operations. There is no second waiting queue behind this limit. Shutdown closes
+operations on one provider. There is no second waiting queue behind this
+limit. Shutdown closes
 admission and drains accepted work before releasing the runtime resources.
 
 ## Cancellation policy
@@ -246,8 +270,8 @@ policy.
 
 ## What the backend assumes today
 
-- The saved provider, when running, answers at its saved or default
-  address; the backend starts without it.
+- Each provider that is on, when running, answers at its saved or default
+  address; the backend starts without any of them.
 - Chat requests can be satisfied by an OpenAI-compatible HTTP endpoint.
 - Load and unload are available through the LM Studio SDK only.
 - Ollama Cloud and Groq accept the saved key as a bearer token; no other
@@ -257,9 +281,9 @@ policy.
 
 - There is no provider registry or adapter plugin system; the four
   providers are fixed.
-- One provider answers at a time; switching reconnects the backend.
-- There is no retry or request-time fallback after a provider and model are
-  sampled for an admitted request.
+- There is no retry or request-time fallback: a request goes only to the
+  provider of the model it names, also when that provider is off or cannot be
+  reached.
 - There is no request budgeting, quota tracking, or provider-specific telemetry.
 - Default-model selection lasts for the current session and does not load weights.
   The [desktop model settings](/architecture/desktop/#model-settings) describe how

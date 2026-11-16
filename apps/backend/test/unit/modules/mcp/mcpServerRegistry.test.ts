@@ -9,7 +9,8 @@ import {
   mcpSettingsSchema,
   type BuiltInMcpSettings,
   type McpEnvironmentVariable,
-  type McpServerSettings
+  type McpServerSettings,
+  type McpSettings
 } from "@lys/share"
 import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -108,6 +109,21 @@ const LOOK_DOT_UP_TOOL = buildTool("look.up")
 
 /** Tool the model calls `look_up` too. */
 const LOOK_UNDERSCORE_UP_TOOL = buildTool("look_up")
+
+/**
+ * Names that are no MCP tool name of a server with an `echo` tool: no
+ * prefix, a server no setting names, a tool the server does not list, and
+ * names the prefix and separator do not split into a server and a tool.
+ */
+const UNKNOWN_TOOL_NAMES: readonly string[] = Object.freeze([
+  "echo",
+  "read_page",
+  "mcp__ghost__echo",
+  "mcp__alpha__missing",
+  "mcp__alpha",
+  "mcp____echo",
+  "mcp__alpha_echo"
+])
 
 /** State of a server being opened. */
 const CONNECTING: McpServerState = Object.freeze({ status: "connecting" })
@@ -297,8 +313,11 @@ function buildSettingsRead(
   return Object.freeze({ status: "read", settings })
 }
 
-/** The switch of a built-in server that is on. */
-const SWITCH_ON: BuiltInMcpSettings["email"] = Object.freeze({ enabled: true })
+/** The switches of the email server with the person's mailbox on. */
+const SWITCH_ON: BuiltInMcpSettings["email"] = Object.freeze({
+  enabled: true,
+  lysEnabled: false
+})
 
 /** Switches that switch the built-in email server on. */
 const EMAIL_ON: BuiltInMcpSettings = Object.freeze({ email: SWITCH_ON })
@@ -307,8 +326,10 @@ const EMAIL_ON: BuiltInMcpSettings = Object.freeze({ email: SWITCH_ON })
 type FakeBuiltInServer = Readonly<{
   /** The server, over stdio, named `email`. */
   server: BuiltInMcpServer
-  /** Records every read. */
-  readServer: MockInstance<() => Promise<BuiltInMcpServerRead>>
+  /** Records every read, with the group it was read with. */
+  readServer: MockInstance<
+    (settings: McpSettings) => Promise<BuiltInMcpServerRead>
+  >
   /**
    * Makes every later read return this outcome.
    *
@@ -322,19 +343,25 @@ type FakeBuiltInServer = Readonly<{
  *
  * @param read - Outcome of each read until the case sets another; a start
  * with the fake stdio server named `email` when omitted.
+ * @param isLysOnlyTool - Which of its tools only Lys may use; none when
+ * omitted.
  * @returns The server and its recorded reads.
  */
 function createFakeBuiltInServer(
   read: BuiltInMcpServerRead = buildBuiltInRead(
     buildFakeStdioServerSettings("email")
-  )
+  ),
+  isLysOnlyTool: BuiltInMcpServer["isLysOnlyTool"] = () => false
 ): FakeBuiltInServer {
   let nextRead = read
-  const readServer = vi.fn(() => Promise.resolve(nextRead))
+  const readServer = vi.fn<
+    (settings: McpSettings) => Promise<BuiltInMcpServerRead>
+  >(() => Promise.resolve(nextRead))
   const server: BuiltInMcpServer = Object.freeze({
     name: "email",
     transport: "stdio",
-    readServer
+    readServer,
+    isLysOnlyTool
   })
   return Object.freeze({
     server,
@@ -1712,15 +1739,6 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         buildFakeStdioServerSettings("delta")
       ])
       await harness.registry.updateServers()
-      const unknownNames = [
-        "echo",
-        "read_page",
-        "mcp__ghost__echo",
-        "mcp__alpha__missing",
-        "mcp__alpha",
-        "mcp____echo",
-        "mcp__alpha_echo"
-      ]
 
       const found = harness.registry.findTurnTool("mcp__alpha__look_up")
 
@@ -1730,6 +1748,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           definition: harness.registry.listToolDefinitions()[1],
           isDestructive: false,
           isOpenWorldWrite: false,
+          isLysOnly: false,
           sendToolCall: expect.any(Function)
         }
       })
@@ -1740,8 +1759,8 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         status: "not-connected"
       })
       expect(
-        unknownNames.map((name) => harness.registry.findTurnTool(name))
-      ).toEqual(unknownNames.map(() => ({ status: "unknown" })))
+        UNKNOWN_TOOL_NAMES.map((name) => harness.registry.findTurnTool(name))
+      ).toEqual(UNKNOWN_TOOL_NAMES.map(() => ({ status: "unknown" })))
     })
   })
 
@@ -2133,6 +2152,27 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       ).toEqual(["alpha"])
     })
 
+    it.each([
+      ["the person's mailbox", SWITCH_ON],
+      ["Lys's own mailbox", { enabled: false, lysEnabled: true }]
+    ])(
+      "reads the email server with the applied group while %s alone is on",
+      async (_label, email) => {
+        const builtIn = createFakeBuiltInServer()
+        const harness = createRegistryHarness({
+          builtInServers: [builtIn.server]
+        })
+        harness.updateReadServers([], { email })
+
+        await harness.registry.updateServers()
+
+        expect(builtIn.readServer).toHaveBeenCalledOnce()
+        expect(builtIn.readServer.mock.calls[0]?.[0].builtIn.email).toEqual(
+          email
+        )
+      }
+    )
+
     it("opens a switched-on built-in server with the settings its read builds, and keeps its session while a later read builds equal settings", async () => {
       const builtIn = createFakeBuiltInServer()
       const harness = createRegistryHarness({
@@ -2376,6 +2416,38 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         buildList([buildStdioStatus("email", buildConnectedState(1))])
       )
       expect(harness.openServer).toHaveBeenCalledTimes(2)
+    })
+
+    it("marks a built-in server's tool as only Lys's when the server says so, and no tool of an added server that takes its name", async () => {
+      const builtIn = createFakeBuiltInServer(
+        buildBuiltInRead(buildFakeStdioServerSettings("email")),
+        (toolName) => toolName === "mcp__email__echo"
+      )
+      const harness = createRegistryHarness({
+        builtInServers: [builtIn.server]
+      })
+      harness.updateReadServers([], EMAIL_ON)
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildEmailStatus(buildConnectedState(1))])
+      )
+      const builtInEcho = findTool(harness.registry, "mcp__email__echo")
+      harness.updateReadServers(
+        [buildFakeStdioServerSettings("email")],
+        EMAIL_ON
+      )
+
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("email", buildConnectedState(1))])
+      )
+
+      expect(builtInEcho.isLysOnly).toBe(true)
+      expect(findTool(harness.registry, "mcp__email__echo").isLysOnly).toBe(
+        false
+      )
     })
 
     it("stops a running added server as removed when the built-in server of its name returns with equal settings, and lists the built-in server", async () => {

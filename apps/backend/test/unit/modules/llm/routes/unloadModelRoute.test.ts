@@ -1,10 +1,13 @@
 import {
+  buildLlmProviderApiPath,
   createLlmServiceBusyProblem,
   llmModelNotFoundProblemSchema,
   llmProviderLoadsModelsProblemSchema,
   llmRuntimeUnavailableProblemSchema,
-  llmUnloadFailedProblemSchema
+  llmUnloadFailedProblemSchema,
+  llmUnloadModelApi
 } from "@lys/protocol"
+import { LLM_PROVIDERS } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import { createLlmProviderLoadsModelsError } from "../../../../../src/modules/llm/llmProviderLoadsModelsError"
 import { createLlmRuntimeFailureEvidence } from "../../../../../src/modules/llm/llmRuntimeFailureEvidence"
@@ -17,7 +20,10 @@ import {
 } from "../../../support/llmRouteTestApp"
 
 /** Published path of the unload route. */
-const UNLOAD_MODEL_PATH = "/api/v1/llm/unload"
+const UNLOAD_MODEL_PATH = buildLlmProviderApiPath(
+  llmUnloadModelApi.path,
+  "lmStudio"
+)
 
 /** Model key requested by every case. */
 const MODEL_KEY = "qwen/qwen3-8b"
@@ -82,6 +88,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     expect(listRecordsAtLevel(testApp, "warn")).toEqual([
       expect.objectContaining({
         msg: "LLM model instance could not be stopped",
+        provider: "lmStudio",
         modelKey: MODEL_KEY,
         operation: "stop-model-instance",
         modelIdentifier: `${MODEL_KEY}:2`,
@@ -140,6 +147,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     expect(listRecordsAtLevel(testApp, "error")).toEqual([
       expect.objectContaining({
         msg: "LLM runtime inventory could not be read before the model stop",
+        provider: "lmStudio",
         modelKey: MODEL_KEY,
         operation: "list-initial-model-instances",
         err: expect.objectContaining({
@@ -176,6 +184,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     expect(listRecordsAtLevel(testApp, "error")).toEqual([
       expect.objectContaining({
         msg: "LLM model instance could not be stopped",
+        provider: "lmStudio",
         modelKey: MODEL_KEY,
         operation: "stop-model-instance",
         modelIdentifier: MODEL_KEY,
@@ -183,6 +192,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
       }),
       expect.objectContaining({
         msg: "LLM runtime inventory could not be read after the model stop",
+        provider: "lmStudio",
         modelKey: MODEL_KEY,
         operation: "list-reconciled-model-instances",
         err: expect.objectContaining({ message: "socket closed" })
@@ -219,6 +229,7 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     expect(listRecordsAtLevel(testApp, "error")).toEqual([
       expect.objectContaining({
         msg: "LLM model instance could not be stopped",
+        provider: "lmStudio",
         modelKey: MODEL_KEY,
         operation: "stop-model-instance",
         modelIdentifier: MODEL_KEY,
@@ -226,10 +237,53 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
       }),
       expect.objectContaining({
         msg: "LLM model instances remain loaded after stop reconciliation",
+        provider: "lmStudio",
         modelKey: MODEL_KEY,
         remainingModelIdentifiers: [MODEL_KEY]
       })
     ])
+  })
+
+  it.each(LLM_PROVIDERS)(
+    "stops the model on %s, the provider the path names, and asks no other provider",
+    async (provider) => {
+      const testApp = createLlmRouteTestApp()
+      const stops = LLM_PROVIDERS.map((stopped) =>
+        vi
+          .spyOn(
+            testApp.llmProviderServices[stopped].llmService,
+            "stopLlmModelsByKey"
+          )
+          .mockResolvedValue({ status: "stopped", diagnostics: [] })
+      )
+      await updateFastifyWithLlmModelUnloadRoute(testApp.app)
+
+      const response = await testApp.app.inject({
+        method: "PATCH",
+        url: buildLlmProviderApiPath(llmUnloadModelApi.path, provider),
+        payload: { modelId: MODEL_KEY }
+      })
+
+      expect(response.statusCode).toBe(204)
+      expect(stops.map((stop) => stop.mock.calls.length)).toEqual(
+        LLM_PROVIDERS.map((stopped) => (stopped === provider ? 1 : 0))
+      )
+    }
+  )
+
+  it("refuses a path that names no provider Lys can reach before any provider is asked", async () => {
+    const testApp = createLlmRouteTestApp()
+    const stopLlmModelsByKey = vi.spyOn(testApp.service, "stopLlmModelsByKey")
+    await updateFastifyWithLlmModelUnloadRoute(testApp.app)
+
+    const response = await testApp.app.inject({
+      method: "PATCH",
+      url: llmUnloadModelApi.path.replace(":provider", "LMStudio"),
+      payload: { modelId: MODEL_KEY }
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(stopLlmModelsByKey).not.toHaveBeenCalled()
   })
 
   it.each([

@@ -1,8 +1,10 @@
 import type {
   LlmInfo,
   LlmModelLoading,
+  LlmRuntimeConnectionStatus,
   LlmTestModelApiResponse
 } from "@lys/protocol"
+import type { LlmProvider } from "@lys/share"
 
 import { buildModelLoadConfiguration } from "@/lib/models/model-load-configuration"
 
@@ -46,30 +48,15 @@ export function readObservedModelLoading(
   return inventory.status === "ready" ? inventory.modelLoading : "unknown"
 }
 
-/** One application-owned model request; mutations are serialized in the renderer. */
+/**
+ * One application-owned model request of one provider; the renderer admits
+ * one request per provider at a time.
+ */
 export type ModelRequestState =
   | { readonly status: "idle" }
   | { readonly status: "listing" }
   | {
       readonly status: "loading" | "unloading" | "testing"
-      readonly modelKey: string
-    }
-
-/**
- * Compact residency summary for the runtime card and composer.
- * @remarks Several models may be loaded. The summary prefers the loaded default,
- * then the first loaded inventory entry. None means the inventory was read and
- * holds no loaded model. Unknown means observation failed. Unavailable means
- * the inventory cannot be read yet, as while the backend is not running or
- * LM Studio is not connected; it claims nothing about loaded weights, which
- * LM Studio keeps after the backend stops.
- */
-export type ModelRuntimeState =
-  | { readonly status: "none" }
-  | { readonly status: "unknown" }
-  | { readonly status: "unavailable" }
-  | {
-      readonly status: "loading" | "loaded" | "unloading"
       readonly modelKey: string
     }
 
@@ -105,73 +92,99 @@ export type LoadedModelConfigurations = ReadonlyMap<
 /** Records of a session in which no model has been observed as loaded. */
 const NO_LOADED_MODEL_CONFIGURATIONS: LoadedModelConfigurations = new Map()
 
-/** Observable model state atomically replaced by the application store. */
-export type ModelState = {
+/**
+ * Connection status of one provider as the desktop shows it.
+ *
+ * @remarks `unknown` means the backend is not running or the provider's
+ * status could not be read; the other values mirror the backend's runtime
+ * connection to that provider, `off` for a provider that is turned off.
+ */
+export type LlmProviderStatus = "unknown" | LlmRuntimeConnectionStatus
+
+/**
+ * What the desktop knows of one provider: its connection and its models.
+ *
+ * @remarks The application store replaces it atomically. Only the status
+ * survives a release; the rest returns to its initial value whenever the
+ * provider is not connected, since nothing can then be observed.
+ */
+export type ProviderModelState = {
+  /** Latest published connection status. */
+  readonly status: LlmProviderStatus
   /** Latest complete inventory observation. */
-  readonly modelInventory: ModelInventoryState
+  readonly inventory: ModelInventoryState
   /** Current renderer request, or idle after settlement. */
-  readonly modelRequest: ModelRequestState
-  /** Summary derived atomically from inventory, request, and default. */
-  readonly modelRuntime: ModelRuntimeState
+  readonly request: ModelRequestState
   /** Latest safe request failure; null when no failure is shown. */
-  readonly modelError: string | null
+  readonly error: string | null
   /** Latest health observation, cleared by the next operation. */
-  readonly modelHealth: LlmTestModelApiResponse | null
+  readonly health: LlmTestModelApiResponse | null
+  /**
+   * When the latest operation settled with its closing inventory read, or
+   * null before one has settled since the last release.
+   */
+  readonly settledAt: Date | null
   /**
    * Load configuration known for each model observed as loaded; a model that
-   * is not loaded has no entry.
+   * is not loaded has no entry. Only LM Studio's models have entries: the
+   * stored load settings name LM Studio's models, the only ones Lys loads.
    */
   readonly loadedModelConfigurations: LoadedModelConfigurations
 }
 
-/** Initial model state before a backend inventory observation. */
-export const initialModelState: ModelState = Object.freeze({
-  modelInventory: Object.freeze({ status: "unavailable" }),
-  modelRequest: Object.freeze({ status: "idle" }),
-  modelRuntime: Object.freeze({ status: "unavailable" }),
-  modelError: null,
-  modelHealth: null,
-  loadedModelConfigurations: NO_LOADED_MODEL_CONFIGURATIONS
+/** What the desktop knows of every provider, keyed by provider. */
+export type ProviderModelStates = Readonly<
+  Record<LlmProvider, ProviderModelState>
+>
+
+/**
+ * The model state of a provider before any observation, and after a release:
+ * nothing listed, requested, failed, observed, or recorded.
+ */
+export const RELEASED_PROVIDER_MODELS: Omit<ProviderModelState, "status"> =
+  Object.freeze({
+    inventory: Object.freeze({ status: "unavailable" }),
+    request: Object.freeze({ status: "idle" }),
+    error: null,
+    health: null,
+    settledAt: null,
+    loadedModelConfigurations: NO_LOADED_MODEL_CONFIGURATIONS
+  })
+
+/** State of a provider before the backend reported its status. */
+const INITIAL_PROVIDER_MODEL_STATE: ProviderModelState = Object.freeze({
+  status: "unknown",
+  ...RELEASED_PROVIDER_MODELS
 })
 
-/**
- * Projects inventory into the compact residency summary.
- * @param inventory - Latest authoritative inventory observation.
- * @param request - Current renderer operation.
- * @param defaultModel - Preferred model, without claiming it is loaded.
- * @returns The transition, preferred loaded model, confirmed absence,
- * unavailable state while the inventory cannot be read, or unknown state.
- */
-export function buildModelRuntime(
-  inventory: ModelInventoryState,
-  request: ModelRequestState,
-  defaultModel: string | null
-): ModelRuntimeState {
-  if (request.status === "loading" || request.status === "unloading") {
-    return { status: request.status, modelKey: request.modelKey }
+/** Every provider's state before the backend reported anything. */
+export const INITIAL_PROVIDER_MODEL_STATES: ProviderModelStates = Object.freeze(
+  {
+    lmStudio: INITIAL_PROVIDER_MODEL_STATE,
+    ollama: INITIAL_PROVIDER_MODEL_STATE,
+    ollamaCloud: INITIAL_PROVIDER_MODEL_STATE,
+    groq: INITIAL_PROVIDER_MODEL_STATE
   }
-  if (inventory.status === "failed") return { status: "unknown" }
-  if (inventory.status === "unavailable") return { status: "unavailable" }
-  const loaded =
-    inventory.models.find(
-      (model) => model.loaded && model.modelKey === defaultModel
-    ) ?? inventory.models.find((model) => model.loaded)
-  return loaded
-    ? { status: "loaded", modelKey: loaded.modelKey }
-    : { status: "none" }
-}
+)
 
 /**
- * Reports whether weights are in transition.
- * @param modelRuntime - Current residency summary.
- * @returns True while a load or unload awaits backend settlement.
+ * Replaces some fields of one provider's state.
+ *
+ * @param states - Every provider's state; not modified.
+ * @param provider - Provider whose state changes.
+ * @param change - Fields to replace; the others keep their values.
+ * @returns Newly owned, frozen states in which only that provider's entry is
+ * new.
  */
-export function isModelTransitionInFlight(
-  modelRuntime: ModelRuntimeState
-): boolean {
-  return (
-    modelRuntime.status === "loading" || modelRuntime.status === "unloading"
-  )
+export function updateProviderModelState(
+  states: ProviderModelStates,
+  provider: LlmProvider,
+  change: Partial<ProviderModelState>
+): ProviderModelStates {
+  return Object.freeze({
+    ...states,
+    [provider]: Object.freeze({ ...states[provider], ...change })
+  })
 }
 
 /**

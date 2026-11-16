@@ -48,6 +48,7 @@ const ECHO_TOOL: TurnMcpTool = Object.freeze({
   }),
   isDestructive: false,
   isOpenWorldWrite: false,
+  isLysOnly: false,
   sendToolCall: () => Promise.reject(new Error("Unexpected MCP call"))
 })
 

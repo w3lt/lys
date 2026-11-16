@@ -1,8 +1,9 @@
 //! The binary over standard input and output, as the backend runs it:
 //! the MCP handshake, the tool list, a call, a cut result, a failed
 //! call, a cancelled send, a draft save cancelled while its draft is
-//! stored, the exit on the end of input, and a start that fails as the
-//! input ends before the handshake.
+//! stored, the exit on the end of input, a start that fails as the input
+//! ends before the handshake, and Lys's own mailbox served alone or next
+//! to the person's.
 
 use std::io::Write;
 use std::sync::mpsc;
@@ -12,11 +13,15 @@ use serde_json::{Value, json};
 use tokio::time::timeout;
 
 use crate::support::binary::{
-    BinaryProcess, STEP_WAIT_LIMIT, follow_lines, read_to_end_in_thread, wait_for_stream_end,
+    AccountVariables, BinaryProcess, STEP_WAIT_LIMIT, follow_lines, read_to_end_in_thread,
+    wait_for_stream_end,
 };
 use crate::support::imap::{FakeImapServer, FakeMailbox, ImapFault, ImapMode, NewMessage};
 use crate::support::smtp::{DATA_END, FakeSmtpServer, SmtpFault, SmtpMode};
-use crate::support::{SecurityName, TestMessage, TestServers, build_account_json};
+use crate::support::{ADDRESS, SecurityName, TestMessage, TestServers, build_account_json};
+
+/// The address of Lys's own account in the dialogues.
+const LYS_ADDRESS: &str = "lys@example.net";
 
 /// Builds the JSON of `LYS_EMAIL_ACCOUNT` for fakes on the ports that
 /// talk without TLS.
@@ -29,6 +34,18 @@ fn build_plain_account_json(imap_port: u16, smtp_port: u16) -> String {
             smtp_security: SecurityName::Plain,
         },
         false,
+    )
+}
+
+/// Builds the JSON of `LYS_EMAIL_LYS_ACCOUNT` for fakes on the ports that
+/// talk without TLS: the account of [`build_plain_account_json`] with
+/// [`LYS_ADDRESS`] as its address, a mailbox of its own as long as its fakes
+/// are not the person's.
+fn build_plain_lys_account_json(imap_port: u16, smtp_port: u16) -> String {
+    build_plain_account_json(imap_port, smtp_port).replacen(
+        &format!(r#""address":"{ADDRESS}""#),
+        &format!(r#""address":"{LYS_ADDRESS}""#),
+        1,
     )
 }
 
@@ -48,7 +65,7 @@ struct Dialogue {
 ///
 /// # Arguments
 ///
-/// * `variable` - The JSON of `LYS_EMAIL_ACCOUNT`.
+/// * `accounts` - The account variables the binary starts with.
 /// * `messages` - The messages, in order; each one with an id is a request
 ///   whose answer comes before the next message is sent.
 ///
@@ -56,8 +73,8 @@ struct Dialogue {
 ///
 /// When a request is not answered in time, the binary does not exit in
 /// time once its input ended, or its standard error does not end in time.
-fn send_dialogue_messages(variable: String, messages: Vec<Value>) -> Dialogue {
-    let (mut binary, streams) = BinaryProcess::start(&[], Some(variable.as_ref()));
+fn send_dialogue_messages(accounts: AccountVariables<'_>, messages: Vec<Value>) -> Dialogue {
+    let (mut binary, streams) = BinaryProcess::start_with_accounts(&[], accounts);
     let mut input = streams.input;
     let lines = follow_lines(streams.output);
     let log = read_to_end_in_thread(streams.log);
@@ -422,7 +439,7 @@ fn assert_draft_answers(unshown_draft: &Value, shown_draft: &Value, smtp: &FakeS
 fn assert_logged_without_account(stderr: &str) {
     let logged: Vec<&str> = stderr.lines().collect();
     let lines = [
-        "server: serving MCP over stdio",
+        "server: serving MCP over stdio for person",
         "tool list_folders: done (folders: 7 listed)",
         "tool read_email: failed (invalid-id)",
     ];
@@ -445,9 +462,15 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
     let variable = build_plain_account_json(imap.port, smtp.port);
     let messages = build_dialogue_messages();
 
-    let dialogue = tokio::task::spawn_blocking(move || send_dialogue_messages(variable, messages))
-        .await
-        .expect("the dialogue ends");
+    let dialogue = tokio::task::spawn_blocking(move || {
+        let accounts = AccountVariables {
+            person: Some(variable.as_ref()),
+            lys: None,
+        };
+        send_dialogue_messages(accounts, messages)
+    })
+    .await
+    .expect("the dialogue ends");
 
     assert_eq!(dialogue.exit_code, Some(0), "{}", dialogue.stderr);
     let [
@@ -481,10 +504,15 @@ async fn logs_a_failed_start_and_exits_with_1_when_its_input_ends_before_initial
     let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
     let variable = build_plain_account_json(imap.port, smtp.port);
 
-    let dialogue =
-        tokio::task::spawn_blocking(move || send_dialogue_messages(variable, Vec::new()))
-            .await
-            .expect("the dialogue ends");
+    let dialogue = tokio::task::spawn_blocking(move || {
+        let accounts = AccountVariables {
+            person: Some(variable.as_ref()),
+            lys: None,
+        };
+        send_dialogue_messages(accounts, Vec::new())
+    })
+    .await
+    .expect("the dialogue ends");
 
     assert_eq!(dialogue.exit_code, Some(1), "{}", dialogue.stderr);
     assert_eq!(
@@ -493,4 +521,213 @@ async fn logs_a_failed_start_and_exits_with_1_when_its_input_ends_before_initial
     );
     assert!(imap.list_commands().is_empty());
     assert!(smtp.list_commands().is_empty());
+}
+
+/// The messages of the dialogue with both mailboxes: the handshake, the
+/// tool list, a folder list of Lys's, each mailbox's tool given the other's
+/// id, a search and a read of Lys's, a send from Lys's mailbox first
+/// given a `from`, which no send tool takes, then without it, and a call
+/// of a tool neither mailbox has.
+fn build_two_mailbox_messages() -> Vec<Value> {
+    vec![
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "lys-test", "version": "0"}}}),
+        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+        json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "lys_list_folders", "arguments": {}}}),
+        json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "lys_read_email", "arguments": {"id": "1.1001.INBOX"}}}),
+        json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "read_email", "arguments": {"id": "lys.1.1001.INBOX"}}}),
+        json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "lys_search_emails", "arguments": {}}}),
+        json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "lys_read_email", "arguments": {"id": "lys.1.1001.INBOX"}}}),
+        json!({"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "lys_send_email", "arguments": {"from": ADDRESS, "to": ["jane@example.com"], "subject": "Hi", "body": "Hello"}}}),
+        json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "lys_send_email", "arguments": {"to": ["jane@example.com"], "subject": "Hi", "body": "Hello"}}}),
+        json!({"jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": {"name": "lys_nothing", "arguments": {}}}),
+    ]
+}
+
+/// Gets the text of a call's answer.
+///
+/// # Panics
+///
+/// When the answer holds no text.
+fn get_answer_text(answer: &Value) -> &str {
+    answer["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{answer}"))
+}
+
+/// Asserts that the answer to `tools/list` names the person's ten tools,
+/// then Lys's ten, each with `lys_` before its name, and that no
+/// description names either mailbox's address.
+fn assert_two_mailbox_tools(listed: &Value) {
+    let names: Vec<&str> = listed["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("a name"))
+        .collect();
+    assert_eq!(names.len(), 20, "{names:?}");
+    let (person, lys) = names.split_at(10);
+    let renamed: Vec<String> = person.iter().map(|name| format!("lys_{name}")).collect();
+    assert!(
+        person.iter().all(|name| !name.starts_with("lys_")),
+        "{names:?}"
+    );
+    assert_eq!(lys, renamed, "{names:?}");
+    let tools = listed["result"]["tools"].to_string();
+    assert!(!tools.contains(ADDRESS), "{tools}");
+    assert!(!tools.contains(LYS_ADDRESS), "{tools}");
+}
+
+/// Asserts that Lys's tools listed its folders, found its messages under
+/// ids of its own and read one, refused the person's id, and refused a
+/// send given a `from`; that the person's tool refused Lys's id as no
+/// id, without naming her mailbox; and that a tool neither mailbox has is
+/// an invalid parameter.
+fn assert_two_mailbox_answers(answers: &[Value]) {
+    /// The JSON-RPC code of an invalid parameter.
+    const INVALID_PARAMS: i32 = -32_602;
+
+    let [
+        folders,
+        person_id,
+        lys_id,
+        found,
+        read,
+        given_from,
+        _,
+        unknown,
+    ] = answers
+    else {
+        panic!("{answers:?}");
+    };
+    assert!(get_answer_text(folders).starts_with("- INBOX (Inbox): 2 messages\n"));
+    assert_eq!(
+        get_answer_text(person_id),
+        "This id is from the person's mailbox. Use the tools without lys_ for it."
+    );
+    assert_eq!(
+        get_answer_text(lys_id),
+        "That is not a message id. Use an id from search_emails, such as 12.345.INBOX."
+    );
+    assert!(
+        get_answer_text(found).contains("lys.1.1001.INBOX"),
+        "{found}"
+    );
+    assert!(get_answer_text(read).contains("Short body."), "{read}");
+    assert!(
+        get_answer_text(given_from).contains("unknown field `from`"),
+        "{given_from}"
+    );
+    for refused in [person_id, lys_id, given_from] {
+        assert_eq!(refused["result"]["isError"], true, "{refused}");
+    }
+    assert_eq!(unknown["error"]["code"], INVALID_PARAMS, "{unknown}");
+}
+
+/// Asserts that the binary logged that it serves both mailboxes, and each
+/// call of Lys's tools under its `lys_` name, without either address or
+/// the password.
+fn assert_two_mailboxes_logged(stderr: &str) {
+    let logged: Vec<&str> = stderr.lines().collect();
+    let lines = [
+        "server: serving MCP over stdio for person and lys",
+        "tool lys_list_folders: done (folders: 7 listed)",
+        "tool lys_read_email: failed (other-mailbox-id)",
+        "tool read_email: failed (invalid-id)",
+    ];
+    for line in lines {
+        assert!(logged.contains(&line), "{stderr}");
+    }
+    assert!(
+        logged
+            .iter()
+            .any(|line| line.starts_with("tool lys_send_email: done")),
+        "{stderr}"
+    );
+    assert!(!stderr.contains(crate::support::PASSWORD), "{stderr}");
+    assert!(!stderr.contains("example."), "{stderr}");
+}
+
+/// Checks that the binary, given both account variables, serves the
+/// person's tools and Lys's `lys_` twins in one process, keeps each
+/// mailbox's ids to its own tools, sends from Lys's mailbox from its own
+/// address through its own SMTP server, and logs neither address.
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_lys_s_own_mailbox_next_to_the_person_s() {
+    let person_imap =
+        FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Plain, None).await;
+    let person_smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
+    let lys_imap = FakeImapServer::start(build_dialogue_mailbox(), ImapMode::Plain, None).await;
+    let lys_smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
+    let person = build_plain_account_json(person_imap.port, person_smtp.port);
+    let lys = build_plain_lys_account_json(lys_imap.port, lys_smtp.port);
+    let messages = build_two_mailbox_messages();
+
+    let dialogue = tokio::task::spawn_blocking(move || {
+        let accounts = AccountVariables {
+            person: Some(person.as_ref()),
+            lys: Some(lys.as_ref()),
+        };
+        send_dialogue_messages(accounts, messages)
+    })
+    .await
+    .expect("the dialogue ends");
+
+    assert_eq!(dialogue.exit_code, Some(0), "{}", dialogue.stderr);
+    let [initialized, listed, calls @ ..] = dialogue.answers.as_slice() else {
+        panic!("{:?}", dialogue.answers);
+    };
+    let instructions = initialized["result"]["instructions"].as_str();
+    assert!(instructions.is_some_and(|text| text.contains("lys_ work on Lys's own mailbox")));
+    assert_two_mailbox_tools(listed);
+    assert_two_mailbox_answers(calls);
+    assert_two_mailboxes_logged(&dialogue.stderr);
+    let sent = lys_smtp.list_mails();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].from, LYS_ADDRESS);
+    assert!(person_smtp.list_mails().is_empty());
+}
+
+/// Checks that the binary, given only Lys's account variable, serves only
+/// Lys's `lys_` tools, with instructions about Lys's mailbox alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_lys_s_own_mailbox_alone() {
+    let imap = FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Plain, None).await;
+    let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
+    let lys = build_plain_lys_account_json(imap.port, smtp.port);
+    let messages = build_two_mailbox_messages().into_iter().take(3).collect();
+
+    let dialogue = tokio::task::spawn_blocking(move || {
+        let accounts = AccountVariables {
+            person: None,
+            lys: Some(lys.as_ref()),
+        };
+        send_dialogue_messages(accounts, messages)
+    })
+    .await
+    .expect("the dialogue ends");
+
+    assert_eq!(dialogue.exit_code, Some(0), "{}", dialogue.stderr);
+    let [initialized, listed] = dialogue.answers.as_slice() else {
+        panic!("{:?}", dialogue.answers);
+    };
+    let instructions = initialized["result"]["instructions"]
+        .as_str()
+        .expect("instructions");
+    assert!(!instructions.contains("person's"), "{instructions}");
+    let tools = listed["result"]["tools"].as_array().expect("tools");
+    assert_eq!(tools.len(), 10);
+    assert!(
+        tools.iter().all(|tool| tool["name"]
+            .as_str()
+            .is_some_and(|name| name.starts_with("lys_"))),
+        "{listed}"
+    );
+    assert!(
+        dialogue
+            .stderr
+            .starts_with("server: serving MCP over stdio for lys\n"),
+        "{}",
+        dialogue.stderr
+    );
 }

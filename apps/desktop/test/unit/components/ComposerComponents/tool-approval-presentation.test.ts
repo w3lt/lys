@@ -65,7 +65,7 @@ describe("formatToolCallSummary", () => {
     ],
     [
       "get_location",
-      "Read the location you saved in Settings → Tools. Nothing is changed."
+      "Read the location you saved in Settings → Profile. Nothing is changed."
     ]
   ] as const)(
     "says what a %s call reads and that nothing is changed",

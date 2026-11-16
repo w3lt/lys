@@ -12,13 +12,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
-import { readEmailAccount } from "../../../../../src/infrastructure/settings/emailAccountFile"
+import { readEmailAccounts } from "../../../../../src/infrastructure/settings/emailAccountFile"
 import { readMcpSettings } from "../../../../../src/infrastructure/settings/mcpSettingsFile"
 import EmailAccountChecker, {
   type EmailAccountCheckEvent
 } from "../../../../../src/modules/mcp/builtIn/email/emailAccountCheck"
 import {
-  createEmailMcpServer,
+  EmailMcpServer,
   type EmailServerCommand
 } from "../../../../../src/modules/mcp/builtIn/email/emailServer"
 import type { McpServerConnectionContext } from "../../../../../src/modules/mcp/mcpServerConnection"
@@ -224,8 +224,8 @@ async function createMcpRouteApp(
   const { processGroups } = createOwnedMcpServerProcessGroups()
   const builtInServers: BuiltInMcpServer[] = options.withBuiltInEmailServer
     ? [
-        createEmailMcpServer(emailServerCommand, () =>
-          readEmailAccount(settingsFilePath)
+        new EmailMcpServer(emailServerCommand, () =>
+          readEmailAccounts(settingsFilePath)
         )
       ]
     : []

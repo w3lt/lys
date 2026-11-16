@@ -78,7 +78,7 @@ const UNLOAD_FAILED_PROBLEM_DEFINITION = Object.freeze({
   status: 503
 } as const satisfies LlmProblemDefinition)
 
-/** Fixed fields for a load or unload the connected provider does not take. */
+/** Fixed fields for a load or unload the request's provider does not take. */
 const PROVIDER_LOADS_MODELS_PROBLEM_DEFINITION = Object.freeze({
   type: "urn:lys:problem:llm:provider-loads-models",
   title: "Provider loads its own models",
@@ -196,7 +196,7 @@ export const llmUnloadFailedProblemSchema =
 
 /**
  * Immutable schema for the Problem Details body of a load or unload refused
- * because the connected provider loads its own models.
+ * because the request's provider loads its own models.
  */
 export const llmProviderLoadsModelsProblemSchema =
   llmProviderLoadsModelsProblemObjectSchema.readonly()
@@ -338,14 +338,14 @@ export function createLlmUnloadProblem(
 
 /**
  * Immutable Problem Details body returned for a load or unload refused
- * because the connected provider loads its own models.
+ * because the request's provider loads its own models.
  */
 export type LlmProviderLoadsModelsProblem = z.infer<
   typeof llmProviderLoadsModelsProblemSchema
 >
 
 /**
- * Creates Problem Details for a load or unload refused because the connected
+ * Creates Problem Details for a load or unload refused because the request's
  * provider decides which models are in memory, so Lys neither loads nor
  * stops its models.
  *

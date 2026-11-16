@@ -2,6 +2,7 @@ import type { MessageGenerationOptions } from "@lys/protocol"
 import {
   FIND_TOOLS_TOOL_NAME,
   toolDefinitionSchema,
+  type LlmModelReference,
   type ToolDefinition
 } from "@lys/share"
 import type {
@@ -40,8 +41,8 @@ export type ToolSearch = Readonly<{
   tools: readonly ToolDefinition[]
   /** UUIDv7 of the asking reply's conversation. */
   conversationId: string
-  /** Model the asking reply uses. */
-  model: string
+  /** Model the asking reply uses, and its provider. */
+  model: LlmModelReference
   /** Sampling and reply length controls of the asking reply. */
   generationOptions: MessageGenerationOptions
   /** Cancellation of the asking reply, aborted by Stop or shutdown. */
@@ -123,8 +124,8 @@ export type FindToolsContext = Readonly<{
   tools: readonly ToolDefinition[]
   /** UUIDv7 of the reply's conversation. */
   conversationId: string
-  /** Model the reply uses. */
-  model: string
+  /** Model the reply uses, and its provider. */
+  model: LlmModelReference
   /** Sampling and reply length controls of the reply. */
   generationOptions: MessageGenerationOptions
   /** Receives why a search ended without finding; lent for the reply. */

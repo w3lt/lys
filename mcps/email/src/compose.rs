@@ -8,6 +8,7 @@
 
 use std::fmt::Write;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lettre::address::Envelope;
@@ -87,6 +88,43 @@ impl CompositionProblem {
             }
             Self::Build(reason) => format!("The message could not be built: {reason}."),
         }
+    }
+}
+
+/// The numbers of the messages composed in one process, for their
+/// identifiers.
+///
+/// One sequence serves every mailbox the process serves, so that two
+/// messages built at the same time under the same domain, as two mailboxes
+/// of one provider can be, still get identifiers of their own.
+///
+/// Concurrency model: concurrent; calls of either mailbox take numbers
+/// through shared references, each from one atomic counter. Resource
+/// ownership: holds only the counter.
+#[derive(Debug)]
+pub struct MessageSequence {
+    /// The number the next message gets.
+    next: AtomicU64,
+}
+
+impl MessageSequence {
+    /// Creates a sequence whose first number is 1.
+    pub fn new() -> Self {
+        Self {
+            next: AtomicU64::new(1),
+        }
+    }
+
+    /// Takes the next number, unique within the sequence.
+    pub fn take_next(&self) -> u64 {
+        self.next.fetch_add(1, Ordering::Relaxed)
+    }
+}
+
+impl Default for MessageSequence {
+    /// Creates a sequence whose first number is 1.
+    fn default() -> Self {
+        Self::new()
     }
 }
 

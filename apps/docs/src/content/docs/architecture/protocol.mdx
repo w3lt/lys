@@ -25,7 +25,7 @@ The public backend surface is small and explicit:
 | Chat and reply routes, requests, and SSE payloads                                         | `packages/protocol/src/apis/chat/*.ts`         |
 | Tool offer, tool-approval and tool-call events, and tool-approval and tool-result routes  | `packages/protocol/src/apis/chat/*.ts`         |
 | Model list, health, load, and unload routes                                               | `packages/protocol/src/apis/llm/*.ts`          |
-| LM Studio connection status and reconnect routes                                          | `packages/protocol/src/apis/llm/*.ts`          |
+| Each model provider's connection status and reconnect routes                              | `packages/protocol/src/apis/llm/*.ts`          |
 | Conversation list, get, rename, and delete routes                                         | `packages/protocol/src/apis/conversation/*.ts` |
 | Agent list, create, get, update, and delete routes                                        | `packages/protocol/src/apis/agent/*.ts`        |
 | MCP server list, sync, and reconnect routes, server states, and the email account check   | `packages/protocol/src/apis/mcp/*.ts`          |

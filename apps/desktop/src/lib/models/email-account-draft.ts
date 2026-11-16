@@ -1,6 +1,8 @@
 import {
   emailAccountSchema,
   emailPasswordSchema,
+  isSameEmailAddress,
+  isSameEmailSignIn,
   MAXIMUM_TCP_PORT,
   type EmailAccount,
   type EmailAccountCandidate,
@@ -9,6 +11,7 @@ import {
   type EmailServerSettings
 } from "@lys/share"
 
+import type { EmailMailbox } from "./email-mailbox"
 import { findEmailPreset, type EmailPreset } from "./email-presets"
 
 /** One of the two mail servers of an account. */
@@ -86,6 +89,18 @@ export type EmailAccountDraftParse =
       readonly problems: EmailAccountDraftProblems
     }
 
+/** What the fields of one mailbox's card are read against. */
+export type EmailAccountDraftBasis = Readonly<{
+  /** The mailbox the card saves. */
+  mailbox: EmailMailbox
+  /** The mailbox's saved account, or null. */
+  savedAccount: EmailAccount | null
+  /** Its saved password, or null. */
+  savedPassword: EmailPassword | null
+  /** The other mailbox's saved account, or null; the card may not open it. */
+  otherAccount: EmailAccount | null
+}>
+
 /** Inputs in the order the card shows them. */
 export const EMAIL_ACCOUNT_DRAFT_FIELDS: readonly EmailAccountDraftField[] =
   Object.freeze([
@@ -117,6 +132,39 @@ const EMPTY_ACCOUNT_DRAFT: EmailAccountDraft = Object.freeze({
   serverKeepsSentCopy: false,
   appliedPreset: undefined
 })
+
+/**
+ * The fields of each mailbox's card before anything is typed: Lys's own
+ * starts with her name as the display name.
+ */
+const EMPTY_ACCOUNT_DRAFTS = Object.freeze({
+  person: EMPTY_ACCOUNT_DRAFT,
+  lys: Object.freeze({ ...EMPTY_ACCOUNT_DRAFT, displayName: "Lys" })
+} satisfies Readonly<Record<EmailMailbox, EmailAccountDraft>>)
+
+/** Where the card of each mailbox places a problem of one mailbox opened twice. */
+type SameMailboxProblems = Readonly<{
+  /** Problem placed on the address: the other mailbox's address. */
+  address: string
+  /** Problem placed on the user name: it signs in to the other mailbox. */
+  signIn: string
+}>
+
+/**
+ * What each mailbox's card says of an account that opens the other
+ * mailbox.
+ */
+const SAME_MAILBOX_PROBLEMS = Object.freeze({
+  person: Object.freeze({
+    address: "This is the address of Lys's account.",
+    signIn: "This signs in to Lys's mailbox."
+  }),
+  lys: Object.freeze({
+    address:
+      "This is the address of your own account. Lys needs an address of her own.",
+    signIn: "This signs in to your own mailbox. Lys needs a mailbox of her own."
+  })
+} satisfies Readonly<Record<EmailMailbox, SameMailboxProblems>>)
 
 /** Host and port inputs of one server side. */
 type EmailServerFields = Readonly<
@@ -167,15 +215,17 @@ function buildServerDraft(server: EmailServerSettings): EmailServerDraft {
  * Builds the fields that show a saved account, or an empty card.
  *
  * @param account - Saved account, or null.
+ * @param mailbox - The mailbox the card saves.
  * @returns The saved values with the password field empty, and the saved
  * address's preset as the one that filled the servers; without an account,
- * every text empty, both servers on TLS, Lys filing the Sent copy, and no
- * preset.
+ * every text empty but, on Lys's card, the display name `Lys`, both servers
+ * on TLS, Lys filing the Sent copy, and no preset.
  */
 export function buildEmailAccountDraft(
-  account: EmailAccount | null
+  account: EmailAccount | null,
+  mailbox: EmailMailbox
 ): EmailAccountDraft {
-  if (account === null) return EMPTY_ACCOUNT_DRAFT
+  if (account === null) return EMPTY_ACCOUNT_DRAFTS[mailbox]
   return {
     address: account.address,
     displayName: account.displayName,
@@ -507,6 +557,31 @@ function buildDraftProblems(
 }
 
 /**
+ * Finds the problems of an account that opens the other mailbox, placed on
+ * the inputs that make it so.
+ *
+ * @param account - Valid account read from the fields.
+ * @param basis - The card's mailbox and the other mailbox's saved account.
+ * @returns The address's problem when the addresses are equal, and the user
+ * name's when both sign in alike, as `@lys/share` compares them; none while
+ * the other mailbox has no account.
+ */
+function findSameMailboxProblems(
+  account: EmailAccount,
+  basis: EmailAccountDraftBasis
+): readonly PlacedProblem[] {
+  const { otherAccount } = basis
+  if (otherAccount === null) return []
+  const messages = SAME_MAILBOX_PROBLEMS[basis.mailbox]
+  const problems: PlacedProblem[] = []
+  if (isSameEmailAddress(account, otherAccount))
+    problems.push(["address", messages.address])
+  if (isSameEmailSignIn(account, otherAccount))
+    problems.push(["userName", messages.signIn])
+  return problems
+}
+
+/**
  * Answers whether an account equals the saved one.
  *
  * @param account - Account read from the fields.
@@ -532,13 +607,14 @@ function isEmailAccountEqual(
  * Reads the fields as an account and a password to save.
  *
  * @param draft - Fields as they are.
- * @param savedAccount - Saved account, or null.
- * @param savedPassword - Saved password, or null.
+ * @param basis - The card's mailbox, its saved account and password, and
+ * the other mailbox's saved account.
  * @returns `invalid` with the first problem of each input when the address,
  * a name, or a host, trimmed, breaks the shared rules, a port is not a
  * whole number from 1 to {@link MAXIMUM_TCP_PORT}, a connection without
  * TLS names a host that is not this machine, which the host input says,
- * or the password is empty while none is saved or breaks its rule;
+ * the account opens the other mailbox, which the address or the user name
+ * says, or the password is empty while none is saved or breaks its rule;
  * otherwise `changed` with the account and the password to save when the
  * account differs from the saved one or a password is typed, or
  * `unchanged`. The password is read as typed, and an empty password field
@@ -546,23 +622,24 @@ function isEmailAccountEqual(
  */
 export function parseEmailAccountDraft(
   draft: EmailAccountDraft,
-  savedAccount: EmailAccount | null,
-  savedPassword: EmailPassword | null
+  basis: EmailAccountDraftBasis
 ): EmailAccountDraftParse {
   const account = emailAccountSchema.safeParse(buildAccountCandidate(draft))
-  const password = parsePasswordDraft(draft.password, savedPassword)
+  const password = parsePasswordDraft(draft.password, basis.savedPassword)
+  const accountProblems = account.success
+    ? findSameMailboxProblems(account.data, basis)
+    : account.error.issues.map(findPlacedAccountProblem)
   const problems = buildDraftProblems([
-    ...(account.success
-      ? []
-      : account.error.issues.map(findPlacedAccountProblem)),
+    ...accountProblems,
     findPlacedPasswordProblem(password)
   ])
-  if (!account.success) return { status: "invalid", problems }
+  if (!account.success || accountProblems.length > 0)
+    return { status: "invalid", problems }
   switch (password.status) {
     case "valid":
       if (
         draft.password === "" &&
-        isEmailAccountEqual(account.data, savedAccount)
+        isEmailAccountEqual(account.data, basis.savedAccount)
       ) {
         return { status: "unchanged" }
       }
@@ -586,14 +663,16 @@ export function parseEmailAccountDraft(
  *
  * @param draft - Fields as they are.
  * @param savedAccount - Saved account, or null for an empty card.
+ * @param mailbox - The mailbox the card saves.
  * @returns True when a text differs as typed, a password is typed, or a
  * server or the Sent copy switch differs.
  */
 export function isEmailAccountDraftDifferent(
   draft: EmailAccountDraft,
-  savedAccount: EmailAccount | null
+  savedAccount: EmailAccount | null,
+  mailbox: EmailMailbox
 ): boolean {
-  const shown = buildEmailAccountDraft(savedAccount)
+  const shown = buildEmailAccountDraft(savedAccount, mailbox)
   return !(
     draft.address === shown.address &&
     draft.displayName === shown.displayName &&

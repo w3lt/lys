@@ -7,6 +7,11 @@ import reactHooks from "eslint-plugin-react-hooks"
 import reactRefresh from "eslint-plugin-react-refresh"
 import reactX from "eslint-plugin-react-x"
 import reactDom from "eslint-plugin-react-dom"
+import {
+  codeStandardsPlugin,
+  codeStandardsPluginName,
+  codeStandardsRuleLevels
+} from "./tools/code-standards/plugin.mts"
 
 /**
  * Repository-wide ESLint flat configuration.
@@ -59,5 +64,14 @@ export default defineConfig([
     languageOptions: { globals: { ...globals.browser, ...globals.node } }
   },
   tseslint.configs.recommended,
+  // The changed-code check in tools/code-standards fails on these warnings
+  // where they overlap changed lines. Declaration files describe external
+  // contracts, which the plugin's rules do not judge.
+  {
+    files: ["**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}"],
+    ignores: ["**/*.d.ts"],
+    plugins: { [codeStandardsPluginName]: codeStandardsPlugin },
+    rules: codeStandardsRuleLevels
+  },
   eslintConfigPrettier
 ])

@@ -30,14 +30,18 @@ fn build_imap_context(
         smtp_security: SecurityName::Plain,
     };
     ToolContext::new(
+        email::mailbox::Mailbox::Person,
         build_account(servers, false),
-        Trust::create_with_extra_roots(vec![authority.root.clone()]),
+        email::tools::SharedCalls::new(Trust::create_with_extra_roots(vec![
+            authority.root.clone(),
+        ])),
     )
 }
 
 /// The failure of a sign-in to the IMAP server that took too long.
 fn build_sign_in_timeout() -> ToolFailure {
     ToolFailure::SignIn {
+        mailbox: email::mailbox::Mailbox::Person,
         protocol: Protocol::Imap,
         failure: SignInFailure::TimedOut,
     }

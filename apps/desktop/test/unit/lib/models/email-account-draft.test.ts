@@ -8,10 +8,12 @@ import {
   parseEmailAccountDraft,
   updateEmailAccountAddress,
   type EmailAccountDraft,
+  type EmailAccountDraftBasis,
   type EmailServerDraft
 } from "@/lib/models/email-account-draft"
 import { findEmailPreset } from "@/lib/models/email-presets"
 import {
+  LYS_EMAIL_ACCOUNT,
   STORED_EMAIL_ACCOUNT,
   STORED_EMAIL_PASSWORD
 } from "../../support/settingsFixtures"
@@ -28,10 +30,26 @@ type DraftFieldProblem = {
 }
 
 /** The fields showing the stored account. */
-const SAVED_DRAFT = buildEmailAccountDraft(STORED_EMAIL_ACCOUNT)
+const SAVED_DRAFT = buildEmailAccountDraft(STORED_EMAIL_ACCOUNT, "person")
 
 /** The fields of an empty card. */
-const EMPTY_DRAFT = buildEmailAccountDraft(null)
+const EMPTY_DRAFT = buildEmailAccountDraft(null, "person")
+
+/** What the person's card reads its fields against while nothing is saved. */
+const NEW_PERSON_BASIS: EmailAccountDraftBasis = Object.freeze({
+  mailbox: "person",
+  savedAccount: null,
+  savedPassword: null,
+  otherAccount: null
+})
+
+/** What the person's card reads its fields against with the stored account. */
+const SAVED_PERSON_BASIS: EmailAccountDraftBasis = Object.freeze({
+  mailbox: "person",
+  savedAccount: STORED_EMAIL_ACCOUNT,
+  savedPassword: STORED_EMAIL_PASSWORD,
+  otherAccount: null
+})
 
 /** Preset of the stored account's provider. */
 const FASTMAIL = findEmailPreset(STORED_EMAIL_ACCOUNT.address)
@@ -121,6 +139,14 @@ describe("buildEmailAccountDraft", () => {
       smtp: { host: "", port: "", security: "tls" },
       serverKeepsSentCopy: false
     })
+  })
+
+  it("starts an empty card of Lys's mailbox with her name as the display name", () => {
+    expect(buildEmailAccountDraft(null, "lys")).toEqual({
+      ...EMPTY_DRAFT,
+      displayName: "Lys"
+    })
+    expect(isEmailAccountDraftDifferent(EMPTY_DRAFT, null, "lys")).toBe(true)
   })
 })
 
@@ -370,7 +396,7 @@ describe("updateEmailAccountAddress", () => {
       ...STORED_EMAIL_ACCOUNT,
       address: "ada@example.test"
     }
-    const saved = buildEmailAccountDraft(ownDomain)
+    const saved = buildEmailAccountDraft(ownDomain, "person")
 
     expect(updateAddressByKeystroke(saved, "ada@gmail.com")).toEqual({
       ...saved,
@@ -424,13 +450,9 @@ describe("parseEmailAccountDraft", () => {
   })
 
   it("reads the saved account with an empty password field as unchanged", () => {
-    expect(
-      parseEmailAccountDraft(
-        SAVED_DRAFT,
-        STORED_EMAIL_ACCOUNT,
-        STORED_EMAIL_PASSWORD
-      )
-    ).toEqual({ status: "unchanged" })
+    expect(parseEmailAccountDraft(SAVED_DRAFT, SAVED_PERSON_BASIS)).toEqual({
+      status: "unchanged"
+    })
   })
 
   it("reads a typed account as changed, trimmed, with the ports as numbers", () => {
@@ -446,7 +468,7 @@ describe("parseEmailAccountDraft", () => {
       imap
     }
 
-    expect(parseEmailAccountDraft(typed, null, null)).toEqual({
+    expect(parseEmailAccountDraft(typed, NEW_PERSON_BASIS)).toEqual({
       status: "changed",
       account: {
         address: "ada@gmail.com",
@@ -464,8 +486,7 @@ describe("parseEmailAccountDraft", () => {
     expect(
       parseEmailAccountDraft(
         { ...SAVED_DRAFT, password: "new-app-password" },
-        STORED_EMAIL_ACCOUNT,
-        STORED_EMAIL_PASSWORD
+        SAVED_PERSON_BASIS
       )
     ).toEqual({
       status: "changed",
@@ -478,8 +499,7 @@ describe("parseEmailAccountDraft", () => {
     expect(
       parseEmailAccountDraft(
         { ...SAVED_DRAFT, serverKeepsSentCopy: false },
-        STORED_EMAIL_ACCOUNT,
-        STORED_EMAIL_PASSWORD
+        SAVED_PERSON_BASIS
       )
     ).toEqual({
       status: "changed",
@@ -599,8 +619,7 @@ describe("parseEmailAccountDraft", () => {
     (_label, { change, field, expectedProblem }) => {
       const parse = parseEmailAccountDraft(
         { ...buildTypedGmailDraft(), ...change },
-        null,
-        null
+        NEW_PERSON_BASIS
       )
 
       expect(parse.status).toBe("invalid")
@@ -621,8 +640,7 @@ describe("parseEmailAccountDraft", () => {
 
     const parse = parseEmailAccountDraft(
       { ...buildTypedGmailDraft(), smtp },
-      null,
-      null
+      NEW_PERSON_BASIS
     )
 
     expect(parse).toEqual({
@@ -643,8 +661,7 @@ describe("parseEmailAccountDraft", () => {
 
     const parse = parseEmailAccountDraft(
       { ...buildTypedGmailDraft(), imap },
-      null,
-      null
+      NEW_PERSON_BASIS
     )
 
     expect(parse).toMatchObject({
@@ -657,8 +674,7 @@ describe("parseEmailAccountDraft", () => {
     expect(
       parseEmailAccountDraft(
         { ...buildTypedGmailDraft(), password: "" },
-        null,
-        null
+        NEW_PERSON_BASIS
       )
     ).toEqual({
       status: "invalid",
@@ -669,8 +685,7 @@ describe("parseEmailAccountDraft", () => {
   it("reports the first problem of every input, in the card's order", () => {
     const parse = parseEmailAccountDraft(
       { ...EMPTY_DRAFT, address: "ada", userName: "ada" },
-      null,
-      null
+      NEW_PERSON_BASIS
     )
 
     expect(parse.status).toBe("invalid")
@@ -688,8 +703,7 @@ describe("parseEmailAccountDraft", () => {
   it("reads the password as typed, keeping its spaces", () => {
     const parse = parseEmailAccountDraft(
       { ...buildTypedGmailDraft(), password: " app password " },
-      null,
-      null
+      NEW_PERSON_BASIS
     )
 
     expect(parse).toMatchObject({
@@ -699,7 +713,10 @@ describe("parseEmailAccountDraft", () => {
   })
 
   it("brands the password it returns", () => {
-    const parse = parseEmailAccountDraft(buildTypedGmailDraft(), null, null)
+    const parse = parseEmailAccountDraft(
+      buildTypedGmailDraft(),
+      NEW_PERSON_BASIS
+    )
 
     expect(parse.status).toBe("changed")
     if (parse.status !== "changed") return
@@ -715,8 +732,7 @@ describe("parseEmailAccountDraft", () => {
     expect(
       parseEmailAccountDraft(
         { ...SAVED_DRAFT, address: "ada@gmail.com" },
-        STORED_EMAIL_ACCOUNT,
-        STORED_EMAIL_PASSWORD
+        SAVED_PERSON_BASIS
       )
     ).toEqual({
       status: "changed",
@@ -726,12 +742,95 @@ describe("parseEmailAccountDraft", () => {
   })
 })
 
+describe("parseEmailAccountDraft of an account that opens the other mailbox", () => {
+  /** A typed password, so that only the mailbox can keep a draft from saving. */
+  const password = "app-password"
+
+  /** Lys's card, empty, while the person's stored account is saved. */
+  const lysBasis: EmailAccountDraftBasis = Object.freeze({
+    mailbox: "lys",
+    savedAccount: null,
+    savedPassword: null,
+    otherAccount: STORED_EMAIL_ACCOUNT
+  })
+
+  /** The person's card, empty, while Lys's account is saved. */
+  const personBasis: EmailAccountDraftBasis = Object.freeze({
+    ...NEW_PERSON_BASIS,
+    otherAccount: LYS_EMAIL_ACCOUNT
+  })
+
+  /** What Lys's card says of the person's address and sign-in. */
+  const lysProblems = Object.freeze({
+    address:
+      "This is the address of your own account. Lys needs an address of her own.",
+    userName:
+      "This signs in to your own mailbox. Lys needs a mailbox of her own."
+  })
+
+  it.each([
+    {
+      label: "Lys's card, the person's address and sign-in",
+      basis: lysBasis,
+      draft: { ...SAVED_DRAFT, password },
+      problems: lysProblems
+    },
+    {
+      label: "Lys's card, the person's address in other case",
+      basis: lysBasis,
+      draft: {
+        ...SAVED_DRAFT,
+        address: "ADA@fastmail.com",
+        userName: "lys@fastmail.com",
+        password
+      },
+      problems: { address: lysProblems.address }
+    },
+    {
+      label: "Lys's card, the person's sign-in",
+      basis: lysBasis,
+      draft: { ...SAVED_DRAFT, address: "lys@fastmail.com", password },
+      problems: { userName: lysProblems.userName }
+    },
+    {
+      label: "the person's card, Lys's address and sign-in",
+      basis: personBasis,
+      draft: {
+        ...buildEmailAccountDraft(LYS_EMAIL_ACCOUNT, "person"),
+        password
+      },
+      problems: {
+        address: "This is the address of Lys's account.",
+        userName: "This signs in to Lys's mailbox."
+      }
+    }
+  ] as const)("refuses, on $label", ({ basis, draft, problems }) => {
+    expect(parseEmailAccountDraft(draft, basis)).toEqual({
+      status: "invalid",
+      problems
+    })
+  })
+
+  it("accepts the same user name on another IMAP server", () => {
+    const imap: EmailServerDraft = { ...SAVED_DRAFT.imap, port: "143" }
+
+    expect(
+      parseEmailAccountDraft(
+        { ...SAVED_DRAFT, address: "lys@fastmail.com", imap, password },
+        lysBasis
+      )
+    ).toMatchObject({ status: "changed" })
+  })
+})
+
 describe("isEmailAccountDraftDifferent", () => {
   it.each([
     ["the saved account's fields", SAVED_DRAFT, STORED_EMAIL_ACCOUNT],
     ["the fields of an empty card without an account", EMPTY_DRAFT, null]
   ] as const)("is false for %s", (_label, draft, savedAccount) => {
-    expect(isEmailAccountDraftDifferent(draft, savedAccount)).toBe(false)
+    expect(isEmailAccountDraftDifferent(draft, savedAccount, "person")).toBe(
+      false
+    )
   })
 
   it.each<[string, Partial<EmailAccountDraft>]>([
@@ -746,14 +845,19 @@ describe("isEmailAccountDraftDifferent", () => {
     expect(
       isEmailAccountDraftDifferent(
         { ...SAVED_DRAFT, ...change },
-        STORED_EMAIL_ACCOUNT
+        STORED_EMAIL_ACCOUNT,
+        "person"
       )
     ).toBe(true)
   })
 
   it("is true once anything is typed in an empty card", () => {
     expect(
-      isEmailAccountDraftDifferent({ ...EMPTY_DRAFT, userName: "ada" }, null)
+      isEmailAccountDraftDifferent(
+        { ...EMPTY_DRAFT, userName: "ada" },
+        null,
+        "person"
+      )
     ).toBe(true)
   })
 })

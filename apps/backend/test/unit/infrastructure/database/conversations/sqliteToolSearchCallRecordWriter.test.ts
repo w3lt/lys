@@ -66,6 +66,7 @@ function openWriter(findToolsCall: ToolCallReplyPart = FIND_TOOLS_CALL) {
     id: REPLY_ID,
     conversationId: CONVERSATION_ID,
     model: "qwen/qwen3-8b",
+    provider: "lmStudio",
     parts: [findToolsCall],
     status: "streaming",
     finishReason: null,

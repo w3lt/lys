@@ -8,13 +8,19 @@ import { cn } from "@/lib/utils"
  * Supplies the Lys button variants used by {@link Button}.
  *
  * @remarks Variants express purpose
- * rather than theme: `default`, `outline`, `secondary`, `ghost`, `destructive`,
- * and `link`. Sizes follow the compact desktop density of 28/32/36px controls
- * with 14/16/18px icons, plus icon-only
- * sizes; `default` is used for both variant and size when omitted.
+ * rather than theme: `default`, `outline`, `secondary`, `ghost`, and
+ * `destructive` are framed controls in the control text; `link` is a link
+ * inside running text and takes that text's size; `text` is a frameless code
+ * action set in the mono meta text, such as "paste json" beside a field; and
+ * `back` is the uppercase eyebrow that returns from an editor to its list.
+ * Sizes follow the compact desktop density of 28/32/36px controls with
+ * 14/16/18px icons, plus icon-only sizes from 24px; `link`, `text`, and `back`
+ * keep no frame, so they ignore the size's height and padding, and `text` and
+ * `back` set a 12px icon beside their text whatever the size. `default` is
+ * used for both variant and size when omitted.
  */
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap outline-none transition-[color,background-color,border-color,box-shadow,filter,translate] duration-(--duration-standard) ease-(--ease-standard) select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "group/button inline-flex shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-transparent bg-clip-padding text-control font-medium whitespace-nowrap outline-none transition-[color,background-color,border-color,box-shadow,filter,translate] duration-(--duration-standard) ease-(--ease-standard) select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -28,18 +34,32 @@ const buttonVariants = cva(
           "bg-transparent text-[var(--app-text-muted)] hover:bg-[var(--app-surface-hover)] hover:text-[var(--app-text-strong)] aria-expanded:bg-[var(--app-surface-hover)] aria-expanded:text-[var(--app-text-strong)]",
         destructive:
           "border-[var(--app-border-danger)] bg-destructive/10 text-[var(--app-text-danger)] hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40",
-        link: "text-[var(--app-text-link)] underline-offset-4 hover:underline"
+        link: "text-[length:inherit] text-[var(--app-text-link)] underline-offset-4 hover:underline",
+        text: "font-mono text-meta font-normal tracking-[0.04em] text-[var(--app-text-link)] hover:text-[var(--app-text-strong)]",
+        back: "font-mono text-meta tracking-[0.14em] text-[var(--app-text-muted)] uppercase hover:text-[var(--app-text-strong)]"
       },
       size: {
         default:
           "h-8 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2 [&_svg:not([class*='size-'])]:size-4",
         sm: "h-7 gap-1 px-2.5 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
         lg: "h-9 gap-2 px-3 has-data-[icon=inline-end]:pr-2.5 has-data-[icon=inline-start]:pl-2.5 [&_svg:not([class*='size-'])]:size-[18px]",
+        "icon-xs": "size-6 [&_svg:not([class*='size-'])]:size-3.5",
         icon: "size-8 [&_svg:not([class*='size-'])]:size-4",
         "icon-sm": "size-7 [&_svg:not([class*='size-'])]:size-3.5",
         "icon-lg": "size-9 [&_svg:not([class*='size-'])]:size-[18px]"
       }
     },
+    compoundVariants: [
+      {
+        variant: ["link", "text", "back"],
+        class:
+          "h-auto px-0 has-data-[icon=inline-end]:pr-0 has-data-[icon=inline-start]:pl-0"
+      },
+      {
+        variant: ["text", "back"],
+        class: "min-h-6 gap-1.5 [&_svg:not([class*='size-'])]:size-3"
+      }
+    ],
     defaultVariants: {
       variant: "default",
       size: "default"
@@ -52,31 +72,33 @@ const buttonVariants = cva(
  *
  * @remarks Base UI button props,
  * children, and interaction callbacks are forwarded, while `variant` and
- * `size` select repository styling and default to `default`. The forwarded ref
- * targets the Base UI button's `HTMLElement` host. Base UI supplies button
- * rendering, native activation, disabled behavior, and focus behavior.
- * Caller-provided `aria-haspopup`, `aria-pressed`, and related native
- * attributes are forwarded and consumed by the maintained styling; this
- * adapter owns no popup or pressed state and no failure handling.
- * @param props - Base UI button props, children, and repository variants.
- * @param ref - Ref forwarded to the Base UI button's `HTMLElement` host.
+ * `size` select repository styling, default to `default`, and are exposed on
+ * the host as `data-variant` and `data-size`. A supplied `ref` targets the
+ * Base UI button's `HTMLElement` host. Base UI supplies button rendering,
+ * native activation, disabled behavior, and focus behavior. Caller-provided
+ * `aria-haspopup`, `aria-pressed`, and related native attributes are
+ * forwarded and consumed by the maintained styling; this adapter owns no
+ * popup or pressed state and no failure handling.
+ * @param props - Base UI button props, children, ref, and repository
+ * variants.
  * @returns The styled Base UI button.
  */
-const Button = React.forwardRef<
-  React.ComponentRef<typeof ButtonPrimitive>,
-  ButtonPrimitive.Props & VariantProps<typeof buttonVariants>
->(function Button(
-  { className, variant = "default", size = "default", ...props },
-  ref
-) {
+function Button({
+  className,
+  variant = "default",
+  size = "default",
+  ...props
+}: React.ComponentProps<typeof ButtonPrimitive> &
+  VariantProps<typeof buttonVariants>) {
   return (
     <ButtonPrimitive
-      ref={ref}
       data-slot="button"
+      data-variant={variant}
+      data-size={size}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />
   )
-})
+}
 
 export { Button }

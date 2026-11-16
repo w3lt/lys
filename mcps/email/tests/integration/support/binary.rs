@@ -11,11 +11,24 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use email::mailbox::Mailbox;
+
 /// Longest a binary may take, in real time, for one step of a test: to
 /// answer a request, to bring a call to the fault a fake holds it at, to
 /// exit once its input ended or the one case it runs ended, or to close
 /// its output once it exited.
 pub const STEP_WAIT_LIMIT: Duration = Duration::from_secs(30);
+
+/// The account variables the `email` binary starts with: each mailbox's
+/// value, which need not be Unicode text, or `None` to start the binary
+/// without that mailbox's variable.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AccountVariables<'a> {
+    /// The value of `LYS_EMAIL_ACCOUNT`, the person's account.
+    pub person: Option<&'a OsStr>,
+    /// The value of `LYS_EMAIL_LYS_ACCOUNT`, Lys's own account.
+    pub lys: Option<&'a OsStr>,
+}
 
 /// The standard streams of a started binary, each piped to the test.
 pub struct BinaryStreams {
@@ -66,7 +79,36 @@ impl BinaryProcess {
     ///
     /// When the binary cannot be started.
     pub fn start(arguments: &[&str], variable: Option<&OsStr>) -> (Self, BinaryStreams) {
-        Self::start_piped(build_email_binary_command(arguments, variable))
+        Self::start_with_accounts(
+            arguments,
+            AccountVariables {
+                person: variable,
+                lys: None,
+            },
+        )
+    }
+
+    /// Starts the binary with its standard streams piped and the account
+    /// variables of both mailboxes as given; from then on, the value ends
+    /// it whatever the test does next.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - The binary's command-line arguments.
+    /// * `accounts` - The account variables it starts with.
+    ///
+    /// # Returns
+    ///
+    /// The process and its standard streams.
+    ///
+    /// # Panics
+    ///
+    /// When the binary cannot be started.
+    pub fn start_with_accounts(
+        arguments: &[&str],
+        accounts: AccountVariables<'_>,
+    ) -> (Self, BinaryStreams) {
+        Self::start_piped(build_email_binary_command(arguments, accounts))
     }
 
     /// Starts the binary with its standard input ended, its standard error
@@ -94,7 +136,13 @@ impl BinaryProcess {
     ) -> (Self, ChildStderr) {
         let (reader, writer) = io::pipe().expect("a pipe");
         drop(reader);
-        let mut command = build_email_binary_command(arguments, variable);
+        let mut command = build_email_binary_command(
+            arguments,
+            AccountVariables {
+                person: variable,
+                lys: None,
+            },
+        );
         command
             .stdin(Stdio::null())
             .stdout(writer)
@@ -202,20 +250,25 @@ impl BinaryProcess {
     }
 }
 
-/// Builds the command that runs the `email` binary.
+/// Builds the command that runs the `email` binary, with only the account
+/// variables given, whatever the test's own environment holds.
 ///
 /// # Arguments
 ///
 /// * `arguments` - The binary's command-line arguments.
-/// * `variable` - The value of `LYS_EMAIL_ACCOUNT`, which need not be
-///   Unicode text, or `None` to run the binary without the variable.
-fn build_email_binary_command(arguments: &[&str], variable: Option<&OsStr>) -> Command {
+/// * `accounts` - The account variables it runs with.
+fn build_email_binary_command(arguments: &[&str], accounts: AccountVariables<'_>) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_email"));
     command.args(arguments);
-    match variable {
-        Some(value) => command.env("LYS_EMAIL_ACCOUNT", value),
-        None => command.env_remove("LYS_EMAIL_ACCOUNT"),
-    };
+    for (mailbox, variable) in [
+        (Mailbox::Person, accounts.person),
+        (Mailbox::Lys, accounts.lys),
+    ] {
+        match variable {
+            Some(value) => command.env(mailbox.variable_name(), value),
+            None => command.env_remove(mailbox.variable_name()),
+        };
+    }
     command
 }
 

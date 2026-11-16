@@ -1,5 +1,5 @@
 import type { GetAgentApiResponse } from "@lys/protocol"
-import { ARMITAGE_AGENT_CODE } from "@lys/share"
+import { ARMITAGE_AGENT_CODE, type EmailAddress } from "@lys/share"
 import type { ToolSearchCallRecordWriter } from "../conversation/records"
 import Agent, { type AgentProfile } from "./agent"
 import type { AgentRequestLimits, AgentRequestState } from "./agentActivity"
@@ -17,6 +17,7 @@ import type {
   AgentStateView,
   ConversationTitleLookup
 } from "./agentStateTools"
+import { isLysAgentCode } from "./builtInAgents"
 import type {
   AgentReader,
   AgentSearcher,
@@ -88,6 +89,11 @@ export type AgentRuntimeServiceOptions = Readonly<{
    * for the service's lifetime.
    */
   toolSearchCallRecords: ToolSearchCallRecordWriter
+  /**
+   * Reads the address of Lys's own mailbox while it is in use, or null;
+   * lent to Caliginia and Lysiptera for the service's lifetime.
+   */
+  readLysEmailAddress: () => EmailAddress | null
 }>
 
 /** Shared outcome of a read or search the asking agent may not make. */
@@ -95,6 +101,15 @@ const FORBIDDEN_OUTCOME = Object.freeze({ status: "forbidden" } as const)
 
 /** Shared outcome of a state read of a code no agent has. */
 const MISSING_OUTCOME = Object.freeze({ status: "missing" } as const)
+
+/**
+ * Reads the email address of an agent that has no mailbox of its own.
+ *
+ * @returns Null, always.
+ */
+function readNoEmailAddress(): null {
+  return null
+}
 
 /** Requests of an agent that has no live instance. */
 const NO_REQUESTS: readonly AgentRequestState[] = Object.freeze([])
@@ -182,6 +197,9 @@ export default class AgentRuntimeService
   /** Borrowed store of the records of tool searches' own tool calls. */
   readonly #toolSearchCallRecords: ToolSearchCallRecordWriter
 
+  /** Reads the address of Lys's own mailbox while it is in use. */
+  readonly #readLysEmailAddress: () => EmailAddress | null
+
   /** Live agents by code, each created on its agent's first load. */
   readonly #liveAgents = new Map<string, Agent>()
 
@@ -198,6 +216,7 @@ export default class AgentRuntimeService
     this.#findConversationTitle = options.findConversationTitle
     this.#requestLimits = options.requestLimits
     this.#toolSearchCallRecords = options.toolSearchCallRecords
+    this.#readLysEmailAddress = options.readLysEmailAddress
   }
 
   /**
@@ -316,7 +335,10 @@ export default class AgentRuntimeService
         replyModel: this.#replyModel,
         replyContextMeter: this.#replyContextMeter,
         stateReader: this,
-        toolKeeper: this
+        toolKeeper: this,
+        readEmailAddress: isLysAgentCode(agent.code)
+          ? this.#readLysEmailAddress
+          : readNoEmailAddress
       }
     )
     this.#liveAgents.set(agent.code, createdAgent)

@@ -5,6 +5,7 @@ import {
   hasDistinctAttachmentNames,
   type ConversationAttachment
 } from "./attachment"
+import { llmProviderSchema } from "./providers"
 
 /** Validates ISO-8601 timestamps persisted with exactly millisecond precision. */
 const timestampSchema = z.iso.datetime({ precision: 3 })
@@ -221,8 +222,13 @@ export const replyPartSchema = z.discriminatedUnion("kind", [
 /** Validates an assistant message, including its generation lifecycle state. */
 export const conversationAssistantMessageSchema = z.strictObject({
   ...conversationMessageBase,
-  /** Non-empty model identifier that produced or owns the reply. */
+  /** Non-empty key of the model that produced or owns the reply. */
   model: z.string().min(1),
+  /**
+   * Provider of that model; null for a reply stored before Lys recorded
+   * providers, whose provider is unknown.
+   */
+  provider: llmProviderSchema.nullable(),
   role: z.literal("assistant"),
   /**
    * Parts in the order they were stored; empty before the first one or when

@@ -1,4 +1,5 @@
 import type { ChatGenerationEvent } from "@lys/protocol"
+import type { LlmModelReference } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import type { TitleGenerationOptions } from "../../../../src/modules/chat/chatService"
 import createTitleGenerationTask, {
@@ -9,6 +10,15 @@ import {
   createTestFastify,
   type CapturedLogRecord
 } from "../../support/fastifyTestApp"
+
+/**
+ * Model of every case: one on Groq, so a case shows the title request and
+ * the loaded check name the provider with the key.
+ */
+const GROQ_LLAMA_70B: LlmModelReference = Object.freeze({
+  provider: "groq",
+  modelKey: "llama-3.3-70b-versatile"
+})
 
 /** Documented `titleGenerationOutcome` values of the title task's log records. */
 type TitleGenerationOutcome =
@@ -87,7 +97,7 @@ async function getTitleTaskOutcome(scenario: TitleTaskScenario) {
     findLoadedContextLength:
       scenario.findLoadedContextLength ?? (async () => 4096),
     userMessageContent: "Plan my trip to Hanoi",
-    model: "qwen/qwen3-8b",
+    model: GROQ_LLAMA_70B,
     abortSignal: scenario.abortSignal ?? new AbortController().signal,
     sendEvent: (event) => {
       events.push(event)
@@ -108,7 +118,7 @@ describe("createTitleGenerationTask", () => {
 
     expect(generateTitle).toHaveBeenCalledExactlyOnceWith({
       message: "Plan my trip to Hanoi",
-      model: "qwen/qwen3-8b",
+      model: GROQ_LLAMA_70B,
       signal: abortSignal
     })
   })
@@ -268,7 +278,7 @@ describe("createTitleGenerationTask", () => {
     })
 
     expect(findLoadedContextLength).toHaveBeenCalledExactlyOnceWith(
-      "qwen/qwen3-8b"
+      GROQ_LLAMA_70B
     )
     expect(generateTitle).not.toHaveBeenCalled()
     expect(run.updateConversationTitle).not.toHaveBeenCalled()

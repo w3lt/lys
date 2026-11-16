@@ -72,7 +72,7 @@ const NEW_CONVERSATION_REQUEST = Object.freeze(
   chatApiRequestBodySchema.parse({
     conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
     message: "Hello",
-    model: "qwen3-8b",
+    model: { provider: "lmStudio", modelKey: "qwen3-8b" },
     generationOptions: { temperature: 0.7 }
   })
 )
@@ -82,7 +82,7 @@ const CONTINUED_CONVERSATION_REQUEST = Object.freeze(
   chatApiRequestBodySchema.parse({
     conversation: { kind: "existing", id: FIXTURE_CONVERSATION_ID },
     message: "Read my notes",
-    model: "qwen3-8b",
+    model: { provider: "lmStudio", modelKey: "qwen3-8b" },
     generationOptions: { temperature: 0.2, replyCeiling: 512 },
     tools: { definitions: [buildToolDefinition("read_text_file")] }
   })
@@ -163,7 +163,7 @@ const IMAGE_NEEDS_VISION_PROBLEM = chatImageNeedsVisionProblemSchema.parse({
   title: "Image needs vision",
   status: 409,
   detail:
-    "The image photo.png needs a model with vision, and qwen3-8b cannot see images.",
+    "The image photo.png needs a model with vision, and qwen3-8b on LM Studio cannot see images.",
   fileName: "photo.png",
   model: "qwen3-8b"
 })
@@ -800,7 +800,7 @@ describe("getChatContextMeasurement", () => {
   /** Measurement request of a new conversation Caliginia answers. */
   const MEASUREMENT_REQUEST = Object.freeze({
     conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
-    model: "qwen3-8b"
+    model: { provider: "lmStudio", modelKey: "qwen3-8b" }
   } as const)
 
   it("sends the request to the caller's backend with its signal, uncached, and returns the measurement", async () => {

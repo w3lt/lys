@@ -1,6 +1,6 @@
 .markdown-message {
   color: var(--app-text);
-  font-size: 14px;
+  font-size: var(--text-control);
   line-height: 1.7;
 }
 
@@ -32,17 +32,17 @@
 }
 
 .markdown-message h1 {
-  font-size: 24px;
+  font-size: var(--text-heading);
   line-height: 1.2;
 }
 
 .markdown-message h2 {
-  font-size: 18px;
+  font-size: var(--text-title);
 }
 
 .markdown-message h3,
 .markdown-message h4 {
-  font-size: 16px;
+  font-size: var(--text-lead);
   line-height: 1.35;
 }
 
@@ -178,7 +178,7 @@
 .markdown-message .footnotes {
   border-top: 1px solid var(--app-border-subtle);
   color: var(--app-text-muted);
-  font-size: 12px;
+  font-size: var(--text-note);
   line-height: 1.5;
   margin-top: 24px;
   padding-top: 12px;
@@ -225,7 +225,7 @@
 .markdown-message th {
   background: var(--app-surface-table-header);
   color: var(--app-text-strong);
-  font-size: 12px;
+  font-size: var(--text-note);
   font-weight: 600;
   line-height: 1.35;
   vertical-align: bottom;
@@ -272,7 +272,7 @@
   color: var(--app-text-muted);
   display: flex;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-meta);
   font-weight: 500;
   justify-content: space-between;
   letter-spacing: 0.16em;
@@ -283,7 +283,7 @@
   color: var(--app-text-code);
   display: block;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-note);
   line-height: 1.65;
   overflow-x: auto;
   padding: 12px;

@@ -55,8 +55,15 @@ repository today; it is not a promise of unreleased work.
   title is generated at a time per conversation, and the composer accepts the
   next message as soon as the reply ends, without waiting for the title.
 - Interrupted streaming rows are recovered on backend startup.
-- Runtime, Model, Generation, Agents, Tools, MCP, and Secrets settings panes
-  are available.
+- Lys, Profile, Runtime, Models, Generation, Agents, Tools, MCP, Providers,
+  and Secrets settings panes are available, in that order in the settings
+  rail, which lists the Lys and Profile panes' sections to jump to.
+  The Lys pane sets up Lys's own mailbox, after signing in to its IMAP and
+  SMTP servers, and switches it on or off; its About Lys section is held for
+  the session only. The Profile pane saves the location `get_location`
+  returns, down to the precision the person chooses; its About you,
+  Preferences, and Notes for Lys sections are held for the session only and
+  reach no model ([#379](https://github.com/w3lt/lys/issues/379)).
   The Runtime pane starts and stops the backend and vmo, shows whether each
   is ready, and saves whether each starts when Lys opens; Lys stops both when
   it quits. Model controls refresh inventory, load and unload weights, and check
@@ -64,19 +71,21 @@ repository today; it is not a promise of unreleased work.
   Lysiptera, and Armitage, which can be read and duplicated but not changed
   or deleted,
   and creates, edits, duplicates, and deletes the user's agents through the
-  backend. The Tools pane lists the desktop's file tools, the backend's
-  `read_page` and `web_search`, and the tools of the connected MCP servers;
+  backend. The Tools pane lists Lys's own tools, the desktop's file tools and
+  the backend's `read_page` and `web_search`, with what their descriptions
+  take of the loaded model's context;
   each tool's switch and its Ask me or Just run choice are saved, and the Tool calls switch lasts for the session only.
   `read_page` is
   off and cannot be switched on while vmo is not ready. The MCP pane lists
   the email server Lys ships, marked built-in, and adds, edits, and removes
   MCP servers, each a local program Lys starts or a remote server it reaches
   over Streamable HTTP, fills a new one from a pasted config, switches each
-  server on or off, shows whether each is connected, switches its tools and
-  sets whether they ask first, lists the tools Lys skipped, and reconnects
-  one; the email server's card saves the one email account it works with,
-  after signing in to its IMAP and SMTP servers. The Secrets pane saves the
-  Tavily API key `web_search` needs, and checks it.
+  server on or off, shows whether each is connected, sets each of its tools
+  to Ask, Run, or Off, with a search over them, lists the tools Lys skipped,
+  and reconnects one; the email server's details save the person's own email
+  account, after signing in to its IMAP and SMTP servers, and switch that
+  mailbox on or off. The Secrets pane saves the Tavily API key `web_search`
+  needs, and checks it.
 - A chat offers the switched-on tools to a model trained for tool use and
   answers its tool calls: file tools run in the desktop, `read_page` asks vmo
   to read one public web page in headless Chromium inside a micro VM, running
@@ -86,8 +95,12 @@ repository today; it is not a promise of unreleased work.
   `read_page` is likewise unavailable until vmo answers its health route. An
   MCP tool runs on its server, which the backend calls while the server is
   switched on and connected; MCP tools start on. The email server Lys ships,
-  off until an email account is saved and its switch is on, reads, searches,
-  sends, and files mail over IMAP and SMTP. Each call
+  off until an email account is saved and its mailbox is switched on, reads,
+  searches, sends, and files mail over IMAP and SMTP, in one process for the
+  person's mailbox and Lys's own: Lys's own address lets her receive and send
+  mail as an agent of her own, through `lys_` tools that only Caliginia and
+  Lysiptera are offered, and only they learn it from `read_my_state`; every
+  send asks first. Each call
   asks the person first unless its tool is set to Just run, which the backend
   decides for every tool from the saved choices; before that, the backend
   denies a call that names a private key or credential file, a path outside
@@ -124,10 +137,11 @@ repository today; it is not a promise of unreleased work.
   edits remain session-only.
 - Every model load Lys starts sends that model's load configuration: context
   length, eval batch size, flash attention, KV cache placement, and active
-  experts. The Model pane edits it for the selected default model and saves it
-  automatically.
-- The Composer label, send eligibility, and each chat request use the loaded
-  runtime projection described in [desktop model settings](/architecture/desktop/#model-settings).
+  experts. The Models pane edits it for the selected LM Studio model and saves
+  it automatically.
+- Several providers can be on at once. Each conversation's model names its
+  provider, and the composer sends only to that model while it is loaded; see
+  [the conversation's model](/architecture/desktop/#the-conversations-model).
 - On macOS, `build.sh` builds the desktop app from a source checkout, builds
   vmo and the email MCP server in release, installs the backend runtime, vmo,
   and the email server under `$LYS_HOME/runtime`, and copies `Lys.app` to

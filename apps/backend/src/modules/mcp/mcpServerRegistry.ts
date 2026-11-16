@@ -1,5 +1,6 @@
 import type { McpServerList, McpServerState } from "@lys/protocol"
 import {
+  isBuiltInMcpServerOn,
   MCP_TOOL_NAME_PREFIX,
   type BuiltInMcpServerName,
   type McpServerSettings,
@@ -52,10 +53,21 @@ export type BuiltInMcpServer = Readonly<{
   transport: McpServerTransport
   /**
    * Reads what the server needs, such as a saved account, and builds the
-   * settings it starts with; called each time the settings are applied
-   * with the server switched on and its name free.
+   * settings it starts with; called with the applied `mcp` group each time
+   * it is applied with the server switched on, as
+   * `isBuiltInMcpServerOn` tells, and its name free.
    */
-  readServer: () => Promise<BuiltInMcpServerRead>
+  readServer: (settings: McpSettings) => Promise<BuiltInMcpServerRead>
+  /**
+   * Answers whether only Lys herself, Caliginia or Lysiptera, may be
+   * offered and call one of the server's tools.
+   *
+   * @param toolName - Model-facing name of a tool the server lists, such
+   * as `mcp__email__lys_send_email`.
+   * @returns True for a tool that works on something of Lys's own, such as
+   * her mailbox; false for any other tool.
+   */
+  isLysOnlyTool: (toolName: string) => boolean
 }>
 
 /**
@@ -86,6 +98,13 @@ export type TurnMcpTool = Readonly<{
    * tool call policy then asks the person before each call.
    */
   isOpenWorldWrite: boolean
+  /**
+   * Whether only Lys herself, Caliginia or Lysiptera, may be offered and
+   * call the tool: true for a tool of a server Lys ships that works on
+   * something of Lys's own, such as the `lys_` tools of the email server,
+   * which work on her mailbox; false for every tool of an added server.
+   */
+  isLysOnly: boolean
   /**
    * Runs one call on the tool's server as it is connected when the call
    * runs.
@@ -378,7 +397,8 @@ export default class McpServerRegistry {
    * @returns `found` when the named server is connected and lists the tool;
    * `not-connected` when the server is applied but connecting, failed,
    * switched off, or unable to start; `unknown` otherwise. A found tool's
-   * calls run on the server's session as it is when each call runs.
+   * calls run on the server's session as it is when each call runs, and it
+   * is Lys-only when its server is one Lys ships that says so.
    */
   public findTurnTool(toolName: string): McpTurnToolLookup {
     /** Lookup of a tool whose server is switched off or cannot start. */
@@ -392,11 +412,32 @@ export default class McpServerRegistry {
     if (entry === undefined) return UNKNOWN_TOOL
     switch (entry.run.status) {
       case "running":
-        return this.#findSessionTool(entry.run.session, toolName)
+        return this.#findSessionTool(entry.run.session, {
+          toolName,
+          isLysOnly: this.#isLysOnlyTool(entry, toolName)
+        })
       case "off":
       case "unusable":
         return notConnectedTool
     }
+  }
+
+  /**
+   * Answers whether only Lys herself may be offered and call a tool of an
+   * applied server.
+   *
+   * @param entry - The tool's server.
+   * @param toolName - Model-facing name of the tool.
+   * @returns What the server Lys ships under the entry's name answers, for
+   * a built-in entry; false for an added server, even one that took a
+   * built-in server's name.
+   */
+  #isLysOnlyTool(entry: ServerEntry, toolName: string): boolean {
+    if (!entry.isBuiltIn) return false
+    const builtIn = this.#dependencies.builtInServers.find(
+      (server) => server.name === entry.name
+    )
+    return builtIn?.isLysOnlyTool(toolName) ?? false
   }
 
   /**
@@ -691,16 +732,17 @@ export default class McpServerRegistry {
    * Finds one MCP tool a request offers on its server's running session.
    *
    * @param session - The server's session.
-   * @param toolName - Model-facing name of the tool.
+   * @param tool - Model-facing name of the tool, and whether only Lys
+   * herself may be offered and call it.
    * @returns `found` when the session is connected and lists the tool,
    * whose calls run on the server's session as it is when each call runs;
    * otherwise the session's answer.
    */
   #findSessionTool(
     session: McpServerSession,
-    toolName: string
+    tool: Readonly<{ toolName: string; isLysOnly: boolean }>
   ): McpTurnToolLookup {
-    const lookup = session.findTool(toolName)
+    const lookup = session.findTool(tool.toolName)
     switch (lookup.status) {
       case "found": {
         const { definition } = lookup
@@ -710,6 +752,7 @@ export default class McpServerRegistry {
             definition,
             isDestructive: lookup.isDestructive,
             isOpenWorldWrite: lookup.isOpenWorldWrite,
+            isLysOnly: tool.isLysOnly,
             sendToolCall: (
               callArguments: McpToolCallArguments,
               abortSignal: AbortSignal
@@ -777,8 +820,8 @@ async function createBuiltInServerPlans(
 ): Promise<readonly ServerPlan[]> {
   const outcomes = await Promise.allSettled(
     builtIns.map((builtIn) =>
-      settings.builtIn[builtIn.name].enabled
-        ? createBuiltInServerPlan(builtIn)
+      isBuiltInMcpServerOn(settings.builtIn, builtIn.name)
+        ? createBuiltInServerPlan(builtIn, settings)
         : Promise.resolve(buildOffBuiltInServerPlan(builtIn))
     )
   )
@@ -795,14 +838,16 @@ async function createBuiltInServerPlans(
  * reading what it needs.
  *
  * @param server - The built-in server.
+ * @param settings - The group, which switches it on.
  * @returns A start with the settings its read built, or why it cannot
  * start.
  * @throws The read's failure.
  */
 async function createBuiltInServerPlan(
-  server: BuiltInMcpServer
+  server: BuiltInMcpServer,
+  settings: McpSettings
 ): Promise<ServerPlan> {
-  const read = await server.readServer()
+  const read = await server.readServer(settings)
   const run: PlannedRun =
     read.status === "read"
       ? Object.freeze({ status: "start", settings: read.settings })

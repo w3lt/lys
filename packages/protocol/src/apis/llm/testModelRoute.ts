@@ -7,19 +7,23 @@ import {
   llmRuntimeUnavailableProblemSchema,
   type LlmRuntimeUnavailableProblem
 } from "../../http/errors/llm"
+import { llmProviderSchema } from "@lys/share"
 import { apiLlmTestModelRoute } from "./routes"
 
 /** Maximum decoded key length accepted by the Fastify path router. */
 const MAX_LLM_MODEL_HEALTH_PATH_PARAMETER_LENGTH = 100
 
 /**
- * Validates the canonical model key selected by the health route path.
+ * Validates the provider and the canonical model key selected by the health
+ * route path.
  *
  * @remarks The decoded key is limited to 100 characters to match Fastify's
  * effective path-parameter boundary without changing shared router policy.
  */
 export const llmTestModelApiParamsSchema = z
   .strictObject({
+    /** Provider whose model is checked. */
+    provider: llmProviderSchema,
     /** Canonical model key containing from 1 through 100 decoded characters. */
     modelId: z.string().min(1).max(MAX_LLM_MODEL_HEALTH_PATH_PARAMETER_LENGTH)
   })
@@ -80,7 +84,7 @@ export const llmTestModelApi = Object.freeze({
   responses: llmTestModelApiResponseSchemas
 })
 
-/** Path parameters containing a canonical model key within the router's decoded length limit. */
+/** Path parameters naming the provider and a canonical model key within the router's decoded length limit. */
 export type LlmTestModelApiParams = z.infer<typeof llmTestModelApi.params>
 
 /** Loaded-state observation returned by an accepted health query. */
@@ -96,7 +100,7 @@ export type LlmTestModelApiReply = {
 
 /** Fastify route type for model-health parameters and responses. */
 export type LlmTestModelApiRoute = {
-  /** Validated canonical model key supplied to the backend handler. */
+  /** Validated provider and canonical model key supplied to the backend handler. */
   readonly Params: LlmTestModelApiParams
   /** Status-specific health observation and service-unavailable payloads. */
   readonly Reply: LlmTestModelApiReply

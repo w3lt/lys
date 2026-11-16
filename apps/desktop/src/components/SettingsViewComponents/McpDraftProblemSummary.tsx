@@ -1,5 +1,7 @@
 import { useId, type ReactElement, type RefObject } from "react"
 
+import { Button } from "@/components/ui/button"
+
 import {
   formatMcpDraftProblemSummaryHeading,
   type McpDraftProblemListing
@@ -110,13 +112,14 @@ function McpDraftProblemItem<TField extends string>({
 }: McpDraftProblemItemProps<TField>): ReactElement {
   return (
     <li>
-      <button
+      <Button
         className="settings-view__mcp-summary-link"
         onClick={() => onSelectField(listing.field)}
         type="button"
+        variant="link"
       >
         {listing.label}: {listing.problem}
-      </button>
+      </Button>
     </li>
   )
 }

@@ -7,6 +7,7 @@ import type {
   ReplyStreamRequest
 } from "../../../src/modules/agent/replyModel"
 import { ChatCompletionCancelledError } from "../../../src/utils/errors"
+import { LM_STUDIO_QWEN3_8B } from "./llmFixtures"
 
 /** What the model behind a reply model does with every request of a case. */
 export type ReplyModelScript =
@@ -106,7 +107,7 @@ function createReplyStreamRequest(
       { role: "user", content: "Hello", images: [] }
     ],
     tools: [],
-    model: "qwen/qwen3-8b",
+    model: LM_STUDIO_QWEN3_8B,
     generationOptions: { temperature: 0.4, replyCeiling: 128 },
     abortSignal
   }

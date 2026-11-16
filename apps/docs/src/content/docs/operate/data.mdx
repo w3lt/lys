@@ -30,28 +30,35 @@ The desktop host owns a JSON settings file at `$LYS_HOME/settings.json`.
   [Configuration](/operate/configuration/)
 - parsed as JSON on load and rewritten as pretty-printed JSON when the Tauri
   `save_settings` command is called
-- read, never written, by the backend for the model provider, its address
-  and key, the Tavily API key, the Just run list, the MCP servers with their
-  switches, and the email account with its password
+- read, never written, by the backend for the model providers that are on,
+  their addresses and keys, the Tavily API key, the Just run list, the MCP servers with their
+  switches, and the email accounts, the person's and Lys's own, with their
+  passwords
 - read, never created or written, by the host's `get_location` tool for the
   location the person saved
 
 The desktop loads this file at initialization and autosaves generation, load
 configuration, tool approval, runtime startup switch, and MCP server switch
 edits; it saves the
-Tavily API key, the location, the MCP servers, and the email account with its
+Tavily API key, the location, the MCP servers, and each email account with its
 password when the person saves them. Each save
 replaces only its own part and preserves the rest already on disk, including a
 `loadConfiguration.default` written by hand; the other runtime edits in the
 UI remain session-only.
 
 The `location` group holds the city, region, and country the person typed in
-Settings → Tools, each optional; Lys never detects them. It is personal data,
-kept as plain text in this owner-only file and saved only when the person
-presses Save. It leaves the file only when a `get_location` call runs, as the
-call's result, which goes to the model and is stored with the reply (below).
-Saving with every field empty removes it from the file; results stored
-earlier keep it.
+Settings → Profile, each optional; Lys never detects them. It is personal
+data, kept as plain text in this owner-only file and saved only when the
+person presses Save location, down to the part chosen under Share down to. It
+leaves the file only when a `get_location` call runs, as the call's result,
+which goes to the model and is stored with the reply (below). Saving with
+every field empty, or with Nothing chosen, removes it from the file; results
+stored earlier keep it.
+
+The Lys pane's About Lys, with its portrait, and the Profile pane's About
+you, Preferences, and Notes for Lys are not kept anywhere: the renderer holds
+them in memory until the window reloads or Lys restarts, and no file or
+request carries them.
 
 The `mcp` group holds the MCP servers the person saved in Settings → MCP: each
 one's name and either its command, arguments, and environment variables, or

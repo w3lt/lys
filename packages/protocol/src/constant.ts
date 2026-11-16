@@ -104,8 +104,8 @@ export const VMO_PORT = 8080
  */
 export const TAVILY_API_HOST = "api.tavily.com"
 /**
- * Host of Ollama Cloud, the only place requests go while Ollama Cloud is the
- * active provider.
+ * Host of Ollama Cloud, the only place requests for Ollama Cloud's models
+ * go.
  *
  * @remarks The backend sends model listings and chat requests, with the
  * person's Ollama API key, to `https://` followed by this host, and the
@@ -115,8 +115,7 @@ export const TAVILY_API_HOST = "api.tavily.com"
  */
 export const OLLAMA_CLOUD_API_HOST = "ollama.com"
 /**
- * Host of Groq's API, the only place requests go while Groq is the active
- * provider.
+ * Host of Groq's API, the only place requests for Groq's models go.
  *
  * @remarks The backend sends model listings and chat requests, with the
  * person's Groq API key, to `https://` followed by this host, and the

@@ -102,7 +102,7 @@ function listSettingsWrites(
  * @returns The expected `save_settings` arguments.
  */
 function buildRuntimeWrite(autoStartBackend: boolean, autoStartVmo: boolean) {
-  const runtime: RuntimeSettings = {
+  const runtime: SettingsDocument["runtime"] = {
     ...STORED_SETTINGS_DOCUMENT.runtime,
     autoStartBackend,
     autoStartVmo
@@ -119,7 +119,7 @@ describe("isRuntimeAutoStartSettingsEqual", () => {
     const runtime = STORED_SETTINGS.runtime
     const otherSessionFields: RuntimeSettings = {
       ...runtime,
-      defaultModel: "another",
+      defaultModel: { provider: "groq", modelKey: "another" },
       backendAddress: "http://127.0.0.1:1"
     }
 

@@ -3,6 +3,7 @@ import type {
   ConversationAssistantMessage,
   ConversationAttachmentDraft,
   ConversationUserMessage,
+  LlmModelReference,
   ReplyPart,
   ToolCallReplyPart
 } from "@lys/share"
@@ -54,8 +55,10 @@ export type CreateConversationTurnOptions = Readonly<{
   conversation: ConversationTurnTarget
   /** User message appended once to the transcript, with its attachments. */
   userMessage: ConversationTurnUserMessage
-  /** Nonempty model identity stored on the assistant reply. */
-  model: string
+  /**
+   * Model stored on the assistant reply: its key and its provider.
+   */
+  model: LlmModelReference
 }>
 
 /** Immutable turn identities plus an independent snapshot of the earlier transcript. */

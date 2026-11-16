@@ -138,6 +138,14 @@ export type ToolCallRoundContext = Readonly<{
    */
   tools: AgentToolset
   /**
+   * Whether the agent answering is Lys herself, Caliginia or Lysiptera,
+   * the only agents that may call an MCP tool only Lys may use. For any
+   * other agent, a call of such a tool is answered as a call of a tool the
+   * round did not offer, without naming it among the tools the agent can
+   * call, and never runs.
+   */
+  canUseLysOnlyTools: boolean
+  /**
    * What the request names about the tools the turn does not offer; a call
    * of one is answered as not run, and so is a call of any tool not offered
    * while tool calls are off.
@@ -532,13 +540,14 @@ export async function handleToolCallRound(
   if (context.tools.size === 0 && !hasUnofferedToolNote(context.unofferedTools))
     throw new Error("The model called a tool although none was offered")
   const toolCalls = Object.freeze(round.toolCalls.map(createContextToolCall))
-  const gate = hasGatedToolCall(toolCalls, context.tools)
+  const tools = listCallableTools(context.tools, context.canUseLysOnlyTools)
+  const gate = hasGatedToolCall(toolCalls, tools)
     ? await context.createToolCallGate()
     : undefined
   const toolCallRules = await readToolCallRules(context.toolCallPolicy)
   if (context.abortSignal.aborted) return undefined
   const handling: ToolCallHandling = Object.freeze({
-    tools: context.tools,
+    tools,
     unofferedTools: context.unofferedTools,
     toolCallPolicy: context.toolCallPolicy,
     toolCallRules,
@@ -581,6 +590,34 @@ function hasGatedToolCall(
     const tool = tools.get(toolCall.toolName)
     return tool !== undefined && !runsWithoutApproval(tool)
   })
+}
+
+/**
+ * Lists the offered tools the answering agent may call.
+ *
+ * @param tools - Tools the round offered.
+ * @param canUseLysOnlyTools - Whether the agent is Caliginia or Lysiptera.
+ * @returns The tools unchanged when the agent may use every tool, or when
+ * none is an MCP tool only Lys may use; otherwise a copy without those
+ * tools.
+ */
+function listCallableTools(
+  tools: AgentToolset,
+  canUseLysOnlyTools: boolean
+): AgentToolset {
+  if (canUseLysOnlyTools || ![...tools.values()].some(isLysOnlyTool))
+    return tools
+  return new Map([...tools].filter(([, tool]) => !isLysOnlyTool(tool)))
+}
+
+/**
+ * Answers whether only Lys herself may call an offered tool.
+ *
+ * @param tool - Offered tool.
+ * @returns True for an MCP tool only Caliginia and Lysiptera may use.
+ */
+function isLysOnlyTool(tool: OfferedTool): boolean {
+  return tool.runner === "mcp" && tool.mcpTool.isLysOnly
 }
 
 /**

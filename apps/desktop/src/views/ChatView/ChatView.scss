@@ -123,7 +123,7 @@
 .chat-view__stopped {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-meta);
   font-weight: 500;
   text-transform: uppercase;
 }
@@ -141,7 +141,7 @@
   background-clip: text;
   -webkit-background-clip: text;
   font-family: var(--font-sans);
-  font-size: 32px;
+  font-size: var(--text-display);
   font-weight: 620;
   letter-spacing: -0.02em;
   line-height: 1.1;
@@ -152,7 +152,7 @@
   margin: 18px 0 0;
   color: var(--app-text-muted);
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: var(--text-control);
   line-height: 1.5;
 }
 
@@ -177,7 +177,6 @@
 
 .chat-view__starter {
   justify-content: space-between;
-  padding: 0 12px;
   text-align: left;
 }
 
@@ -218,7 +217,7 @@
 .chat-view__user-copy {
   margin: 12px 0 0;
   color: var(--app-text);
-  font-size: 14px;
+  font-size: var(--text-control);
   line-height: 1.65;
   white-space: pre-wrap;
 }
@@ -246,7 +245,7 @@
 
 .chat-view__attachment-kind {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-tag);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--app-text-faint);
@@ -255,7 +254,7 @@
 .chat-view__attachment-name {
   max-width: 240px;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--text-note);
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--app-text);
@@ -286,7 +285,7 @@
 .chat-view__error [data-slot="alert-title"] {
   color: var(--app-text-danger);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-meta);
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -295,7 +294,7 @@
 .chat-view__error [data-slot="alert-description"] {
   margin-top: 8px;
   color: var(--app-text-danger-muted);
-  font-size: 14px;
+  font-size: var(--text-control);
   line-height: 1.55;
 }
 
@@ -313,7 +312,7 @@
   color: var(--app-text-muted);
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-meta);
   font-weight: 500;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -332,7 +331,7 @@
   padding-left: 12px;
   border-left: 1px solid var(--app-border-subtle);
   color: var(--app-text-muted);
-  font-size: 13px;
+  font-size: var(--text-body);
   line-height: 1.6;
   white-space: pre-wrap;
 }
@@ -356,7 +355,7 @@
 .chat-view__step-text {
   margin: 0 0 6px;
   color: var(--app-text-muted);
-  font-size: 13px;
+  font-size: var(--text-body);
   line-height: 1.6;
   white-space: pre-wrap;
 }
@@ -372,12 +371,12 @@
   gap: 8px;
   color: var(--app-text);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-body);
 }
 
 .chat-view__call-name {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-note);
 }
 
 .chat-view__call-target {
@@ -392,7 +391,7 @@
   margin-left: auto;
   color: var(--app-text-faint);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-meta);
   white-space: nowrap;
 }
 
@@ -412,7 +411,7 @@
   margin: 0 0 4px;
   color: var(--app-text-faint);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-tag);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -425,7 +424,7 @@
   display: grid;
   margin: 0;
   gap: 2px;
-  font-size: 12px;
+  font-size: var(--text-note);
 }
 
 .chat-view__call-arguments div {
@@ -452,7 +451,7 @@
   margin: 0;
   color: var(--app-text-code);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-note);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -465,7 +464,7 @@
   margin: 0 0 6px;
   color: var(--app-text-faint);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-meta);
   font-weight: 500;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -490,7 +489,7 @@
   max-width: 100%;
   gap: 8px;
   color: var(--app-text);
-  font-size: 13px;
+  font-size: var(--text-body);
   text-decoration: none;
 }
 
@@ -507,7 +506,7 @@
 .chat-view__source-number {
   color: var(--app-text-link);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-meta);
 }
 
 .chat-view__source-title {
@@ -520,7 +519,7 @@
 .chat-view__source-site,
 .chat-view__source-via {
   color: var(--app-text-faint);
-  font-size: 12px;
+  font-size: var(--text-note);
   white-space: nowrap;
 }
 

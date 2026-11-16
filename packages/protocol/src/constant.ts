@@ -89,7 +89,91 @@ export const VMO_HOST = "127.0.0.1"
  * changing it requires changing all three together.
  */
 export const VMO_PORT = 8080
+/**
+ * Loopback interface on which voice, Lys's speech service, listens.
+ *
+ * @remarks The backend sends speech synthesis requests to this host, and the
+ * desktop names it on the voice card. It is not persisted. voice's
+ * `WebServer` in `apps/voice` declares it again as its default host, and
+ * `VOICE_ADDRESS` in the desktop's Tauri host, which checks voice's health,
+ * as its host, under the same CONST-005 exception as {@link VMO_HOST} and
+ * guarded by the same kind of test, so changing it requires changing all
+ * three together.
+ */
+export const VOICE_HOST = "127.0.0.1"
+/**
+ * TCP port on which voice serves its HTTP health route.
+ *
+ * @remarks The backend checks this port before asking voice to speak, and
+ * the desktop names it on the voice card. It is not persisted. voice's
+ * `WebServer` in `apps/voice` declares it again as its default port, and
+ * `VOICE_ADDRESS` in the desktop's Tauri host as its port, under the same
+ * CONST-005 exception as {@link VOICE_HOST}, so changing it requires
+ * changing all three together.
+ */
+export const VOICE_PORT = 9090
+/**
+ * TCP port on which voice accepts speech WebSockets.
+ *
+ * @remarks voice serves only WebSockets carrying one speech each on this
+ * port, on the same loopback host as {@link VOICE_HOST}. The backend opens
+ * one socket per reply or notification and is the only client; the desktop
+ * never connects to it.
+ */
+export const VOICE_SOCKET_PORT = 9091
 // ============== ENV CONFIG ============== //
+
+// ============== AUDIO ============== //
+/**
+ * Sample rate of every audio frame language model and speech services
+ * exchange, in samples per second.
+ *
+ * @remarks Speech synthesis produces 24 kHz frames; the renderer plays them
+ * at the same rate. It is not persisted.
+ */
+export const VOICE_AUDIO_SAMPLE_RATE_HZ = 24_000
+/**
+ * Number of audio channels of every audio frame; voice speaks in mono.
+ */
+export const VOICE_AUDIO_CHANNELS = 1
+/**
+ * Bytes per audio sample on the wire; samples are signed 16-bit little
+ * endian, so an audio frame carries two bytes per sample.
+ */
+export const VOICE_AUDIO_BYTES_PER_SAMPLE = 2
+// ============== AUDIO ============== //
+
+// ============== SPEECH STREAM ============== //
+/**
+ * Close code of a speech or notification socket whose audio was fully sent:
+ * voice finished speaking everything it was given.
+ */
+export const SPEECH_CLOSE_COMPLETE = 1000
+/**
+ * Close code of a speech or notification socket whose speech failed inside
+ * voice; the desktop stops playback and the reply text continues.
+ */
+export const SPEECH_CLOSE_FAILED = 1011
+/**
+ * Close code of a speech socket whose conversation or reply does not exist.
+ */
+export const SPEECH_CLOSE_NO_SUCH_REPLY = 4404
+/**
+ * Close code of a speech or notification socket superseded by a newer one
+ * for the same reply.
+ */
+export const SPEECH_CLOSE_SUPERSEDED = 4409
+/**
+ * Close code of a speech socket whose reply stopped, failed, or, for a
+ * `current` speech, is no longer being written.
+ */
+export const SPEECH_CLOSE_REPLY_ENDED = 4410
+/**
+ * Close code of a speech or notification socket opened while voice cannot
+ * speak, because it is stopped, starting, or broken.
+ */
+export const SPEECH_CLOSE_VOICE_UNAVAILABLE = 4503
+// ============== SPEECH STREAM ============== //
 
 // ============== EXTERNAL SERVICES ============== //
 /**

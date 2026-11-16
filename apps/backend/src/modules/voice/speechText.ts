@@ -175,7 +175,7 @@ function cleanInline(text: string): string {
   return text
     .replace(CITATION_MARKERS, "")
     .replace(/\s+/g, " ")
-    .replace(/\s+([.,;:!?)\]])/g, "$1")
+    .replace(/\s+(?=[.,;:!?)\]])/g, "")
     .trim()
 }
 
@@ -276,6 +276,47 @@ function pushBlock(blocks: string[], text: string): void {
   if (cleaned !== "") blocks.push(cleaned)
 }
 
+/** Blocks that carry no words to speak. */
+const SPOKEN_SILENCED = new Set([
+  "table",
+  "code",
+  "math",
+  "html",
+  "yaml",
+  "definition",
+  "footnoteDefinition",
+  "thematicBreak"
+])
+
+/** Collects one list item: blocks recurse, inline runs join a sentence. */
+function collectListItem(
+  node: RootContent,
+  definitions: Definitions,
+  blocks: string[]
+): void {
+  const children = (node as { children?: RootContent[] }).children ?? []
+  const parts: string[] = []
+  for (const child of children) {
+    if (child.type === "list" || isBlockChild(child)) {
+      collectBlock(child, definitions, blocks)
+    } else {
+      parts.push(inline(child, definitions))
+    }
+  }
+  if (parts.length > 0) pushBlock(blocks, parts.join(" "))
+}
+
+/** Collects every child of a node with children. */
+function collectChildBlocks(
+  node: RootContent,
+  definitions: Definitions,
+  blocks: string[]
+): void {
+  const children = (node as { children?: RootContent[] }).children
+  if (!Array.isArray(children)) return
+  for (const child of children) collectBlock(child, definitions, blocks)
+}
+
 /** Collects the blocks of one subtree into `blocks`. */
 function collectBlock(
   node: RootContent,
@@ -287,37 +328,14 @@ function collectBlock(
     case "heading":
       pushBlock(blocks, inlineChildren(node, definitions))
       return
-    case "listItem": {
-      const parts: string[] = []
-      for (const child of node.children) {
-        if (child.type === "list") collectBlock(child, definitions, blocks)
-        else if (isBlockChild(child)) collectBlock(child, definitions, blocks)
-        else parts.push(inline(child, definitions))
-      }
-      if (parts.length > 0) pushBlock(blocks, parts.join(" "))
-      return
-    }
-    case "list":
-    case "blockquote":
-      for (const child of node.children)
-        collectBlock(child, definitions, blocks)
-      return
-    case "table":
-    case "code":
-    case "math":
-    case "html":
-    case "yaml":
-    case "definition":
-    case "footnoteDefinition":
-    case "thematicBreak":
+    case "listItem":
+      collectListItem(node, definitions, blocks)
       return
     default:
-      if ("children" in node && Array.isArray(node.children)) {
-        for (const child of node.children)
-          collectBlock(child as RootContent, definitions, blocks)
-      }
-      return
+      break
   }
+  if (SPOKEN_SILENCED.has(node.type)) return
+  collectChildBlocks(node, definitions, blocks)
 }
 
 /** Whether a list-item child is a block rather than inline content. */

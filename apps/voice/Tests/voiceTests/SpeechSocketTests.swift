@@ -155,7 +155,10 @@ private final class TestSpeechClient: @unchecked Sendable {
     private func send(_ data: Data, opcode: NWProtocolWebSocket.Opcode) {
         let metadata = NWProtocolWebSocket.Metadata(opcode: opcode)
         let context = NWConnection.ContentContext(identifier: "test", metadata: [metadata])
-        connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { _ in })
+        connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { _ in
+            // The test asserts on what the server does next; the send
+            // completion itself carries no information worth reacting to.
+        })
     }
 
     /// Maps a WebSocket close code onto its 16-bit code, if any.

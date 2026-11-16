@@ -95,12 +95,16 @@ export default function updateFastifyWithSpeechRoutes(
  * socket; requests without an `Origin`, such as ones from local processes,
  * are allowed, as with the HTTP routes.
  */
-async function refuseForeignOrigins(
+function refuseForeignOrigins(
   request: FastifyRequest,
-  reply: FastifyReply
-): Promise<void> {
-  if (isAllowedOrigin(request.headers.origin)) return
-  reply.code(403).send({
+  reply: FastifyReply,
+  done: (error?: Error) => void
+): void {
+  if (isAllowedOrigin(request.headers.origin)) {
+    done()
+    return
+  }
+  void reply.code(403).send({
     type: "about:blank",
     title: "Forbidden",
     status: 403,

@@ -85,10 +85,7 @@ final class SpeechConnection: @unchecked Sendable {
                 message = .failure(error)
             }
             switch message {
-            case .failure:
-                await teardown()
-                return
-            case .success(.close):
+            case .failure, .success(.close):
                 await teardown()
                 return
             case .success(.text(let body)):

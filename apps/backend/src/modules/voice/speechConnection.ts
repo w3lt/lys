@@ -241,10 +241,6 @@ class SpeechSession {
     this.#subscription = new ReplyEventSubscription<ChatReplyEvent>(
       this.#receiveEvent
     )
-    // A subscription that ends without a terminal event means the reply
-    // ended between the snapshot and the follow, or a write failed; the
-    // reply will say nothing more, so stop the speech.
-    void this.#subscription.closed.then(this.#subscriptionClosed)
   }
 
   /**
@@ -274,6 +270,10 @@ class SpeechSession {
    * @returns Settlement once the socket has been closed.
    */
   public async start(): Promise<void> {
+    // A subscription that ends without a terminal event means the reply
+    // ended between the snapshot and the follow, or a write failed; the
+    // reply will say nothing more, so stop the speech.
+    void this.#subscription.closed.then(this.#subscriptionClosed)
     if (this.#request.kind === "notification") {
       await this.#startNotification()
       return

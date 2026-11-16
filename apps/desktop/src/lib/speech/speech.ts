@@ -199,7 +199,7 @@ export function startSpeech(): () => void {
     update(useChatViewStore.getState().request.status)
   })
 
-  update(undefined)
+  update()
 
   return () => {
     stopTrackingFocus()

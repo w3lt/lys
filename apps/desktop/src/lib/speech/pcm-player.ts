@@ -101,7 +101,7 @@ export function createPcmPlayer(
       nextStartTime = 0
     },
     resume(): void {
-      if (context !== undefined && context.state === "suspended") {
+      if (context?.state === "suspended") {
         void context.resume().catch(() => undefined)
       }
     }

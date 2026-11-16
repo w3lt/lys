@@ -244,6 +244,17 @@ async function createStateToolApp(): Promise<ChatRouteTestApp> {
   return testApp
 }
 
+/**
+ * One request that names a tool the backend adds itself: the tool, where the
+ * request names it, the request fields that name it, and the refusal.
+ */
+type ReservedToolCase = [
+  name: string,
+  position: string,
+  fields: Readonly<Record<string, unknown>>,
+  message: string
+]
+
 /** What came of a request whose model gave the web researcher work. */
 type DelegatedRequest = Readonly<{
   /**
@@ -1157,22 +1168,20 @@ describe("updateFastifyWithChatRoute", () => {
   )
 
   /**
-   * Refusal of a request that names a tool the backend adds itself as switched
-   * off or unable to run.
+   * Lists the requests that name a tool the backend adds itself, once for
+   * each place a request can name a tool.
+   *
+   * @param name - Name of the backend's own tool.
+   * @returns One case for each place, with the refusal the request gets.
    */
-  const reservedUnofferedToolMessage =
-    "A request does not name read_attachment, read_my_state, find_agents, read_agent_state, find_tools, report_progress, or stop_job as switched off or unable to run; they have no switch and the backend adds them to a turn itself."
-
-  it.each(
-    [
-      "read_attachment",
-      "read_my_state",
-      "find_agents",
-      "read_agent_state",
-      "find_tools",
-      "report_progress",
-      "stop_job"
-    ].flatMap((name) => [
+  function listReservedToolCases(name: string): ReservedToolCase[] {
+    /**
+     * Refusal of a request that names a tool the backend adds itself as
+     * switched off or unable to run.
+     */
+    const reservedUnofferedToolMessage =
+      "A request does not name read_attachment, read_my_state, find_agents, read_agent_state, find_tools, report_progress, or stop_job as switched off or unable to run; they have no switch and the backend adds them to a turn itself."
+    return [
       [
         name,
         "offered as a client tool",
@@ -1197,10 +1206,22 @@ describe("updateFastifyWithChatRoute", () => {
         { unavailableTools: [{ name, reason: "page-reader-not-ready" }] },
         reservedUnofferedToolMessage
       ]
-    ])
+    ]
+  }
+
+  it.for(
+    [
+      "read_attachment",
+      "read_my_state",
+      "find_agents",
+      "read_agent_state",
+      "find_tools",
+      "report_progress",
+      "stop_job"
+    ].flatMap((name) => listReservedToolCases(name))
   )(
     "rejects a request with the backend's own tool %s %s before storing a turn",
-    async (_name, _position, fields, message) => {
+    async ([, , fields, message]) => {
       const testApp = await createChatRouteTestApp()
       updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
@@ -1261,7 +1282,7 @@ describe("updateFastifyWithChatRoute", () => {
     )
   })
 
-  it.each([
+  it.for([
     [
       "an error-level failure",
       new Error("model not loaded"),
@@ -1274,9 +1295,9 @@ describe("updateFastifyWithChatRoute", () => {
       "debug",
       "Chat completion was cancelled"
     ]
-  ])(
+  ] as const)(
     "logs a reply ended by the model's rejection as %s with the request's logger",
-    async (_label, rejection, level, msg) => {
+    async ([, rejection, level, msg]) => {
       const testApp = await createChatRouteTestApp()
       // Store the turn for real, so the reply's writes reach a stored message.
       testApp.createConversationTurn.mockRestore()

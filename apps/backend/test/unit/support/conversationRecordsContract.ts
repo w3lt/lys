@@ -1416,12 +1416,12 @@ function registerDeliveredReportReadCases(
     )
   })
 
-  it.each([
+  it.for([
     ["a report citing its sources out of order", "result", "Wool.", [5, 2]],
     ["a report citing a source twice", "result", "Wool.", [2, 2]]
   ] as const)(
     "rejects %s, which the report contract refuses",
-    (_label, kind, content, sourceNumbers) => {
+    ([, kind, content, sourceNumbers]) => {
       const harness = createHarness()
       const mainId = saveMainConversation(harness, 1)
       const job = saveJob(harness, createJobFixture(mainId, 1, "completed"))

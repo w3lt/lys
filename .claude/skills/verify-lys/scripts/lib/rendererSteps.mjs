@@ -237,6 +237,27 @@ export function waitForComposerReady(page, timeoutMs) {
 }
 
 /**
+ * Types a message into the composer and presses Send once it enables.
+ *
+ * @param {import("./rendererPage.mjs").RendererPage} page - The page, with
+ * the composer ready.
+ * @param {string} message - Text to type.
+ * @returns {Promise<{message: string}>} The message sent.
+ * @throws If Send does not enable within 5 seconds.
+ */
+export async function sendComposerMessage(page, message) {
+  await page.click(COMPOSER_TEXTAREA)
+  await page.typeText(message)
+  await page.waitForPageCondition({
+    description: "the Send button to enable",
+    expression: SEND_ENABLED,
+    timeoutMs: 5000
+  })
+  await page.click(SEND_BUTTON)
+  return { message }
+}
+
+/**
  * Waits until the app shell is on the page: the store finished loading
  * settings and the composer with its Settings button is rendered, whether
  * or not the backend and provider are ready.

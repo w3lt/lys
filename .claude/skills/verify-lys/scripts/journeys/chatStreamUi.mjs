@@ -7,13 +7,12 @@
 import { rejectUnless } from "../lib/journey.mjs"
 import { ESCAPE_KEY } from "../lib/rendererPage.mjs"
 import {
-  COMPOSER_TEXTAREA,
   LAST_ASSISTANT_TEXT,
   PAST_CONVERSATIONS_BUTTON,
   PAST_CONVERSATIONS_DIALOG,
   REPLY_FINISHED,
   SEND_BUTTON,
-  SEND_ENABLED,
+  sendComposerMessage,
   waitForComposerReady
 } from "../lib/rendererSteps.mjs"
 import {
@@ -31,6 +30,33 @@ const REPLY_OPENING = "Lys verification reply:"
 
 /** Closing words of the reply, expected only in the finished text. */
 const REPLY_CLOSING = "all at once."
+
+/**
+ * Opens Past conversations and waits until it lists the conversation under
+ * its generated title, then closes it with Escape.
+ *
+ * @param {import("../lib/rendererPage.mjs").RendererPage} page - The page,
+ * with the reply finished.
+ * @param {import("../lib/journey.mjs").EvidenceRecorder} evidence - The
+ * step's recorder.
+ * @returns {Promise<{title: string}>} The title the dialog lists.
+ * @throws If the dialog does not list the title within 15 seconds.
+ */
+async function findTitledConversation(page, evidence) {
+  await page.click(PAST_CONVERSATIONS_BUTTON)
+  await page.waitForPageCondition({
+    description:
+      "the Past conversations dialog to list the titled conversation",
+    expression: `(() => {
+      const dialog = ${PAST_CONVERSATIONS_DIALOG};
+      return dialog !== null && dialog.textContent.includes(${JSON.stringify(VERIFICATION_TITLE)});
+    })()`,
+    timeoutMs: 15_000
+  })
+  await page.captureScreenshot(evidence.buildPath("history.png"))
+  await page.pressKey(ESCAPE_KEY)
+  return { title: VERIFICATION_TITLE }
+}
 
 export default Object.freeze({
   id: "chat-stream-ui",
@@ -50,17 +76,9 @@ export default Object.freeze({
           return { placeholder }
         }
       )
-      await steps.step("type the message and press Send", async () => {
-        await page.click(COMPOSER_TEXTAREA)
-        await page.typeText(VERIFICATION_MESSAGE)
-        await page.waitForPageCondition({
-          description: "the Send button to enable",
-          expression: SEND_ENABLED,
-          timeoutMs: 5000
-        })
-        await page.click(SEND_BUTTON)
-        return { message: VERIFICATION_MESSAGE }
-      })
+      await steps.step("type the message and press Send", () =>
+        sendComposerMessage(page, VERIFICATION_MESSAGE)
+      )
       const midStream = await steps.step(
         "the reply streams: caret shown, Stop offered, text partial",
         async (evidence) => {
@@ -126,21 +144,7 @@ export default Object.freeze({
       )
       await steps.step(
         "Past conversations lists the conversation under its generated title",
-        async (evidence) => {
-          await page.click(PAST_CONVERSATIONS_BUTTON)
-          await page.waitForPageCondition({
-            description:
-              "the Past conversations dialog to list the titled conversation",
-            expression: `(() => {
-            const dialog = ${PAST_CONVERSATIONS_DIALOG};
-            return dialog !== null && dialog.textContent.includes(${JSON.stringify(VERIFICATION_TITLE)});
-          })()`,
-            timeoutMs: 15_000
-          })
-          await page.captureScreenshot(evidence.buildPath("history.png"))
-          await page.pressKey(ESCAPE_KEY)
-          return { title: VERIFICATION_TITLE }
-        }
+        (evidence) => findTitledConversation(page, evidence)
       )
     } finally {
       await page.close()

@@ -28,7 +28,6 @@ import {
   PAST_CONVERSATIONS_DIALOG,
   REPLY_FINISHED,
   SEND_BUTTON,
-  SEND_ENABLED,
   TOOLS_PANE,
   TOOL_APPROVAL_CARD,
   TRANSCRIPT_MESSAGES,
@@ -42,6 +41,7 @@ import {
   closeSettingsView,
   openSettingsPane,
   readSwitchState,
+  sendComposerMessage,
   waitForComposerReady
 } from "../lib/rendererSteps.mjs"
 import { readJobRows } from "../lib/sqliteEvidence.mjs"
@@ -152,26 +152,6 @@ async function getDelegateWorkToolRow(page, evidence) {
   )
   await closeSettingsView(page)
   return { ...row, switchState }
-}
-
-/**
- * Types the delegation message into the composer and presses Send.
- *
- * @param {import("../lib/rendererPage.mjs").RendererPage} page - The page,
- * with the composer ready.
- * @returns {Promise<{message: string}>} The message sent.
- * @throws If Send does not enable within 5 seconds.
- */
-async function sendDelegationMessage(page) {
-  await page.click(COMPOSER_TEXTAREA)
-  await page.typeText(DELEGATION_MESSAGE)
-  await page.waitForPageCondition({
-    description: "the Send button to enable",
-    expression: SEND_ENABLED,
-    timeoutMs: 5000
-  })
-  await page.click(SEND_BUTTON)
-  return { message: DELEGATION_MESSAGE }
 }
 
 /**
@@ -878,7 +858,7 @@ async function sendDelegation(steps, page) {
     (evidence) => getDelegateWorkToolRow(page, evidence)
   )
   await steps.step("type the delegation message and press Send", () =>
-    sendDelegationMessage(page)
+    sendComposerMessage(page, DELEGATION_MESSAGE)
   )
   await steps.step(
     "the approval card describes the delegate_work call; Allow once",

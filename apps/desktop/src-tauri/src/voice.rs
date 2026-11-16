@@ -603,7 +603,9 @@ mod tests {
 
     use serde_json::{json, to_value};
 
-    use super::{send_voice_health_check, Voice, VoiceHealth, VoiceProcessStatus, VoiceStopOutcome};
+    use super::{
+        send_voice_health_check, Voice, VoiceHealth, VoiceProcessStatus, VoiceStopOutcome,
+    };
 
     /// Stop timeout of the cases whose child exits on `SIGTERM`; never reached.
     const LONG_STOP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -706,11 +708,7 @@ mod tests {
     #[test]
     fn stop_ends_a_child_that_exits_on_sigterm() {
         let (voice, _stop) = create_guarded_voice(LONG_STOP_TIMEOUT);
-        get_running_pid(
-            voice
-                .start(build_shell_command(EXITS_ON_SIGTERM))
-                .unwrap(),
-        );
+        get_running_pid(voice.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
 
         assert_eq!(voice.stop(), Ok(VoiceStopOutcome::Stopped));
         assert_eq!(voice.status(), Ok(VoiceProcessStatus::Stopped));
@@ -720,10 +718,8 @@ mod tests {
     fn stop_kills_a_child_that_ignores_sigterm() {
         // The child ignores `SIGTERM`, so only `SIGKILL` ends the group. The
         // ready file orders the stop after the trap is installed.
-        let case_dir = std::env::temp_dir().join(format!(
-            "voice-sigkill-test-{}",
-            std::process::id()
-        ));
+        let case_dir =
+            std::env::temp_dir().join(format!("voice-sigkill-test-{}", std::process::id()));
         std::fs::create_dir_all(&case_dir).expect("create the test directory");
         let ready = case_dir.join("ready");
         let script = format!(
@@ -750,18 +746,17 @@ mod tests {
         let second = get_running_pid(voice.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
 
         assert_ne!(first, second);
-        assert_eq!(voice.status(), Ok(VoiceProcessStatus::Running { pid: second }));
+        assert_eq!(
+            voice.status(),
+            Ok(VoiceProcessStatus::Running { pid: second })
+        );
         assert_eq!(voice.stop(), Ok(VoiceStopOutcome::Stopped));
     }
 
     #[test]
     fn start_while_running_keeps_the_running_child() {
         let (voice, _stop) = create_guarded_voice(LONG_STOP_TIMEOUT);
-        let pid = get_running_pid(
-            voice
-                .start(build_shell_command(EXITS_ON_SIGTERM))
-                .unwrap(),
-        );
+        let pid = get_running_pid(voice.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
 
         let second = voice.start(build_shell_command(EXITS_ON_SIGTERM));
 

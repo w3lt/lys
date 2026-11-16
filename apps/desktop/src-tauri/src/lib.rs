@@ -195,7 +195,7 @@ fn format_voice_stop_problem_at_exit(
 mod tests {
     use std::any::Any;
 
-    use super::{format_voice_stop_problem_at_exit, format_vmo_stop_problem_at_exit};
+    use super::{format_vmo_stop_problem_at_exit, format_voice_stop_problem_at_exit};
     use crate::{vmo::VmoStopOutcome, voice::VoiceStopOutcome};
 
     #[test]

@@ -96,6 +96,8 @@ extension HTTPResponse {
             self.init(status: .badRequest)
         case .requestHeadTooLarge:
             self.init(status: .requestHeaderFieldsTooLarge)
+        case .requestHeadTimeout:
+            self.init(status: .requestTimeout)
         case .unsupportedVersion:
             self.init(status: .httpVersionNotSupported)
         }

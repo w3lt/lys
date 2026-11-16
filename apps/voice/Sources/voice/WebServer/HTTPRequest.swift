@@ -59,6 +59,8 @@ enum HTTPRequestError: Error, Equatable {
     case requestHeadTooLarge
     /// The request line names an HTTP major version other than 1.
     case unsupportedVersion
+    /// The request head did not arrive within the configured time limit.
+    case requestHeadTimeout
 }
 
 extension HTTPRequest {

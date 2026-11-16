@@ -9,8 +9,12 @@ enum HTTPStatus: Int, Sendable {
     case notFound = 404
     /// `405 Method Not Allowed`: the path exists, but not for the request method.
     case methodNotAllowed = 405
+    /// `408 Request Timeout`: the request head did not arrive in time.
+    case requestTimeout = 408
     /// `431 Request Header Fields Too Large`: the request head is too long.
     case requestHeaderFieldsTooLarge = 431
+    /// `503 Service Unavailable`: the speech models are not loaded yet.
+    case serviceUnavailable = 503
     /// `500 Internal Server Error`: the server failed while answering.
     case internalServerError = 500
     /// `505 HTTP Version Not Supported`: the request uses an HTTP major version
@@ -24,8 +28,10 @@ enum HTTPStatus: Int, Sendable {
         case .badRequest: "Bad Request"
         case .notFound: "Not Found"
         case .methodNotAllowed: "Method Not Allowed"
+        case .requestTimeout: "Request Timeout"
         case .requestHeaderFieldsTooLarge: "Request Header Fields Too Large"
         case .internalServerError: "Internal Server Error"
+        case .serviceUnavailable: "Service Unavailable"
         case .httpVersionNotSupported: "HTTP Version Not Supported"
         }
     }

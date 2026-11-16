@@ -53,24 +53,20 @@ async function readActivityStream(signal: AbortSignal): Promise<void> {
  * @remarks The timer and the abort listener are released when the wait ends
  * either way, so a stopped follow leaves nothing scheduled.
  */
-async function waitForActivityReconnectDelay(
-  signal: AbortSignal
-): Promise<void> {
+function waitForActivityReconnectDelay(signal: AbortSignal): Promise<void> {
   const reconnectDelayMs = 1000
-  if (signal.aborted) return
+  if (signal.aborted) return Promise.resolve()
 
-  let endWait!: () => void
-  const delay = new Promise<void>((resolve) => {
-    endWait = resolve
+  return new Promise<void>((resolve) => {
+    /** Ends the wait, releasing the timer and the abort listener. */
+    function endWait(): void {
+      clearTimeout(reconnectTimer)
+      signal.removeEventListener("abort", endWait)
+      resolve()
+    }
+    const reconnectTimer = setTimeout(endWait, reconnectDelayMs)
+    signal.addEventListener("abort", endWait, { once: true })
   })
-  const reconnectTimer = setTimeout(endWait, reconnectDelayMs)
-  signal.addEventListener("abort", endWait, { once: true })
-  try {
-    await delay
-  } finally {
-    clearTimeout(reconnectTimer)
-    signal.removeEventListener("abort", endWait)
-  }
 }
 
 /**

@@ -10,7 +10,7 @@
     "test:live": "vitest run --config vitest.live.config.ts"
   },
   "dependencies": {
-    "@fastify/cors": "^11.4.1",
+    "@fastify/cors": "^11.4.2",
     "@fastify/sse": "^0.6.1",
     "@lmstudio/sdk": "^2.1.0",
     "@lys/protocol": "workspace:*",

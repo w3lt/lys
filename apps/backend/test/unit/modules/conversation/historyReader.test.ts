@@ -15,6 +15,7 @@ import {
   registerConversationMetadataReaderContractSuite,
   type ConversationMetadataReaderHarness
 } from "../../support/conversationMetadataReaderContract"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 
 /**
  * Opens isolated in-memory conversation services with one committed turn.
@@ -27,7 +28,7 @@ function openHistoryWithTurn() {
   const turn = turns.createConversationTurn({
     conversation: createNewConversationTarget("lys"),
     userMessage: createTurnUserMessage("Plan the TRIP"),
-    model: "qwen/qwen3-8b"
+    model: LM_STUDIO_QWEN3_8B
   })
   return { database, turns, history, turn }
 }
@@ -121,7 +122,7 @@ describe("StoredConversationHistoryReader", () => {
         turns.createConversationTurn({
           conversation: { kind: "existing", id: turn.conversation.id },
           userMessage: createTurnUserMessage("Again"),
-          model: "qwen/qwen3-8b"
+          model: LM_STUDIO_QWEN3_8B
         })
       ).not.toThrow()
     })

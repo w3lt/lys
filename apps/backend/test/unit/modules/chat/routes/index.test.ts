@@ -10,11 +10,14 @@ import {
   createChatRouteTestApp,
   sendChatRequest
 } from "../../../support/chatRouteTestApp"
-import { createDownloadedLlmModel } from "../../../support/llmFixtures"
+import {
+  createDownloadedLlmModel,
+  LM_STUDIO_QWEN3_8B
+} from "../../../support/llmFixtures"
 import { createChatCompletionChunk } from "../../../support/openAiEndpointFake"
 
 /** Model both requests of the shared-memory case name. */
-const MODEL = "qwen/qwen3-8b"
+const MODEL = LM_STUDIO_QWEN3_8B
 
 describe("registerChatRoutes", () => {
   it.each([
@@ -42,7 +45,7 @@ describe("registerChatRoutes", () => {
     )
     testApp.generateTitle.mockResolvedValue("Trip plan")
     testApp.listDownloadedLlmModels.mockResolvedValue([
-      createDownloadedLlmModel({ modelKey: MODEL })
+      createDownloadedLlmModel({ modelKey: MODEL.modelKey })
     ])
     await registerChatRoutes(testApp.app)
 

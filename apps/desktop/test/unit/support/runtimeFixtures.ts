@@ -1,20 +1,24 @@
 import type { BackendServerStatus, useLysStore } from "@/lib/store"
-import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
 import {
-  buildModelRuntime,
+  INITIAL_PROVIDER_MODEL_STATES,
+  updateProviderModelState,
+  type LlmProviderStatus,
   type ModelInventoryState
 } from "@/lib/store/model-runtime"
 import { buildLlmInfo } from "./modelFixtures"
 
-/** Runtime facts a case arranges in the application store. */
+/**
+ * Runtime facts a case arranges in the application store, for LM Studio, the
+ * provider the first-run settings turn on.
+ */
 export type RuntimeArrangement = Readonly<{
   /** Backend lifecycle state. */
   backendStatus: BackendServerStatus
   /** Latest LM Studio status the backend reported. */
-  lmStudioStatus: LmStudioStatus
-  /** Latest model inventory observation. */
+  lmStudioStatus: LlmProviderStatus
+  /** Latest LM Studio inventory observation. */
   modelInventory: ModelInventoryState
-  /** Default model chosen in settings, or null when none is. */
+  /** Key of the LM Studio model chosen as the default, or null when none is. */
   defaultModel: string | null
 }>
 
@@ -47,7 +51,7 @@ export const READY_RUNTIME: RuntimeArrangement = Object.freeze({
  */
 export function buildUnreachableRuntime(
   backendStatus: BackendServerStatus,
-  lmStudioStatus: LmStudioStatus = "unknown"
+  lmStudioStatus: LlmProviderStatus = "unknown"
 ): RuntimeArrangement {
   return Object.freeze({
     backendStatus,
@@ -65,9 +69,10 @@ export function buildUnreachableRuntime(
  * @throws When the facts hold an inventory while LM Studio cannot be
  * reached; the store releases the inventory then, so such a state cannot
  * occur.
- * @remarks The residency summary is derived from the inventory and the
- * default model with the store's own projection, so the arranged state is
- * one the store could reach. Every other field keeps its initial value.
+ * @remarks LM Studio is turned on as the only provider, as the first-run
+ * settings turn it on; its state holds the status and the inventory with no
+ * request in flight, and the default names an LM Studio model. Every other
+ * provider keeps its initial state, and every other field its current value.
  */
 export function updateStoreRuntime(
   store: typeof useLysStore,
@@ -84,16 +89,21 @@ export function updateStoreRuntime(
   const { settings } = store.getState()
   store.setState({
     backendServerInfo: { status: runtime.backendStatus },
-    lmStudioStatus: runtime.lmStudioStatus,
-    modelInventory: runtime.modelInventory,
-    modelRuntime: buildModelRuntime(
-      runtime.modelInventory,
-      { status: "idle" },
-      runtime.defaultModel
+    providerModels: updateProviderModelState(
+      INITIAL_PROVIDER_MODEL_STATES,
+      "lmStudio",
+      { status: runtime.lmStudioStatus, inventory: runtime.modelInventory }
     ),
     settings: {
       ...settings,
-      runtime: { ...settings.runtime, defaultModel: runtime.defaultModel }
+      providers: { ...settings.providers, enabled: ["lmStudio"] },
+      runtime: {
+        ...settings.runtime,
+        defaultModel:
+          runtime.defaultModel === null
+            ? null
+            : { provider: "lmStudio", modelKey: runtime.defaultModel }
+      }
     }
   })
 }

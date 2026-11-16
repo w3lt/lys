@@ -217,9 +217,10 @@ describe("startDueWakeUpTurn", () => {
         }
       ]
     })
-    expect(options.turn.assistantMessage.model).toBe(
-      DELEGATING_TURN_SETTINGS.model
-    )
+    expect(options.turn.assistantMessage).toMatchObject({
+      model: DELEGATING_TURN_SETTINGS.model.modelKey,
+      provider: DELEGATING_TURN_SETTINGS.model.provider
+    })
     expect(options.agent.code).toBe(CALIGINIA_AGENT_CODE)
     expect(options.settings).toBe(DELEGATING_TURN_SETTINGS)
     expect(options.startedBy).toBe("backend")
@@ -455,9 +456,9 @@ describe("startDueWakeUpTurn", () => {
      * Settings of a later turn of the person's, written with another model than
      * {@link DELEGATING_TURN_SETTINGS}.
      */
-    const laterTurnSettings: TurnSettings = Object.freeze({
+    const laterTurnSettings: TurnSettings = Object.freeze<TurnSettings>({
       ...DELEGATING_TURN_SETTINGS,
-      model: "qwen/qwen3-14b"
+      model: { provider: "lmStudio", modelKey: "qwen/qwen3-14b" }
     })
 
     const services = openDelegationTestServices()
@@ -476,7 +477,10 @@ describe("startDueWakeUpTurn", () => {
 
     const { options } = findOnlyWakeUpTurn(services)
     expect(options.settings).toBe(laterTurnSettings)
-    expect(options.turn.assistantMessage.model).toBe("qwen/qwen3-14b")
+    expect(options.turn.assistantMessage).toMatchObject({
+      model: "qwen/qwen3-14b",
+      provider: "lmStudio"
+    })
   })
 
   it("leaves the reports delivered and starts no further wake-up when the wake-up reply fails because its model is not loaded", async () => {

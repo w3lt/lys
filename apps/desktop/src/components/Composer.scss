@@ -34,7 +34,7 @@
 
 .composer__offline-message,
 .composer__notice-message {
-  font-size: 14px;
+  font-size: var(--text-control);
   color: var(--app-text-muted);
 }
 
@@ -96,7 +96,6 @@
   padding: 2px 0;
   border: 0;
   background: transparent;
-  font-size: 14px;
   line-height: 1.55;
 }
 
@@ -157,8 +156,6 @@
 
 .composer__send {
   flex: none;
-  height: 32px;
-  padding-inline: 16px;
 }
 
 /*
@@ -176,7 +173,7 @@
   background: color-mix(in oklch, var(--lys-violet) 12%, transparent);
   color: var(--app-text-strong);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-meta);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   inset: 0;
@@ -209,7 +206,7 @@
 
 .composer__chip-kind {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-tag);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--app-text-faint);
@@ -218,7 +215,7 @@
 .composer__chip-name {
   max-width: 190px;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--text-note);
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--app-text);
@@ -226,7 +223,7 @@
 
 .composer__chip-tokens {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-tag);
   color: var(--app-text-faint);
 }
 
@@ -264,7 +261,7 @@
  * on it; hidden with display none, it would leave the accessibility tree too.
  */
 .composer__attachment-refusal {
-  font-size: 12px;
+  font-size: var(--text-note);
   color: var(--app-text-danger);
 }
 
@@ -298,37 +295,6 @@
   gap: 13px;
 }
 
-.composer__icon-button {
-  display: flex;
-  width: 24px;
-  height: 24px;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--app-text-faint);
-  cursor: pointer;
-  transition:
-    color var(--duration-standard) var(--ease-standard),
-    background-color var(--duration-standard) var(--ease-standard);
-}
-
-.composer__icon-button svg {
-  width: 13px;
-  height: 13px;
-}
-
-.composer__icon-button:hover {
-  background: var(--app-surface-hover);
-  color: var(--app-text-strong);
-}
-
-/* An open disclosure keeps its trigger lit; `aria-expanded` also states it. */
-.composer__icon-button[aria-expanded="true"] {
-  color: var(--lys-violet);
-}
-
 .composer__divider {
   width: 1px;
   height: 12px;
@@ -346,7 +312,7 @@
   background: transparent;
   color: var(--app-text-faint);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-meta);
   letter-spacing: 0.1em;
   white-space: nowrap;
   cursor: pointer;
@@ -408,7 +374,7 @@
 
 .composer__activity {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-meta);
   letter-spacing: 0.12em;
   white-space: nowrap;
   color: var(--app-text-faint);
@@ -439,7 +405,7 @@
 .composer__menu-eyebrow,
 .composer__eyebrow {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: var(--text-tag);
   font-weight: 400;
   letter-spacing: 0.26em;
   text-transform: uppercase;
@@ -452,10 +418,29 @@
 
 .composer__menu-tag {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: var(--text-tag);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--app-text-faint);
+}
+
+/* One group per turned-on provider; a rule sets each provider apart. */
+.composer__model-group + .composer__model-group {
+  padding-top: 4px;
+  margin-top: 4px;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+/* Why a turned-on provider lists no model: a quiet line, not a choice. */
+.composer__model-status {
+  padding: 6px 10px 8px;
+  font-size: var(--text-note);
+  line-height: 1.45;
+  color: var(--app-text-muted);
+
+  &[data-disabled] {
+    opacity: 1;
+  }
 }
 
 .composer__model-option {
@@ -485,7 +470,7 @@
 
 .composer__model-option-name {
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--text-body);
   font-weight: 500;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -494,14 +479,14 @@
 
 .composer__model-option-detail {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-tag);
   letter-spacing: 0.04em;
   color: var(--app-text-faint);
 }
 
 .composer__model-option-tag {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-tag);
   letter-spacing: 0.06em;
   white-space: nowrap;
   color: var(--app-text-muted);
@@ -526,7 +511,7 @@
   border: 1px solid var(--app-border-strong);
   border-radius: var(--radius-capsule);
   font-family: var(--font-sans);
-  font-size: 8.5px;
+  font-size: var(--text-tag);
   font-weight: 600;
   letter-spacing: 0;
   color: var(--app-text-muted);
@@ -536,7 +521,7 @@
 .composer__agent-fixed .composer__agent-initial {
   width: 22px;
   height: 22px;
-  font-size: 10px;
+  font-size: var(--text-tag);
 }
 
 .composer__agent-lock {
@@ -551,7 +536,7 @@
 
 .composer__agent-bio {
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--text-note);
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--app-text-faint);
@@ -572,7 +557,7 @@
 .composer__agent-note {
   padding: 0 10px 9px;
   margin: 0;
-  font-size: 11.5px;
+  font-size: var(--text-note);
   line-height: 1.5;
   color: var(--app-text-faint);
   text-wrap: pretty;
@@ -581,7 +566,7 @@
 .composer__agent-action {
   justify-content: space-between;
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: var(--text-note);
   color: var(--app-text-muted);
 }
 
@@ -602,7 +587,7 @@
   background: transparent;
   color: var(--app-text-faint);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-meta);
   letter-spacing: 0.06em;
   white-space: nowrap;
   cursor: pointer;
@@ -686,7 +671,7 @@
   justify-content: space-between;
   gap: 12px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-tag);
   letter-spacing: 0.06em;
   color: var(--app-text-muted);
 }
@@ -712,7 +697,7 @@
   align-items: center;
   gap: 12px;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--text-note);
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--app-text);
@@ -721,7 +706,7 @@
 .composer__meter-row dd {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--text-meta);
   white-space: nowrap;
   color: var(--app-text-muted);
 }
@@ -754,7 +739,7 @@
 
 .composer__meter-note {
   margin: 0;
-  font-size: 11.5px;
+  font-size: var(--text-note);
   line-height: 1.5;
   text-wrap: pretty;
   color: var(--app-text-muted);
@@ -842,10 +827,23 @@
   background: var(--app-status-danger);
 }
 
+/*
+ * A prompt that expired waits for nothing: the card drops its raised shadow
+ * and its dot turns neutral.
+ */
+.composer__approval[data-expired] {
+  box-shadow: none;
+}
+
+.composer__approval[data-expired] .composer__approval-dot {
+  background: var(--app-status-neutral);
+  box-shadow: none;
+}
+
 .composer__approval-label {
   flex: 1;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-meta);
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -861,7 +859,7 @@
   border: 0;
   border-radius: var(--radius-detail);
   background: transparent;
-  font-size: 12px;
+  font-size: var(--text-note);
   font-weight: 500;
   color: var(--app-text-muted);
   cursor: pointer;
@@ -897,7 +895,7 @@
 
 .composer__approval-tool-name {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-body);
   font-weight: 500;
   color: var(--app-text-strong);
 }
@@ -906,7 +904,7 @@
   padding: 2px 7px;
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-tag);
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -932,7 +930,7 @@
 .composer__approval-summary {
   margin: 0;
   padding: 8px 14px 12px;
-  font-size: 14px;
+  font-size: var(--text-control);
   line-height: 1.55;
   overflow-wrap: anywhere;
   color: var(--app-text);
@@ -954,7 +952,7 @@
   grid-template-columns: 120px minmax(0, 1fr);
   gap: 12px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-note);
   line-height: 1.6;
 }
 
@@ -981,12 +979,12 @@
 
 .composer__approval-hint {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--text-note);
   color: var(--app-text-muted);
 }
 
 .composer__approval-footer kbd {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--text-tag);
   opacity: 0.72;
 }

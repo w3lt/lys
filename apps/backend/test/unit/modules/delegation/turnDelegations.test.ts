@@ -18,12 +18,12 @@ import {
 } from "../../support/delegationTestServices"
 
 /**
- * Settings of a later turn, whose reply `openai/gpt-oss-20b` writes, which
- * tells them from the settings of the turn that gave the work.
+ * Settings of a later turn, whose reply `openai/gpt-oss-20b` on LM Studio
+ * writes, which tells them from the settings of the turn that gave the work.
  */
-const LATER_TURN_SETTINGS: TurnSettings = Object.freeze({
+const LATER_TURN_SETTINGS: TurnSettings = Object.freeze<TurnSettings>({
   ...DELEGATING_TURN_SETTINGS,
-  model: "openai/gpt-oss-20b"
+  model: { provider: "lmStudio", modelKey: "openai/gpt-oss-20b" }
 })
 
 describe("createTurnDelegation", () => {

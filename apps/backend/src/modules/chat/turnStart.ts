@@ -5,6 +5,7 @@ import type {
 import type {
   Conversation,
   ConversationAssistantMessageStatus,
+  LlmModelReference,
   ToolDefinition
 } from "@lys/share"
 import type { FastifyBaseLogger } from "fastify"
@@ -12,6 +13,7 @@ import type Agent from "../agent/agent"
 import type { AgentTurn } from "../agent/agent"
 import { AgentRequestLimitError } from "../agent/agentActivity"
 import type { FindAttachmentImage } from "../agent/agentContext"
+import { listAgentMcpTools } from "../agent/builtInAgents"
 import type { TurnDelegation } from "../agent/turnDelegation"
 import type { UnofferedTools } from "../agent/unofferedTools"
 import type AttachmentFileStore from "../attachment/attachmentFileStore"
@@ -26,6 +28,7 @@ import ReadAttachmentTool, {
 import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import type ToolApprovalService from "../toolApproval/toolApprovalService"
+import type { ToolCallPolicy } from "../toolApproval/toolCallPolicy"
 import type { TitleGenerationOptions } from "./chatService"
 import type {
   ConversationTurn,
@@ -48,21 +51,23 @@ import createTitleGenerationTask from "./titleGenerationTask"
  * turns; nothing in it belongs to one turn.
  */
 export type TurnSettings = Readonly<{
-  /** Model that writes the reply. */
-  model: string
+  /** Model that writes the reply, and its provider. */
+  model: LlmModelReference
   /** Sampling and reply length controls sent with every round. */
   generationOptions: MessageGenerationOptions
   /** Client tools the turn offers, each name once; empty when it offers none. */
   clientTools: readonly ToolDefinition[]
   /**
    * Backend tools the turn offers, each name once, without the attachment
-   * reader, which the start adds for each turn that offers it; empty when
-   * none.
+   * reader, which the start offers among the direct tools of each turn that
+   * offers it; empty when none.
    */
   builtInTools: readonly TurnBuiltInTool[]
   /**
    * MCP tools the turn offers, each name once; each call runs on its server
-   * as connected when the call runs. Empty when none.
+   * as connected when the call runs. The start leaves out the ones only Lys
+   * may use unless the turn's agent is Caliginia or Lysiptera. Empty when
+   * none.
    */
   mcpTools: readonly TurnMcpTool[]
   /**
@@ -77,7 +82,8 @@ export type TurnSettings = Readonly<{
   canSeeImages: boolean
   /**
    * Whether the model is trained for tool use, so the turn offers the
-   * attachment reader and the agent adds its state tools to the turn.
+   * attachment reader, and the agent adds its state tools to the turn and
+   * routes its other tools through `find_tools`.
    */
   trainedForToolUse: boolean
 }>
@@ -176,16 +182,24 @@ export type TurnStartDependencies = Readonly<{
   /** Bound title operation retained separately from chat completion. */
   generateTitle: (options: TitleGenerationOptions) => Promise<string>
   /**
-   * Context length a model is loaded with, observed through the
-   * model-operation queue without loading it; undefined when it is not
-   * loaded.
+   * Context length a model is loaded with on its provider, observed
+   * through that provider's model-operation queue without loading it;
+   * undefined when it is not loaded.
    */
-  findLoadedContextLength: (model: string) => Promise<number | undefined>
+  findLoadedContextLength: (
+    model: LlmModelReference
+  ) => Promise<number | undefined>
   /** Inclusive maximum number of title requests permitted for one turn. */
   titleGenerationMaxAttempts: number
   /**
-   * Approval gateway every tool call passes, except a call of a backend
-   * tool that runs without approval.
+   * What the tool call rules know about this machine, and the reader of the
+   * folders the person lets tools use; every checked call is decided by them
+   * before its approval, and again once the person allows it.
+   */
+  toolCallPolicy: ToolCallPolicy
+  /**
+   * Approval gate every tool call the policy does not deny passes, except an
+   * allowed call of a backend tool that runs without approval.
    */
   toolApprovals: Pick<ToolApprovalService, "createToolCallGate">
 }>
@@ -209,10 +223,11 @@ type TurnReplyInput = Readonly<{
    */
   options: StartTurnOptions
   /**
-   * Backend tools of the turn, each name once: the settings' tools, then the
-   * attachment reader when the turn offers it; empty when none.
+   * Backend tools offered in every round, never routed through
+   * `find_tools`: the attachment reader when the turn offers it; empty
+   * otherwise.
    */
-  builtInTools: readonly TurnBuiltInTool[]
+  directTools: readonly TurnBuiltInTool[]
   /** Reads the bytes of one stored image attachment of the conversation. */
   findAttachmentImage: FindAttachmentImage
   /** The turn's part in delegation, as its starter's hooks created it. */
@@ -222,7 +237,11 @@ type TurnReplyInput = Readonly<{
 /** What a turn's reply task borrows until the reply is final. */
 type TurnReplyDependencies = Pick<
   TurnStartDependencies,
-  "turns" | "replyParts" | "findConversation" | "toolApprovals"
+  | "turns"
+  | "replyParts"
+  | "findConversation"
+  | "toolCallPolicy"
+  | "toolApprovals"
 >
 
 /** How an agent's turn stores its reply and reads the reply's state back. */
@@ -238,13 +257,17 @@ type ReplyStorage = Pick<
 /** The failure that ended a reply because one of its rounds was not sent. */
 type ReplyRefusal = Parameters<AgentTurn["reportReplyRefusal"]>[0]
 
+/** Direct tools of a turn that offers none. */
+const NO_DIRECT_TOOLS: readonly TurnBuiltInTool[] = Object.freeze([])
+
 /**
  * Starts the generation that writes one stored turn's reply and, for a
  * person's turn in an untitled conversation, its title unless another turn of
  * that conversation is already generating one.
  *
  * @param dependencies - Registry, persistence, attachment files, title
- * generation, and approval gateway, borrowed until the generation settles.
+ * generation, tool call policy, and approval gate, borrowed until the
+ * generation settles.
  * @param options - The stored turn, its agent, its settings, who starts it,
  * the starter's delegation hooks, and the logger its tasks log to.
  * @returns The registered generation. Open its first followers before
@@ -257,9 +280,10 @@ type ReplyRefusal = Parameters<AgentTurn["reportReplyRefusal"]>[0]
  * after the starter was told.
  * @remarks The starter's hooks are called as {@link StartTurnOptions}
  * describes, and the turn's agent is handed the delegation they create. The
- * backend tools of the turn are the settings' tools, followed by the
- * attachment reader as {@link buildTurnBuiltInTools} adds it for a model
- * trained for tool use. A backend-started turn gets no title task, whatever
+ * turn offers the settings' tools, without the MCP tools only Lys may use
+ * unless its agent is Caliginia or Lysiptera, and the direct tools
+ * {@link buildTurnDirectTools} builds for a model trained for tool use. A
+ * backend-started turn gets no title task, whatever
  * its conversation's title. A failure of either task, or of the starter's
  * `handleReplyEnded`, is logged as an error with the turn's logger.
  */
@@ -378,10 +402,9 @@ function handleTaskFailure(logger: FastifyBaseLogger, failure: unknown): void {
  * @param dependencies - Attachment files, read while the reply is written.
  * @param turnDelegation - The turn's part in delegation, as its starter's
  * hooks created it.
- * @returns The options with the backend tools of the turn, which are the
- * settings' tools followed by the attachment reader as
- * {@link buildTurnBuiltInTools} adds it for a model trained for tool use,
- * the reader of the conversation's stored images, and the turn's delegation.
+ * @returns The options with the direct tools {@link buildTurnDirectTools}
+ * builds for a model trained for tool use, the reader of the conversation's
+ * stored images, and the turn's delegation.
  */
 function buildTurnReplyInput(
   options: StartTurnOptions,
@@ -390,19 +413,18 @@ function buildTurnReplyInput(
 ): TurnReplyInput {
   const { turn, settings } = options
   const conversationId = turn.conversation.id
-  const builtInTools = settings.trainedForToolUse
-    ? buildTurnBuiltInTools(
-        settings.builtInTools,
+  const directTools = settings.trainedForToolUse
+    ? buildTurnDirectTools(
         listReadableAttachments(conversationId, [
           ...turn.conversation.messages,
           turn.userMessage
         ]),
         (location) => attachmentFiles.readAttachment(location)
       )
-    : settings.builtInTools
+    : NO_DIRECT_TOOLS
   return {
     options,
-    builtInTools,
+    directTools,
     findAttachmentImage: buildAttachmentImageReader(
       conversationId,
       attachmentFiles
@@ -412,32 +434,28 @@ function buildTurnReplyInput(
 }
 
 /**
- * Builds the backend tools of a turn whose model is trained for tool use.
+ * Builds the direct tools of a turn whose model is trained for tool use.
  *
- * @param offeredTools - Backend tools the turn's settings offer.
  * @param attachments - Every attachment of the conversation, the new
  * message's included.
  * @param readAttachmentFile - Reads an attachment's file; lent for the turn.
- * @returns The offered tools, followed by the attachment reader when an
- * attachment is a text file; the reader's calls run without approval, as
- * they read only what the person attached to this conversation. A model
- * that is not trained for tool use gets the offered tools alone, without a
- * call here.
+ * @returns The attachment reader when an attachment is a text file, offered
+ * in every round, as it reads only what the person attached to this
+ * conversation, and its calls run without approval; none otherwise. A model
+ * that is not trained for tool use gets no direct tool, without a call
+ * here.
  */
-function buildTurnBuiltInTools(
-  offeredTools: readonly TurnBuiltInTool[],
+function buildTurnDirectTools(
   attachments: readonly ReadableAttachment[],
   readAttachmentFile: ReadAttachmentFile
 ): readonly TurnBuiltInTool[] {
-  if (!hasReadableTextAttachment(attachments)) return offeredTools
-  return [
-    ...offeredTools,
-    {
-      definition: buildReadAttachmentDefinition(),
-      tool: new ReadAttachmentTool(attachments, readAttachmentFile),
-      runsWithoutApproval: true
-    }
-  ]
+  if (!hasReadableTextAttachment(attachments)) return NO_DIRECT_TOOLS
+  const reader: TurnBuiltInTool = Object.freeze({
+    definition: buildReadAttachmentDefinition(),
+    tool: new ReadAttachmentTool(attachments, readAttachmentFile),
+    runsWithoutApproval: true
+  })
+  return Object.freeze([reader])
 }
 
 /**
@@ -540,28 +558,31 @@ async function createTurnReply(
 /**
  * Builds the turn the agent answers for one stored turn.
  *
- * @param dependencies - Persistence and approval gateway the reply uses.
+ * @param dependencies - Persistence, tool call policy, and approval gate the
+ * reply uses.
  * @param input - Stored turn, its tools, its delegation, and what the reply
  * keeps.
  * @param context - The reply task's cancellation, event sender, tool call
  * sender, and approval prompt sender.
  * @returns The agent turn, whose parts and final state go to the stored
  * reply and whose reply state is read back from the stored conversation,
- * which numbers new sources after the conversation's stored ones,
- * whose tool calls pass the approval gateway, and whose images are read
- * from the conversation's attachment files. The turn's part in delegation
- * is the one its starter's hooks created. With the turn's logger, an
- * unreadable settings file, and a reply refused because its agent's request
- * slots and line were full, are logged as warnings; a cancelled reply, and a
- * round that was not sent because it did not fit or its model was not
- * loaded, at debug level; and any other reply failure as an error.
+ * which numbers new sources after the conversation's stored ones, whose
+ * offered MCP tools leave out the ones only Lys may use unless the agent is
+ * Caliginia or Lysiptera, whose tool calls pass the tool call policy and
+ * then the approval gate, and whose images are read from the conversation's
+ * attachment files. The turn's part in delegation is the one its starter's
+ * hooks created. With the turn's logger, an unreadable settings file, a
+ * reply refused because its agent's request slots and line were full, and a
+ * tool search Armitage could not finish are logged as warnings; a cancelled
+ * reply, and a round that was not sent because it did not fit or its model
+ * was not loaded, at debug level; and any other reply failure as an error.
  */
 function buildAgentTurn(
   dependencies: TurnReplyDependencies,
   input: TurnReplyInput,
   context: ReplyTaskContext
 ): AgentTurn {
-  const { turn, settings, logger } = input.options
+  const { turn, agent, settings, logger } = input.options
   const { toolApprovals } = dependencies
   const { sendToolApprovalPrompt } = context
   const storage = buildReplyStorage(dependencies, turn)
@@ -578,9 +599,10 @@ function buildAgentTurn(
     model: settings.model,
     trainedForToolUse: settings.trainedForToolUse,
     generationOptions: settings.generationOptions,
+    directTools: input.directTools,
     clientTools: settings.clientTools,
-    builtInTools: input.builtInTools,
-    mcpTools: settings.mcpTools,
+    builtInTools: settings.builtInTools,
+    mcpTools: listAgentMcpTools(agent.code, settings.mcpTools),
     unofferedTools: settings.unofferedTools,
     delegation: input.turnDelegation,
     abortSignal: context.abortSignal,
@@ -591,12 +613,64 @@ function buildAgentTurn(
     findReplyStatus: storage.findReplyStatus,
     sendEvent: context.sendEvent,
     sendClientToolCall: context.sendClientToolCall,
+    toolCallPolicy: buildTurnToolCallPolicy(
+      dependencies.toolCallPolicy,
+      logger
+    ),
     createToolCallGate: () =>
       toolApprovals.createToolCallGate(sendToolApprovalPrompt, () => {
         logger.warn(unreadableChoicesWarning)
       }),
     ...buildReplyFailureReporters(logger)
   }
+}
+
+/**
+ * Builds the tool call policy of one turn, which logs each read of the
+ * approved folders that finds them unreadable.
+ *
+ * @param toolCallPolicy - The backend's policy, left unchanged.
+ * @param logger - Logger of the turn, borrowed for the reply.
+ * @returns The policy {@link reportUnreadableApprovedFolders} wraps, whose
+ * report is a warning with the turn's logger.
+ */
+function buildTurnToolCallPolicy(
+  toolCallPolicy: ToolCallPolicy,
+  logger: FastifyBaseLogger
+): ToolCallPolicy {
+  const unreadableFoldersWarning =
+    "The folders tools may use could not be read from settings.json; every tool call of this round that names a file or folder is denied"
+  return reportUnreadableApprovedFolders(toolCallPolicy, () => {
+    logger.warn(unreadableFoldersWarning)
+  })
+}
+
+/**
+ * Wraps a tool call policy so that each read of the approved folders that
+ * finds them unreadable is reported.
+ *
+ * @param toolCallPolicy - The backend's policy, left unchanged.
+ * @param reportApprovedFoldersUnreadable - Called once per such read, before
+ * the read settles; must not throw.
+ * @returns A frozen policy with the same paths, whose reads settle as the
+ * policy's do.
+ * @remarks The policy denies every call that names a path while the folders
+ * cannot be read, so the report is what tells an operator why, as the Just
+ * run read reports the same file.
+ */
+function reportUnreadableApprovedFolders(
+  toolCallPolicy: ToolCallPolicy,
+  reportApprovedFoldersUnreadable: () => void
+): ToolCallPolicy {
+  return Object.freeze({
+    ...toolCallPolicy,
+    readApprovedFolders: async () => {
+      const approvedFolders = await toolCallPolicy.readApprovedFolders()
+      if (approvedFolders.kind === "unreadable")
+        reportApprovedFoldersUnreadable()
+      return approvedFolders
+    }
+  })
 }
 
 /**
@@ -655,19 +729,24 @@ function findStoredReplyStatus(
 }
 
 /**
- * Builds the reporters that log how a reply ended without finishing.
+ * Builds the reporters that log how a reply, or one of its tool searches,
+ * ended without finishing.
  *
  * @param logger - Logger of the turn, borrowed for the reply.
  * @returns Reporters that log a reply refused because its agent's request
  * slots and line were full as a warning, a cancellation and a round that was
  * not sent because it did not fit or its model was not loaded as debug
- * entries, and a failed stream as an error.
+ * entries, a failed stream as an error, and a tool search Armitage could not
+ * finish as a warning.
  */
 function buildReplyFailureReporters(
   logger: FastifyBaseLogger
 ): Pick<
   AgentTurn,
-  "reportReplyCancellation" | "reportReplyRefusal" | "reportReplyFailure"
+  | "reportReplyCancellation"
+  | "reportReplyRefusal"
+  | "reportReplyFailure"
+  | "reportToolSearchFailure"
 > {
   return {
     reportReplyCancellation: (failure) => {
@@ -678,6 +757,12 @@ function buildReplyFailureReporters(
     },
     reportReplyFailure: (failure) => {
       logger.error({ err: failure }, "Chat completion stream failed")
+    },
+    reportToolSearchFailure: (failure) => {
+      logger.warn(
+        { err: failure },
+        "Armitage could not finish a tool search, so the reply went on without its tools"
+      )
     }
   }
 }

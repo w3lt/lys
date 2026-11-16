@@ -12,6 +12,7 @@ import {
   buildMcpToolNamePrefix,
   BUILT_IN_MCP_SERVER_NAMES,
   getTypedHostAndPort,
+  isBuiltInMcpServerOn,
   MAXIMUM_MCP_SERVER_COUNT,
   MAXIMUM_MCP_SERVER_NAME_LENGTH,
   type BuiltInMcpServerName,
@@ -41,9 +42,9 @@ import type {
   McpServerListState
 } from "@/lib/store/mcp-servers"
 import type { McpSettingsSaveState } from "@/lib/store/mcp-settings"
-import type { LysSettings } from "@/lib/store/settings"
+import type { LysSettings, ToolSettings } from "@/lib/store/settings"
 import { getToolApproval, type ToolApproval } from "@/lib/store/tool-settings"
-import type { ToolListState } from "@/lib/store/tools"
+import { isToolOn, type ToolListState } from "@/lib/store/tools"
 
 import {
   calculateOfferedToolTotals,
@@ -75,11 +76,14 @@ export type McpListedServer =
       readonly kind: "built-in"
       /** Its name, which is also its key in the group's switches. */
       readonly name: BuiltInMcpServerName
-      /** Whether the person switched it on. */
+      /** Whether the person switched it on: for `email`, either mailbox. */
       readonly isOn: boolean
       /** Whether an added server has its name, which keeps it from being applied. */
       readonly isNameTaken: boolean
-      /** Whether it has what it needs to run: for `email`, a saved account. */
+      /**
+       * Whether it has what it needs to run: for `email`, the person's
+       * account or Lys's own.
+       */
       readonly isReady: boolean
     }
 
@@ -237,12 +241,14 @@ const MCP_CONNECTION_WORDS = Object.freeze({
 } satisfies Readonly<Record<McpServerTransport, McpConnectionWords>>)
 
 /** What the email server needs before it runs, and why it failed without it. */
-const EMAIL_ACCOUNT_MISSING_NOTE = "Needs an email account. Add one below."
+const EMAIL_ACCOUNT_MISSING_NOTE =
+  "Needs an email account. Add yours below, or Lys's in the Lys pane."
 
 /** How the email server is shown. */
 const EMAIL_SERVER_PRESENTATION: BuiltInMcpServerPresentation = Object.freeze({
   transport: "stdio",
-  blurb: "Reads, searches, and sends your email over IMAP and SMTP.",
+  blurb:
+    "Reads, searches, and sends your email and Lys's own over IMAP and SMTP.",
   needsNote: EMAIL_ACCOUNT_MISSING_NOTE,
   startFailure:
     "Lys couldn't start its email server. Run build.sh to install it."
@@ -259,10 +265,10 @@ const BUILT_IN_MCP_SERVER_PRESENTATIONS = Object.freeze({
  * Tells whether the email server has what it needs before it runs.
  *
  * @param settings - The `email` group.
- * @returns True once an email account is saved.
+ * @returns True once the person's account or Lys's own is saved.
  */
 function isEmailServerReady(settings: Pick<LysSettings, "email">): boolean {
-  return settings.email.account !== null
+  return settings.email.account !== null || settings.email.lysAccount !== null
 }
 
 /** State of a server whose command is starting. */
@@ -290,7 +296,7 @@ const MCP_SERVER_FAILURE_TEXTS = Object.freeze({
     "The server refused to connect or to list its tools, or its answer was too large or not valid MCP.",
   "account-missing": EMAIL_ACCOUNT_MISSING_NOTE,
   "account-invalid":
-    "The saved email account is not usable. Save it again below."
+    "The saved email account is not usable. Save yours again below, or Lys's in the Lys pane."
 } satisfies Readonly<Record<McpServerFailure, string>>)
 
 /** Why a tool of a server is not listed; a new reason must add one. */
@@ -379,8 +385,8 @@ export const MCP_BACKEND_STOPPED_NOTE =
 export const MCP_TOOL_LIST_CUT_NOTE = `The server lists more tools than Lys reads. Lys reads the first ${MAXIMUM_MCP_SERVER_TOOL_COUNT}.`
 
 /** Note shown under a server's listed tools. */
-export const MCP_TOOL_CHIPS_NOTE =
-  "Click a tool to leave it out. Every tool that is on is described to the model with each request."
+export const MCP_TOOL_CHOICES_NOTE =
+  "Ask waits for your yes before each call, Run goes ahead without asking, and Off keeps the tool out of the agents' reach. A request carries the description of a tool that is not off once Armitage finds that tool for it."
 
 /** Note shown once the most servers the settings allow are saved. */
 export const MCP_SERVER_LIMIT_NOTE = `Lys keeps up to ${MAXIMUM_MCP_SERVER_COUNT} servers. Remove one to add another.`
@@ -509,9 +515,9 @@ export function canSwitchMcpServer(server: McpListedServer): boolean {
  *
  * @param settings - The `mcp` and `email` groups.
  * @returns A frozen list: the servers Lys ships first, in their fixed
- * order, each with its switch, whether an added server took its name, and
- * whether it has what it needs, which for `email` is a saved account; then
- * the added servers in list order.
+ * order, each on while any of its switches is, with whether an added
+ * server took its name and whether it has what it needs, which for `email`
+ * is either saved account; then the added servers in list order.
  */
 export function listMcpServers(
   settings: Pick<LysSettings, "mcp" | "email">
@@ -533,7 +539,7 @@ export function listMcpServers(
   const builtIn = BUILT_IN_MCP_SERVER_NAMES.map((name): McpListedServer => ({
     kind: "built-in",
     name,
-    isOn: settings.mcp.builtIn[name].enabled,
+    isOn: isBuiltInMcpServerOn(settings.mcp.builtIn, name),
     isNameTaken: addedNames.has(name),
     isReady: builtInMcpServerReadiness[name](settings)
   }))
@@ -1104,6 +1110,73 @@ export function formatMcpServerToolMeta(
   )
   const estimate = formatToolTokenEstimate(totals.offeredTokenCount)
   return `${totals.offeredToolCount} of ${tools.length} on · ${estimate}`
+}
+
+/**
+ * Tells whether a tool's name or description holds the search text.
+ *
+ * @param tool - The tool.
+ * @param needle - The search text, trimmed and lower-cased; not empty.
+ * @returns Whether the name, with or without its underscores read as
+ * spaces, or the description holds the text, ignoring letter case.
+ */
+function isMcpToolMatch(tool: McpToolDefinition, needle: string): boolean {
+  const name = tool.serverToolName.toLowerCase()
+  return (
+    name.includes(needle) ||
+    name.replaceAll("_", " ").includes(needle) ||
+    tool.description.toLowerCase().includes(needle)
+  )
+}
+
+/**
+ * Keeps the tools of a server that match the search text.
+ *
+ * @param tools - The server's listed tools, in order.
+ * @param query - The search text as typed; surrounding spaces and letter
+ * case are ignored.
+ * @returns The tools whose name, with or without its underscores read as
+ * spaces, or description holds the text, in order; every tool while the
+ * text is blank.
+ */
+export function filterMcpTools(
+  tools: readonly McpToolDefinition[],
+  query: string
+): readonly McpToolDefinition[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === "") return tools
+  return tools.filter((tool) => isMcpToolMatch(tool, needle))
+}
+
+/** What a search of a server's tools found. */
+export type McpToolSearchOutcome = {
+  /** Name of the server. */
+  readonly serverName: string
+  /** The search text as typed. */
+  readonly query: string
+  /** How many tools match. */
+  readonly shownCount: number
+  /** How many tools the server lists. */
+  readonly toolCount: number
+}
+
+/**
+ * Formats what a search of a server's tools found.
+ *
+ * @param outcome - The server, the search text, and the counts.
+ * @returns Nothing while the text is blank; `No <server> tool matches
+ * “<text>”.` while none matches, the text trimmed; `Showing n of m tools`
+ * otherwise.
+ */
+export function formatMcpToolSearchOutcome(
+  outcome: McpToolSearchOutcome
+): string {
+  const text = outcome.query.trim()
+  if (text === "") return ""
+  if (outcome.shownCount === 0) {
+    return `No ${outcome.serverName} tool matches “${text}”.`
+  }
+  return `Showing ${outcome.shownCount} of ${outcome.toolCount} tools`
 }
 
 /**
@@ -1752,4 +1825,114 @@ export function getMcpEntryListPresentation(
   list: McpDraftEntryList
 ): McpEntryListPresentation {
   return MCP_ENTRY_LIST_PRESENTATIONS[list]
+}
+
+/** How many applied servers run, and how many need attention. */
+export type McpServerOverview = {
+  /** Servers the backend connected. */
+  readonly runningCount: number
+  /** Servers the pane lists, on or off. */
+  readonly totalCount: number
+  /** Servers whose connection failed. */
+  readonly failedCount: number
+  /** Servers the backend is starting or reaching. */
+  readonly connectingCount: number
+}
+
+/** What the tools of the running servers are set to. */
+export type McpToolOverview = {
+  /** Tools that are not off, which the agents can be offered. */
+  readonly offeredCount: number
+  /** Tools on that ask first. */
+  readonly askCount: number
+  /** Tools on that run without asking. */
+  readonly runCount: number
+  /** Tools switched off. */
+  readonly offCount: number
+}
+
+/**
+ * Counts the servers by their state in the backend.
+ *
+ * @param list - The servers the backend applied, with their states.
+ * @param listedServerCount - How many servers the pane lists, from the
+ * saved settings, which the total counts whether or not the backend runs.
+ * @returns The listed servers, and how many of them run, failed, and
+ * connect; no server runs, fails, or connects until the list was read.
+ */
+export function summarizeMcpServers(
+  list: McpServerListState,
+  listedServerCount: number
+): McpServerOverview {
+  if (list.status !== "loaded") {
+    return {
+      runningCount: 0,
+      totalCount: listedServerCount,
+      failedCount: 0,
+      connectingCount: 0
+    }
+  }
+  const countBy = (status: McpServerStatus["state"]["status"]): number =>
+    list.servers.filter((server) => server.state.status === status).length
+  return {
+    runningCount: countBy("connected"),
+    totalCount: listedServerCount,
+    failedCount: countBy("failed"),
+    connectingCount: countBy("connecting")
+  }
+}
+
+/**
+ * Counts the listed tools of the running servers by their choice.
+ *
+ * @param toolList - Lifecycle of the tool list, which lists the tools of
+ * the running servers.
+ * @param toolSettings - Saved switches and approvals.
+ * @returns How many tools are offered, ask first, run without asking, and
+ * are off; all zero until the list was read.
+ */
+export function summarizeMcpTools(
+  toolList: ToolListState,
+  toolSettings: ToolSettings
+): McpToolOverview {
+  const tools =
+    toolList.status === "loaded"
+      ? toolList.tools.filter((tool) => tool.runner === "mcp")
+      : []
+  const onTools = tools.filter((tool) => isToolOn(toolSettings.switches, tool))
+  const runCount = onTools.filter(
+    (tool) =>
+      getToolApproval(toolSettings.justRunToolNames, tool.name) === "run"
+  ).length
+  return {
+    offeredCount: onTools.length,
+    askCount: onTools.length - runCount,
+    runCount,
+    offCount: tools.length - onTools.length
+  }
+}
+
+/**
+ * Formats the line under the overview's server count.
+ *
+ * @param overview - The running, total, failed, and connecting counts.
+ * @returns How many servers need attention while one failed; how many are
+ * connecting while one is; that none runs while none does; and otherwise
+ * that every server that is on answers. The tone colors its dot.
+ */
+export function formatMcpServerOverviewNote(overview: McpServerOverview): {
+  readonly text: string
+  readonly tone: "danger" | "pending" | "neutral" | "success"
+} {
+  if (overview.failedCount > 0) {
+    const verb = overview.failedCount === 1 ? "needs" : "need"
+    return { text: `${overview.failedCount} ${verb} attention`, tone: "danger" }
+  }
+  if (overview.connectingCount > 0) {
+    return { text: `${overview.connectingCount} connecting`, tone: "pending" }
+  }
+  if (overview.runningCount === 0) {
+    return { text: "No server is running", tone: "neutral" }
+  }
+  return { text: "Every server that is on is answering", tone: "success" }
 }

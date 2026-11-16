@@ -39,13 +39,19 @@ const STORED_RESEARCHER = Object.freeze({
 /** Built-in agents of the service in every case that passes no others. */
 const SHIPPED_BUILT_IN_AGENTS = buildBuiltInAgents({
   caliginia: "You are Caliginia.",
-  lysiptera: "You are Lysiptera."
+  lysiptera: "You are Lysiptera.",
+  armitage: "You are Armitage."
 })
 
 /** Summaries every list page carries for {@link SHIPPED_BUILT_IN_AGENTS}. */
 const BUILT_IN_AGENT_SUMMARIES = [
   { code: "caliginia", name: "Caliginia", bio: "Lys's dark side." },
-  { code: "lysiptera", name: "Lysiptera", bio: "Lys's light side." }
+  { code: "lysiptera", name: "Lysiptera", bio: "Lys's light side." },
+  {
+    code: "armitage",
+    name: "Armitage",
+    bio: "Lys's tool keeper. It finds the tools the other agents need and answers agents, not chats."
+  }
 ]
 
 /**

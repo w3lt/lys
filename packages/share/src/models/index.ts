@@ -3,10 +3,12 @@ export {
   agentCodeSchema,
   agentDefinitionSchema,
   agentSchema,
+  ARMITAGE_AGENT_CODE,
   builtInAgentSchema,
   CALIGINIA_AGENT_CODE,
   DELEGATE_WORK_TOOL_NAME,
   FIND_AGENTS_TOOL_NAME,
+  FIND_TOOLS_TOOL_NAME,
   LYSIPTERA_AGENT_CODE,
   MAXIMUM_AGENT_BIO_LENGTH,
   MAXIMUM_AGENT_CODE_LENGTH,
@@ -99,6 +101,10 @@ export {
   type LocationSettings,
   type PlaceName
 } from "./location"
+export {
+  approvedFolderPathSchema,
+  MAXIMUM_APPROVED_FOLDER_PATH_LENGTH
+} from "./approvedFolder"
 export { getTypedHostAndPort } from "./internationalizedHost"
 export {
   isWithinJsonValueLimits,
@@ -111,6 +117,9 @@ export {
   emailAddressSchema,
   emailSecuritySchema,
   emailSettingsSchema,
+  isSameEmailAddress,
+  isSameEmailMailbox,
+  isSameEmailSignIn,
   LOOPBACK_EMAIL_HOSTS,
   MAXIMUM_EMAIL_ADDRESS_LENGTH,
   MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH,
@@ -118,6 +127,7 @@ export {
   MAXIMUM_EMAIL_USER_NAME_LENGTH,
   type EmailAccount,
   type EmailAccountCandidate,
+  type EmailAddress,
   type EmailSecurity,
   type EmailServerSettings,
   type EmailSettings
@@ -126,6 +136,7 @@ export { MAXIMUM_TCP_PORT } from "./hostName"
 export {
   BUILT_IN_MCP_SERVER_NAMES,
   buildMcpToolNamePrefix,
+  isBuiltInMcpServerOn,
   MAXIMUM_MCP_COMMAND_ARGUMENT_COUNT,
   MAXIMUM_MCP_COMMAND_ARGUMENT_LENGTH,
   MAXIMUM_MCP_COMMAND_LENGTH,
@@ -154,9 +165,14 @@ export {
   type BuiltInMcpSettings
 } from "./mcp"
 export {
+  isSameLlmModelReference,
+  LLM_PROVIDER_NAMES,
+  LLM_PROVIDERS,
+  llmModelReferenceSchema,
   llmProviderSchema,
   llmProviderSettingsSchema,
   providerAddressSchema,
+  type LlmModelReference,
   type LlmProvider,
   type LlmProviderSettings,
   type ProviderAddress

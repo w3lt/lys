@@ -13,21 +13,22 @@ Drive a feature's journeys from the repository root, sandbox off:
 node .claude/skills/verify-lys/scripts/verify-lys.mjs run --journey <journey-id> [--journey <journey-id>]
 ```
 
-| Feature                                         | Journeys                                                                   | Last proved                                                                                           |
-| ----------------------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| [Chat streaming](chat-streaming.md)             | `chat-stream-api`, `chat-stream-ui`                                        | 2026-11-01 at `cdb09874`, both passed; both failed on the held-back regression                        |
-| [Settings persistence](settings-persistence.md) | `settings-generation-ui`, `settings-autostart-ui`                          | 2026-11-01 at `cdb09874`, both passed                                                                 |
-| [Backend lifecycle](backend-lifecycle.md)       | `backend-health`, `backend-lifecycle-ui`, `host-lifecycle-native` (opt-in) | 2026-11-01 at `cdb09874`, first two passed; native blocked (no GUI session)                           |
-| [Agent delegation](agent-delegation.md)         | `agent-delegation-ui`                                                      | 2026-11-16 at `123a452e` with the journey uncommitted, passed; failed with the wake-up call taken out |
+| Feature                                         | Journeys                                                                   | Last proved                                                                                                                                                               |
+| ----------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Chat streaming](chat-streaming.md)             | `chat-stream-api`, `chat-stream-ui`                                        | 2026-11-14 at `b93854ea` with the #360 work tree, both passed, the reply stored with provider `ollama`; 2026-11-01 at `cdb09874`, both failed on the held-back regression |
+| [Settings persistence](settings-persistence.md) | `settings-generation-ui`, `settings-autostart-ui`                          | 2026-11-14 at `b93854ea` with the #360 work tree, both passed                                                                                                             |
+| [Controls and type](controls-and-type.md)       | `controls-and-type-ui`                                                     | 2026-11-15 at `7dedecb` with the #385 work tree, passed; failed with the old unlayered reset put back in `App.scss`                                                       |
+| [Backend lifecycle](backend-lifecycle.md)       | `backend-health`, `backend-lifecycle-ui`, `host-lifecycle-native` (opt-in) | 2026-11-14 at `b93854ea` with the #360 work tree, first two passed; native not run (last blocked on 2026-11-01, no GUI session)                                           |
+| [Agent delegation](agent-delegation.md)         | `agent-delegation-ui`                                                      | 2026-11-16 at `123a452e` with the journey uncommitted, passed; failed with the wake-up call taken out                                                                     |
 
 Features Lys has that no journey covers yet, from its routes and panes:
 conversation history (rename, delete, search, open a past conversation),
 attachments on a message, the tool switches and tool approval flow (only
 `delegate_work` is covered, by agent delegation), the Agents pane (custom
-agents), the Model pane (load configuration, load and unload), the Providers
-and Secrets panes, MCP servers, vmo and `read_page`, `web_search`, the
-stop-reply button, and the context meter. Each needs its own file and journey
-before it counts as verified.
+agents), the Models pane (load configuration, load and unload), the Providers
+pane (several providers on at once) and the Secrets pane, MCP servers, vmo
+and `read_page`, `web_search`, the stop-reply button, and the context meter.
+Each needs its own file and journey before it counts as verified.
 
 To add a feature: write `features/<feature>.md` with the four sections, add a
 journey under `scripts/journeys/` that exports `{id, feature, title,

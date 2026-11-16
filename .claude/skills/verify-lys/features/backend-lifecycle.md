@@ -8,9 +8,13 @@ quit, and the backend reports its health and its provider connection.
 
 - Health: `GET /api/v1/heath` (the route name is spelled that way) answers
   `{ok: true}`; the renderer polls it after a start.
-- Provider connection: `GET /api/v1/llm/runtime` reports `connecting`,
-  `connected`, or `unreachable`; `GET /api/v1/llm/list` lists models with
-  `loaded`; the composer is ready only with a loaded model.
+- Provider connection: every provider has its own routes.
+  `GET /api/v1/llm/:provider/runtime` reports `connecting`, `connected`,
+  `unreachable`, or `off` (the provider is turned off in Settings →
+  Providers); `GET /api/v1/llm/:provider/list` lists that provider's models
+  with `loaded`. The composer is ready only when the conversation's model is
+  loaded: the default model, or else the first loaded model in provider
+  order.
 - Runtime pane: the `Lys backend` card shows the status heading (`Backend
 running`, `starting`, `stopping`, `stopped`, `not responding`), Start
   (enabled only when stopped) and Stop, and the `Start it when Lys opens`
@@ -23,7 +27,8 @@ running`, `starting`, `stopping`, `stopped`, `not responding`), Start
   quitting the app stops it.
 - Not covered: the vmo card, the `Backend not responding` path, the MCP
   process group cleanup on stop, the production bundle under
-  `$LYS_HOME/runtime`.
+  `$LYS_HOME/runtime`, and the routes of the providers that are off (the
+  renderer polls their runtime status, which reads `off`).
 
 ## How to get to it (user POV)
 
@@ -44,9 +49,11 @@ node .claude/skills/verify-lys/scripts/verify-lys.mjs run --native --journey hos
 `backend-health` (`scripts/journeys/backendHealth.mjs`) checks the health
 answer (`01-health.json`); that every pid `lsof` lists on 12345 has the
 process group of the backend pid the host reports (`02-port-owner.json`);
-that the runtime is `connected`, asking `POST /api/v1/llm/runtime/connect`
-once if not (`03-runtime.json`); and that `lys-verify:latest` is listed with
-`loaded: true` (`04-llm-list.json`).
+that `GET /api/v1/llm/ollama/runtime` reports `connected`, asking
+`POST /api/v1/llm/ollama/runtime/connect` once if not and waiting up to 30 s,
+or failing at once on `off` (`03-runtime.json`); and that
+`GET /api/v1/llm/ollama/list` lists `lys-verify:latest` with `loaded: true`
+(`04-llm-list.json`).
 
 `backend-lifecycle-ui` (`scripts/journeys/backendLifecycleUi.mjs`) opens
 Settings → Runtime, waits for `[aria-label="Backend status"] h2` to read

@@ -1,6 +1,10 @@
 import { conversationAssistantMessageSchema, jobSchema } from "@lys/share"
 import * as z from "zod"
-import { chatToolCallSchema } from "../chat/_share"
+import {
+  chatToolApprovalPromptSchema,
+  chatToolApprovalTokenSchema,
+  chatToolCallSchema
+} from "../chat/_share"
 import { apiActivityEventsRoute } from "./routes"
 
 /**
@@ -27,8 +31,11 @@ export const activityReplySchema = z.strictObject({
   ...activityReplyTargetShape,
   /** Desktop tool calls sent to run and not answered, in the order sent. */
   pendingToolCalls: z.array(chatToolCallSchema).readonly(),
-  /** Approval prompts sent and not answered, in the order sent. */
-  pendingToolApprovals: z.array(chatToolCallSchema).readonly()
+  /**
+   * Approval prompts sent and not answered, in the order sent, each with the
+   * token its answer must carry.
+   */
+  pendingToolApprovals: z.array(chatToolApprovalPromptSchema).readonly()
 })
 
 /** One backend-started reply generating now, with what it waits for. */
@@ -90,7 +97,9 @@ const activityToolApprovalEventSchema = z.strictObject({
   type: z.literal("tool-approval"),
   ...activityReplyTargetShape,
   /** Call the person allows or rejects through the tool-approval endpoint. */
-  call: chatToolCallSchema
+  call: chatToolCallSchema,
+  /** Single-use token the answer to this prompt must carry. */
+  approvalToken: chatToolApprovalTokenSchema
 })
 
 /**

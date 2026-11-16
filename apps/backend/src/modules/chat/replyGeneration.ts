@@ -1,9 +1,9 @@
 import type {
   ChatGenerationEvent,
-  ChatToolApprovalAnswer,
   ChatToolCall,
   ChatToolResult
 } from "@lys/protocol"
+import type { SendToolApprovalPrompt } from "../toolApproval/toolCallGate"
 import PendingToolCalls, {
   type PendingToolCallSnapshot,
   type ToolCallAnswer,
@@ -33,15 +33,15 @@ export type ReplyTaskContext = ReplyGenerationTaskContext &
       toolCall: ChatToolCall
     ) => Promise<ChatToolResult | undefined>
     /**
-     * Lists one checked call and shows it to every follower for approval,
-     * then waits for the person's answer. Resolves with that answer, or with
-     * undefined once the reply was stopped, the generation disposed, or the
-     * reply task settled; never rejects.
+     * Lists one checked call with a new single-use token and shows both to
+     * every follower for approval, then waits for the person's answer, which
+     * must carry the token and arrive before the prompt's time limit.
+     * Resolves with that answer, without the token; with `expired` at the
+     * limit; or with undefined once the reply was stopped, the generation
+     * disposed, or the reply task settled; never rejects.
      * Throws if a call with the same identifier is already waiting.
      */
-    sendToolApprovalPrompt: (
-      toolCall: ChatToolCall
-    ) => Promise<ChatToolApprovalAnswer | undefined>
+    sendToolApprovalPrompt: SendToolApprovalPrompt
   }>
 
 /** Work and failure reporting for one generation. */
@@ -79,7 +79,8 @@ export type StartReplyGenerationOptions = Readonly<{
  * (resolving at once), because a follower or stop request can race the
  * settlement. Tool calls the reply task sends to run or shows for approval
  * are listed until they are answered, the reply is stopped or disposed, or
- * the reply task settles; there is no timer.
+ * the reply task settles; a prompt also ends when it reaches its time limit,
+ * and a call sent to run has no timer.
  * Concurrency model: single-owner, on the backend's event loop.
  */
 export default class ReplyGeneration implements AsyncDisposable {
@@ -218,9 +219,9 @@ export default class ReplyGeneration implements AsyncDisposable {
    * Lists the tool calls and approval prompts the reply waits on.
    *
    * @returns A frozen snapshot of the calls sent to run and the calls shown
-   * for approval that are not yet answered, each in send order; both empty
-   * once the reply was stopped, the generation disposed, the reply task
-   * settled, or every call answered.
+   * for approval that are not yet answered or expired, each in send order;
+   * both empty once the reply was stopped, the generation disposed, the reply
+   * task settled, or every call answered or expired.
    */
   public get pendingToolCalls(): PendingToolCallSnapshot {
     return this.#pendingToolCalls.snapshot
@@ -231,13 +232,14 @@ export default class ReplyGeneration implements AsyncDisposable {
    *
    * @param toolCallId - Identifier of the call's `tool-call` or
    * `tool-approval` event.
-   * @param answer - Validated result or approval answer, handed to the reply
-   * unchanged.
-   * @returns `accepted` when the call was waiting for that kind of answer;
-   * `not-pending` when it is unknown, already answered, waiting for the other
-   * kind of answer, or ended with its reply. Only `accepted` changes
-   * anything. Calls still waiting when the reply task settles end without an
-   * answer.
+   * @param answer - Validated result, handed to the reply unchanged, or
+   * approval answer with its prompt's token, handed on without the token.
+   * @returns `accepted` when the call was waiting for that kind of answer,
+   * with that token for a prompt; `token-mismatch` when a prompt waits for
+   * the call but the token is not its own; `not-pending` when the call is
+   * unknown, already answered, expired, waiting for the other kind of answer,
+   * or ended with its reply. Only `accepted` changes anything. Calls still waiting
+   * when the reply task settles end without an answer.
    */
   public resolveToolCall(
     toolCallId: string,

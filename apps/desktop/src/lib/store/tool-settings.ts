@@ -33,7 +33,10 @@ export type ToolSettingsSaveState =
   | { readonly status: "saved" }
   | { readonly status: "failed" }
 
-/** Tool approval and switch commands and the autosave of the tools group. */
+/**
+ * Tool approval, switch, and approved folder commands and the autosave of the
+ * tools group.
+ */
 export type ToolSettingsSlice = {
   /** Latest save outcome, retained across settings-pane unmounts. */
   readonly toolSettingsSave: ToolSettingsSaveState
@@ -64,6 +67,30 @@ export type ToolSettingsSlice = {
    * failed save, the switch still applies until Lys quits.
    */
   readonly updateToolOn: (toolName: string, isOn: boolean) => void
+  /**
+   * Adds a folder the person lets tools use and saves the tools group.
+   *
+   * @param folderPath - Path that passes the shared approved folder path
+   * rule; the caller checks it.
+   * @remarks The pane lists the folder at once; tool calls follow the list
+   * from the next round of calls after the save completes, because the
+   * backend's policy and the desktop's file tools read the settings file. A
+   * path already listed changes and saves nothing. The first folder turns the
+   * folder rule on: from then on, a call naming a path outside every listed
+   * folder is denied. `toolSettingsSave` reports the save; after a failed
+   * save, tool calls keep following the list last saved.
+   */
+  readonly addApprovedFolder: (folderPath: string) => void
+  /**
+   * Removes a folder from those the person lets tools use and saves the
+   * tools group.
+   *
+   * @param folderPath - Path as listed.
+   * @remarks Applies as {@link ToolSettingsSlice.addApprovedFolder} does. A
+   * path not listed changes and saves nothing. Removing the last folder turns
+   * the folder rule off, so tools may name any path again.
+   */
+  readonly removeApprovedFolder: (folderPath: string) => void
   /**
    * Persists the current tool choices, preserving the other groups on disk.
    * @returns Resolves after the latest change is saved or fails; it never
@@ -99,8 +126,8 @@ export function getToolApproval(
  *
  * @param first - One tool-choice value.
  * @param second - The other tool-choice value.
- * @returns Whether both put the same tools on Just run and give the same
- * tools the same switch, in any order.
+ * @returns Whether both put the same tools on Just run, give the same tools
+ * the same switch, and list the same folders, in any order.
  */
 export function isToolSettingsEqual(
   first: ToolSettings,
@@ -114,6 +141,10 @@ export function isToolSettingsEqual(
     first.switches.size === second.switches.size &&
     [...first.switches].every(
       ([toolName, isOn]) => second.switches.get(toolName) === isOn
+    ) &&
+    first.approvedFolderPaths.length === second.approvedFolderPaths.length &&
+    first.approvedFolderPaths.every((folderPath) =>
+      second.approvedFolderPaths.includes(folderPath)
     )
   )
 }
@@ -125,8 +156,8 @@ export function isToolSettingsEqual(
  * @param toolName - Name of the tool whose approval is replaced.
  * @param approval - New approval of the tool.
  * @returns A new frozen value whose set holds the tool's name only on Just
- * run, keeping every other name, also names Lys does not list, and every
- * switch.
+ * run, keeping every other name, also names Lys does not list, every switch,
+ * and every folder.
  */
 function buildToolSettings(
   tools: ToolSettings,
@@ -143,7 +174,7 @@ function buildToolSettings(
       break
   }
 
-  return Object.freeze({ justRunToolNames, switches: tools.switches })
+  return Object.freeze({ ...tools, justRunToolNames })
 }
 
 /**
@@ -152,8 +183,8 @@ function buildToolSettings(
  * @param tools - Current choices, left unchanged.
  * @param toolName - Name of the tool whose switch is replaced.
  * @param isOn - Whether the tool is offered to the model.
- * @returns A new frozen value holding every current approval and switch and
- * the replacement.
+ * @returns A new frozen value holding every current approval, switch, and
+ * folder, and the replacement.
  */
 function buildToolSwitchSettings(
   tools: ToolSettings,
@@ -163,18 +194,37 @@ function buildToolSwitchSettings(
   const switches = new Map(tools.switches)
   switches.set(toolName, isOn)
 
-  return Object.freeze({ justRunToolNames: tools.justRunToolNames, switches })
+  return Object.freeze({ ...tools, switches })
 }
 
 /**
- * Creates the application-owned tool approval and switch commands and
- * initial state.
+ * Builds the tool choices with a new list of approved folders.
+ *
+ * @param tools - Current choices, left unchanged.
+ * @param approvedFolderPaths - Complete replacement list.
+ * @returns A new frozen value holding every current approval and switch and
+ * the frozen list.
+ */
+function buildApprovedFolderSettings(
+  tools: ToolSettings,
+  approvedFolderPaths: readonly string[]
+): ToolSettings {
+  return Object.freeze({
+    ...tools,
+    approvedFolderPaths: Object.freeze([...approvedFolderPaths])
+  })
+}
+
+/**
+ * Creates the application-owned tool approval, switch, and approved folder
+ * commands and initial state.
  * @param set - Owning store's atomic state updater.
  * @param get - Reads the current settings and save lifecycle.
  * @param dependencies - Save operation that the application serializes with
  * the other settings-group saves.
- * @returns A slice that applies each approval and switch at once and saves
- * the tools group, coalescing pending changes to the latest value.
+ * @returns A slice that applies each approval, switch, and folder change at
+ * once and saves the tools group, coalescing pending changes to the latest
+ * value.
  * @remarks Native writes are not cancellable. Pane unmount does not cancel
  * work; completion never overwrites a change made after the save began. A
  * newer change is saved after the active write settles, including after
@@ -231,6 +281,38 @@ export function createToolSettingsSlice(
   }
 
   /**
+   * Implements {@link ToolSettingsSlice.addApprovedFolder}.
+   * @param folderPath - Valid path to add.
+   */
+  function addApprovedFolder(folderPath: string): void {
+    const { tools } = get().settings
+    if (tools.approvedFolderPaths.includes(folderPath)) return
+
+    updateToolSettings(
+      buildApprovedFolderSettings(tools, [
+        ...tools.approvedFolderPaths,
+        folderPath
+      ])
+    )
+  }
+
+  /**
+   * Implements {@link ToolSettingsSlice.removeApprovedFolder}.
+   * @param folderPath - Listed path to remove.
+   */
+  function removeApprovedFolder(folderPath: string): void {
+    const { tools } = get().settings
+    if (!tools.approvedFolderPaths.includes(folderPath)) return
+
+    updateToolSettings(
+      buildApprovedFolderSettings(
+        tools,
+        tools.approvedFolderPaths.filter((listed) => listed !== folderPath)
+      )
+    )
+  }
+
+  /**
    * Replaces the tool choices and starts saving them.
    * @param nextTools - Complete replacement choices.
    */
@@ -248,6 +330,8 @@ export function createToolSettingsSlice(
     toolSettingsSave: idleSave,
     updateToolApproval,
     updateToolOn,
+    addApprovedFolder,
+    removeApprovedFolder,
     saveToolSettings
   }
 }

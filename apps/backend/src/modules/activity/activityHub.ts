@@ -309,8 +309,9 @@ export default class ActivityHub {
  *
  * @param target - Identifiers of the reply whose generation sent the event.
  * @param event - Event of that generation.
- * @returns The `tool-approval` or `tool-call` event with the reply's
- * identifiers and the call; undefined for every other kind, which the
+ * @returns The `tool-approval` event with the reply's identifiers, the call,
+ * and the token its answer must carry, or the `tool-call` event with the
+ * reply's identifiers and the call; undefined for every other kind, which the
  * activity stream does not carry: a reply's parts, sources, title, and end
  * reach clients through the reply's own stream and through `reply-ended`.
  * @throws {TypeError} If the event is of a kind this module does not know.
@@ -321,8 +322,14 @@ function buildForwardedEvent(
 ): ActivityEvent | undefined {
   switch (event.type) {
     case "tool-approval":
+      return {
+        type: "tool-approval",
+        ...target,
+        call: event.call,
+        approvalToken: event.approvalToken
+      }
     case "tool-call":
-      return { type: event.type, ...target, call: event.call }
+      return { type: "tool-call", ...target, call: event.call }
     case "title":
     case "reply-part":
     case "reply-part-delta":

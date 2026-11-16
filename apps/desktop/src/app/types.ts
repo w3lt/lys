@@ -2,6 +2,8 @@
 export type View = "chat" | "settings"
 /** Settings pane selected within the settings view. */
 export type SettingsPane =
+  | "lys"
+  | "profile"
   | "runtime"
   | "model"
   | "generation"

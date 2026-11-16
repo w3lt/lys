@@ -34,11 +34,12 @@ export type LlmRuntimeFailureReporters = {
 /** Dependencies supplied when creating the application-scoped LLM runtime service. */
 export type LlmRuntimeServiceCreationOptions = LlmRuntimeFailureReporters & {
   /**
-   * Finds how to reach the provider the person saved as active. Called at
-   * the start of every connection attempt; a rejection means no usable
-   * provider is saved, such as a hosted provider without its key.
+   * Finds how to reach the service's provider as the person saved it.
+   * Called at the start of every connection attempt; it resolves to
+   * undefined while the provider is off, and a rejection means the provider
+   * is on but not usable, such as a hosted provider without its key.
    */
-  readonly findLlmProviderAccess: () => Promise<LlmProviderAccess>
+  readonly findLlmProviderAccess: () => Promise<LlmProviderAccess | undefined>
   /**
    * Acquires a ready, provider-available runtime for one provider, with who
    * loads its models. A resolved runtime transfers to the service; a
@@ -70,6 +71,33 @@ type LlmRuntimeConnectionState =
       /** The latest attempt failed, or the held runtime stopped answering and was released. */
       status: "unreachable"
     }>
+  | Readonly<{
+      /** The latest attempt found the provider off, so it tried nothing. */
+      status: "off"
+    }>
+
+/**
+ * The service's provider as one read of the person's settings found it.
+ *
+ * @remarks `on`: the provider is on, with how to reach it. `off`: the person
+ * turned it off. `unusable`: it is on but cannot be reached as saved, such as
+ * a hosted provider without its key, or the settings could not be read.
+ */
+type SavedLlmProvider =
+  | Readonly<{
+      /** The provider is on. */
+      status: "on"
+      /** How to reach it; may hold a secret key. */
+      llmProviderAccess: LlmProviderAccess
+    }>
+  | Readonly<{
+      /** The provider is off. */
+      status: "off"
+    }>
+  | Readonly<{
+      /** The provider is on but cannot be reached as saved. */
+      status: "unusable"
+    }>
 
 /** A connection attempt that connect calls share while it is pending. */
 type LlmRuntimeConnectionAttempt =
@@ -85,10 +113,10 @@ type LlmRuntimeConnectionAttempt =
       /** Settled status shared by every call that joins the attempt. */
       settlement: Promise<LlmRuntimeConnectionStatus>
       /**
-       * The saved provider the attempt read, or undefined when none is
-       * usable; rejects only when the failure reporter throws.
+       * The saved provider as the attempt read it; rejects only when the
+       * failure reporter throws.
        */
-      llmProviderAccess: Promise<LlmProviderAccess | undefined>
+      savedLlmProvider: Promise<SavedLlmProvider>
     }>
 
 /** Connection state before an attempt settles or while a runtime is acquired. */
@@ -101,19 +129,49 @@ const UNREACHABLE_LLM_RUNTIME_CONNECTION_STATE = Object.freeze({
   status: "unreachable"
 } as const satisfies LlmRuntimeConnectionState)
 
+/** Connection state after an attempt found the provider off. */
+const OFF_LLM_RUNTIME_CONNECTION_STATE = Object.freeze({
+  status: "off"
+} as const satisfies LlmRuntimeConnectionState)
+
 /**
- * Owns the backend's LLM runtime connection and serializes every model
- * operation against it.
+ * Connection state an attempt leaves, holding no runtime, for a provider it
+ * found off or unusable.
+ */
+const UNHELD_LLM_RUNTIME_CONNECTION_STATES = Object.freeze({
+  off: OFF_LLM_RUNTIME_CONNECTION_STATE,
+  unusable: UNREACHABLE_LLM_RUNTIME_CONNECTION_STATE
+} satisfies Readonly<
+  Record<Exclude<SavedLlmProvider["status"], "on">, LlmRuntimeConnectionState>
+>)
+
+/** Saved provider of a read that found it off. */
+const OFF_SAVED_LLM_PROVIDER: SavedLlmProvider = Object.freeze({
+  status: "off"
+})
+
+/** Saved provider of a read that found it on but unusable. */
+const UNUSABLE_SAVED_LLM_PROVIDER: SavedLlmProvider = Object.freeze({
+  status: "unusable"
+})
+
+/**
+ * Owns the backend's connection to one provider's LLM runtime and serializes
+ * every model operation against it.
  *
- * @remarks Owns at most one runtime, acquired through the supplied
- * capability for the provider the person saved, which each connection
- * attempt reads again; a held runtime for a provider that is no longer saved
- * is released before another is acquired. Connection attempts and model
+ * @remarks The backend runs one service per provider. Owns at most one
+ * runtime, acquired through the supplied capability for the provider as the
+ * person saved it, which each connection attempt reads again; a held runtime
+ * for an address or key that is no longer saved is released before another
+ * is acquired. An attempt that finds the provider off releases a held
+ * runtime, tries nothing, and leaves the status `off` without reporting a
+ * failure; model operations are then refused as runtime-unavailable, as for
+ * every status but `connected`. Connection attempts and model
  * operations run through one owned {@link LlmRuntimeOperationQueue}, which
  * refuses work beyond its capacity with the service-busy error before
  * acceptance. A connect call shares a queued attempt, or a running attempt
- * that read the same saved provider as the call reads; otherwise it queues
- * an attempt of its own. Invariant: a runtime is held
+ * that read the provider on with the same access as the call reads;
+ * otherwise it queues an attempt of its own. Invariant: a runtime is held
  * exactly while the status is `connected`, and only queued work acquires,
  * probes, or releases it, so no attempt overlaps a model operation.
  * A model operation whose runtime call rejects is followed, before the next
@@ -134,8 +192,11 @@ export default class LlmRuntimeService
     LlmRuntimeConnector,
     LlmEngineOperationQueue
 {
-  /** Finds how to reach the saved provider at each connection attempt. */
-  readonly #findLlmProviderAccess: () => Promise<LlmProviderAccess>
+  /**
+   * Finds how to reach the saved provider at each connection attempt, or
+   * nothing while it is off.
+   */
+  readonly #findLlmProviderAccess: () => Promise<LlmProviderAccess | undefined>
 
   /** Borrowed acquisition capability; each resolved runtime transfers to this service. */
   readonly #acquireLlmRuntime: (
@@ -218,13 +279,13 @@ export default class LlmRuntimeService
       attempt?.status === "running" &&
       this.#operationQueue.status === "ready"
     ) {
-      const savedLlmProviderAccess = await findComparableLlmProviderAccess(
+      const savedLlmProvider = await findComparableSavedLlmProvider(
         this.#findLlmProviderAccess
       )
       if (
-        isSameFoundLlmProviderAccess(
-          savedLlmProviderAccess,
-          await attempt.llmProviderAccess
+        isSameUsableSavedLlmProvider(
+          savedLlmProvider,
+          await attempt.savedLlmProvider
         )
       ) {
         return await attempt.settlement
@@ -318,28 +379,32 @@ export default class LlmRuntimeService
    * @remarks Runs only as queued work, so no model operation overlaps it.
    * As it starts, the queued attempt becomes running and carries the read it
    * makes. From then on, a connect call joins it only when the call reads the
-   * same provider, because a provider saved since then might not be the one
-   * it reads.
-   * A held runtime for a provider that is no longer the saved one is released
-   * before the new one is acquired; when no usable provider is saved, the
-   * held runtime is released and the status becomes `unreachable`.
+   * provider on with the same access, because a provider saved since then
+   * might not be the one it reads.
+   * A held runtime for an access that is no longer the saved one is released
+   * before the new one is acquired. When the provider is off, the held
+   * runtime is released and the status becomes `off`; when it is unusable,
+   * the held runtime is released and the status becomes `unreachable`.
    */
   async #updateLlmRuntimeConnection(): Promise<LlmRuntimeConnectionStatus> {
-    const savedLlmProviderAccess = this.#findSavedLlmProviderAccess()
+    const savedLlmProviderRead = this.#findSavedLlmProvider()
     const attempt = this.#connectionAttempt
     if (attempt?.status === "queued") {
       this.#connectionAttempt = Object.freeze({
         status: "running",
         settlement: attempt.settlement,
-        llmProviderAccess: savedLlmProviderAccess
+        savedLlmProvider: savedLlmProviderRead
       })
     }
-    const llmProviderAccess = await savedLlmProviderAccess
+    const savedLlmProvider = await savedLlmProviderRead
     const connection = this.#connection
     if (connection.status === "connected") {
       if (
-        llmProviderAccess !== undefined &&
-        isSameLlmProviderAccess(connection.llmProviderAccess, llmProviderAccess)
+        savedLlmProvider.status === "on" &&
+        isSameLlmProviderAccess(
+          connection.llmProviderAccess,
+          savedLlmProvider.llmProviderAccess
+        )
       ) {
         const status = await this.#updateLlmRuntimeAvailability(
           connection.acquiredLlmRuntime.llmRuntime
@@ -354,26 +419,29 @@ export default class LlmRuntimeService
       }
     }
 
-    if (llmProviderAccess === undefined) {
-      this.#connection = UNREACHABLE_LLM_RUNTIME_CONNECTION_STATE
-      return "unreachable"
+    if (savedLlmProvider.status !== "on") {
+      this.#connection =
+        UNHELD_LLM_RUNTIME_CONNECTION_STATES[savedLlmProvider.status]
+      return this.#connection.status
     }
-    return await this.#openLlmRuntimeConnection(llmProviderAccess)
+    return await this.#openLlmRuntimeConnection(
+      savedLlmProvider.llmProviderAccess
+    )
   }
 
   /**
    * Finds the saved provider for one connection attempt.
    *
-   * @returns How to reach it, or undefined after a reported failure to find a
-   * usable provider.
+   * @returns The provider on with how to reach it, off, or unusable after a
+   * reported failure to find how to reach it.
    * @throws If the failure reporter throws.
    */
-  async #findSavedLlmProviderAccess(): Promise<LlmProviderAccess | undefined> {
+  async #findSavedLlmProvider(): Promise<SavedLlmProvider> {
     try {
-      return await this.#findLlmProviderAccess()
+      return buildSavedLlmProvider(await this.#findLlmProviderAccess())
     } catch (findingError) {
       this.#reportLlmRuntimeAcquisitionFailure(findingError)
-      return undefined
+      return UNUSABLE_SAVED_LLM_PROVIDER
     }
   }
 
@@ -536,40 +604,60 @@ export default class LlmRuntimeService
 }
 
 /**
+ * Builds the saved provider from what its lookup found.
+ *
+ * @param llmProviderAccess - How to reach the provider, or undefined while it
+ * is off.
+ * @returns The provider on with that access, or off.
+ */
+function buildSavedLlmProvider(
+  llmProviderAccess: LlmProviderAccess | undefined
+): SavedLlmProvider {
+  return llmProviderAccess === undefined
+    ? OFF_SAVED_LLM_PROVIDER
+    : Object.freeze({ status: "on", llmProviderAccess })
+}
+
+/**
  * Finds the saved provider for a connect call to compare with a running
  * attempt's.
  *
  * @param findLlmProviderAccess - Saved-provider lookup the service borrows.
- * @returns How to reach the saved provider, or undefined when none is usable.
+ * @returns The provider on with how to reach it, off, or unusable when the
+ * lookup fails.
  * @remarks A failure is not reported here: the call then queues an attempt
  * of its own, which reads the saved provider again and reports a failure.
  */
-async function findComparableLlmProviderAccess(
-  findLlmProviderAccess: () => Promise<LlmProviderAccess>
-): Promise<LlmProviderAccess | undefined> {
+async function findComparableSavedLlmProvider(
+  findLlmProviderAccess: () => Promise<LlmProviderAccess | undefined>
+): Promise<SavedLlmProvider> {
   try {
-    return await findLlmProviderAccess()
+    return buildSavedLlmProvider(await findLlmProviderAccess())
   } catch {
-    return undefined
+    return UNUSABLE_SAVED_LLM_PROVIDER
   }
 }
 
 /**
- * Determines whether two reads of the saved provider both found the same
- * usable provider.
+ * Determines whether two reads of the saved provider both found it on and
+ * reachable in the same way.
  *
- * @param savedLlmProviderAccess - What a connect call read, if usable.
- * @param attemptLlmProviderAccess - What the running attempt read, if usable.
- * @returns Whether both are present and reach the same provider.
+ * @param callSavedLlmProvider - What a connect call read.
+ * @param attemptSavedLlmProvider - What the running attempt read.
+ * @returns Whether both found the provider on with the same access; a read
+ * that found it off or unusable never matches.
  */
-function isSameFoundLlmProviderAccess(
-  savedLlmProviderAccess: LlmProviderAccess | undefined,
-  attemptLlmProviderAccess: LlmProviderAccess | undefined
+function isSameUsableSavedLlmProvider(
+  callSavedLlmProvider: SavedLlmProvider,
+  attemptSavedLlmProvider: SavedLlmProvider
 ): boolean {
   return (
-    savedLlmProviderAccess !== undefined &&
-    attemptLlmProviderAccess !== undefined &&
-    isSameLlmProviderAccess(savedLlmProviderAccess, attemptLlmProviderAccess)
+    callSavedLlmProvider.status === "on" &&
+    attemptSavedLlmProvider.status === "on" &&
+    isSameLlmProviderAccess(
+      callSavedLlmProvider.llmProviderAccess,
+      attemptSavedLlmProvider.llmProviderAccess
+    )
   )
 }
 

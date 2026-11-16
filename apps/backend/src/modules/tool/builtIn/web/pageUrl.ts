@@ -1,4 +1,4 @@
-import { isBlockedAddress, isLocalHostName } from "./webAddresses"
+import { isLocalUrlHost } from "./webAddresses"
 
 /** Nominal marker of a URL that passed {@link parsePageUrl}. */
 declare const PAGE_URL_BRAND: unique symbol
@@ -64,30 +64,6 @@ const PAGE_URL_PROBLEM_MESSAGES = Object.freeze({
 } satisfies Readonly<Record<PageUrlProblem, string>>)
 
 /**
- * Answers whether a URL host is this machine or a blocked IP address.
- *
- * @param hostname - Host as the URL parser normalized it; an IPv6 address
- * keeps its brackets.
- * @returns True for a local name or a blocked IP literal.
- */
-function isLocalPageHost(hostname: string): boolean {
-  if (isLocalHostName(hostname)) return true
-  if (hostname.startsWith("[")) return isBlockedAddress(hostname.slice(1, -1))
-  return isIpv4Literal(hostname) && isBlockedAddress(hostname)
-}
-
-/**
- * Answers whether a normalized URL host is an IPv4 address.
- *
- * @param hostname - Host as the URL parser normalized it.
- * @returns True for four dot-separated decimal numbers, the only form the
- * parser leaves an IPv4 host in.
- */
-function isIpv4Literal(hostname: string): boolean {
-  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)
-}
-
-/**
  * Finds why a parsed URL may not be requested.
  *
  * @param url - Absolute URL from the URL parser.
@@ -98,7 +74,7 @@ function findPageUrlProblem(url: URL): PageUrlProblem | undefined {
     return "unsupported-scheme"
   }
   if (url.username !== "" || url.password !== "") return "has-credentials"
-  if (isLocalPageHost(url.hostname)) return "local-address"
+  if (isLocalUrlHost(url.hostname)) return "local-address"
   return undefined
 }
 

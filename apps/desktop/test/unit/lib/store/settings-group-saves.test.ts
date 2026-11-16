@@ -5,10 +5,7 @@ import {
   saveLatestSettingsGroup,
   type LatestSettingsGroupSave
 } from "@/lib/store/settings-group-saves"
-import type {
-  LoadConfigurationSettings,
-  RuntimeSettings
-} from "@/lib/store/settings"
+import type { LoadConfigurationSettings } from "@/lib/store/settings"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import {
   createControlledPromise,
@@ -168,7 +165,7 @@ describe("createSettingsGroupSaves", () => {
     const { writes, readStoredDocument } = startSettingsFileHost()
     const saves = createSettingsGroupSaves()
     const providers = llmProviderSettingsSchema.parse({
-      active: "groq",
+      enabled: ["lmStudio", "groq"],
       lmStudio: { address: null },
       ollama: { address: null }
     })
@@ -197,6 +194,7 @@ describe("createSettingsGroupSaves", () => {
 
     const secretsSave = saves.saveSecretsSettings({ tavilyApiKey: null })
     const toolsSave = saves.saveToolSettings({
+      approvedFolderPaths: [],
       justRunToolNames: new Set(["find_files"]),
       switches: new Map([["web_search", true]])
     })
@@ -272,6 +270,7 @@ describe("createSettingsGroupSaves", () => {
 
     const mcpSave = saves.saveMcpSettings(noServers)
     const emailSave = saves.saveEmailAccountSettings(
+      "person",
       editedAccount,
       STORED_EMAIL_PASSWORD
     )
@@ -287,7 +286,7 @@ describe("createSettingsGroupSaves", () => {
     expect(readStoredDocument()).toEqual({
       ...STORED_SETTINGS_DOCUMENT,
       mcp: noServers,
-      email: { account: editedAccount }
+      email: { account: editedAccount, lysAccount: null }
     })
   })
 
@@ -296,6 +295,7 @@ describe("createSettingsGroupSaves", () => {
     const saves = createSettingsGroupSaves()
 
     const toolsSave = saves.saveToolSettings({
+      approvedFolderPaths: [],
       justRunToolNames: new Set(["find_files"]),
       switches: new Map()
     })
@@ -311,7 +311,7 @@ describe("createSettingsGroupSaves", () => {
     writes[1]?.resolve(null)
     await runtimeSave
 
-    const runtime: RuntimeSettings = {
+    const runtime: SettingsDocument["runtime"] = {
       ...STORED_SETTINGS_DOCUMENT.runtime,
       autoStartBackend: true,
       autoStartVmo: true

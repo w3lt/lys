@@ -6,6 +6,7 @@ describe("readPrompt", () => {
   it.each([
     ["caliginia-system", "caliginia.txt"],
     ["lysiptera-system", "lysiptera.txt"],
+    ["armitage-system", "armitage.txt"],
     ["title-generation", "title-generation.txt"]
   ] as const)(
     "reads %s from %s without surrounding whitespace",

@@ -247,6 +247,7 @@ function parseConversationMessage(
   return conversationMessageSchema.parse({
     ...common,
     model: row.model,
+    provider: row.provider,
     parts: partsByReply.get(row.id) ?? [],
     status: row.status,
     finishReason: row.finishReason,
@@ -302,7 +303,7 @@ export function findConversation(
   }
   const rows = statements
     .getStatement(
-      `SELECT id, role, model, content, status, origin,
+      `SELECT id, role, model, provider, content, status, origin,
     finish_reason AS finishReason, created_at AS createdAt, updated_at AS updatedAt
     FROM conversation_messages
     WHERE conversation_id = ? AND role IN ('user', 'assistant') ORDER BY created_at, id`

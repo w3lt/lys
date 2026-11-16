@@ -1,13 +1,17 @@
 import {
   deleteConversationApi,
   stopChatReplyApi,
-  stopConversationJobsApi
+  stopConversationJobsApi,
+  type LlmRuntimeConnectionStatus
 } from "@lys/protocol"
 import {
   DELEGATE_WORK_TOOL_NAME,
+  LLM_PROVIDERS,
   type Job,
+  type LlmProvider,
   type McpServerSettings
 } from "@lys/share"
+import type { FastifyInstance } from "fastify"
 import { once } from "node:events"
 import {
   existsSync,
@@ -18,7 +22,6 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import type { FastifyInstance } from "fastify"
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import { buildApp } from "../../src/app"
@@ -56,12 +59,14 @@ import {
   waitForFirstJobReplyEnd
 } from "./support/delegationTestServices"
 import { CapturedLogDestination } from "./support/fastifyTestApp"
+import { LM_STUDIO_QWEN3_8B } from "./support/llmFixtures"
 import { buildFakeStdioServerSettings } from "./support/mcpTestServers"
 import {
   fakeLmStudio,
   type FakeLmStudioOperations
 } from "./support/lmStudioSdkFake"
 import { createChatCompletionChunk } from "./support/openAiEndpointFake"
+import { startProviderServer } from "./support/providerServer"
 import { createFailingOutput, createWorkingOutput } from "./support/testOutputs"
 
 vi.mock("@lmstudio/sdk", () => import("./support/lmStudioSdkFake"))
@@ -159,14 +164,18 @@ async function* createHiReplyStream() {
  * Creates spies in place of the model calls of an application that no
  * provider is connected to.
  *
- * @param app - Ready application whose LLM service and chat service are
- * spied on.
- * @returns The spies. Every model is loaded with a context of 1,000,000
- * tokens, in which each text counts one token, and every reply is `Hi`.
+ * @param app - Ready application whose LM Studio LLM service and chat
+ * service are spied on.
+ * @returns The spies. Every LM Studio model is loaded with a context of
+ * 1,000,000 tokens, in which each text counts one token, and every reply is
+ * `Hi`.
  */
 function createModelSpies(app: FastifyInstance) {
   const findLlmContextMeasurement = vi
-    .spyOn(app.llmService, "findLlmContextMeasurement")
+    .spyOn(
+      app.llmProviderServices.lmStudio.llmService,
+      "findLlmContextMeasurement"
+    )
     .mockImplementation(async (_model, texts) => ({
       contextLength: 1_000_000,
       textTokenCounts: texts.map(() => 1)
@@ -273,6 +282,22 @@ function createAgentBodyOfSize(code: string, byteLength: number): string {
   })
 }
 
+/**
+ * Lists the connection status of each provider's LLM runtime service.
+ *
+ * @param app - Application whose provider services are read.
+ * @returns The statuses in {@link LLM_PROVIDERS} order.
+ */
+function listLlmRuntimeConnectionStatuses(
+  app: FastifyInstance
+): LlmRuntimeConnectionStatus[] {
+  return LLM_PROVIDERS.map(
+    (provider) =>
+      app.llmProviderServices[provider].llmRuntimeService
+        .llmRuntimeConnectionStatus
+  )
+}
+
 describe("buildApp", () => {
   beforeEach(() => {
     fakeLmStudio.reset()
@@ -352,7 +377,12 @@ describe("buildApp", () => {
     expect(agentsResponse.json()).toEqual({
       builtInAgents: [
         { code: "caliginia", name: "Caliginia", bio: "Lys's dark side." },
-        { code: "lysiptera", name: "Lysiptera", bio: "Lys's light side." }
+        { code: "lysiptera", name: "Lysiptera", bio: "Lys's light side." },
+        {
+          code: "armitage",
+          name: "Armitage",
+          bio: "Lys's tool keeper. It finds the tools the other agents need and answers agents, not chats."
+        }
       ],
       agents: [],
       storedCount: 0,
@@ -370,7 +400,7 @@ describe("buildApp", () => {
     const turn = app.conversationTurns.createConversationTurn({
       conversation: createNewConversationTarget("caliginia"),
       userMessage: createTurnUserMessage("Hello"),
-      model: "qwen/qwen3-8b"
+      model: LM_STUDIO_QWEN3_8B
     })
 
     const part = app.replyParts.createReplyPart(turn.assistantMessage.id, {
@@ -393,8 +423,9 @@ describe("buildApp", () => {
     onTestFinished(async () => await app.close())
     await app.ready()
     // No provider is connected: the model calls are answered here instead.
-    vi.spyOn(app.llmService, "listDownloadedLlmModels").mockResolvedValue([])
-    vi.spyOn(app.llmService, "findLlmContextMeasurement").mockImplementation(
+    const { llmService } = app.llmProviderServices.lmStudio
+    vi.spyOn(llmService, "listDownloadedLlmModels").mockResolvedValue([])
+    vi.spyOn(llmService, "findLlmContextMeasurement").mockImplementation(
       async (_model, texts) => ({
         contextLength: 1_000_000,
         textTokenCounts: texts.map(() => 1)
@@ -408,7 +439,7 @@ describe("buildApp", () => {
     const chat = await sendChatRequest(app, {
       conversation: { kind: "new", agentCode: "caliginia" },
       message: "Hello",
-      model: "qwen/qwen3-8b",
+      model: LM_STUDIO_QWEN3_8B,
       generationOptions: { temperature: 0.4 }
     })
     const history = await app.inject({
@@ -897,12 +928,66 @@ describe("buildApp", () => {
     onTestFinished(async () => await app.close())
     await app.ready()
 
-    await app.llmRuntimeService.connectLlmRuntime()
+    await app.llmProviderServices.lmStudio.llmRuntimeService.connectLlmRuntime()
 
     expect(log.records).toContainEqual(
       expect.objectContaining({
         level: "warn",
         msg: "[LMStudioClient][System] WebSocket connection refused."
+      })
+    )
+  })
+
+  it("starts every provider's connection once listening, and LM Studio failing to connect stops no other provider", async () => {
+    fakeLmStudio.operations = {
+      ...fakeLmStudio.operations,
+      getLMStudioVersion: () =>
+        Promise.reject(new Error("WebSocket connection refused."))
+    }
+    const ollama = await startProviderServer({
+      "GET /api/tags": () => ({ status: 200, body: { models: [] } })
+    })
+    const config = createOwnedBackendConfig()
+    const settingsFilePath = join(
+      dirname(config.databaseFilePath),
+      "settings.json"
+    )
+    writeFileSync(
+      settingsFilePath,
+      JSON.stringify({
+        providers: {
+          enabled: ["lmStudio", "ollama"],
+          lmStudio: { address: null },
+          ollama: { address: new URL(ollama.baseUrl).host }
+        }
+      })
+    )
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: { ...config, settingsFilePath },
+      logger: createBackendLogger(log)
+    })
+    onTestFinished(async () => await app.close())
+
+    await app.listen({ host: "127.0.0.1", port: 0 })
+
+    const expectedStatuses = [
+      "unreachable",
+      "connected",
+      "off",
+      "off"
+    ] satisfies readonly LlmRuntimeConnectionStatus[]
+    await vi.waitFor(() => {
+      expect(listLlmRuntimeConnectionStatuses(app)).toEqual(expectedStatuses)
+    })
+    expect(ollama.requests).toContainEqual(
+      expect.objectContaining({ method: "GET", path: "/api/tags" })
+    )
+    expect(log.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        provider: "lmStudio" satisfies LlmProvider,
+        msg: "Model provider runtime acquisition failed"
       })
     )
   })

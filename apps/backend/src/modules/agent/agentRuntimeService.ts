@@ -1,4 +1,6 @@
 import type { GetAgentApiResponse } from "@lys/protocol"
+import { ARMITAGE_AGENT_CODE, type EmailAddress } from "@lys/share"
+import type { ToolSearchCallRecordWriter } from "../conversation/records"
 import Agent, { type AgentProfile } from "./agent"
 import type { AgentRequestLimits, AgentRequestState } from "./agentActivity"
 import {
@@ -15,14 +17,22 @@ import type {
   AgentStateView,
   ConversationTitleLookup
 } from "./agentStateTools"
+import { isLysAgentCode } from "./builtInAgents"
 import type {
   AgentReader,
   AgentSearcher,
   AgentSearchMatch,
   FoundAgent
 } from "./capabilities"
+import {
+  FAILED_TOOL_SEARCH,
+  type ToolKeeper,
+  type ToolSearch,
+  type ToolSearchOutcome
+} from "./findToolsTool"
 import type { ReplyContextMeter } from "./replyContextMeter"
 import type { ReplyModel } from "./replyModel"
+import { runToolKeeperSearch } from "./toolKeeperSearch"
 
 /**
  * Finds the title of a stored conversation.
@@ -74,6 +84,16 @@ export type AgentRuntimeServiceOptions = Readonly<{
    * own slots and line.
    */
   requestLimits: AgentRequestLimits
+  /**
+   * Store of the decision records of tool searches' own tool calls, lent
+   * for the service's lifetime.
+   */
+  toolSearchCallRecords: ToolSearchCallRecordWriter
+  /**
+   * Reads the address of Lys's own mailbox while it is in use, or null;
+   * lent to Caliginia and Lysiptera for the service's lifetime.
+   */
+  readLysEmailAddress: () => EmailAddress | null
 }>
 
 /** Shared outcome of a read or search the asking agent may not make. */
@@ -82,6 +102,15 @@ const FORBIDDEN_OUTCOME = Object.freeze({ status: "forbidden" } as const)
 /** Shared outcome of a state read of a code no agent has. */
 const MISSING_OUTCOME = Object.freeze({ status: "missing" } as const)
 
+/**
+ * Reads the email address of an agent that has no mailbox of its own.
+ *
+ * @returns Null, always.
+ */
+function readNoEmailAddress(): null {
+  return null
+}
+
 /** Requests of an agent that has no live instance. */
 const NO_REQUESTS: readonly AgentRequestState[] = Object.freeze([])
 
@@ -89,14 +118,14 @@ const NO_REQUESTS: readonly AgentRequestState[] = Object.freeze([])
  * Builds the listing of an agent a search found.
  *
  * @param match - The search match.
- * @returns The frozen listing, with the role its kind gives.
+ * @returns The frozen listing, with the role its code and kind give.
  */
 function buildAgentListing(match: AgentSearchMatch): AgentListing {
   return Object.freeze({
     code: match.code,
     name: match.name,
     bio: match.bio,
-    role: calculateAgentRole(match.kind),
+    role: calculateAgentRole(match),
     deletedAt: match.deletedAt
   })
 }
@@ -106,8 +135,8 @@ function buildAgentListing(match: AgentSearchMatch): AgentListing {
  *
  * @param agent - The built-in or stored agent as found now.
  * @param requestLimits - Request slots and waiting limit of every agent.
- * @returns Its code, the role its kind gives, its system prompt, and the
- * request limits.
+ * @returns Its code, the role its code and kind give, its system prompt,
+ * and the request limits.
  */
 function buildAgentProfile(
   agent: GetAgentApiResponse,
@@ -115,19 +144,21 @@ function buildAgentProfile(
 ): AgentProfile {
   return Object.freeze({
     code: agent.code,
-    role: calculateAgentRole(agent.kind),
+    role: calculateAgentRole(agent),
     systemPrompt: agent.systemPrompt,
     requestLimits
   })
 }
 
 /**
- * Keeps one live {@link Agent} per agent a request has loaded, and tells
- * agents about themselves and each other as their roles allow.
+ * Keeps one live {@link Agent} per agent a request has loaded, tells agents
+ * about themselves and each other as their roles allow, and has Armitage,
+ * the tool keeper, find the tools a routed turn needs.
  *
  * @remarks An agent becomes live the first time a chat or a context
- * measurement loads it, even for a request refused after the load, and stays
- * live for the service's lifetime, so every turn of an agent, overlapping or
+ * measurement loads it, even for a request refused after the load, and
+ * Armitage on its first tool search; each stays live for the service's
+ * lifetime, so every turn of an agent, overlapping or
  * not, runs on one instance that knows all of them and shares its request
  * slots among them; each live agent has its own slots. Each load gives the live
  * agent the system prompt the agent has now; a reply already running keeps
@@ -138,11 +169,16 @@ function buildAgentProfile(
  * working on no request. Owns its live agents, which own no resource; the
  * model's owner releases the model access and its meter, and the records'
  * owner closes the store. After that, a load of a stored agent's code and a
- * permitted read or search fail with `Database is closed`; a built-in
- * agent's load and a refused read or search touch no store. Concurrency
- * model: single-owner, synchronous on the backend's event loop.
+ * permitted read or search fail with `Database is closed`, and so does
+ * the record of a tool search's first tool call, which fails the search; a
+ * built-in agent's load and a refused read or search touch no store. Concurrency model: single-owner on the backend's event loop; loads,
+ * reads, and searches of agents are synchronous, and tool searches run
+ * asynchronously as requests of Armitage's live agent, overlapping searches
+ * sharing its request slots.
  */
-export default class AgentRuntimeService implements AgentStateReader {
+export default class AgentRuntimeService
+  implements AgentStateReader, ToolKeeper
+{
   /** Borrowed lookup and search of every agent. */
   readonly #agents: AgentReader & AgentSearcher
 
@@ -158,13 +194,20 @@ export default class AgentRuntimeService implements AgentStateReader {
   /** Request slots and waiting limit every live agent gets. */
   readonly #requestLimits: AgentRequestLimits
 
+  /** Borrowed store of the records of tool searches' own tool calls. */
+  readonly #toolSearchCallRecords: ToolSearchCallRecordWriter
+
+  /** Reads the address of Lys's own mailbox while it is in use. */
+  readonly #readLysEmailAddress: () => EmailAddress | null
+
   /** Live agents by code, each created on its agent's first load. */
   readonly #liveAgents = new Map<string, Agent>()
 
   /**
    * Retains the borrowed lookups and model access without reading anything.
    * @param options - Agent lookup and search, model access, its meter, the
-   * conversation title lookup, and the request limits of every agent.
+   * conversation title lookup, the request limits of every agent, and the
+   * store of tool searches' call records.
    */
   public constructor(options: AgentRuntimeServiceOptions) {
     this.#agents = options.agents
@@ -172,6 +215,8 @@ export default class AgentRuntimeService implements AgentStateReader {
     this.#replyContextMeter = options.replyContextMeter
     this.#findConversationTitle = options.findConversationTitle
     this.#requestLimits = options.requestLimits
+    this.#toolSearchCallRecords = options.toolSearchCallRecords
+    this.#readLysEmailAddress = options.readLysEmailAddress
   }
 
   /**
@@ -181,29 +226,43 @@ export default class AgentRuntimeService implements AgentStateReader {
    * @returns The agent's live instance, created on its first load with every
    * request slot free and the service's request limits, and holding the
    * system prompt the built-in or stored agent has now; undefined
-   * when no agent has the code or its agent is deleted, which creates
-   * nothing.
+   * when no agent has the code, its agent is deleted, or it is Armitage, the
+   * tool keeper, which answers agents, not chats; that creates nothing.
    * @throws For a code that is not a built-in agent's, if the store is closed
    * or the stored agent is invalid.
    */
   public loadChatAgent(code: string): Agent | undefined {
+    if (code === ARMITAGE_AGENT_CODE) return undefined
     const found = this.#agents.findAgent(code)
     if (found?.deletedAt !== null) return undefined
-    const liveAgent = this.#liveAgents.get(code)
-    if (liveAgent !== undefined) {
-      liveAgent.updateSystemPrompt(found.agent.systemPrompt)
-      return liveAgent
+    return this.#loadLiveAgent(found.agent)
+  }
+
+  /**
+   * Has Armitage, the tool keeper, find the tools that fit a task.
+   *
+   * @param search - As {@link ToolKeeper.findTools} takes it.
+   * @returns As {@link ToolKeeper.findTools} returns; `failed`, after
+   * reporting why, also when Armitage is not one of the built-in agents.
+   * The search runs on Armitage's live agent, made live on the first
+   * search, as {@link runToolKeeperSearch} runs it.
+   * @throws The signal's abort reason once `search.abortSignal` aborts,
+   * before anything is read or reported when it aborted already.
+   */
+  public async findTools(search: ToolSearch): Promise<ToolSearchOutcome> {
+    search.abortSignal.throwIfAborted()
+    const found = this.#agents.findAgent(ARMITAGE_AGENT_CODE)
+    if (found === undefined) {
+      search.reportFailure(
+        new Error("Armitage, the built-in tool keeper, is not defined")
+      )
+      return FAILED_TOOL_SEARCH
     }
-    const createdAgent = new Agent(
-      buildAgentProfile(found.agent, this.#requestLimits),
-      {
-        replyModel: this.#replyModel,
-        replyContextMeter: this.#replyContextMeter,
-        stateReader: this
-      }
+    return await runToolKeeperSearch(
+      this.#loadLiveAgent(found.agent),
+      search,
+      this.#toolSearchCallRecords
     )
-    this.#liveAgents.set(code, createdAgent)
-    return createdAgent
   }
 
   /**
@@ -213,8 +272,8 @@ export default class AgentRuntimeService implements AgentStateReader {
    * {@link AgentStateReader.listAgentMatches} takes it.
    * @returns `forbidden` without searching when the reader's role does not
    * grant `find-agents`; otherwise `found` with the frozen first matches in
-   * search order, deleted agents included, each with the role its kind
-   * gives, and the number of all matches.
+   * search order, deleted agents included, each with the role its code and
+   * kind give, and the number of all matches.
    * @throws If the store is closed or a matched agent is invalid.
    */
   public listAgentMatches(
@@ -258,6 +317,35 @@ export default class AgentRuntimeService implements AgentStateReader {
   }
 
   /**
+   * Loads the live agent of an agent as found now.
+   * @param agent - The built-in or stored agent.
+   * @returns Its live instance, holding the agent's system prompt now;
+   * created on the agent's first load with every request slot free and the
+   * service's request limits.
+   */
+  #loadLiveAgent(agent: GetAgentApiResponse): Agent {
+    const liveAgent = this.#liveAgents.get(agent.code)
+    if (liveAgent !== undefined) {
+      liveAgent.updateSystemPrompt(agent.systemPrompt)
+      return liveAgent
+    }
+    const createdAgent = new Agent(
+      buildAgentProfile(agent, this.#requestLimits),
+      {
+        replyModel: this.#replyModel,
+        replyContextMeter: this.#replyContextMeter,
+        stateReader: this,
+        toolKeeper: this,
+        readEmailAddress: isLysAgentCode(agent.code)
+          ? this.#readLysEmailAddress
+          : readNoEmailAddress
+      }
+    )
+    this.#liveAgents.set(agent.code, createdAgent)
+    return createdAgent
+  }
+
+  /**
    * Builds the state of one found agent.
    * @param found - The agent and its deletion.
    * @returns The frozen state, with the request slot count every agent has
@@ -270,7 +358,7 @@ export default class AgentRuntimeService implements AgentStateReader {
     return Object.freeze({
       code: found.agent.code,
       name: found.agent.name,
-      role: calculateAgentRole(found.agent.kind),
+      role: calculateAgentRole(found.agent),
       deletedAt: found.deletedAt,
       requestSlotCount: this.#requestLimits.slotCount,
       requests: Object.freeze(

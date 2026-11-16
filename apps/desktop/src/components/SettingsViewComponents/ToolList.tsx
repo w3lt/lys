@@ -136,11 +136,7 @@ function ToolApprovalRow({
         variant="outline"
       >
         {TOOL_APPROVALS.map((option) => (
-          <ToggleGroupItem
-            className="settings-view__tool-segment"
-            key={option}
-            value={option}
-          >
+          <ToggleGroupItem key={option} value={option}>
             {formatToolApprovalLabel(option)}
           </ToggleGroupItem>
         ))}
@@ -424,12 +420,7 @@ function ToolUnavailableNote({
       {isFixedInSecretsPane(reason) ? (
         <>
           {" "}
-          <Button
-            onClick={onOpenSecrets}
-            size="sm"
-            type="button"
-            variant="link"
-          >
+          <Button onClick={onOpenSecrets} type="button" variant="link">
             Open Secrets
           </Button>
         </>

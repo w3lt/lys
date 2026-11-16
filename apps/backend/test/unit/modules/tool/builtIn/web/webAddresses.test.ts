@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   isBlockedAddress,
-  isLocalHostName
+  isLocalUrlHost
 } from "../../../../../../src/modules/tool/builtIn/web/webAddresses"
 
 describe("isBlockedAddress", () => {
@@ -61,18 +61,39 @@ describe("isBlockedAddress", () => {
   })
 })
 
-describe("isLocalHostName", () => {
+describe("isLocalUrlHost", () => {
   it.each(["localhost", "localhost.", "app.localhost", "a.b.localhost."])(
-    "treats %s as this machine",
+    "treats the name %s as this machine",
     (hostname) => {
-      expect(isLocalHostName(hostname)).toBe(true)
+      expect(isLocalUrlHost(hostname)).toBe(true)
     }
   )
 
   it.each(["example.com", "localhost.example.com", "mylocalhost", "local"])(
-    "does not treat %s as this machine",
+    "does not treat the name %s as this machine",
     (hostname) => {
-      expect(isLocalHostName(hostname)).toBe(false)
+      expect(isLocalUrlHost(hostname)).toBe(false)
     }
   )
+
+  it.each([
+    ["a local name", "localhost"],
+    ["a name under localhost", "api.localhost."],
+    ["a loopback IPv4 address", "127.0.0.1"],
+    ["a private IPv4 address", "192.168.1.10"],
+    ["the IPv6 loopback address", "[::1]"],
+    ["an IPv4-mapped loopback address", "[::ffff:7f00:1]"],
+    ["a unique-local IPv6 address", "[fd00::1]"]
+  ])("treats %s as local", (_label, hostname) => {
+    expect(isLocalUrlHost(hostname)).toBe(true)
+  })
+
+  it.each([
+    ["a host name", "example.com"],
+    ["a public IPv4 address", "93.184.215.14"],
+    ["a public IPv6 address", "[2606:4700:4700::1111]"],
+    ["a name made of digits and dots", "1.2.3.4.5"]
+  ])("does not treat %s as local", (_label, hostname) => {
+    expect(isLocalUrlHost(hostname)).toBe(false)
+  })
 })

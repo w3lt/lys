@@ -41,14 +41,18 @@ async fn build_smtp_context(
         smtp_security,
     };
     ToolContext::new(
+        email::mailbox::Mailbox::Person,
         build_account(servers, false),
-        Trust::create_with_extra_roots(vec![authority.root.clone()]),
+        email::tools::SharedCalls::new(Trust::create_with_extra_roots(vec![
+            authority.root.clone(),
+        ])),
     )
 }
 
 /// The failure of a sign-in to the SMTP server that took too long.
 fn build_sign_in_timeout() -> ToolFailure {
     ToolFailure::SignIn {
+        mailbox: email::mailbox::Mailbox::Person,
         protocol: Protocol::Smtp,
         failure: SignInFailure::TimedOut,
     }

@@ -98,10 +98,10 @@ describe("createChatAttachmentUnsupportedProblem", () => {
 })
 
 describe("createChatImageNeedsVisionProblem", () => {
-  it("names the image and the model that cannot see it", () => {
+  it("names the image and the model that cannot see it, with the model's provider", () => {
     const problem = createChatImageNeedsVisionProblem(
       "photo.png",
-      "qwen/qwen3-8b",
+      { provider: "groq", modelKey: "qwen/qwen3-8b" },
       "/api/v1/chat"
     )
 
@@ -110,7 +110,7 @@ describe("createChatImageNeedsVisionProblem", () => {
       title: "Image needs vision",
       status: 409,
       detail:
-        "The image photo.png needs a model with vision, and qwen/qwen3-8b cannot see images.",
+        "The image photo.png needs a model with vision, and qwen/qwen3-8b on Groq cannot see images.",
       instance: "/api/v1/chat",
       fileName: "photo.png",
       model: "qwen/qwen3-8b"

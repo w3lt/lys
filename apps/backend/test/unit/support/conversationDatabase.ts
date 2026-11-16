@@ -341,13 +341,14 @@ function saveReplyRow(
   statements
     .getStatement(
       `INSERT INTO conversation_messages
-      (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
-      VALUES (?, ?, 'assistant', ?, '', ?, ?, ?, ?)`
+      (id, conversation_id, role, model, provider, content, status, finish_reason, created_at, updated_at)
+      VALUES (?, ?, 'assistant', ?, ?, '', ?, ?, ?, ?)`
     )
     .run(
       row.id,
       row.conversationId,
       row.model,
+      row.provider,
       row.status,
       row.finishReason,
       row.createdAt,
@@ -504,5 +505,28 @@ export function listJobReportRows(
 ): JobReportRowFixture[] {
   return database.handleDatabaseReadRequest((statements) =>
     listStoredJobReportRows(statements)
+  )
+}
+
+/**
+ * Reads every stored tool call decision record.
+ *
+ * @param database - Read access to a migrated test database.
+ * @returns Each record's columns by name, ordered by call.
+ */
+export function readToolCallDecisionRows(
+  database: DatabaseReader
+): Record<string, unknown>[] {
+  return database.handleDatabaseReadRequest((statements) =>
+    statements
+      .getStatement(
+        `SELECT call_id AS callId, conversation_id AS conversationId,
+        agent_code AS agentCode, tool_name AS toolName,
+        policy_effect AS policyEffect, policy_reason AS policyReason,
+        policy_id AS policyId, approval_mode AS approvalMode, answer, outcome,
+        created_at AS createdAt, updated_at AS updatedAt
+        FROM tool_call_decisions ORDER BY call_id`
+      )
+      .all()
   )
 }

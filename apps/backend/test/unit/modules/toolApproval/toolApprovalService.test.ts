@@ -52,8 +52,12 @@ describe("ToolApprovalService", () => {
       vi.fn()
     )
 
-    expect(gate.startToolCall(PAGE_CALL, () => true).status).toBe("allowed")
-    expect(gate.startToolCall(SEARCH_CALL, () => true).status).toBe("prompted")
+    expect(gate.startToolCall(PAGE_CALL, false, () => true).status).toBe(
+      "allowed"
+    )
+    expect(gate.startToolCall(SEARCH_CALL, false, () => true).status).toBe(
+      "prompted"
+    )
     expect(sendToolApprovalPrompt.mock.calls).toEqual([[SEARCH_CALL]])
   })
 
@@ -67,8 +71,8 @@ describe("ToolApprovalService", () => {
       createAllowingPromptSender(),
       vi.fn()
     )
-    gate.startToolCall(PAGE_CALL, () => true)
-    gate.startToolCall(SEARCH_CALL, () => true)
+    gate.startToolCall(PAGE_CALL, false, () => true)
+    gate.startToolCall(SEARCH_CALL, false, () => true)
 
     expect(readJustRunToolNames).toHaveBeenCalledOnce()
   })
@@ -87,7 +91,7 @@ describe("ToolApprovalService", () => {
         createAllowingPromptSender(),
         vi.fn()
       )
-      decisions.push(gate.startToolCall(PAGE_CALL, () => true).status)
+      decisions.push(gate.startToolCall(PAGE_CALL, false, () => true).status)
     }
 
     expect(decisions).toEqual(["prompted", "allowed", "prompted"])
@@ -104,8 +108,12 @@ describe("ToolApprovalService", () => {
       reportSettingsUnreadable
     )
 
-    expect(gate.startToolCall(PAGE_CALL, () => true).status).toBe("prompted")
-    expect(gate.startToolCall(SEARCH_CALL, () => true).status).toBe("prompted")
+    expect(gate.startToolCall(PAGE_CALL, false, () => true).status).toBe(
+      "prompted"
+    )
+    expect(gate.startToolCall(SEARCH_CALL, false, () => true).status).toBe(
+      "prompted"
+    )
     expect(reportSettingsUnreadable).toHaveBeenCalledOnce()
   })
 

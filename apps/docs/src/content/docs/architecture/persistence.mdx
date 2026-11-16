@@ -25,7 +25,8 @@ images vmo runs its page-reading VMs from.
 Only the backend reads or writes the database directly.
 `SqliteDatabase` (`apps/backend/src/infrastructure/database/`) owns the
 connection, its schema version, and closing it; the composition root opens it
-once and closes it after the LLM runtime service and before the chat service.
+once and closes it last, after the chat service and every provider's LLM
+runtime service.
 Stores borrow read and write transactions that cannot close the connection or
 end a transaction early. The conversation records in
 `src/infrastructure/database/conversations/` own every query on the
@@ -45,7 +46,7 @@ operation cannot change data.
 | Table                      | Owned by                    | Notes                                                                                                                                                                                                                                                                                         |
 | -------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `conversations`            | SQLite conversation records | One row per conversation, including `title`, `agent_code`, `created_at`, and `updated_at`. A job also has its `parent_conversation_id` and `job_number`; a main conversation has neither.                                                                                                     |
-| `conversation_messages`    | SQLite conversation records | Ordered user messages and replies, with each reply's `status`, `finish_reason`, and `model`, and each reply's reasoning, text, and tool-call parts as rows under it. A user message's `origin` says who wrote it: the person, a delegator, or the backend for a wake-up turn.                 |
+| `conversation_messages`    | SQLite conversation records | Ordered user messages and replies, with each reply's `status`, `finish_reason`, `model`, and `provider`, and each reply's reasoning, text, and tool-call parts as rows under it. A user message's `origin` says who wrote it: the person, a delegator, or the backend for a wake-up turn.     |
 | `conversation_sources`     | SQLite conversation records | One row per numbered web source of a conversation: `number`, `url`, and `title`, each number and URL once.                                                                                                                                                                                    |
 | `conversation_attachments` | SQLite conversation records | One row per attachment of a user message: `number`, `name`, `kind`, `size_bytes`, and an image's `media_type`, `width`, and `height`; each number once per conversation, each name once per message ignoring case.                                                                            |
 | `job_reports`              | SQLite delegation records   | One row per report a job sent its delegator: a progress note, or how one of the job's replies ended, with the title of the job message it answers and, once delivered, the parent's message that delivered it. Storing a turn and startup recovery write it through the conversation records. |
@@ -72,10 +73,12 @@ agent records are just two interfaces, `AgentRecordStore` for listing,
 lookup, and changes and `AgentRecordSearcher` for search: the service is
 their only consumer and uses every operation of both, while the routes
 receive narrow capabilities of the service instead. Deleting an agent only sets its `deleted_at`, so its code is
-never free again and the built-in agents can still look it up; listings,
+never free again and the built-in agents but Armitage can still look it up; listings,
 counts, and changes skip it. The service is not a database service: it also owns the
-built-in agents Caliginia and Lysiptera, which are never stored, and refuses
-to store another agent under their codes `caliginia` and `lysiptera`. It is
+built-in agents Caliginia, Lysiptera, and Armitage, which are never stored,
+and refuses to store another agent under their codes `caliginia`,
+`lysiptera`, and `armitage`; schema version 12 moved a stored agent coded
+`armitage`, with its conversations, to a free code. It is
 decorated as `app.agentService`; the agent routes in
 `src/modules/agent/routes/` call it. The agent runtime service, decorated as
 `app.agentRuntimeService`, reads agents through it for the chat routes and
@@ -100,7 +103,7 @@ On startup the database owner:
 1. Opens the SQLite file with foreign keys enabled.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
-4. Records the latest version, 12, and commits; a migration failure rolls back
+4. Records the latest version, 19, and commits; a migration failure rolls back
    all pending work.
 5. Switches to write-ahead logging with `synchronous = NORMAL`. A database from
    a newer version was refused in step 3, before anything changed its file.
@@ -130,8 +133,23 @@ text, and tool calls are rows of their own under the reply's row, moves each
 stored reply's text into one text part, and adds `conversation_sources`; it
 cannot be undone. Version 10 adds `conversation_attachments`. Version 11 adds
 `agents.deleted_at`; agents deleted before it are gone, and their codes stay
-free. Version 12 adds jobs: the parent and job number columns of
-`conversations`, the `origin` and `job_call_id` columns of
+free. Version 13 adds `tool_call_decisions`, one record per tool call of how
+the backend decided it, with a trigger that copies each status change of the
+call into its record; a call stored before it has no record. Version 14
+creates that table again, copying every row, so a record may also store the
+answer `expired`, and version 15 does the same so it may store the denials
+`outside-approved-folders` and `settings-unreadable`. Version 16 adds
+`tool_search_call_decisions`, one record per tool call of a tool search's
+reply, such as Armitage's, under the `find_tools` call that ran the search,
+with a trigger that marks the search's calls still running as interrupted
+when that call stops running. Version 17 creates both decision tables again,
+copying every row, so a record may store the identity of the policy's rule
+set and the policy's usage, budget, open-world, and paid-tool reasons.
+Version 18 adds `conversation_messages.provider`, the provider of the model
+that wrote each reply, because the same model key on two providers names two
+models; replies stored before it have none (`NULL`), since which provider
+wrote them was never stored. Version 19 adds jobs: the parent and job
+number columns of `conversations`, the `origin` and `job_call_id` columns of
 `conversation_messages`, and the `job_reports` table. It only adds, and
 `NULL` in a new column keeps every existing row's meaning: a main
 conversation, and a message the person wrote.
@@ -144,7 +162,13 @@ the conversation's activity time forward, to a later time when the message's
 time is not later than the stored one. A rename validates
 the renamed conversation before it commits, so an invalid stored row rolls the
 rename back. Every reply part, fragment, tool call change, and source is
-committed before it is sent to any stream following the reply. The fragment
+committed before it is sent to any stream following the reply. A tool call's
+decision record is written in the transaction that stores the call, and the
+answer that moves a waiting call on in the transaction that changes it; see
+[Database schemas](/reference/schema/#tool_call_decisions). A tool search's
+reply is kept in memory, so each of its calls is recorded in a transaction of
+its own when the reply keeps it, before it can run, and its end in another;
+see [`tool_search_call_decisions`](/reference/schema/#tool_search_call_decisions). The fragment
 `UPDATE`, like every statement, is compiled on its first use and reused; each
 write runs in one write transaction, guarded by the reply still streaming.
 Finalizing a reply marks its waiting and running tool calls interrupted in
@@ -155,8 +179,9 @@ conversation, in the transaction that stores the turn.
 ## Settings ownership
 
 The settings JSON is a separate host-managed artifact. The backend reads only
-the Tavily API key, the Just run list (`tools.justRun`), and the `mcp` group
-from it, and never writes it. The desktop reaches it through Tauri commands.
+the `providers` group with the Ollama Cloud and Groq keys, the Tavily API
+key, the Just run list (`tools.justRun`), the approved folders
+(`tools.approvedFolders`), and the `mcp` group from it, and never writes it. The desktop reaches it through Tauri commands.
 
 Generation, load configuration, tool approval, and runtime startup switch
 edits are saved automatically. Each save reads the document already on disk

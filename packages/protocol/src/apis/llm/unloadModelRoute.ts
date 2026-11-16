@@ -7,6 +7,7 @@ import {
   type LlmProviderLoadsModelsProblem
 } from "../../http/errors/llm"
 import { llmServiceBusyProblemSchema } from "../../http/errors/llmServiceBusy"
+import { llmProviderApiParamsSchema, type LlmProviderApiParams } from "./_share"
 import { apiLlmUnloadModelRoute } from "./routes"
 
 /** Validates a non-empty model key whose loaded instances should be stopped. */
@@ -41,11 +42,12 @@ export const llmUnloadModelApiResponseSchemas = Object.freeze({
  * may load a new matching instance afterward. Service-busy responses mean the
  * unload was refused before queue acceptance. Accepted unloads continue under
  * the service owner even if the requesting client disconnects. A 409 response
- * means the connected provider loads its own models, so nothing was stopped.
+ * means the provider loads its own models, so nothing was stopped.
  */
 export const llmUnloadModelApi = Object.freeze({
   method: "PATCH",
   path: apiLlmUnloadModelRoute,
+  params: llmProviderApiParamsSchema,
   body: llmUnloadModelApiRequestBodySchema,
   responses: llmUnloadModelApiResponseSchemas
 })
@@ -71,7 +73,7 @@ export type LlmUnloadModelApiReply = {
   readonly 204: undefined
   /** Loaded model was not found. */
   readonly 404: LlmUnloadModelApiNotFoundResponse
-  /** The connected provider loads its own models; nothing was stopped. */
+  /** The provider loads its own models; nothing was stopped. */
   readonly 409: LlmProviderLoadsModelsProblem
   /** Admission was refused, runtime access failed, or the unload failed. */
   readonly 503: LlmUnloadModelApiServiceUnavailableResponse
@@ -79,6 +81,8 @@ export type LlmUnloadModelApiReply = {
 
 /** Fastify route type for the model-unload request and responses. */
 export type LlmUnloadModelApiRoute = {
+  /** Validated provider whose model instances are stopped. */
+  readonly Params: LlmProviderApiParams
   /** Validated canonical model key supplied to the backend handler. */
   readonly Body: LlmUnloadModelApiRequestBody
   /** Status-specific success and Problem Details payloads. */

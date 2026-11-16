@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs"
 
 /** Identifiers for prompt files maintained by the backend. */
 export type PromptType =
-  "caliginia-system" | "lysiptera-system" | "title-generation"
+  | "caliginia-system"
+  | "lysiptera-system"
+  | "armitage-system"
+  | "title-generation"
 
 /** Filesystem record associating a prompt identifier with its module-relative path. */
 type PromptProps = {
@@ -21,6 +24,10 @@ const prompts: PromptProps[] = [
   {
     type: "lysiptera-system",
     filePath: new URL("./lysiptera.txt", import.meta.url)
+  },
+  {
+    type: "armitage-system",
+    filePath: new URL("./armitage.txt", import.meta.url)
   },
   {
     type: "title-generation",

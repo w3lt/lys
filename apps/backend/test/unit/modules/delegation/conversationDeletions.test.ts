@@ -226,6 +226,7 @@ describe("stopDeletedReplies", () => {
     const { generation, replyTask } = startControlledGeneration(services, lead)
     await waitForMicrotasks()
     const approval = replyTask.context.sendToolApprovalPrompt(approvalToolCall)
+    const [prompt] = generation.pendingToolCalls.toolApprovals
     const toolResult = replyTask.context.sendClientToolCall(desktopToolCall)
     const replies = listWorkingReplies(services.runtime, conversationId)
     services.conversation.editor.deleteConversation(conversationId)
@@ -239,7 +240,10 @@ describe("stopDeletedReplies", () => {
       toolApprovals: []
     })
     expect(
-      generation.resolveToolCall(approvalToolCall.id, { status: "allowed" })
+      generation.resolveToolCall(approvalToolCall.id, {
+        status: "allowed",
+        approvalToken: prompt?.approvalToken ?? ""
+      })
     ).toBe("not-pending")
     expect(
       generation.resolveToolCall(desktopToolCall.id, {

@@ -1,9 +1,11 @@
 import {
   agentCodeSchema,
   FIND_AGENTS_TOOL_NAME,
+  LLM_PROVIDER_NAMES,
   READ_AGENT_STATE_TOOL_NAME,
   READ_MY_STATE_TOOL_NAME,
   toolDefinitionSchema,
+  type EmailAddress,
   type ToolDefinition
 } from "@lys/share"
 import type {
@@ -24,6 +26,7 @@ import {
   type AgentIdentity,
   type AgentRole
 } from "./agentRoles"
+import { isLysAgentCode } from "./builtInAgents"
 import { MAXIMUM_AGENT_SEARCH_MATCHES } from "./capabilities"
 import { formatOneLine } from "./oneLineText"
 
@@ -172,6 +175,12 @@ export type AgentStateToolContext = Readonly<{
   requestId: string
   /** Reads agents and their state; lent for the turn. */
   reader: AgentStateReader
+  /**
+   * Email address that is the agent's own when the turn began: Lys's own
+   * mailbox's while it is in use, for Caliginia and Lysiptera only; null
+   * otherwise. Personal data.
+   */
+  emailAddress: EmailAddress | null
 }>
 
 /** One run of a state tool: the reply that calls it, and when it runs. */
@@ -194,7 +203,8 @@ const FORBIDDEN_MESSAGE = "Only leaders can see other agents."
 /** What the state tools offer an agent of each role. */
 const ROLE_SCOPE_TEXT: Readonly<Record<AgentRole, string>> = Object.freeze({
   leader: `As a leader you can find other agents with ${FIND_AGENTS_TOOL_NAME} and read their state with ${READ_AGENT_STATE_TOOL_NAME}.`,
-  member: "As a member you can see only your own state."
+  member: "As a member you can see only your own state.",
+  "tool-keeper": "As the tool keeper you can see no agent's state."
 })
 
 /** Words for each status of a tool call. */
@@ -228,7 +238,7 @@ function buildReadMyStateDefinition(role: AgentRole): ToolDefinition {
     : "You can see only your own state."
   return toolDefinitionSchema.parse({
     name: READ_MY_STATE_TOOL_NAME,
-    description: `Read your own state: who you are, your role, how many of your request slots are in use, and each request you are working on right now, the reply you are writing included, or that waits for a free slot, with its conversation, model, start time, and step. ${scope}`,
+    description: `Read your own state: who you are, your role, your email address when you have one, how many of your request slots are in use, and each request you are working on right now, the reply you are writing included, or that waits for a free slot, with its conversation, model, start time, and step. ${scope}`,
     group: "agents",
     access: "reads",
     runner: "backend",
@@ -375,7 +385,8 @@ function formatRequestPlace(
  * @param request - The request.
  * @param linePlace - One-based place in line of a waiting request.
  * @param run - The reply that calls the tool, and the time of the run.
- * @returns Where it is, when it started, its model, and its step.
+ * @returns Where it is, when it started, its model and the model's provider,
+ * and its step.
  */
 function formatRequest(
   request: AgentRequestView,
@@ -384,7 +395,7 @@ function formatRequest(
 ): string {
   const place = formatRequestPlace(request, run.requestId)
   const elapsed = formatElapsedTime(request.startedAt, run.now)
-  return `${place}: started ${request.startedAt} (${elapsed}) with ${request.model}; ${formatRequestStep(request.step, linePlace)}.`
+  return `${place}: started ${request.startedAt} (${elapsed}) with ${request.model.modelKey} on ${LLM_PROVIDER_NAMES[request.model.provider]}; ${formatRequestStep(request.step, linePlace)}.`
 }
 
 /**
@@ -448,12 +459,34 @@ function formatRequests(
  * Formats who the calling agent is.
  *
  * @param state - The calling agent's state.
- * @returns Its name, code, role, deletion, and what its role lets it see.
+ * @param emailAddress - The agent's own email address, or null.
+ * @returns Its name, code, role, deletion, what its role lets it see, and
+ * its email address, or for Caliginia and Lysiptera that none is in use.
  */
-function formatOwnHeader(state: AgentStateView): string {
+function formatOwnHeader(
+  state: AgentStateView,
+  emailAddress: EmailAddress | null
+): string {
   const deletion =
     state.deletedAt === null ? "" : ` You were deleted on ${state.deletedAt}.`
-  return `You are ${formatOneLine(state.name)} (code ${state.code}), a ${state.role}.${deletion} ${ROLE_SCOPE_TEXT[state.role]}`
+  return `You are ${formatOneLine(state.name)} (code ${state.code}), a ${state.role}.${deletion} ${ROLE_SCOPE_TEXT[state.role]}${formatOwnEmailAddress(state.code, emailAddress)}`
+}
+
+/**
+ * Formats the calling agent's own email address.
+ *
+ * @param code - Code of the calling agent.
+ * @param emailAddress - Its own email address, or null.
+ * @returns The sentence that gives the address, after a space; for
+ * Caliginia and Lysiptera without one, the sentence that none is in use;
+ * else nothing, as no other agent has a mailbox of its own.
+ */
+function formatOwnEmailAddress(
+  code: string,
+  emailAddress: EmailAddress | null
+): string {
+  if (emailAddress !== null) return ` Your email address is ${emailAddress}.`
+  return isLysAgentCode(code) ? " You have no email address in use." : ""
 }
 
 /**
@@ -504,7 +537,7 @@ function runReadMyState(
   if (outcome.status !== "found")
     return buildRefusedStateResult(outcome, context.self.code)
   return buildSucceededResult([
-    formatOwnHeader(outcome.state),
+    formatOwnHeader(outcome.state, context.emailAddress),
     ...formatRequests(outcome.state, context.requestId, now)
   ])
 }
@@ -741,14 +774,18 @@ function buildRoleTools(role: AgentRole): readonly AgentStateToolEntry[] {
 const ROLE_TOOLS: Readonly<Record<AgentRole, readonly AgentStateToolEntry[]>> =
   Object.freeze({
     leader: buildRoleTools("leader"),
-    member: buildRoleTools("member")
+    member: buildRoleTools("member"),
+    "tool-keeper": buildRoleTools("tool-keeper")
   })
 
 /** State tool definitions of each role, built once from its tools. */
 const ROLE_DEFINITIONS: Readonly<Record<AgentRole, readonly ToolDefinition[]>> =
   Object.freeze({
     leader: Object.freeze(ROLE_TOOLS.leader.map((tool) => tool.definition)),
-    member: Object.freeze(ROLE_TOOLS.member.map((tool) => tool.definition))
+    member: Object.freeze(ROLE_TOOLS.member.map((tool) => tool.definition)),
+    "tool-keeper": Object.freeze(
+      ROLE_TOOLS["tool-keeper"].map((tool) => tool.definition)
+    )
   })
 
 /**
@@ -756,7 +793,8 @@ const ROLE_DEFINITIONS: Readonly<Record<AgentRole, readonly ToolDefinition[]>> =
  *
  * @param role - Role of the agent.
  * @returns The frozen definitions, the same on every call: `read_my_state`
- * for both roles, then `find_agents` and `read_agent_state` for a leader.
+ * for a leader and a member, then `find_agents` and `read_agent_state` for a
+ * leader; none for the tool keeper.
  * Each is in the `agents` group, reads this machine, and runs in the
  * backend.
  */

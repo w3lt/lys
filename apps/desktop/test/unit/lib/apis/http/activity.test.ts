@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { readActivityEvents } from "@/lib/apis/http/activity"
 import {
   ACTIVITY_ROUTE,
+  buildActivityApprovalPrompt,
   buildActivityReply,
   buildIdleActivityRoute
 } from "../../../support/activityFixtures"
@@ -100,7 +101,7 @@ describe("readActivityEvents", () => {
       {
         type: "tool-approval",
         ...jobReply,
-        call: buildToolCall(69, "read_text_file")
+        ...buildActivityApprovalPrompt(buildToolCall(69, "read_text_file"))
       },
       { type: "reply-ended", ...jobReply, status: "completed" }
     ]

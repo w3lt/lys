@@ -1,9 +1,12 @@
-import type { ChatGenerationEvent } from "@lys/protocol"
-import type {
-  ConversationSource,
-  ReplyPart,
-  ToolCallReplyPart
+import type { ChatGenerationEvent, ChatToolApprovalAnswer } from "@lys/protocol"
+import {
+  replyPartSchema,
+  type ConversationSource,
+  type ReplyPart,
+  type ToolCallReplyPart
 } from "@lys/share"
+import { v7 as uuidv7 } from "uuid"
+import type { ToolCallDecisionRecord } from "../toolApproval/toolCallDecisionRecord"
 
 /** Reasoning or text of one round, as the agent asks to store it. */
 type ReplyFragmentDraft = Readonly<{
@@ -25,6 +28,11 @@ type ReplyToolCallDraftBase = Readonly<{
   toolName: string
   /** Argument text as the model wrote it. */
   argumentText: string
+  /**
+   * How the backend decided the call before it ran; stored with the call
+   * and never shown to the model or a follower.
+   */
+  decision: ToolCallDecisionRecord
 }>
 
 /**
@@ -55,8 +63,10 @@ export type ReplyPartDraft =
  * One change of a stored tool call.
  *
  * @remarks `running` follows the person's approval of a waiting call;
- * `rejected` answers a waiting call the person did not allow; `succeeded`
- * and `failed` end a running call with the text the model reads.
+ * `rejected` answers a waiting call that was not allowed, with why;
+ * `expired` ends a waiting call whose prompt reached its time limit, and is
+ * stored as `failed`; `succeeded` and `failed` end a running call with the
+ * text the model reads.
  */
 export type ReplyToolCallChange =
   | Readonly<{
@@ -75,11 +85,68 @@ export type ReplyToolCallChange =
       sources: readonly ConversationSource[]
     }>
   | Readonly<{
-      /** The call failed while running, or the person rejected it. */
-      status: "failed" | "rejected"
+      /** The call failed while running. */
+      status: "failed"
       /** Non-empty explanation the model reads. */
       result: string
     }>
+  | Readonly<{
+      /** The call was not allowed. */
+      status: "rejected"
+      /** Non-empty explanation the model reads. */
+      result: string
+      /**
+       * Why: `declined` when the person rejected the call, `showFailed`
+       * when the client could not show it to them.
+       */
+      reason: Extract<ChatToolApprovalAnswer, { status: "rejected" }>["reason"]
+    }>
+  | Readonly<{
+      /**
+       * Nobody answered the call's prompt within its time limit, so the
+       * call never ran; stored as failed.
+       */
+      status: "expired"
+      /** Non-empty explanation the model reads. */
+      result: string
+    }>
+
+/**
+ * Builds the complete part a draft describes.
+ *
+ * @param draft - Part the agent asks to store.
+ * @param now - Time of the operation, stored as both of the part's times.
+ * @returns The validated part; a reasoning or text part gets a new UUIDv7, a
+ * tool call keeps its own identifier and leaves its decision out. No draft is
+ * a succeeded call, so none shows sources.
+ * @throws If the draft breaks the part contract, such as empty text or an
+ * empty failure message.
+ */
+export function buildReplyPart(draft: ReplyPartDraft, now: string): ReplyPart {
+  if (draft.kind !== "tool-call")
+    return replyPartSchema.parse({
+      kind: draft.kind,
+      id: uuidv7(),
+      round: draft.round,
+      createdAt: now,
+      updatedAt: now,
+      content: draft.content
+    })
+  const toolCall = {
+    kind: draft.kind,
+    id: draft.id,
+    round: draft.round,
+    toolName: draft.toolName,
+    argumentText: draft.argumentText,
+    createdAt: now,
+    updatedAt: now
+  }
+  return replyPartSchema.parse(
+    draft.status === "failed"
+      ? { ...toolCall, status: draft.status, result: draft.result }
+      : { ...toolCall, status: draft.status }
+  )
+}
 
 /** What a reply's part sequence needs from its turn. */
 export type ReplyPartSequenceDependencies = Readonly<{

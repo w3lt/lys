@@ -4,6 +4,28 @@ import { clearMocks } from "@tauri-apps/api/mocks"
 import { afterEach, beforeEach } from "vitest"
 import { startBackendFake } from "./support/backendFake"
 
+/**
+ * Streams the blob's bytes, as the platform's `Blob.stream()` does. jsdom's
+ * Blob has no `stream()`, and Shiki's WebAssembly loader calls it to unpack
+ * its engine, so without it every Markdown pass that runs Shiki fails.
+ * @param this - The blob whose bytes the stream yields.
+ * @returns A stream that yields the blob's bytes in one chunk and then
+ * closes, or errors when the bytes cannot be read.
+ */
+function streamBlobBytes(this: Blob): ReturnType<Blob["stream"]> {
+  const bytes = this.arrayBuffer()
+  return new ReadableStream({
+    async start(controller) {
+      controller.enqueue(new Uint8Array(await bytes))
+      controller.close()
+    }
+  })
+}
+
+if (!Object.hasOwn(Blob.prototype, "stream")) {
+  Blob.prototype.stream = streamBlobBytes
+}
+
 // Vitest globals are off, so Testing Library cannot register its own cleanup.
 // Unmount every rendered tree and remove the Tauri IPC double after each case,
 // so neither a rendered component nor a native command handler reaches the

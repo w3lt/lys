@@ -11,6 +11,24 @@ const SERVER_NAME = "notes"
 const EMPTY_INPUT_SCHEMA = Object.freeze({ type: "object" })
 
 /**
+ * Annotations the email server Lys ships gives a read, a send, and a
+ * deletion, the same on each mailbox's copy of the tool.
+ */
+const EMAIL_TOOL_ANNOTATIONS = Object.freeze({
+  search_emails: { readOnlyHint: true, openWorldHint: true },
+  send_email: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    openWorldHint: true
+  },
+  delete_draft: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    openWorldHint: true
+  }
+})
+
+/**
  * Builds the catalog of tools added one at a time, as the tool list reader
  * adds them.
  *
@@ -100,8 +118,97 @@ describe("McpToolCatalogBuilder", async () => {
         }
       ],
       skippedTools: [],
-      isToolListCut: false
+      isToolListCut: false,
+      destructiveToolNames: new Set(),
+      openWorldWriteToolNames: new Set()
     })
+  })
+
+  it.each([
+    ["marked destructive", { destructiveHint: true }, true],
+    [
+      "marked destructive and read-only",
+      { destructiveHint: true, readOnlyHint: true },
+      false
+    ],
+    ["marked not destructive", { destructiveHint: false }, false],
+    ["marked only as not read-only", { readOnlyHint: false }, false],
+    ["without annotations", undefined, false]
+  ])(
+    "names a listed tool %s as destructive only when its server says so: %s",
+    (_label, annotations, isDestructive) => {
+      const catalog = buildCatalog([
+        { ...buildTool("erase"), annotations },
+        buildTool("read")
+      ])
+
+      expect(catalog.destructiveToolNames).toEqual(
+        new Set(isDestructive ? ["mcp__notes__erase"] : [])
+      )
+    }
+  )
+
+  it.each(
+    Object.entries({
+      "marked open-world": [{ openWorldHint: true }, true],
+      "marked open-world and destructive": [
+        { openWorldHint: true, destructiveHint: true },
+        true
+      ],
+      "marked open-world and read-only": [
+        { openWorldHint: true, readOnlyHint: true },
+        false
+      ],
+      "marked not open-world": [{ openWorldHint: false }, false],
+      "marked only as not read-only": [{ readOnlyHint: false }, false],
+      "without annotations": [undefined, false]
+    } satisfies Record<
+      string,
+      readonly [Readonly<Record<string, boolean>> | undefined, boolean]
+    >)
+  )(
+    "names a listed tool %s as an open-world write only when its server says so",
+    (_label, [annotations, isOpenWorldWrite]) => {
+      const catalog = buildCatalog([
+        { ...buildTool("send"), annotations },
+        buildTool("read")
+      ])
+
+      expect(catalog.openWorldWriteToolNames).toEqual(
+        new Set(isOpenWorldWrite ? ["mcp__notes__send"] : [])
+      )
+    }
+  )
+
+  it("names the sends and deletions of both email mailboxes as asking, each by its own name", () => {
+    const builder = new McpToolCatalogBuilder("email")
+    for (const prefix of ["", "lys_"])
+      for (const [name, annotations] of Object.entries(EMAIL_TOOL_ANNOTATIONS))
+        builder.addTool({ ...buildTool(`${prefix}${name}`), annotations })
+
+    const catalog = builder.build()
+
+    expect(catalog.openWorldWriteToolNames).toEqual(
+      new Set([
+        "mcp__email__send_email",
+        "mcp__email__delete_draft",
+        "mcp__email__lys_send_email",
+        "mcp__email__lys_delete_draft"
+      ])
+    )
+    expect(catalog.destructiveToolNames).toEqual(
+      new Set(["mcp__email__delete_draft", "mcp__email__lys_delete_draft"])
+    )
+  })
+
+  it("never names a skipped tool as destructive", () => {
+    const catalog = buildCatalog([
+      { ...buildTool("erase"), annotations: { destructiveHint: true } },
+      { ...buildTool("erase"), annotations: { destructiveHint: true } }
+    ])
+
+    expect(catalog.skippedTools).toHaveLength(1)
+    expect(catalog.destructiveToolNames).toEqual(new Set(["mcp__notes__erase"]))
   })
 
   it("keeps the server's order", () => {
@@ -652,7 +759,9 @@ describe("McpToolCatalogBuilder", async () => {
     expect(buildCatalog([])).toEqual({
       definitions: [],
       skippedTools: [],
-      isToolListCut: false
+      isToolListCut: false,
+      destructiveToolNames: new Set(),
+      openWorldWriteToolNames: new Set()
     })
   })
 })

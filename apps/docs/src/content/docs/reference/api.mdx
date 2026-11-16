@@ -14,12 +14,12 @@ route definitions.
 | Method   | Path                                                                              | Request body                                                                                         | Response                                                                   |
 | -------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | `GET`    | `/api/v1/heath`                                                                   | none                                                                                                 | `{ ok: true }`                                                             |
-| `GET`    | `/api/v1/llm/list`                                                                | none                                                                                                 | `{ llms: LlmInfo[], modelLoading: "lys" \| "provider" }`                   |
-| `GET`    | `/api/v1/llm/:modelId/health`                                                     | none                                                                                                 | Loaded-state health observation                                            |
-| `POST`   | `/api/v1/llm/load`                                                                | `{ modelId: string, configuration?: ModelLoadConfiguration }`                                        | `LlmInfo`                                                                  |
-| `PATCH`  | `/api/v1/llm/unload`                                                              | `{ modelId: string }`                                                                                | `204` or typed Problem Details                                             |
-| `GET`    | `/api/v1/llm/runtime`                                                             | none                                                                                                 | `{ status: "connecting" \| "connected" \| "unreachable" }`                 |
-| `POST`   | `/api/v1/llm/runtime/connect`                                                     | none                                                                                                 | Settled `{ status }`, or service-busy Problem Details                      |
+| `GET`    | `/api/v1/llm/:provider/list`                                                      | none                                                                                                 | `{ llms: LlmInfo[], modelLoading: "lys" \| "provider" }`                   |
+| `GET`    | `/api/v1/llm/:provider/:modelId/health`                                           | none                                                                                                 | Loaded-state health observation                                            |
+| `POST`   | `/api/v1/llm/:provider/load`                                                      | `{ modelId: string, configuration?: ModelLoadConfiguration }`                                        | `LlmInfo`                                                                  |
+| `PATCH`  | `/api/v1/llm/:provider/unload`                                                    | `{ modelId: string }`                                                                                | `204` or typed Problem Details                                             |
+| `GET`    | `/api/v1/llm/:provider/runtime`                                                   | none                                                                                                 | `{ status: "connecting" \| "connected" \| "unreachable" \| "off" }`        |
+| `POST`   | `/api/v1/llm/:provider/runtime/connect`                                           | none                                                                                                 | Settled `{ status }`, or service-busy Problem Details                      |
 | `GET`    | `/api/v1/conversations`                                                           | none; optional `query`, `cursor`, `limit` query parameters                                           | Conversation list page                                                     |
 | `GET`    | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Conversation with ordered messages and numbered sources                    |
 | `PATCH`  | `/api/v1/conversations/:conversationId`                                           | `{ title: string }`                                                                                  | Conversation metadata, or `409` for a job                                  |
@@ -40,22 +40,31 @@ route definitions.
 | `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`                 | none                                                                                                 | `text/event-stream` (reply snapshot, then live events)                     |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                   | none                                                                                                 | Bodyless `204`, or `409` Problem Details                                   |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`   | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                                   |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId` | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                                   |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId` | `{ status, reason?, content?, approvalToken }`                                                       | Bodyless `204`, or `409` Problem Details                                   |
 | `POST`   | `/api/v1/chat/:conversationId/jobs/stop`                                          | none                                                                                                 | Bodyless `204`, or `404` Problem Details                                   |
 | `GET`    | `/api/v1/activity/events`                                                         | none                                                                                                 | `text/event-stream` (activity snapshot, then live events)                  |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
 
-List, load, health, unload, and chat-context requests, and a chat request
-for a model whose capabilities the backend has not read yet, answer `503`
-with `urn:lys:problem:llm:runtime-unavailable` while the backend has no
-connected model provider. The runtime-status route never contacts the
-provider; the runtime-connect route waits for a connection attempt, which
-reads the provider saved in `settings.json` again. Requests share a queued
-attempt. A request made while an attempt runs reads the file and shares that
-attempt when it read the same provider; otherwise it waits for an attempt of
-its own.
+Every `/api/v1/llm/` route is for one provider, which its `:provider` path
+segment names: `lmStudio`, `ollama`, `ollamaCloud`, or `groq`. A path that
+names any other provider answers `400` before the route runs, and no
+provider is asked. Each provider has its own connection and its own
+[model operation queue](#model-operation-admission), so a request for one
+provider never waits for another's.
+
+List, load, health, unload, chat, and chat-context requests answer `503`
+with `urn:lys:problem:llm:runtime-unavailable` while the provider they name
+is not connected, which includes a provider that is off; a chat request then
+stores nothing, and nothing is sent to another provider. The runtime-status
+route never contacts the provider; the runtime-connect route waits for a
+connection attempt, which reads from `settings.json` again whether the
+provider is on, its address, and its key. An attempt for a provider that is
+off contacts nothing and settles as `off`. Requests for one provider share a
+queued attempt. A request made while an attempt runs reads the file and
+shares that attempt when both reads found the provider on with the same
+address or key; otherwise it waits for an attempt of its own.
 
 Every request body is limited to 1 MiB (1,048,576 bytes), Fastify's default,
 except a tool result, which is limited to 8 MiB (8,388,608 bytes) so that a
@@ -75,7 +84,7 @@ changed. The response is Fastify's JSON error body, with
     "id": "0198f5a5-7b9b-7e0b-9b0f-87d9d6a5f72d"
   },
   "message": "Tell me what changed",
-  "model": "google/gemma-4-12b-qat",
+  "model": { "provider": "lmStudio", "modelKey": "google/gemma-4-12b-qat" },
   "generationOptions": {
     "temperature": 0.7,
     "replyCeiling": 2048
@@ -90,7 +99,8 @@ selects one of two forms:
 - `{ "kind": "new", "agentCode": "caliginia" }` starts a new conversation,
   created before the first stream event, that the named agent answers: a
   built-in agent (`caliginia`, `lysiptera`) or a stored one. A valid code that
-  no agent has returns the agent-not-found Problem Details response below with
+  no agent has, or `armitage`, the tool keeper, which answers only other
+  agents, returns the agent-not-found Problem Details response below with
   `404`, and nothing is stored.
 - `{ "kind": "existing", "id": "<UUIDv7>" }` continues a stored conversation
   with the agent it was started with, so it names no agent. An unknown
@@ -105,20 +115,30 @@ stored, after its attachment files are written, so a conversation or agent
 deleted in between gets the same `404` or `409` problem, and the written
 files are deleted again.
 
-Once the agent is found, the route reads from the provider's inventory whether
-`model` has `vision` and `trainedForToolUse`, which decide the images the
-model sees and the tools the backend adds to the turn. It remembers what a
-listed model can do while the backend stays connected to the same provider,
-and forgets all of it when another provider connects, so requests for a model read the
-inventory only until a listing has it: while the provider is not connected, such
-a request answers `503` with `urn:lys:problem:llm:runtime-unavailable`, and a
-full model-operation queue `503` with `urn:lys:problem:llm:service-busy`,
-nothing stored. A failed listing is not remembered, and neither is a model
-the inventory does not list: each of its requests reads the inventory again,
-and its turn sees no image and is offered none of the tools the backend
-adds.
+`model` names the model the turn is sent to: `provider`, one of `lmStudio`,
+`ollama`, `ollamaCloud`, or `groq`, and `modelKey`, the non-empty key that
+provider lists the model under, and no other field. The same key on two
+providers names two models. The reply, its title, its context measurements, and the tool
+keeper's searches for it all go to that provider, which receives the model
+by its key; nothing goes to another provider. The reply is stored with both
+the key and the provider.
 
-`message` and `model` must be non-empty strings. Every turn sends the system
+Once the agent is found, the route reads from the inventory of the model's
+provider whether the model has `vision` and `trainedForToolUse`, which decide
+the images the model sees and the tools the backend adds to the turn. Each
+provider's models are read and remembered apart. It remembers what a listed
+model can do while the backend stays connected to that provider at the same
+address and with the same key, and forgets that provider's models when it is
+no longer connected or connects at another address or with another key, so
+requests for a model read the inventory only until a listing has it: while
+the provider is not connected, such a request answers `503` with
+`urn:lys:problem:llm:runtime-unavailable`, and a full model-operation queue
+of that provider `503` with `urn:lys:problem:llm:service-busy`, nothing
+stored. A failed listing is not remembered, and neither is a model the
+inventory does not list: each of its requests reads the inventory again, and
+its turn sees no image and is offered none of the tools the backend adds.
+
+`message` must be a non-empty string. Every turn sends the system
 prompt its agent has when the turn starts, so editing a stored agent changes
 its conversations from their next message. Continuation
 uses the system prompt of the conversation's agent, prior user messages, the
@@ -220,9 +240,9 @@ named `mcp__<server>__<tool>`, and `delegate_work`, which lets the agent give
 work to another agent; see [jobs](#jobs). Together they offer at least one tool, and no name appears in both.
 A request that breaks these rules, names a backend tool the backend does not
 run, or offers `read_attachment`, `read_my_state`, `find_agents`,
-`read_agent_state`, `report_progress`, or `stop_job` as a client or backend
-tool, returns `400` before anything is stored; the backend adds those tools
-to a turn itself. A
+`read_agent_state`, `find_tools`, `report_progress`, or `stop_job` as a
+client or backend tool, returns `400` before anything is stored; the backend
+adds those tools to a turn itself. A
 request that offers a
 backend tool that cannot run now, such as `web_search` without a usable
 Tavily API key, `read_page` while vmo is not ready, or an MCP tool whose
@@ -230,17 +250,22 @@ server is applied but not connected, switched off included, returns `409` with
 `urn:lys:problem:chat:backend-tool-unavailable` before anything is stored; see
 [an offered tool that cannot run](#an-offered-tool-that-cannot-run). An MCP
 tool name that no applied server lists, such as one of a removed server or a
-tool its server no longer lists, returns `400`. The model is offered client
-tools first, then Lys's own backend tools, each in request order, then
-`read_attachment` for a model trained for tool use while the conversation
-holds a text file, then MCP tools in request order, then, for a model
-trained for tool use, the
-[agent state tools](/architecture/backend/#agent-state-tools) and the
-[delegation tools](/architecture/backend/#delegation-tools) the turn may use:
-`delegate_work` when the request offers it, the conversation is a main
-conversation, and the agent is a leader; `stop_job` with `delegate_work` and
-in every turn of a conversation that has jobs; and `report_progress` in
-every turn of a job. A turn keeps the MCP tools it was offered; each call
+tool its server no longer lists, returns `400`. The model is offered
+`read_attachment` first, for a model trained for tool use while the
+conversation holds a text file, then client tools, then Lys's own backend
+tools, then MCP tools, each in request order, then, for a model trained for
+tool use, the [agent state tools](/architecture/backend/#agent-state-tools)
+and the [delegation tools](/architecture/backend/#delegation-tools) the turn
+may use: `delegate_work` when the request offers it, the conversation is a
+main conversation, and the agent is a leader; `stop_job` with
+`delegate_work` and in every turn of a conversation that has jobs; and
+`report_progress` in every turn of a job. For a model trained for tool use,
+the client, backend, and MCP tools are
+[routed](/architecture/backend/#tool-routing): the first round offers
+`find_tools` in their place, and each tool it finds is offered from the
+reply's next round; the agent state tools and the delegation tools are
+offered from the first round and never routed. A turn keeps the MCP tools it
+was offered; each call
 runs on the tool's server as it is connected when the call runs, and fails
 for the model when the server is no longer connected or no longer lists the
 tool. Without `tools`, a turn of a model that is not trained for tool use is
@@ -286,9 +311,9 @@ All three fields are optional:
 
 A tool appears at most once across `tools`, `switchedOffToolNames`, and
 `unavailableTools`, and neither list names `read_attachment`,
-`read_my_state`, `find_agents`, `read_agent_state`, `report_progress`, or
-`stop_job`, which have no switch and which the backend adds to a turn
-itself. A request that breaks these
+`read_my_state`, `find_agents`, `read_agent_state`, `find_tools`,
+`report_progress`, or `stop_job`, which have no switch and which the backend
+adds to a turn itself. A request that breaks these
 rules returns `400` before anything is stored.
 
 Every round of the turn sends the agent's system prompt followed by the notes
@@ -329,8 +354,9 @@ is not, because only the request offers it.
 Accepted chat turns respond as SSE. A missing conversation, a new
 conversation naming a code no agent has, a stored conversation whose agent no
 longer exists, a continued conversation that is a job, an offered backend
-tool that cannot run now, an attachment Lys cannot send, an image for a model without vision, or a model-capability read
-the provider cannot answer returns JSON Problem Details before the stream
+tool that cannot run now, an attachment Lys cannot send, an image for a model
+without vision, or a model-capability read the model's provider cannot answer
+returns JSON Problem Details before the stream
 starts, and nothing is stored or written: no message, no file, and no failed
 reply. Each event payload must match one of
 the eleven variants documented in [SSE events](/reference/sse-events/).
@@ -379,7 +405,7 @@ measurement takes no request slot, so it answers while the agent is busy.
     "kind": "existing",
     "id": "01992f3a-5b6c-7d8e-9f01-23456789abcd"
   },
-  "model": "google/gemma-4-12b-qat",
+  "model": { "provider": "lmStudio", "modelKey": "google/gemma-4-12b-qat" },
   "tools": { "definitions": [], "backendToolNames": ["web_search"] }
 }
 ```
@@ -393,11 +419,16 @@ current system prompt, followed by the notes about the
 [tools the turn does not offer](#tools-the-turn-does-not-offer) when the
 request names any or switches tool calls off, the
 stored messages a turn includes, the empty message,
-and the tools a turn would offer, client tools first, then Lys's own backend
-tools, then `read_attachment` when the conversation holds a text file for a
-model trained for tool use, then the MCP tools of connected servers, then,
-for a model trained for tool use, the agent state tools the answering
-agent's role gives. It counts them with the loaded model's tokenizer and
+and the tools a turn's first round would offer: `read_attachment` first when
+the conversation holds a text file for a model trained for tool use, then
+client tools, then Lys's own backend tools, then the MCP tools of connected
+servers, then, for a model trained for tool use, the agent state tools the
+answering agent's role gives. For a model trained for tool use, the
+offered client, backend, and MCP tools are
+[routed](/architecture/backend/#tool-routing): `find_tools` is measured in
+their place, and the note that tells the model to call it ends the system
+prompt. A `new` conversation that names `armitage` returns `404`, as a chat
+does. It counts them with the loaded model's tokenizer and
 answers `200`:
 
 ```json
@@ -411,14 +442,14 @@ answers `200`:
 }
 ```
 
-| Field                 | Meaning                                                                       |
-| --------------------- | ----------------------------------------------------------------------------- |
-| `contextLength`       | Context length the model is loaded with; the smallest of its loaded instances |
-| `systemPromptTokens`  | Tokens of the agent's system prompt, with the notes about unoffered tools     |
-| `toolTokens`          | Tokens of the offered tool definitions; `0` when none are offered             |
-| `historyTokens`       | Tokens of the stored messages the next turn would include                     |
-| `historyMessageCount` | Number of those messages                                                      |
-| `messageMarkupTokens` | Tokens the new message takes without its text; a client adds the text's count |
+| Field                 | Meaning                                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------------- |
+| `contextLength`       | Context length the model is loaded with; the smallest of its loaded instances                  |
+| `systemPromptTokens`  | Tokens of the agent's system prompt, with the notes about unoffered tools and the routing note |
+| `toolTokens`          | Tokens of the tool definitions a first round offers; `0` when none are offered                 |
+| `historyTokens`       | Tokens of the stored messages the next turn would include                                      |
+| `historyMessageCount` | Number of those messages                                                                       |
+| `messageMarkupTokens` | Tokens the new message takes without its text; a client adds the text's count                  |
 
 - Each count is the text's tokens plus a fixed allowance for the chat
   template's markup: 8 tokens per message, 16 per tool call of an earlier
@@ -432,7 +463,7 @@ answers `200`:
   image whose file is gone is measured as the placeholder sentence a turn
   sends instead. When a stored message
   holds a text file and the model is trained for tool use, `read_attachment`
-  is measured after the offered tools, as a turn offers it. Whether the model
+  is measured before the offered tools, as a turn offers it. Whether the model
   sees images and is trained for tool use is read as the chat request reads
   it, through the same remembered capabilities. A client adds the same
   estimate for each image it would send.
@@ -441,13 +472,13 @@ answers `200`:
   measured only while its server is connected, because its definition is
   known only then; the chat request refuses one whose server is not
   connected.
-- The model is matched like a chat request names it: by its model key, as LM
-  Studio lists it. A model that is not loaded is never
+- The model is matched like a chat request names it: on its provider, by the
+  key that provider lists it under. A model that is not loaded is never
   loaded; the route answers `503` with `urn:lys:problem:llm:model-not-loaded`.
 - The measurement runs through the
-  [model operation queue](#model-operation-admission), so it waits behind a
-  load in progress, and a full queue answers `503` with
-  `urn:lys:problem:llm:service-busy`.
+  [model operation queue](#model-operation-admission) of the model's
+  provider, so it waits behind a load in progress there, and a full queue
+  answers `503` with `urn:lys:problem:llm:service-busy`.
 - A new conversation naming an unknown agent, a conversation that is not
   stored, and a conversation whose agent was deleted get the same `404` and
   `409` problems as the chat request. A backend tool name the backend does not
@@ -489,11 +520,12 @@ document). For `read_page`, it is `page-reader-not-ready`: vmo did not answer
 `unavailableTools` is a listed tool, once. The list reads the settings file
 and asks vmo's health route, contacts nothing else, and never contains the
 key. `read_attachment`, the attachment reader, the agent state tools,
-`read_my_state`, `find_agents`, and `read_agent_state`, and the delegation
-tools `report_progress` and `stop_job` are not listed and cannot be offered
-by name: the chat route adds them to a turn by itself; see
+`read_my_state`, `find_agents`, and `read_agent_state`, `find_tools`, and
+the delegation tools `report_progress` and `stop_job` are not listed and
+cannot be offered by name: the backend adds them to a turn by itself; see
 [attachments](#attachments),
-[agent state tools](/architecture/backend/#agent-state-tools), and
+[agent state tools](/architecture/backend/#agent-state-tools),
+[tool routing](/architecture/backend/#tool-routing), and
 [delegation tools](/architecture/backend/#delegation-tools).
 
 An MCP tool's definition has `runner` and `group` `mcp`, and `access`
@@ -555,50 +587,74 @@ fraction Tavily reports is rounded up. The answer never contains the key.
 
 ## Tool approvals
 
-The backend decides which tool calls need the person: every call of a tool
+The backend decides which tool calls need the person: every call the
+[tool call policy](/architecture/backend/#tool-call-policy) allows of a tool
 that is not saved as Just run, client, backend, and MCP tools alike,
 `delegate_work` included, except `read_attachment`, the agent state tools,
-`report_progress`, and `stop_job`, which run without approval. A call of a
-job's reply asks the person like any other; its prompt arrives on the
+`find_tools`, `report_progress`, and `stop_job`, which run without approval,
+and every call the policy requires approval of, of an MCP tool its server
+marks as destructive or as an open-world write, and of `web_search` from a
+reply's sixth call on, even on Just run. A tool `find_tools` found is asked
+about like any other. A call of a job's reply asks the person like any
+other; its prompt arrives on the
 [activity stream](/reference/sse-events/#activity-stream). It shows such a
 call with a `tool-approval` event, and the client answers it with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`,
 where `callId` is the `id` of the event's call or of its entry in
-`reply-snapshot.pendingToolApprovals`. One request answers one prompt.
+`reply-snapshot.pendingToolApprovals`. One request answers one prompt, and its
+body returns the prompt's `approvalToken`, the single-use token the event or
+the snapshot entry carried.
 
 ```json
-{ "status": "allowed" }
+{
+  "status": "allowed",
+  "approvalToken": "kq3Vb0z2mY9vYQpX7tq1oJw4cE8fH6sN5rU0dLiGaZk"
+}
 ```
 
 ```json
 {
   "status": "rejected",
   "reason": "declined",
-  "content": "The person declined this call. They said: not that folder"
+  "content": "The person declined this call. They said: not that folder",
+  "approvalToken": "kq3Vb0z2mY9vYQpX7tq1oJw4cE8fH6sN5rU0dLiGaZk"
 }
 ```
 
-After `allowed`, the backend runs a backend tool itself, or calls an MCP
-tool on its server, stores its result with the call, and gives it to the
-model; the client sees that result in the
-call's `reply-part` event. For a client tool, it sends the call to run with a
-`tool-call` event under the same `id`. After `rejected`, nothing runs, no
-request reaches an MCP server, and the model reads `content`. `reason` is not shown to the model: `declined` when the person
-rejected the call, and `showFailed` when the client could not show it, such as
-a tool it does not list or arguments it cannot describe.
+After `allowed`, the backend runs a backend tool itself, or calls an MCP tool
+on its server, stores its result with the call, and gives it to the model; the
+client sees that result in the call's `reply-part` event. For a client tool,
+it sends the call to run with a `tool-call` event under the same `id`. After
+`rejected`, nothing runs, no request reaches an MCP server, and the model
+reads `content`. The model never reads `approvalToken`. `reason` is not shown
+to the model: `declined` when the person rejected the call, and `showFailed`
+when the client could not show it, such as a tool it does not list or
+arguments it cannot describe.
 
 The route answers a bodyless `204` once the answer is accepted, and the
-reply's loop continues. A prompt that is unknown, already answered, or whose
-reply ended, and a call that waits for its result instead, return `409` with
+reply's loop continues; the token then stops working. A body without
+`approvalToken`, or with one that is not 43 base64url characters, fails
+validation with `400`. A prompt that is unknown, already answered, expired,
+or whose reply ended, an answer whose token is not the prompt's, and a call
+that waits for its result instead, return `409` with
 `urn:lys:problem:chat:tool-call-not-pending` and change nothing, so repeating
-a request whose response was lost is harmless. The backend sets no time limit
-on a prompt; it waits as for a [tool result](#tool-results).
+a request whose response was lost is harmless, a token sent again finds
+nothing, and a wrong token does not tell the caller whether a prompt waits.
+The prompt keeps waiting after a wrong token, and the backend logs the refusal
+at warn level without the token. A prompt waits at most five minutes
+(`TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES` in `@lys/protocol`); an answer
+must arrive before then. At the limit the backend ends the prompt, stores the
+call as `failed` with a sentence the model reads that names the limit, and
+continues the reply as after a rejection; the client sees the call's change in
+a `reply-part` event. Stop, the end of the reply, or shutdown ends a prompt
+earlier, as it ends the wait for a [tool result](#tool-results).
 
 ## Tool results
 
 A `tool-call` event asks the client to run one call of a client tool: one the
-person allowed, or one whose tool is saved as Just run. The client runs it
-without asking again and answers with
+person allowed, or one the tool call policy allows of a tool saved as Just
+run; a call the policy denies is never sent. The client runs it without asking
+again and answers with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`,
 where `callId` is the `id` of the call's `tool-call` event or of its entry in
 `reply-snapshot.pendingToolCalls`. One request answers one call. Calls of
@@ -689,7 +745,7 @@ is listed as `off`. It reads nothing and contacts no server.
 breaks its rules; or `unreadable` when the file cannot be read as a JSON
 object. After `invalid` or `unreadable`, the backend keeps the servers it
 applied before, and `servers` lists them. The list never carries a command,
-an argument, an environment variable, a URL, a header, or the email account.
+an argument, an environment variable, a URL, a header, or an email account.
 
 | `state.status` | Other fields                                 | Meaning                                                                                                                                                                      |
 | -------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -698,17 +754,17 @@ an argument, an environment variable, a URL, a header, or the email account.
 | `failed`       | `reason`                                     | It is not connected; Reconnect or a changed setting tries again, except that Reconnect answers `409` for `account-missing` and `account-invalid`, which a saved account ends |
 | `off`          | none                                         | Its switch is off, so it is neither started nor reached and lists no tool; Reconnect answers `409`                                                                           |
 
-| `reason`          | Meaning                                                                                                                                                                                                                             |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `start-failed`    | The command could not be started, such as a command not found on `PATH`                                                                                                                                                             |
-| `closed`          | The process exited, or the connection ended, while connecting or later, such as a URL server that answered a call with HTTP `404`, which ends its session, or a server that sent an answer larger than 16 MiB once it was connected |
-| `timed-out`       | Connecting and reading the tools took longer than two minutes                                                                                                                                                                       |
-| `unauthorized`    | The server answered HTTP `401` or `403`; Lys does not sign in with OAuth ([#253](https://github.com/w3lt/lys/issues/253))                                                                                                           |
-| `unreachable`     | No connection could be made, such as a refused connection or an unknown host                                                                                                                                                        |
-| `http-error`      | The server answered another HTTP error, or a redirect, which Lys does not follow                                                                                                                                                    |
-| `protocol-error`  | The server's answers are not valid MCP, an answer while connecting was larger than 16 MiB, or it answered the connection or the tool list with an error                                                                             |
-| `account-missing` | The email server Lys ships is switched on, but no email account is saved; nothing is started until one is                                                                                                                           |
-| `account-invalid` | The email server Lys ships is switched on, but the saved account or its password fails its rules or could not be read; nothing is started until it is saved again                                                                   |
+| `reason`          | Meaning                                                                                                                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start-failed`    | The command could not be started, such as a command not found on `PATH`                                                                                                                                                               |
+| `closed`          | The process exited, or the connection ended, while connecting or later, such as a URL server that answered a call with HTTP `404`, which ends its session, or a server that sent an answer larger than 16 MiB once it was connected   |
+| `timed-out`       | Connecting and reading the tools took longer than two minutes                                                                                                                                                                         |
+| `unauthorized`    | The server answered HTTP `401` or `403`; Lys does not sign in with OAuth ([#253](https://github.com/w3lt/lys/issues/253))                                                                                                             |
+| `unreachable`     | No connection could be made, such as a refused connection or an unknown host                                                                                                                                                          |
+| `http-error`      | The server answered another HTTP error, or a redirect, which Lys does not follow                                                                                                                                                      |
+| `protocol-error`  | The server's answers are not valid MCP, an answer while connecting was larger than 16 MiB, or it answered the connection or the tool list with an error                                                                               |
+| `account-missing` | A mailbox of the email server Lys ships is switched on, the person's or Lys's own, but its email account is not saved; nothing is started, for either mailbox, until it is                                                            |
+| `account-invalid` | A mailbox of the email server Lys ships is switched on, but its saved account or password fails its rules or could not be read, or the two accounts open one mailbox; nothing is started, for either mailbox, until it is saved again |
 
 A connected server's tools are read once, when it connects, across at most 16
 pages of its tool list; a 16th page that names a next one fails the opening,
@@ -735,8 +791,8 @@ whose settings did not change keeps its connection, or its failure; a changed
 one is closed and opened again once that close ended; a removed or
 switched-off one is closed, and a switched-off one is listed as `off`; a new
 or switched-on one is opened. A server Lys ships reads what it needs from the
-file at each apply while its switch is on, the email server the saved account
-and its password, and is opened, or listed as `failed` with
+file at each apply while its switch is on, the email server the saved accounts
+of the mailboxes switched on and their passwords, and is opened, or listed as `failed` with
 `account-missing` or `account-invalid`; an added server with its name is
 applied in its place.
 The servers it opens are `connecting` in the answer, which does not wait for
@@ -807,22 +863,39 @@ stopped. The model reads one of:
   and which ends the connection, failing the server's other calls in flight
   the same way.
 
-The backend checks only the shape of a call's arguments before it asks the
-person: a JSON object of at most 256 KiB, nesting at most 32 levels, whose
-keys follow the argument name rule and include every name the schema
-requires. The server checks the values.
+Before it asks the person, the backend checks the shape of a call's arguments,
+a JSON object of at most 256 KiB, nesting at most 32 levels, whose keys follow
+the argument name rule and include every name the schema requires, and the
+[tool call policy](/architecture/backend/#tool-call-policy) denies a call that
+names a credential file, a path outside the approved folders, or a blocked
+address. The server checks the values.
 
 ### The email server's tools
 
-The email server Lys ships offers ten tools, named `mcp__email__<tool>` to the
-model, each starting on Ask me unless a Just run choice saved for a tool of the
-same name of an earlier server named `email` was kept, as
-[Choices kept by name](/architecture/security/#mcp-servers) says. Every call
+The email server Lys ships offers ten tools for each mailbox it serves, named
+`mcp__email__<tool>` to the model: the ten below for the person's mailbox, and
+the same ten with `lys_` before their names, such as `lys_send_email`, for
+Lys's own, with the same arguments, annotations, and limits. Each tool starts
+on Ask me unless a Just run choice saved for a tool of the same name of an
+earlier server named `email` was kept, as
+[Choices kept by name](/architecture/security/#mcp-servers) says, so Just run
+is chosen for each mailbox's tools on their own. Each description begins with
+the mailbox the tool works on and names no address. Only Caliginia and
+Lysiptera are offered Lys's tools or may call them; another agent's turn never
+offers them, and its call of one is answered as a call of a tool it was not
+offered, as the [backend architecture](/architecture/backend/#the-email-server)
+says. Every call
 opens at most one connection to the
-account's IMAP server and one to its SMTP server, and closes them before the
-call answers. A message id is `<uid>.<uidvalidity>.<folder>` and stays valid
-while the message stays in that folder and the folder is neither renamed nor
-recreated. A call takes at most 240 seconds, within the five minutes the
+mailbox account's IMAP server and one to its SMTP server, and closes them
+before the call answers. A message id is `<uid>.<uidvalidity>.<folder>` on
+the person's mailbox and `lys.<uid>.<uidvalidity>.<folder>` on Lys's, and
+stays valid while the message stays in that folder and the folder is neither
+renamed nor recreated. A tool of Lys's given an id of the person's mailbox,
+as `id`, `reply_to_id`, `forward_id`, or `draft_id`, fails without acting,
+saying `This id is from the person's mailbox. Use the tools without lys_ for it.`
+A tool of the person's given an id of Lys's mailbox fails as given no id,
+with `That is not a message id. Use an id from search_emails, such as 12.345.INBOX.`,
+so nothing it answers names her mailbox. A call takes at most 240 seconds, within the five minutes the
 backend gives every MCP call: the TCP connection and each TLS handshake but
 SMTP's after STARTTLS at most 15 seconds each, each IMAP command and each
 SMTP step, such as the greeting, STARTTLS with its handshake, the sign-in, or
@@ -831,28 +904,29 @@ answer at most 120. A longer successful result is cut so that, with its note,
 it holds at most 20,000 UTF-16 code units, the length the backend keeps of
 every MCP result, error or not.
 
-| Tool                | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Limits                                                                                                                                                                                                                                                                                                                                                                  |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `search_emails`     | Finds messages, newest first, 20 per page, in one folder or, without `folder`, in every folder but an All Mail folder; `text`, `from`, `to`, `subject`, `since` and `before` as `YYYY-MM-DD`, `unread`, `flagged`, and `page` narrow it; each hit shows its id, and each page runs the search again, so mail that arrives, moves, or is deleted between two pages can repeat or skip a hit                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | At most 200 hits read per folder, and the result says which folders were cut; a text argument up to 998 characters; a folder name up to 255                                                                                                                                                                                                                             |
-| `read_email`        | Reads one message by id: its header fields, flags, text, and the list of its attachments, without marking it read                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |                                                                                                                                                                                                                                                                                                                                                                         |
-| `read_conversation` | Reads the conversation a message belongs to, oldest first: the messages whose Message-ID, In-Reply-To, or References field names one of its identifiers exactly, found in every folder, an All Mail view last, each shown once by its Message-ID                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | The newest messages that fit in the result, at most 50, each cut to 3,000 characters of text, and the result says how many older ones were left out; at most the newest 50 matches are read in each folder, and a folder that has more is named; the search uses at most 30 of the message's identifiers, its Message-ID, its In-Reply-To, then its References in order |
-| `read_attachment`   | Reads one attachment of a message as text                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Text, HTML, CSV, JSON, XML, and YAML only; another kind, such as a PDF or an image, is named by `read_email` but cannot be read                                                                                                                                                                                                                                         |
-| `list_folders`      | Lists every folder with its role, Inbox, Sent, Drafts, Trash, Junk, Archive, or All, from the server's RFC 6154 attributes, else from its name, and how many messages it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |                                                                                                                                                                                                                                                                                                                                                                         |
-| `manage_folder`     | Creates, renames, or deletes a folder                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | A folder with a role is neither renamed nor deleted, and a folder holding messages or other folders is not deleted                                                                                                                                                                                                                                                      |
-| `send_email`        | Sends a message with `to`, `cc`, `bcc`, `subject`, and `body`; with `reply_to_id` a reply in that conversation, and with `forward_id` a forward quoting its text and attaching its attachments, each to the recipients and with the subject the call names: a reply or forward without a recipient or a subject is refused: a reply's refusal for want of a recipient names who the replied message is from and where it asks replies to go, and a refusal for want of a subject suggests the usual `Re:` or `Fwd:` one; files a copy in Sent unless the account says the server keeps one, and reports the copy, or, when the IMAP server's answer was lost, unreadable, or late once all of the copy was handed over, that it may or may not be in Sent; a send the SMTP server took but did not confirm is reported as one that may or may not have gone, not to be sent again without asking the person | At most 50 recipients per field; a body up to 500,000 characters; sending is permanent                                                                                                                                                                                                                                                                                  |
-| `save_draft`        | Saves a message in Drafts without sending it, with the same fields and the same rule for a reply or forward, and with `draft_id` replaces that draft. Once the server stored the draft, the call succeeds even when a later step fails: it answers the draft's id, or that the id could not be found and why, and says when the replaced draft could not be deleted and may still be in Drafts. A draft whose answer was lost, unreadable, or late once all of it was handed over, and a call stopped once storing the draft began, are reported as a draft that may be in Drafts, to search for before saving it again; with `draft_id`, the answer also names the draft it replaces, which is still in Drafts after a lost, unreadable, or late answer and may still be there after a stop                                                                                                                | The limits of `send_email`                                                                                                                                                                                                                                                                                                                                              |
-| `send_draft`        | Sends the draft `draft_id` names, as stored with any HTML part and attachments but without its Bcc field, when the call's `to`, `cc`, `bcc`, `subject`, and `body` equal the draft's: each field the same addresses in any order, the subject without its outer white space, and the text with CR LF read as LF and without white space at its end; otherwise nothing is sent, and the refusal shows the draft's recipients and subject and where its text differs. A draft without a recipient is refused. Files the Sent copy as `send_email` does and deletes the draft; a copy that fails after the send is reported without advice to send again, and a draft it could not delete, which may still be in Drafts, with advice to delete it with `delete_draft`, not to send it again                                                                                                                    | Only a message in the Drafts folder, every entry of whose recipient fields is an email address; sending is permanent                                                                                                                                                                                                                                                    |
-| `delete_draft`      | Deletes a draft; on a server without UIDPLUS, it, a draft `send_draft` sent, and a draft `save_draft` replaced are only marked `\Deleted` and stay until the folder is expunged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Only a message in the Drafts folder                                                                                                                                                                                                                                                                                                                                     |
+| Tool                | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Limits                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `search_emails`     | Finds messages, newest first, 20 per page, in one folder or, without `folder`, in every folder but an All Mail folder; `text`, `from`, `to`, `subject`, `since` and `before` as `YYYY-MM-DD`, `unread`, `flagged`, and `page` narrow it; each hit shows its id, and each page runs the search again, so mail that arrives, moves, or is deleted between two pages can repeat or skip a hit                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | At most 200 hits read per folder, and the result says which folders were cut; a text argument up to 998 characters; a folder name up to 255                                                                                                                                                                                                                             |
+| `read_email`        | Reads one message by id: its header fields, flags, text, and the list of its attachments, without marking it read                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |                                                                                                                                                                                                                                                                                                                                                                         |
+| `read_conversation` | Reads the conversation a message belongs to, oldest first: the messages whose Message-ID, In-Reply-To, or References field names one of its identifiers exactly, found in every folder, an All Mail view last, each shown once by its Message-ID                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | The newest messages that fit in the result, at most 50, each cut to 3,000 characters of text, and the result says how many older ones were left out; at most the newest 50 matches are read in each folder, and a folder that has more is named; the search uses at most 30 of the message's identifiers, its Message-ID, its In-Reply-To, then its References in order |
+| `read_attachment`   | Reads one attachment of a message as text                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Text, HTML, CSV, JSON, XML, and YAML only; another kind, such as a PDF or an image, is named by `read_email` but cannot be read                                                                                                                                                                                                                                         |
+| `list_folders`      | Lists every folder with its role, Inbox, Sent, Drafts, Trash, Junk, Archive, or All, from the server's RFC 6154 attributes, else from its name, and how many messages it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |                                                                                                                                                                                                                                                                                                                                                                         |
+| `manage_folder`     | Creates, renames, or deletes a folder                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | A folder with a role is neither renamed nor deleted, and a folder holding messages or other folders is not deleted                                                                                                                                                                                                                                                      |
+| `send_email`        | Sends a message with `to`, `cc`, `bcc`, `subject`, and `body` from the mailbox's own address, the only one it sends from; with `reply_to_id` a reply in that conversation, and with `forward_id` a forward quoting its text and attaching its attachments, each to the recipients and with the subject the call names: a reply or forward without a recipient or a subject is refused: a reply's refusal for want of a recipient names who the replied message is from and where it asks replies to go, and a refusal for want of a subject suggests the usual `Re:` or `Fwd:` one; files a copy in Sent unless the account says the server keeps one, and reports the copy, or, when the IMAP server's answer was lost, unreadable, or late once all of the copy was handed over, that it may or may not be in Sent; a send the SMTP server took but did not confirm is reported as one that may or may not have gone, not to be sent again without asking the person | At most 50 recipients per field; a body up to 500,000 characters; sending is permanent                                                                                                                                                                                                                                                                                  |
+| `save_draft`        | Saves a message in Drafts without sending it, with the same fields and the same rule for a reply or forward, and with `draft_id` replaces that draft. Once the server stored the draft, the call succeeds even when a later step fails: it answers the draft's id, or that the id could not be found and why, and says when the replaced draft could not be deleted and may still be in Drafts. A draft whose answer was lost, unreadable, or late once all of it was handed over, and a call stopped once storing the draft began, are reported as a draft that may be in Drafts, to search for before saving it again; with `draft_id`, the answer also names the draft it replaces, which is still in Drafts after a lost, unreadable, or late answer and may still be there after a stop                                                                                                                                                                           | The limits of `send_email`                                                                                                                                                                                                                                                                                                                                              |
+| `send_draft`        | Sends the draft `draft_id` names from the mailbox's own address, as stored with any HTML part and attachments but without its Bcc field, when the call's `to`, `cc`, `bcc`, `subject`, and `body` equal the draft's: each field the same addresses in any order, the subject without its outer white space, and the text with CR LF read as LF and without white space at its end; otherwise nothing is sent, and the refusal shows the draft's recipients and subject and where its text differs. A draft without a recipient is refused. Files the Sent copy as `send_email` does and deletes the draft; a copy that fails after the send is reported without advice to send again, and a draft it could not delete, which may still be in Drafts, with advice to delete it with `delete_draft`, not to send it again                                                                                                                                                | Only a message in the Drafts folder, every entry of whose recipient fields is an email address; sending is permanent                                                                                                                                                                                                                                                    |
+| `delete_draft`      | Deletes a draft; on a server without UIDPLUS, it, a draft `send_draft` sent, and a draft `save_draft` replaced are only marked `\Deleted` and stay until the folder is expunged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Only a message in the Drafts folder                                                                                                                                                                                                                                                                                                                                     |
 
 The server's standard error lines, which the backend logs as
-`MCP server log line` entries, name the operation, counts, and the class of a
-failure, never the password, an address, a subject, or a body.
+`MCP server log line` entries, name the operation by its tool, whose `lys_`
+tells the mailbox, counts, and the class of a failure, never the password, an
+address, a subject, or a body.
 
 ### Email account check
 
 `POST /api/v1/mcp/email/account-check` signs in to an email account's IMAP
 and SMTP servers without saving anything; the desktop sends it before it
-saves an account. Its body is `{ account, password }`, under the rules of the
+saves an account, the person's or Lys's own alike. Its body is `{ account, password }`, under the rules of the
 [email account](/reference/configuration/#email-account) and its password,
 sent as `application/json`, which a page on another site cannot send without
 a CORS preflight; another body answers `400`, or `415` for a media type the
@@ -927,8 +1001,11 @@ the latest user message or reply text part; conversations without one have
 code of the agent that answers it,
 messages ordered by creation time then identifier, each user message with its
 `attachments` and each reply with its `parts` in stored order, and `sources`,
-the conversation's numbered sources in number order. The code stays after its
-agent is deleted, so it may name no agent. Metadata, here and in every other
+the conversation's numbered sources in number order. Each reply also carries
+`model`, the key of the model that wrote it, and `provider`, that model's
+provider, which is `null` for a reply stored before Lys recorded providers;
+the turn-start events and `reply-snapshot` carry the same reply. The code
+stays after its agent is deleted, so it may name no agent. Metadata, here and in every other
 answer and event that carries it, has a `kind`:
 
 - `main`, a conversation the person started, with `parentConversationId`,
@@ -1095,7 +1172,9 @@ replies of jobs and of wake-up turns, and the jobs they belong to; see the
 ## Agents
 
 There are two kinds of agent. A built-in agent ships with the backend:
-Caliginia (`caliginia`) and Lysiptera (`lysiptera`). It has a `code`, a `name`,
+Caliginia (`caliginia`), Lysiptera (`lysiptera`), and Armitage (`armitage`),
+the tool keeper, which answers other agents when they look for a tool and
+no chat. It has a `code`, a `name`,
 a `bio`, and a `systemPrompt`, belongs to the release, and can be neither
 changed nor deleted. A stored agent is a definition the user created: a `code`, a `name`, a `bio`, a
 `systemPrompt`, and the `createdAt` and `updatedAt` timestamps. The code is the
@@ -1159,7 +1238,7 @@ contain `code`, and an empty body returns `400`. `DELETE` marks the agent
 deleted and returns `204` without a body. From then on `GET`, `PATCH`, and
 `DELETE` answer `404` for it, no new conversation can name it, and its code
 stays taken: the backend keeps the agent's row, with its definition and the
-time it was deleted, so the built-in agents can still look it up with the
+time it was deleted, so the built-in agents but Armitage can still look it up with the
 [agent state tools](/architecture/backend/#agent-state-tools) and a reply it
 was writing when it was deleted runs to its end. A conversation the deleted
 agent answered keeps its messages and its agent code; see
@@ -1284,7 +1363,7 @@ in request order. `fileName` and `model` are extension members.
   "type": "urn:lys:problem:chat:image-needs-vision",
   "title": "Image needs vision",
   "status": 409,
-  "detail": "The image photo.png needs a model with vision, and google/gemma-4-12b-qat cannot see images.",
+  "detail": "The image photo.png needs a model with vision, and google/gemma-4-12b-qat on LM Studio cannot see images.",
   "instance": "/api/v1/chat",
   "fileName": "photo.png",
   "model": "google/gemma-4-12b-qat"
@@ -1319,9 +1398,9 @@ as `loaded`; a local Ollama server reports the models its `/api/ps` lists as
 running. Ollama's list leaves out a model that cannot chat, such as an
 embedding model.
 
-`GET /api/v1/llm/list` returns `llms` ordered by `modelKey`, then by `path`,
-an absent path sorting first, and `modelLoading`, who loads the listed
-models:
+`GET /api/v1/llm/:provider/list` returns the models of the provider the path
+names: `llms` ordered by `modelKey`, then by `path`, an absent path sorting
+first, and `modelLoading`, who loads the listed models:
 
 | `modelLoading` | Meaning                                                                                                                                                                                                                     |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1337,8 +1416,8 @@ load does not observe it; the next list read does.
 
 ## Model load request
 
-`POST /api/v1/llm/load` takes the model to load and, optionally, the settings
-LM Studio loads it with:
+`POST /api/v1/llm/:provider/load` takes the model to load on the provider
+the path names and, optionally, the settings LM Studio loads it with:
 
 ```json
 {
@@ -1391,16 +1470,23 @@ runtime call, and the unload route answers the same way:
   "type": "urn:lys:problem:llm:provider-loads-models",
   "title": "Provider loads its own models",
   "status": 409,
-  "detail": "The connected model provider decides which models are in memory, so Lys does not load or unload its models."
+  "detail": "Ollama decides which models are in memory, so Lys does not load or unload its models."
 }
 ```
 
+The detail names the provider the path names. The runtime-unavailable 503
+detail names it the same way, as in "Groq is not reachable. Check it in
+Settings → Providers, then refresh its status in Lys."; for a chat or
+chat-context request it names the provider of the request's `model`.
+
 ## Model operation admission
 
-Inventory, health, load, unload, and provider connection attempts share one
-queue with one active operation and at most eight waiting. Accepted operations
-execute in arrival order. When all nine positions are occupied, each of these
-endpoints returns `503 Service Unavailable` with `Content-Type:
+Each provider has one queue that its inventory, health, load, unload, and
+connection attempts share, with one active operation and at most eight
+waiting; a full queue of one provider does not refuse another provider's
+operations. Accepted operations execute in arrival order. When all nine
+positions of a provider's queue are occupied, each of these endpoints returns
+`503 Service Unavailable` for that provider with `Content-Type:
 application/problem+json`:
 
 ```json
@@ -1419,7 +1505,8 @@ was already accepted continues to occupy capacity until its operation settles.
 
 ## Model operation cancellation
 
-`POST /api/v1/llm/load` and `PATCH /api/v1/llm/unload` do not support user
+`POST /api/v1/llm/:provider/load` and `PATCH /api/v1/llm/:provider/unload`
+do not support user
 cancellation. After the backend accepts an operation, disconnecting the client
 does not cancel it. Accepted operations remain owned by the backend until success
 or failure, and shutdown waits for them before releasing runtime resources.
@@ -1439,11 +1526,12 @@ waiting for a tool result writes nothing, so it is not ended this way
 
 ## Model health responses
 
-`GET /api/v1/llm/:modelId/health` checks whether a fresh, validated loaded-model
-inventory contains the requested canonical model key. Encode the key as one
-URL segment; for example, `provider/model` becomes
-`/api/v1/llm/provider%2Fmodel/health`. The key must contain 1–100 decoded
-characters, matching the router's existing path-parameter limit.
+`GET /api/v1/llm/:provider/:modelId/health` checks whether a fresh, validated
+loaded-model inventory of the provider the path names contains the requested
+canonical model key. Encode the key as one URL segment; for example,
+`publisher/model` on LM Studio becomes
+`/api/v1/llm/lmStudio/publisher%2Fmodel/health`. The key must contain 1–100
+decoded characters, matching the router's existing path-parameter limit.
 
 The check generates no text and never loads or unloads a model. `ready` means
 the runtime answered and reported a matching loaded instance. It does not prove
@@ -1454,7 +1542,7 @@ Completed checks return `200 OK` with one of these JSON shapes:
 
 ```json
 {
-  "modelId": "provider/model",
+  "modelId": "publisher/model",
   "status": "ready",
   "latencyMs": 4
 }
@@ -1462,7 +1550,7 @@ Completed checks return `200 OK` with one of these JSON shapes:
 
 ```json
 {
-  "modelId": "provider/model",
+  "modelId": "publisher/model",
   "status": "not-ready",
   "reason": "model-not-loaded",
   "latencyMs": 4
@@ -1486,8 +1574,8 @@ The request body must contain only `modelId`, and its value must be a non-empty
 canonical model key. Invalid bodies are rejected with `400 Bad Request` before
 the backend accesses the LLM runtime.
 
-`PATCH /api/v1/llm/unload` attempts every loaded runtime instance currently
-observed with that model key. It returns `204 No Content` when a fresh
+`PATCH /api/v1/llm/:provider/unload` attempts every loaded runtime instance
+that the provider the path names currently reports with that model key. It returns `204 No Content` when a fresh
 reconciliation snapshot contains no matching instance. This is an observation
 of that snapshot, not a guarantee that another runtime client will not load a
 new matching instance afterward. Expected failures use
@@ -1495,13 +1583,13 @@ new matching instance afterward. Expected failures use
 Operation failures include an occurrence-specific `detail`; admission refusal
 uses the fixed four-field service-busy body shown above:
 
-| Status | Problem type                                | Meaning                                                           |
-| ------ | ------------------------------------------- | ----------------------------------------------------------------- |
-| `404`  | `urn:lys:problem:llm:model-not-found`       | No matching instance was initially loaded.                        |
-| `409`  | `urn:lys:problem:llm:provider-loads-models` | The connected provider loads its own models; nothing was stopped. |
-| `503`  | `urn:lys:problem:llm:runtime-unavailable`   | No LLM runtime is connected, or the backend cannot query it.      |
-| `503`  | `urn:lys:problem:llm:unload-failed`         | Reconciliation still found matching instances.                    |
-| `503`  | `urn:lys:problem:llm:service-busy`          | The shared queue is full; no unload was accepted.                 |
+| Status | Problem type                                | Meaning                                                               |
+| ------ | ------------------------------------------- | --------------------------------------------------------------------- |
+| `404`  | `urn:lys:problem:llm:model-not-found`       | No matching instance was initially loaded.                            |
+| `409`  | `urn:lys:problem:llm:provider-loads-models` | The provider loads its own models; nothing was stopped.               |
+| `503`  | `urn:lys:problem:llm:runtime-unavailable`   | The provider is off or not connected, or the backend cannot query it. |
+| `503`  | `urn:lys:problem:llm:unload-failed`         | Reconciliation still found matching instances.                        |
+| `503`  | `urn:lys:problem:llm:service-busy`          | The provider's queue is full; no unload was accepted.                 |
 
 Operation-failure bodies may also include an `instance` identifier for one
 occurrence. The service-busy body has fixed `type`, `title`, `status`, and `detail`

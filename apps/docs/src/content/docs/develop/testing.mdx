@@ -25,6 +25,9 @@ passed without current output.
 ```sh
 pnpm exec prettier . --check
 pnpm exec eslint .
+node tools/code-standards/check-changed-code.mts --base origin/main
+pnpm exec tsc -p tools/code-standards/tsconfig.json
+node --test "tools/code-standards/test/*.test.mts"
 pnpm --filter @lys/desktop test
 pnpm --filter @lys/desktop build
 pnpm --filter @lys/backend exec tsc --noEmit

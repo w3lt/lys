@@ -59,6 +59,7 @@ import {
   type JobMessageRequest
 } from "../../../support/delegationTestServices"
 import { createTestFastify } from "../../../support/fastifyTestApp"
+import { LM_STUDIO_QWEN3_8B } from "../../../support/llmFixtures"
 import { waitForMicrotasks } from "../../../support/microtasks"
 
 /** Identity of the conversation the stubbed history answers for. */
@@ -914,7 +915,7 @@ describe("updateFastifyWithConversationRoutes", () => {
       const newConversationChatRequest = Object.freeze({
         conversation: { kind: "new", agentCode: "caliginia" },
         message: "Plan my trip",
-        model: "qwen/qwen3-8b",
+        model: LM_STUDIO_QWEN3_8B,
         generationOptions: { temperature: 0.4 }
       })
 

@@ -1,43 +1,11 @@
+import type { ReplyPart, ToolCallReplyPart } from "@lys/share"
 import {
-  replyPartSchema,
-  type ReplyPart,
-  type ToolCallReplyPart
-} from "@lys/share"
-import { v7 as uuidv7 } from "uuid"
-import type {
-  ReplyPartDraft,
-  ReplyToolCallChange
+  buildReplyPart,
+  type ReplyPartDraft,
+  type ReplyToolCallChange
 } from "../agent/replyPartSequence"
 import type { ReplyPartWriter } from "../chat/persistence"
 import type { ReplyPartRecordWriter } from "./records"
-
-/**
- * Builds the complete part a draft describes.
- *
- * @param draft - Part the agent asks to store.
- * @param now - Time of the operation, stored as both of the part's times.
- * @returns The validated part; a reasoning or text part gets a new UUIDv7, a
- * tool call keeps its own identifier. No draft is a succeeded call, so none
- * shows sources.
- * @throws If the draft breaks the part contract, such as empty text or an
- * empty failure message.
- */
-function buildReplyPart(draft: ReplyPartDraft, now: string): ReplyPart {
-  if (draft.kind !== "tool-call")
-    return replyPartSchema.parse({
-      kind: draft.kind,
-      id: uuidv7(),
-      round: draft.round,
-      createdAt: now,
-      updatedAt: now,
-      content: draft.content
-    })
-  return replyPartSchema.parse({
-    ...draft,
-    createdAt: now,
-    updatedAt: now
-  })
-}
 
 /**
  * Retains borrowed reply-part records to store the parts of streaming
@@ -69,7 +37,7 @@ export default class StoredReplyParts implements ReplyPartWriter {
 
   /**
    * Implements {@link ReplyPartWriter.createReplyPart}, stamping the part with
-   * the current time.
+   * the current time and storing a tool call's decision with it.
    * @param assistantMessageId - Interface-defined reply.
    * @param draft - Interface-defined part.
    * @returns The interface-defined stored part or absence.
@@ -82,7 +50,8 @@ export default class StoredReplyParts implements ReplyPartWriter {
     const part = buildReplyPart(draft, new Date().toISOString())
     return this.#replyPartRecordWriter.createReplyPart({
       assistantMessageId,
-      part
+      part,
+      toolCallDecision: draft.kind === "tool-call" ? draft.decision : undefined
     })
       ? part
       : undefined

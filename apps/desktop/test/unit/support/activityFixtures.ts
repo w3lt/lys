@@ -2,6 +2,7 @@ import {
   activityEventSchema,
   activityReplySchema,
   type ActivityReply,
+  type ChatToolApprovalPrompt,
   type ChatToolCall
 } from "@lys/protocol"
 import { startBackendEventStream, type BackendRoute } from "./backendFake"
@@ -10,6 +11,7 @@ import {
   FIXTURE_JOB_ID,
   FIXTURE_JOB_REPLY_ID
 } from "./conversationFixtures"
+import { createFixtureApprovalToken } from "./toolFixtures"
 
 /** Route key of the activity stream. */
 export const ACTIVITY_ROUTE = "GET /api/v1/activity/events"
@@ -21,8 +23,9 @@ export const ACTIVITY_ROUTE = "GET /api/v1/activity/events"
  */
 export type ActivityReplyFixture = Readonly<{
   /**
-   * Approval prompts sent and not answered, in sending order; defaults to
-   * none.
+   * Calls of the approval prompts sent and not answered, in sending order;
+   * defaults to none. Each prompt carries the token
+   * {@link buildActivityApprovalPrompt} gives its call.
    */
   pendingToolApprovals?: readonly ChatToolCall[]
   /**
@@ -31,6 +34,24 @@ export type ActivityReplyFixture = Readonly<{
    */
   pendingToolCalls?: readonly ChatToolCall[]
 }>
+
+/**
+ * Builds the approval prompt of one call as the activity stream sends it.
+ *
+ * @param call - Call shown for approval, built by `buildToolCall`.
+ * @returns The call with a token whose sequence is the call's own identity
+ * sequence, so the prompts of one case carry distinct tokens.
+ */
+export function buildActivityApprovalPrompt(
+  call: ChatToolCall
+): ChatToolApprovalPrompt {
+  return {
+    call,
+    approvalToken: createFixtureApprovalToken(
+      Number.parseInt(call.id.slice(-12), 16)
+    )
+  }
+}
 
 /**
  * Builds the job's reply as an activity snapshot lists it.
@@ -48,7 +69,9 @@ export function buildActivityReply(
       parentConversationId: FIXTURE_CONVERSATION_ID,
       assistantMessageId: FIXTURE_JOB_REPLY_ID,
       pendingToolCalls: fixture.pendingToolCalls ?? [],
-      pendingToolApprovals: fixture.pendingToolApprovals ?? []
+      pendingToolApprovals: (fixture.pendingToolApprovals ?? []).map(
+        buildActivityApprovalPrompt
+      )
     })
   )
 }

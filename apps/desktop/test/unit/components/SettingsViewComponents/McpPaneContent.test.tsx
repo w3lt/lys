@@ -37,6 +37,7 @@ import { createControlledPromise } from "../../support/settlement"
 import {
   buildUnreachableRuntime,
   READY_RUNTIME,
+  updateStoreRuntime,
   type RuntimeArrangement
 } from "../../support/runtimeFixtures"
 import {
@@ -105,7 +106,8 @@ const FILES_OFF_LIST = buildMcpServerList([
 ])
 
 /** What the email server's row says it does. */
-const EMAIL_BLURB = "Reads, searches, and sends your email over IMAP and SMTP."
+const EMAIL_BLURB =
+  "Reads, searches, and sends your email and Lys's own over IMAP and SMTP."
 
 /** Saved values that can be secrets, which the pane never shows as text. */
 const SECRET_VALUES = ["debug", "fixture-0000", STORED_EMAIL_PASSWORD]
@@ -187,16 +189,20 @@ function getServerSwitch(serverName: string): HTMLElement {
 }
 
 /**
- * Opens the email server's details and gets its account card.
+ * Opens the email server's details, then the card of the person's saved
+ * account from its row.
  *
  * @param user - User-event session of the case.
- * @returns The form named Email account.
+ * @returns The form named Your email account.
  */
 async function openEmailAccountCard(
   user: ReturnType<typeof userEvent.setup>
 ): Promise<HTMLElement> {
   const email = await expandServer(user, "email")
-  return within(email).getByRole("form", { name: "Email account" })
+  await user.click(
+    within(email).getByRole("button", { name: "Edit your mailbox" })
+  )
+  return within(email).getByRole("form", { name: "Your email account" })
 }
 
 /**
@@ -216,7 +222,8 @@ function startSettingsHost(saveSettings: () => unknown = () => null) {
 
 /**
  * Renders the settings view on the MCP pane, with the stored settings in the
- * application store, and waits for the pane body and its first reads.
+ * application store except that LM Studio is on with the arranged runtime,
+ * and waits for the pane body and its first reads.
  *
  * @param routes - Backend routes the case needs besides the inventory read;
  * the stored list answers the list read and the `files` tools the tool
@@ -243,6 +250,7 @@ async function startMcpPane(
   const { useMcpServerStore } = await import("@/lib/store/mcp-servers")
   const { useToolStore } = await import("@/lib/store/tools")
   useLysStore.setState({ settings: STORED_SETTINGS })
+  updateStoreRuntime(useLysStore, runtime)
   render(<SettingsView onDone={vi.fn()} />)
   // The closing note is withheld until the lazily loaded pane body is shown.
   await screen.findByText(/^Saved in settings\.json in Lys's home folder/)
@@ -562,7 +570,10 @@ describe("McpPaneContent", () => {
     expect(listWrittenDocuments(host.commands)).toEqual([
       {
         ...STORED_SETTINGS_DOCUMENT,
-        mcp: { ...STORED_MCP_SETTINGS, builtIn: { email: { enabled: true } } }
+        mcp: {
+          ...STORED_MCP_SETTINGS,
+          builtIn: { email: { enabled: true, lysEnabled: false } }
+        }
       }
     ])
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, SYNC_ROUTE])
@@ -647,7 +658,16 @@ describe("McpPaneContent", () => {
     expect(
       within(email).queryByRole("region", { name: "configuration" })
     ).toBeNull()
-    const card = within(email).getByRole("form", { name: "Email account" })
+    expect(within(email).queryByRole("form")).toBeNull()
+    expect(within(email).getByText("Your mailbox")).toBeInTheDocument()
+    expect(
+      within(email).getByText(STORED_EMAIL_ACCOUNT.address)
+    ).toBeInTheDocument()
+    expect(within(email).getByText("Switched off")).toBeInTheDocument()
+    await user.click(
+      within(email).getByRole("button", { name: "Edit your mailbox" })
+    )
+    const card = within(email).getByRole("form", { name: "Your email account" })
     expect(within(card).getByRole("textbox", { name: "Address" })).toHaveValue(
       STORED_EMAIL_ACCOUNT.address
     )
@@ -668,7 +688,7 @@ describe("McpPaneContent", () => {
     const user = userEvent.setup()
 
     const secrets = { ...STORED_SETTINGS.secrets, emailPassword: null }
-    const noAccount = { account: null }
+    const noAccount = { account: null, lysAccount: null }
     const settings = { ...STORED_SETTINGS, secrets, email: noAccount }
 
     useLysStore.setState({ settings })
@@ -680,11 +700,11 @@ describe("McpPaneContent", () => {
     )
     const email = await expandServer(user, "email")
     expect(within(email).getAllByRole("status")[0]).toHaveTextContent(
-      "email: OffNeeds an email account. Add one below."
+      "email: OffNeeds an email account. Add yours below, or Lys's in the Lys pane."
     )
-    const card = within(email).getByRole("form", { name: "Email account" })
+    const card = within(email).getByRole("form", { name: "Your email account" })
     expect(within(card).getByRole("status")).toHaveTextContent(
-      "No account yet. The email server stays off until you save one."
+      "No account yet. This mailbox stays off until you save one."
     )
     expect(within(card).getByRole("textbox", { name: "Address" })).toHaveValue(
       ""
@@ -829,7 +849,7 @@ describe("McpPaneContent", () => {
           ...STORED_SETTINGS_DOCUMENT.secrets,
           emailPassword: "new-app-password"
         },
-        email: { account: editedAccount }
+        email: { account: editedAccount, lysAccount: null }
       }
     ])
     expect(listMcpRouteKeys(backend)).toEqual([
@@ -846,6 +866,27 @@ describe("McpPaneContent", () => {
     expect(
       screen.getByRole("region", { name: "servers" })
     ).not.toHaveTextContent("new-app-password")
+  })
+
+  it("keeps Lys's mailbox out of the email server's details, and returns from the card to the row", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+    const card = await openEmailAccountCard(user)
+    const email = getServerRow("email")
+
+    expect(card).toBeInTheDocument()
+    expect(
+      within(email).queryByRole("form", { name: "Lys's email account" })
+    ).toBeNull()
+    await user.click(
+      within(email).getByRole("button", { name: "Back to the mailbox" })
+    )
+
+    expect(within(email).queryByRole("form")).toBeNull()
+    expect(
+      within(email).getByRole("button", { name: "Edit your mailbox" })
+    ).toHaveFocus()
   })
 
   it("saves the account without applying the group while the email server is off", async () => {
@@ -988,8 +1029,13 @@ describe("McpPaneContent", () => {
     )
     await waitForRenderedWork()
     await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(
+      within(getServerRow("email")).getByRole("button", {
+        name: "Edit your mailbox"
+      })
+    )
     const shownAgain = within(getServerRow("email")).getByRole("form", {
-      name: "Email account"
+      name: "Your email account"
     })
 
     expect(whileChecking).toBe("Signing in…")
@@ -1019,7 +1065,7 @@ describe("McpPaneContent", () => {
       within(card).getByRole("button", { name: "Remove account" })
     )
     const question = within(card).getByRole("group", {
-      name: "Remove the email account and its password? The email server is switched off."
+      name: "Remove the email account and its password? This mailbox is switched off."
     })
     expect(
       within(question).getByRole("button", { name: "Keep the email account" })
@@ -1034,14 +1080,14 @@ describe("McpPaneContent", () => {
       {
         ...STORED_SETTINGS_DOCUMENT,
         secrets: { ...STORED_SETTINGS_DOCUMENT.secrets, emailPassword: null },
-        email: { account: null }
+        email: { account: null, lysAccount: null }
       }
     ])
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, SYNC_ROUTE])
     expect(getServerSwitch("email")).not.toBeChecked()
     expect(getServerSwitch("email")).toHaveAttribute("aria-disabled", "true")
     expect(within(card).getByRole("status")).toHaveTextContent(
-      "No account yet. The email server stays off until you save one."
+      "No account yet. This mailbox stays off until you save one."
     )
     expect(within(card).getByRole("textbox", { name: "Address" })).toHaveValue(
       ""
@@ -1082,7 +1128,7 @@ describe("McpPaneContent", () => {
     ])
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE])
     expect(within(card).getByRole("status")).toHaveTextContent(
-      "Lys couldn't switch the email server off, so the account wasn't removed."
+      "Lys couldn't switch this mailbox off, so the account wasn't removed."
     )
     expect(within(card).getByRole("textbox", { name: "Address" })).toHaveValue(
       STORED_EMAIL_ACCOUNT.address
@@ -1096,7 +1142,32 @@ describe("McpPaneContent", () => {
     )
   })
 
-  it("shows one server's state, tools, approval, and configuration at a time, never a secret", async () => {
+  it("opens on an overview of the servers that run, the tools Armitage can offer, and what they ask", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+
+    expect(screen.getByText("1 of 3 running")).toBeInTheDocument()
+    expect(screen.getByText("1 needs attention")).toBeInTheDocument()
+    expect(
+      screen.getByRole("img", { name: "3 ask, 0 run, 0 off" })
+    ).toBeInTheDocument()
+
+    const files = await expandServer(user, "files")
+    await user.click(
+      within(within(files).getByRole("group", { name: "search" })).getByRole(
+        "button",
+        { name: "Off" }
+      )
+    )
+    await waitForRenderedWork()
+
+    expect(
+      screen.getByRole("img", { name: "2 ask, 0 run, 1 off" })
+    ).toBeInTheDocument()
+  })
+
+  it("shows a server's state, tools, approval, and configuration", async () => {
     startSettingsHost()
     await startMcpPane()
     const user = userEvent.setup()
@@ -1114,18 +1185,20 @@ describe("McpPaneContent", () => {
     expect(tools).toHaveTextContent(
       `3 of 3 on · ${formatToolCost(FILES_TOOLS)}`
     )
-    const chips = within(
+    const toolRows = within(
       within(tools).getByRole("list", { name: "Tools of files" })
-    ).getAllByRole("button")
-    expect(chips.map((chip) => chip.textContent)).toEqual([
-      "read_file",
-      "write_file",
-      "search"
+    ).getAllByRole("listitem")
+    expect(toolRows.map((row) => row.textContent)).toEqual([
+      "read_fileRuns read_file on files.AskRunOff",
+      "write_fileRuns write_file on files.AskRunOff",
+      "searchRuns search on files.AskRunOff"
     ])
-    for (const chip of chips) {
-      expect(chip).toHaveAttribute("aria-pressed", "true")
+    for (const toolName of ["read_file", "write_file", "search"]) {
+      const choice = within(tools).getByRole("group", { name: toolName })
+      expect(
+        within(choice).getByRole("button", { name: "Ask" })
+      ).toHaveAttribute("aria-pressed", "true")
     }
-    expect(chips[0]).toHaveAccessibleDescription("Runs read_file on files.")
     const approval = within(files).getByRole("group", {
       name: "Before its tools run"
     })
@@ -1141,6 +1214,69 @@ describe("McpPaneContent", () => {
     expect(configuration).toHaveTextContent(
       "transportstdio · child process of Lyscommand/opt/homebrew/bin/npxarguments-y @modelcontextprotocol/server-filesystem /tmpenvironmentLOG_LEVEL"
     )
+  })
+
+  it("searches a server's tools by name or description", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+    const files = await expandServer(user, "files")
+    const search = within(files).getByRole("searchbox", {
+      name: "Search the files tools"
+    })
+
+    await user.type(search, "write file")
+
+    expect(
+      within(
+        within(files).getByRole("list", { name: "Tools of files" })
+      ).getAllByRole("group")
+    ).toEqual([within(files).getByRole("group", { name: "write_file" })])
+    expect(within(files).getByText("Showing 1 of 3 tools")).toHaveAttribute(
+      "aria-live",
+      "polite"
+    )
+    await user.click(
+      within(files).getByRole("button", { name: "Clear search" })
+    )
+    expect(search).toHaveValue("")
+    expect(search).toHaveFocus()
+    expect(
+      within(
+        within(files).getByRole("list", { name: "Tools of files" })
+      ).getAllByRole("listitem")
+    ).toHaveLength(3)
+  })
+
+  it("says when no tool matches, and clears the search from there too", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+    const files = await expandServer(user, "files")
+    const search = within(files).getByRole("searchbox", {
+      name: "Search the files tools"
+    })
+
+    await user.type(search, "delete")
+
+    expect(within(files).queryByRole("list")).toBeNull()
+    expect(
+      within(files).getByText("No files tool matches “delete”.")
+    ).toBeInTheDocument()
+    const clearButtons = within(files).getAllByRole("button", {
+      name: "Clear search"
+    })
+    expect(clearButtons).toHaveLength(2)
+    await user.click(clearButtons[1])
+    expect(search).toHaveValue("")
+    expect(search).toHaveFocus()
+  })
+
+  it("shows one server at a time, a failed one's cause, and never a secret", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+    const files = await expandServer(user, "files")
 
     const notes = await expandServer(user, "notes")
 
@@ -1166,17 +1302,19 @@ describe("McpPaneContent", () => {
     }
   })
 
-  it("switches a server's tool off and on from its chip, which the application store saves", async () => {
+  it("switches a server's tool off with Off and on again with Ask, which the application store saves", async () => {
     const host = startSettingsHost()
     const { useLysStore } = await startMcpPane()
     const user = userEvent.setup()
     const files = await expandServer(user, "files")
-    const readFile = within(files).getByRole("button", { name: "read_file" })
+    const readFile = within(files).getByRole("group", { name: "read_file" })
 
-    await user.click(readFile)
+    await user.click(within(readFile).getByRole("button", { name: "Off" }))
     await waitForRenderedWork()
 
-    expect(readFile).toHaveAttribute("aria-pressed", "false")
+    expect(
+      within(readFile).getByRole("button", { name: "Off" })
+    ).toHaveAttribute("aria-pressed", "true")
     expect(
       useLysStore.getState().settings.tools.switches.get(FILES_TOOLS[0].name)
     ).toBe(false)
@@ -1197,13 +1335,43 @@ describe("McpPaneContent", () => {
       }
     })
 
-    await user.click(readFile)
+    await user.click(within(readFile).getByRole("button", { name: "Ask" }))
     await waitForRenderedWork()
 
-    expect(readFile).toHaveAttribute("aria-pressed", "true")
+    expect(
+      within(readFile).getByRole("button", { name: "Ask" })
+    ).toHaveAttribute("aria-pressed", "true")
     expect(
       useLysStore.getState().settings.tools.switches.get(FILES_TOOLS[0].name)
     ).toBe(true)
+    expect(
+      useLysStore.getState().settings.tools.justRunToolNames
+    ).not.toContain(FILES_TOOLS[0].name)
+  })
+
+  it("lets one switched-off tool run without asking with Run, switching it on", async () => {
+    startSettingsHost()
+    const { useLysStore } = await startMcpPane()
+    const user = userEvent.setup()
+    const files = await expandServer(user, "files")
+    const search = within(files).getByRole("group", { name: "search" })
+
+    await user.click(within(search).getByRole("button", { name: "Off" }))
+    await waitForRenderedWork()
+    await user.click(within(search).getByRole("button", { name: "Run" }))
+    await waitForRenderedWork()
+
+    const tools = useLysStore.getState().settings.tools
+    expect(tools.switches.get(FILES_TOOLS[2].name)).toBe(true)
+    expect(tools.justRunToolNames.has(FILES_TOOLS[2].name)).toBe(true)
+    expect(tools.justRunToolNames.has(FILES_TOOLS[0].name)).toBe(false)
+    expect(
+      within(files).getByRole("group", { name: "read_file" })
+    ).toHaveTextContent("AskRunOff")
+    expect(within(search).getByRole("button", { name: "Run" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
   })
 
   it("sets every tool of a server to Just run or Ask me at once, and shows differing choices as neither", async () => {
@@ -1257,6 +1425,7 @@ describe("McpPaneContent", () => {
       expect(screen.getByRole("region", { name: "servers" })).toHaveTextContent(
         "3 servers"
       )
+      expect(screen.getByText("0 of 3 running")).toBeInTheDocument()
       expect(getServerToggle("files")).toHaveAccessibleDescription(
         expect.stringContaining("Not connected")
       )
@@ -2079,7 +2248,7 @@ describe("McpPaneContent", () => {
     const email = await expandServer(user, "email")
 
     expect(within(email).getAllByRole("status")[0]).toHaveTextContent(
-      "email: FailedThe saved email account is not usable. Save it again below."
+      "email: FailedThe saved email account is not usable. Save yours again below, or Lys's in the Lys pane."
     )
     expect(
       within(email).queryByRole("button", { name: "Retry email" })
@@ -2144,8 +2313,8 @@ describe("McpPaneContent", () => {
       expect.stringContaining("Running")
     )
 
-    await user.click(screen.getByRole("tab", { name: /^Generation\s*03$/ }))
-    await user.click(screen.getByRole("tab", { name: /^MCP\s*06$/ }))
+    await user.click(screen.getByRole("button", { name: /^Generation\s*05$/ }))
+    await user.click(screen.getByRole("button", { name: /^MCP\b.*08$/ }))
     await screen.findByText(/^Saved in settings\.json in Lys's home folder/)
     await waitForRenderedWork()
 

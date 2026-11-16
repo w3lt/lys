@@ -11,6 +11,7 @@ import {
   hasDistinctToolNames,
   hasDistinctValues,
   isEveryToolRunBy,
+  llmModelReferenceSchema,
   MAXIMUM_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_COUNT,
@@ -300,8 +301,9 @@ function hasDistinctOfferedToolNames(offer: ChatToolOfferCandidate): boolean {
  * one tool is offered, no name is offered twice across the two lists, and
  * neither list names a tool the backend adds to a turn itself
  * (`BACKEND_INTERNAL_TOOL_NAMES`): the attachment reader, when the
- * conversation holds a text attachment, the agent state tools, and the
- * tools a job sends a progress note and a delegator stops a job with. The
+ * conversation holds a text attachment, the agent state tools, the tool that
+ * asks Armitage, the tool keeper, for tools, and the tools a job sends a
+ * progress note and a delegator stops a job with. The
  * backend rejects a backend tool name it does not run (400) and an offered
  * backend tool that cannot run now (409), such as an MCP tool whose server
  * is configured but not connected. Offered only to a model trained for tool
@@ -482,8 +484,11 @@ export const chatApiRequestBodySchema = z
     conversation: chatConversationTargetSchema,
     /** Non-empty user-authored prompt sent to the selected model. */
     message: z.string().min(1),
-    /** Non-empty model identifier resolved by the backend runtime. */
-    model: z.string().min(1),
+    /**
+     * Model the turn is sent to: its provider answers the reply, the title,
+     * and the tool keeper's searches, and the reply is stored with both.
+     */
+    model: llmModelReferenceSchema,
     /** Required generation controls; absence is not represented by this contract. */
     generationOptions: messageGenerationOptionsSchema,
     /**
@@ -577,8 +582,9 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
  * @remarks A 400 is the attachment-unsupported problem when an attachment's
  * content is neither text nor an image Lys sends; a body that fails
  * validation is answered with Fastify's own 400. A 404 is the
- * agent-not-found problem when a new conversation names a code no agent has
- * or a deleted agent's, and the conversation-not-found problem when a
+ * agent-not-found problem when a new conversation names a code no agent has,
+ * a deleted agent's, or Armitage's, which answers no chat, and the
+ * conversation-not-found problem when a
  * continued conversation is not stored. A 409 is the conversation agent
  * missing problem when the continued conversation is stored but its agent no
  * longer exists, the conversation-is-job problem when the continued

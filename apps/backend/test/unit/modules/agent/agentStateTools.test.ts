@@ -1,3 +1,4 @@
+import { ARMITAGE_AGENT_CODE, type LlmModelReference } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   AgentRequestStep,
@@ -27,15 +28,14 @@ import {
   type RunnableBuiltInToolHarness
 } from "../../support/builtInToolContract"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
+import { RUN_TOOL_CALL_ID } from "../../support/toolFixtures"
 
 /** Time the clock reads during every run. */
 const NOW = "2026-10-24T10:05:30.000Z"
 
 /** Reply of the turn whose model calls the tools. */
 const OWN_REQUEST_ID = createFixtureUuidV7(101)
-
-/** Call every run of a state tool answers. */
-const TOOL_CALL_ID = createFixtureUuidV7(102)
 
 /** The leader that calls the tools in most cases. */
 const LEADER: AgentIdentity = Object.freeze({
@@ -53,7 +53,7 @@ const MEMBER: AgentIdentity = Object.freeze({
 const OWN_REQUEST: AgentRequestView = Object.freeze({
   requestId: OWN_REQUEST_ID,
   conversationId: createFixtureUuidV7(1),
-  model: "qwen/qwen3-8b",
+  model: LM_STUDIO_QWEN3_8B,
   startedAt: "2026-10-24T10:05:00.000Z",
   step: Object.freeze({ kind: "preparing", round: 0 }),
   conversationTitle: Object.freeze({ status: "found", title: "Trip to Kyoto" })
@@ -64,7 +64,7 @@ type RequestVariation = Readonly<{
   /** Start time; the own request's by default. */
   startedAt?: string
   /** Model; the own request's by default. */
-  model?: string
+  model?: LlmModelReference
   /** Step; the own request's by default. */
   step?: AgentRequestStep
   /** Title of its conversation; the own request's by default. */
@@ -152,6 +152,94 @@ function findStateTool(
 }
 
 /**
+ * Creates `read_my_state` for a member whose state reads.
+ *
+ * @returns The contract harness, counting the reader's state reads.
+ */
+async function createReadMyStateHarness(): Promise<RunnableBuiltInToolHarness> {
+  const reader = createReader({
+    state: {
+      status: "found",
+      state: {
+        code: MEMBER.code,
+        name: "Researcher",
+        role: "member",
+        deletedAt: null,
+        requestSlotCount: 2,
+        requests: [OWN_REQUEST]
+      }
+    }
+  })
+  const tools = buildAgentStateTools({
+    self: MEMBER,
+    requestId: OWN_REQUEST_ID,
+    emailAddress: null,
+    reader
+  })
+  return {
+    tool: findStateTool(tools, "read_my_state"),
+    runnableArguments: {},
+    countStartedWork: () => reader.findAgentState.mock.calls.length
+  }
+}
+
+/**
+ * Creates `read_agent_state` for a leader that reads Lysiptera's state.
+ *
+ * @returns The contract harness, counting the reader's state reads.
+ */
+async function createReadAgentStateHarness(): Promise<BuiltInToolHarness> {
+  const reader = createReader({
+    state: {
+      status: "found",
+      state: {
+        code: "lysiptera",
+        name: "Lysiptera",
+        role: "leader",
+        deletedAt: null,
+        requestSlotCount: 2,
+        requests: []
+      }
+    }
+  })
+  const tools = buildAgentStateTools({
+    self: LEADER,
+    requestId: OWN_REQUEST_ID,
+    emailAddress: null,
+    reader
+  })
+  return {
+    tool: findStateTool(tools, "read_agent_state"),
+    runnableArguments: { code: "lysiptera" },
+    invalidArguments: { code: "Lysiptera" },
+    countStartedWork: () => reader.findAgentState.mock.calls.length
+  }
+}
+
+/**
+ * Creates `find_agents` for a leader whose searches find no agent.
+ *
+ * @returns The contract harness, counting the reader's searches.
+ */
+async function createFindAgentsHarness(): Promise<BuiltInToolHarness> {
+  const reader = createReader({
+    search: { status: "found", matches: [], matchCount: 0 }
+  })
+  const tools = buildAgentStateTools({
+    self: LEADER,
+    requestId: OWN_REQUEST_ID,
+    emailAddress: null,
+    reader
+  })
+  return {
+    tool: findStateTool(tools, "find_agents"),
+    runnableArguments: { query: "lys" },
+    invalidArguments: { query: " " },
+    countStartedWork: () => reader.listAgentMatches.mock.calls.length
+  }
+}
+
+/**
  * Parses and runs one call of a state tool.
  *
  * @param tools - The turn's state tools.
@@ -169,7 +257,7 @@ async function runStateTool(
   const parsed = findStateTool(tools, name).parseToolCall(callArguments)
   if (parsed.status === "invalid") return parsed
   return await parsed.runToolCall({
-    toolCallId: TOOL_CALL_ID,
+    toolCallId: RUN_TOOL_CALL_ID,
     abortSignal: new AbortController().signal,
     addWebSources: () => []
   })
@@ -206,6 +294,10 @@ describe("buildAgentStateDefinitions", () => {
     )
   })
 
+  it("gives the tool keeper no state tool", () => {
+    expect(buildAgentStateDefinitions("tool-keeper")).toEqual([])
+  })
+
   it.each(["leader", "member"] as const)(
     "lists every %s tool in the agents group, reading this machine, run by the backend",
     (role) => {
@@ -235,11 +327,13 @@ describe("buildAgentStateTools", () => {
     const leaderTools = buildAgentStateTools({
       self: LEADER,
       requestId: OWN_REQUEST_ID,
+      emailAddress: null,
       reader
     })
     const memberTools = buildAgentStateTools({
       self: MEMBER,
       requestId: OWN_REQUEST_ID,
+      emailAddress: null,
       reader
     })
 
@@ -253,36 +347,19 @@ describe("buildAgentStateTools", () => {
       expect(tool.runsWithoutApproval).toBe(true)
   })
 
+  it("builds no tool for the tool keeper", () => {
+    expect(
+      buildAgentStateTools({
+        self: { code: ARMITAGE_AGENT_CODE, role: "tool-keeper" },
+        requestId: OWN_REQUEST_ID,
+        emailAddress: null,
+        reader: createReader({})
+      })
+    ).toEqual([])
+  })
+
   describe("read_my_state", () => {
-    registerArgumentFreeBuiltInToolContractSuite(
-      async (): Promise<RunnableBuiltInToolHarness> => {
-        const reader = createReader({
-          state: {
-            status: "found",
-            state: {
-              code: MEMBER.code,
-              name: "Researcher",
-              role: "member",
-              deletedAt: null,
-              requestSlotCount: 2,
-              requests: [OWN_REQUEST]
-            }
-          }
-        })
-        return {
-          tool: findStateTool(
-            buildAgentStateTools({
-              self: MEMBER,
-              requestId: OWN_REQUEST_ID,
-              reader
-            }),
-            "read_my_state"
-          ),
-          runnableArguments: {},
-          countStartedWork: () => reader.findAgentState.mock.calls.length
-        }
-      }
-    )
+    registerArgumentFreeBuiltInToolContractSuite(createReadMyStateHarness)
 
     it("tells a leader who it is and each request it works on, marking the calling one", async () => {
       const reader = createReader({
@@ -297,7 +374,7 @@ describe("buildAgentStateTools", () => {
             requests: [
               buildRequest(102, {
                 startedAt: "2026-10-24T09:58:10.000Z",
-                model: "qwen/qwen3-14b",
+                model: { provider: "groq", modelKey: "qwen/qwen3-14b" },
                 step: {
                   kind: "using-tools",
                   round: 1,
@@ -316,6 +393,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -324,11 +402,11 @@ describe("buildAgentStateTools", () => {
       expect(result).toEqual({
         status: "succeeded",
         content: [
-          "You are Caliginia (code caliginia), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state.",
+          "You are Caliginia (code caliginia), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state. You have no email address in use.",
           "Now: 2026-10-24T10:05:30.000Z.",
           "Request slots: 2 of 2 in use.",
-          `1. In "Weekly plan": started 2026-10-24T09:58:10.000Z (7 minutes ago) with qwen/qwen3-14b; using tools: web_search done, read_page waiting for the person's approval.`,
-          "2. This reply, in this conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; getting ready to answer."
+          `1. In "Weekly plan": started 2026-10-24T09:58:10.000Z (7 minutes ago) with qwen/qwen3-14b on Groq; using tools: web_search done, read_page waiting for the person's approval.`,
+          "2. This reply, in this conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; getting ready to answer."
         ].join("\n"),
         sources: []
       })
@@ -355,6 +433,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: MEMBER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -366,7 +445,7 @@ describe("buildAgentStateTools", () => {
           "You are Researcher (code researcher), a member. As a member you can see only your own state.",
           "Now: 2026-10-24T10:05:30.000Z.",
           "Request slots: 1 of 2 in use.",
-          "1. This reply, in this conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; getting ready to answer.",
+          "1. This reply, in this conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; getting ready to answer.",
           "Nothing else is in progress."
         ].join("\n")
       })
@@ -389,6 +468,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: MEMBER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -397,6 +477,36 @@ describe("buildAgentStateTools", () => {
       expect(result).toMatchObject({
         content: expect.stringMatching(
           /^You are Researcher \(code researcher\), a member\. You were deleted on 2026-10-24T10:04:00\.000Z\. As a member/
+        )
+      })
+    })
+
+    it("tells Lys her own email address while one is in use", async () => {
+      const reader = createReader({
+        state: {
+          status: "found",
+          state: {
+            code: "lysiptera",
+            name: "Lysiptera",
+            role: "leader",
+            deletedAt: null,
+            requestSlotCount: 2,
+            requests: [OWN_REQUEST]
+          }
+        }
+      })
+      const tools = buildAgentStateTools({
+        self: { code: "lysiptera", role: "leader" },
+        requestId: OWN_REQUEST_ID,
+        emailAddress: "lys@example.net",
+        reader
+      })
+
+      const result = await runStateTool(tools, "read_my_state")
+
+      expect(result).toMatchObject({
+        content: expect.stringMatching(
+          /^You are Lysiptera \(code lysiptera\), a leader\. As a leader [^\n]*read_agent_state\. Your email address is lys@example\.net\.\n/
         )
       })
     })
@@ -418,6 +528,7 @@ describe("buildAgentStateTools", () => {
       const [readMyState] = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
       const parsed = readMyState?.tool.parseToolCall({})
@@ -426,7 +537,7 @@ describe("buildAgentStateTools", () => {
       if (parsed?.status !== "parsed") throw new Error("Not parsed")
       vi.setSystemTime(new Date("2026-10-24T10:07:00.000Z"))
       const result = await parsed.runToolCall({
-        toolCallId: TOOL_CALL_ID,
+        toolCallId: RUN_TOOL_CALL_ID,
         abortSignal: new AbortController().signal,
         addWebSources: () => []
       })
@@ -440,40 +551,14 @@ describe("buildAgentStateTools", () => {
   })
 
   describe("read_agent_state", () => {
-    registerBuiltInToolContractSuite(async (): Promise<BuiltInToolHarness> => {
-      const reader = createReader({
-        state: {
-          status: "found",
-          state: {
-            code: "lysiptera",
-            name: "Lysiptera",
-            role: "leader",
-            deletedAt: null,
-            requestSlotCount: 2,
-            requests: []
-          }
-        }
-      })
-      return {
-        tool: findStateTool(
-          buildAgentStateTools({
-            self: LEADER,
-            requestId: OWN_REQUEST_ID,
-            reader
-          }),
-          "read_agent_state"
-        ),
-        runnableArguments: { code: "lysiptera" },
-        invalidArguments: { code: "Lysiptera" },
-        countStartedWork: () => reader.findAgentState.mock.calls.length
-      }
-    })
+    registerBuiltInToolContractSuite(createReadAgentStateHarness)
 
     it("refuses a value that cannot be an agent code without reading", async () => {
       const reader = createReader({})
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -491,6 +576,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({
           state: {
             status: "found",
@@ -522,7 +608,7 @@ describe("buildAgentStateTools", () => {
           "Web researcher (code researcher) is a member.",
           "Now: 2026-10-24T10:05:30.000Z.",
           "Request slots: 1 of 2 in use.",
-          `1. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; getting ready to answer.`
+          `1. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; getting ready to answer.`
         ].join("\n")
       })
     })
@@ -534,7 +620,7 @@ describe("buildAgentStateTools", () => {
           conversationTitle: { status: "found", title: null },
           step: { kind: "thinking", round: 0 }
         },
-        "In an untitled conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; thinking."
+        "In an untitled conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; thinking."
       ],
       [
         "in a deleted conversation, writing, a minute in",
@@ -543,12 +629,12 @@ describe("buildAgentStateTools", () => {
           startedAt: "2026-10-24T10:04:30.000Z",
           step: { kind: "writing", round: 2 }
         },
-        "In a conversation that was deleted: started 2026-10-24T10:04:30.000Z (1 minute ago) with qwen/qwen3-8b; writing the reply."
+        "In a conversation that was deleted: started 2026-10-24T10:04:30.000Z (1 minute ago) with qwen/qwen3-8b on LM Studio; writing the reply."
       ],
       [
         "reading tool results in a later round",
         { step: { kind: "preparing", round: 1 } },
-        `In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; reading tool results.`
+        `In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; reading tool results.`
       ],
       [
         "with a call of each other status",
@@ -565,7 +651,7 @@ describe("buildAgentStateTools", () => {
             ]
           }
         },
-        `In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; using tools: a running, b running in the app, c failed, d rejected by the person, e interrupted.`
+        `In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; using tools: a running, b running in the app, c failed, d rejected by the person, e interrupted.`
       ]
     ])("tells another agent's request %s", async (_label, variation, line) => {
       const reader = createReader({
@@ -584,6 +670,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -648,6 +735,7 @@ describe("buildAgentStateTools", () => {
         const tools = buildAgentStateTools({
           self: LEADER,
           requestId: OWN_REQUEST_ID,
+          emailAddress: null,
           reader
         })
 
@@ -661,11 +749,11 @@ describe("buildAgentStateTools", () => {
             "Lysiptera (code lysiptera) is a leader.",
             "Now: 2026-10-24T10:05:30.000Z.",
             slotLine,
-            `1. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; thinking.`,
-            `2. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; writing the reply.`,
+            `1. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; thinking.`,
+            `2. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; writing the reply.`,
             ...waiting.map(
               (_request, index) =>
-                `${index + 3}. In "Errand ${index + 1}": started 2026-10-24T10:05:10.000Z (less than a minute ago) with qwen/qwen3-8b; waiting for a free request slot, number ${index + 1} in line.`
+                `${index + 3}. In "Errand ${index + 1}": started 2026-10-24T10:05:10.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; waiting for a free request slot, number ${index + 1} in line.`
             )
           ].join("\n"),
           sources: []
@@ -677,6 +765,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({
           state: {
             status: "found",
@@ -720,6 +809,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -743,6 +833,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({ state: { status: "missing" } })
       })
 
@@ -759,6 +850,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({ state: { status: "forbidden" } })
       })
 
@@ -772,24 +864,7 @@ describe("buildAgentStateTools", () => {
   })
 
   describe("find_agents", () => {
-    registerBuiltInToolContractSuite(async (): Promise<BuiltInToolHarness> => {
-      const reader = createReader({
-        search: { status: "found", matches: [], matchCount: 0 }
-      })
-      return {
-        tool: findStateTool(
-          buildAgentStateTools({
-            self: LEADER,
-            requestId: OWN_REQUEST_ID,
-            reader
-          }),
-          "find_agents"
-        ),
-        runnableArguments: { query: "lys" },
-        invalidArguments: { query: " " },
-        countStartedWork: () => reader.listAgentMatches.mock.calls.length
-      }
-    })
+    registerBuiltInToolContractSuite(createFindAgentsHarness)
 
     it("lists the matches with their code, role, deletion, and bio on one line, searching the trimmed query", async () => {
       const reader = createReader({
@@ -817,6 +892,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -843,6 +919,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({
           search: {
             status: "found",
@@ -875,6 +952,7 @@ describe("buildAgentStateTools", () => {
       const one = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({
           search: {
             status: "found",
@@ -894,6 +972,7 @@ describe("buildAgentStateTools", () => {
       const none = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({
           search: { status: "found", matches: [], matchCount: 0 }
         })
@@ -922,6 +1001,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -941,6 +1021,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader
       })
 
@@ -953,6 +1034,7 @@ describe("buildAgentStateTools", () => {
       const tools = buildAgentStateTools({
         self: LEADER,
         requestId: OWN_REQUEST_ID,
+        emailAddress: null,
         reader: createReader({ search: { status: "forbidden" } })
       })
 

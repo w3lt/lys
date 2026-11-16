@@ -26,7 +26,12 @@ await build({
 // together, and every copy settles before a failure ends the build, so no
 // prompt is left half-written.
 const promptCopies = await Promise.allSettled(
-  ["caliginia.txt", "lysiptera.txt", "title-generation.txt"].map((filename) =>
+  [
+    "caliginia.txt",
+    "lysiptera.txt",
+    "armitage.txt",
+    "title-generation.txt"
+  ].map((filename) =>
     copyFile(
       new URL(`./src/utils/prompts/${filename}`, import.meta.url),
       new URL(`./dist/${filename}`, import.meta.url)

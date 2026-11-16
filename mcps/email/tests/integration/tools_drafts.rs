@@ -956,6 +956,7 @@ async fn answers_a_replacing_draft_whose_answer_was_lost_with_the_draft_it_repla
     assert_eq!(drafts.len(), 2);
     assert!(drafts.iter().all(|draft| !draft.has_flag("\\Deleted")));
     let replaced = EmailId {
+        mailbox: email::mailbox::Mailbox::Person,
         uid: 1,
         uid_validity: 1003,
         folder: "Drafts".to_owned(),

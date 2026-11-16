@@ -8,6 +8,7 @@ import {
   createNewConversationTarget,
   createTurnUserMessage
 } from "../../support/conversationFixtures"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 
 /**
  * Opens isolated in-memory conversation adapters with one committed turn.
@@ -21,7 +22,7 @@ function openEditorWithTurn() {
   const turn = turns.createConversationTurn({
     conversation: createNewConversationTarget("lys"),
     userMessage: createTurnUserMessage("Hello"),
-    model: "qwen/qwen3-8b"
+    model: LM_STUDIO_QWEN3_8B
   })
   return { database, turns, replyParts, editor, history, turn }
 }

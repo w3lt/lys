@@ -103,24 +103,28 @@ describe("isToolSettingsEqual", () => {
   it("compares the names on Just run, whatever their order", () => {
     const switches = new Map<string, boolean>()
     const first = {
+      approvedFolderPaths: [],
       justRunToolNames: new Set(["read_page", "find_files"]),
       switches
     }
 
     expect(
       isToolSettingsEqual(first, {
+        approvedFolderPaths: [],
         justRunToolNames: new Set(["find_files", "read_page"]),
         switches
       })
     ).toBe(true)
     expect(
       isToolSettingsEqual(first, {
+        approvedFolderPaths: [],
         justRunToolNames: new Set(["read_page"]),
         switches
       })
     ).toBe(false)
     expect(
       isToolSettingsEqual(first, {
+        approvedFolderPaths: [],
         justRunToolNames: new Set(["read_page", "web_search"]),
         switches
       })
@@ -130,6 +134,7 @@ describe("isToolSettingsEqual", () => {
   it("compares the switches by tool and value, whatever their order", () => {
     const justRunToolNames = new Set<string>()
     const first = {
+      approvedFolderPaths: [],
       justRunToolNames,
       switches: new Map([
         ["web_search", true],
@@ -139,6 +144,7 @@ describe("isToolSettingsEqual", () => {
 
     expect(
       isToolSettingsEqual(first, {
+        approvedFolderPaths: [],
         justRunToolNames,
         switches: new Map([
           ["find_files", false],
@@ -148,6 +154,7 @@ describe("isToolSettingsEqual", () => {
     ).toBe(true)
     expect(
       isToolSettingsEqual(first, {
+        approvedFolderPaths: [],
         justRunToolNames,
         switches: new Map([
           ["web_search", true],
@@ -157,18 +164,55 @@ describe("isToolSettingsEqual", () => {
     ).toBe(false)
     expect(
       isToolSettingsEqual(first, {
+        approvedFolderPaths: [],
         justRunToolNames,
         switches: new Map([["web_search", true]])
       })
     ).toBe(false)
     expect(
       isToolSettingsEqual(first, {
+        approvedFolderPaths: [],
         justRunToolNames,
         switches: new Map([
           ["web_search", true],
           ["read_page", false]
         ])
       })
+    ).toBe(false)
+  })
+})
+
+describe("isToolSettingsEqual with approved folders", () => {
+  it("compares the folders, whatever their order", () => {
+    const tools = Object.freeze({
+      approvedFolderPaths: ["/srv/shared", "/Users/ada/work"],
+      justRunToolNames: new Set<string>(),
+      switches: new Map<string, boolean>()
+    })
+
+    expect(
+      isToolSettingsEqual(tools, {
+        ...tools,
+        approvedFolderPaths: ["/Users/ada/work", "/srv/shared"]
+      })
+    ).toBe(true)
+    expect(
+      isToolSettingsEqual(tools, {
+        ...tools,
+        approvedFolderPaths: ["/srv/shared"]
+      })
+    ).toBe(false)
+    expect(
+      isToolSettingsEqual(tools, {
+        ...tools,
+        approvedFolderPaths: ["/srv/shared", "/Users/ada"]
+      })
+    ).toBe(false)
+    expect(
+      isToolSettingsEqual(
+        { ...tools, approvedFolderPaths: ["/srv/shared"] },
+        tools
+      )
     ).toBe(false)
   })
 })
@@ -263,6 +307,101 @@ describe("createToolSettingsSlice", () => {
         buildToolsWrite(["find_files"])
       ])
       expect(store.getState().toolSettingsSave).toEqual({ status: "saved" })
+    })
+  })
+
+  describe("approved folders", () => {
+    /**
+     * Builds the write of the stored tool choices with these folders.
+     *
+     * @param approvedFolders - Folders the write lists.
+     * @returns The arguments of the write.
+     */
+    function buildFoldersWrite(approvedFolders: readonly string[]) {
+      return {
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          tools: {
+            justRun: ["read_page"],
+            switches: { search_files: false },
+            approvedFolders
+          }
+        }
+      }
+    }
+
+    it("lists an added folder at once, then saves it with every tool choice", async () => {
+      const { host, writes } = startControlledSettingsHost()
+      const store = createToolSettingsStore()
+
+      store.getState().addApprovedFolder("/Users/ada/work")
+      const listedAtOnce = store.getState().settings.tools.approvedFolderPaths
+      await waitForMicrotasks()
+      writes[0]?.resolve(null)
+      await waitForMicrotasks()
+
+      expect(listedAtOnce).toEqual(["/Users/ada/work"])
+      expect(Object.isFrozen(listedAtOnce)).toBe(true)
+      expect(store.getState().toolSettingsSave).toEqual({ status: "saved" })
+      expect(listSettingsWrites(host.commands)).toEqual([
+        buildFoldersWrite(["/Users/ada/work"])
+      ])
+    })
+
+    it("removes a listed folder and saves the list without it, leaving it out once empty", async () => {
+      const { host, writes } = startControlledSettingsHost()
+      const store = createToolSettingsStore()
+      const changes = [
+        () => store.getState().addApprovedFolder("/Users/ada/work"),
+        () => store.getState().addApprovedFolder("/srv/shared"),
+        () => store.getState().removeApprovedFolder("/Users/ada/work"),
+        () => store.getState().removeApprovedFolder("/srv/shared")
+      ]
+
+      for (const [index, change] of changes.entries()) {
+        change()
+        await waitForMicrotasks()
+        writes[index]?.resolve(null)
+        await waitForMicrotasks()
+      }
+
+      expect(store.getState().settings.tools.approvedFolderPaths).toEqual([])
+      expect(listSettingsWrites(host.commands)).toEqual([
+        buildFoldersWrite(["/Users/ada/work"]),
+        buildFoldersWrite(["/Users/ada/work", "/srv/shared"]),
+        buildFoldersWrite(["/srv/shared"]),
+        buildToolsWrite(["read_page"])
+      ])
+    })
+
+    it("changes and saves nothing when the folder is already listed, or not listed for a removal", async () => {
+      const { host, writes } = startControlledSettingsHost()
+      const store = createToolSettingsStore()
+      store.getState().addApprovedFolder("/Users/ada/work")
+      await waitForMicrotasks()
+      writes[0]?.resolve(null)
+      await waitForMicrotasks()
+      const before = store.getState().settings
+
+      store.getState().addApprovedFolder("/Users/ada/work")
+      store.getState().removeApprovedFolder("/srv/shared")
+      await waitForMicrotasks()
+
+      expect(store.getState().settings).toBe(before)
+      expect(listSettingsWrites(host.commands)).toHaveLength(1)
+    })
+
+    it("keeps the listed folders when a tool's approval or switch changes", () => {
+      startControlledSettingsHost()
+      const store = createToolSettingsStore()
+
+      store.getState().addApprovedFolder("/Users/ada/work")
+      store.getState().updateToolApproval("find_files", "run")
+      store.getState().updateToolOn("web_search", false)
+
+      expect(store.getState().settings.tools.approvedFolderPaths).toEqual([
+        "/Users/ada/work"
+      ])
     })
   })
 

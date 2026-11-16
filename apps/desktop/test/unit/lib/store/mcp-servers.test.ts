@@ -732,7 +732,7 @@ describe("useMcpServerStore", () => {
 
       expect(useLysStore.getState().settings.mcp).toEqual({
         ...STORED_MCP_SETTINGS,
-        builtIn: { email: { enabled: true } }
+        builtIn: { email: { enabled: true, lysEnabled: false } }
       })
       expect(
         host.commands.filter((invoked) => invoked.command === "save_settings")
@@ -766,6 +766,31 @@ describe("useMcpServerStore", () => {
 
       expect(backend.requests).toEqual([])
       expect(useLysStore.getState().settings.mcp).toEqual(STORED_MCP_SETTINGS)
+    })
+  })
+
+  describe("saveEmailMailboxSwitch", () => {
+    it("saves one mailbox's switch, then asks the running backend to apply the group", async () => {
+      const host = startSettingsHost()
+      const { readRouteKeys } = startMcpBackend({
+        [SYNC_ROUTE]: answerList(CONNECTED_LIST)
+      })
+      const { useMcpServerStore, useLysStore } = await loadFreshMcpServerStore()
+
+      await expect(
+        useMcpServerStore.getState().saveEmailMailboxSwitch("lys", true)
+      ).resolves.toBe("saved")
+      await vi.waitFor(() => {
+        expect(readRouteKeys()).toEqual([SYNC_ROUTE])
+      })
+
+      expect(useLysStore.getState().settings.mcp.builtIn.email).toEqual({
+        enabled: false,
+        lysEnabled: true
+      })
+      expect(
+        host.commands.filter((invoked) => invoked.command === "save_settings")
+      ).toHaveLength(1)
     })
   })
 })

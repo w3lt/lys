@@ -161,7 +161,11 @@ accepted until [#171](https://github.com/w3lt/lys/issues/171).
 - **Constraint:** the commands are tools, not the permission gateway, and Lys
   has no path policy yet for them to check against. The paths they can reach
   are bounded only by the operating-system user that runs Lys, which today is
-  the person who launched it.
+  the person who launched it, except the files that
+  [#339](https://github.com/w3lt/lys/issues/339) has them refuse: a file
+  whose real path names a private key or credential file or folder of the
+  list the backend's tool call policy denies, and Lys's settings file. That
+  list is the gateway's own, so it is not a second path policy.
 - **Alternatives considered:**
   - A fixed restriction inside the commands, such as the home directory only
     or no hidden files, was rejected when the tools were designed: it would be
@@ -270,12 +274,15 @@ to the wait for the answer to a backend tool's call.
   tool's result; its pending prompts and calls; and the reply-events
   connections that follow it while it waits. Every other API still follows
   API-019.
-- **Constraint:** on Ask me the person may take any time to allow or reject a
-  call, so the backend sets no timer on the wait. The answer, Stop, deleting
-  the conversation, or backend shutdown ends it, and a job's wait also ends
-  when its delegator stops the job with `stop_job`. A newer turn in the
-  conversation does not end it yet: a waiting reply writes nothing that would
-  notice the change ([#137](https://github.com/w3lt/lys/issues/137)).
+- **Constraint:** the backend sets no timer on the wait for a client tool's
+  result. A prompt the person has not answered expires after five minutes
+  ([#342](https://github.com/w3lt/lys/issues/342)): the call is stored as
+  failed without running and the reply goes on, so no answer is given for the
+  person. The answer, Stop, deleting the conversation, or backend shutdown
+  ends either wait sooner, and a job's wait also ends when its delegator
+  stops the job with `stop_job`. A newer turn in the conversation does not
+  end it yet: a waiting reply writes nothing that would notice the change
+  ([#137](https://github.com/w3lt/lys/issues/137)).
 - **Alternatives considered:** a timer that answers a call after a fixed time
   was not taken, because it would answer for the person. Ending the wait on a
   newer turn was deferred to
@@ -286,8 +293,9 @@ to the wait for the answer to a backend tool's call.
   ends. After a newer turn, the old reply keeps waiting, and a later round
   that only calls tools can keep asking for calls until Stop.
 - **Removal condition:** [#137](https://github.com/w3lt/lys/issues/137) ends
-  the wait on a newer turn. The missing timer stays by design:
-  the person's answer or Stop bounds the wait.
+  the wait on a newer turn. The missing timer on a client tool's result
+  stays by design: the tool runs on the person's machine, and its result or
+  Stop bounds the wait.
 
 ## Tool run failure exception
 
@@ -354,12 +362,42 @@ for [PR #308](https://github.com/w3lt/lys/pull/308), to the `enabled` and
 `builtIn` switches of the `mcp` group, the `email` group, and `emailPassword`
 in `secrets`.
 
+On 2026-11-13 the maintainer extended it again, for
+[PR #372](https://github.com/w3lt/lys/pull/372) and
+[issue #361](https://github.com/w3lt/lys/issues/361), in the same scope and
+with the same alternatives and removal condition, to the three fields of
+Lys's own mailbox: `lysEnabled` in `mcp.builtIn.email`, `lysAccount` in the
+`email` group, and `lysEmailPassword` in `secrets`. Each is optional and read
+as its default when absent, `false` or `null`, so a file written before them
+loads with the same meaning. The added risk: a build from before them knows
+`builtIn` and the `email` group but refuses `lysEnabled` and `lysAccount`,
+which this build writes on every save, so the file fails to load in it, every
+setting with it, until both are removed by hand; it ignores
+`lysEmailPassword` and drops it on its next save.
+
+On 2026-11-14 the maintainer extended it again, for
+[PR #377](https://github.com/w3lt/lys/pull/377) and
+[issue #360](https://github.com/w3lt/lys/issues/360), in the same scope and
+with the same alternatives and removal condition, to the `enabled` list of the
+`providers` group, the providers that are on. It is the one place where a
+missing field tells the file's format: a `providers` group without `enabled`
+was written before that pull request, and its single `active` provider, or LM
+Studio when `active` is missing, is read as the one provider that is on. When
+`enabled` is present it wins, even when empty, and `active` is ignored but must
+still name a provider. A save writes `enabled` and drops `active`; the file is
+not rewritten on load. The Tauri host and the backend read the group the same
+way. The added risk: a build from before `enabled` refuses an unknown field in
+the `providers` group, and this build writes `enabled` on every save, so the
+file fails to load in it, every setting with it, until `enabled` is replaced
+by `active` by hand.
+
 - **Scope:** only `$LYS_HOME/settings.json`, which the
   [native settings module](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/settings.rs)
   reads and writes, and whose `secrets` group the backend reads for the
   Tavily API key and the email account's password, its `mcp` group for the
-  MCP servers and their switches, and its `email` group for the email
-  account. A missing group,
+  MCP servers and their switches, its `email` group for the email
+  account, and its `providers` group for the providers that are on. A missing
+  group,
   such as `loadConfiguration` in a file written before PR #143, is read as
   that group's defaults like any other missing optional field; no format is
   inferred from it, and the file is not rewritten on load. Every other
@@ -386,7 +424,8 @@ in `secrets`.
   they are removed by hand; a build from before the email server drops the
   `email` group and `emailPassword`, and the saved account with them. Nothing
   stops an older build from rewriting a newer file. The current build rejects
-  an unknown field inside `loadConfiguration`, `tools`, `location`, `mcp`, a
+  an unknown field inside `loadConfiguration`, `tools`, `location`,
+  `providers`, `mcp`, a
   server object and `builtIn` included, and `email`, so a newer file that
   adds a field to one of these groups fails to load in this build, every
   setting with it. It ignores an unknown group and

@@ -30,6 +30,7 @@ import {
   type ConversationRecordsHarness,
   type JobReportFixture
 } from "../../support/conversationRecordsContract"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 
 /** Time of every turn a case creates. */
 const NOW = "2026-03-04T05:06:07.890Z"
@@ -96,7 +97,7 @@ function createPersonTurn(
   return createCommittedTurn(records, {
     conversation,
     userMessage: createTurnUserMessage(content),
-    model: "qwen/qwen3-8b"
+    model: LM_STUDIO_QWEN3_8B
   })
 }
 
@@ -123,7 +124,7 @@ function createJobTurn(
   return createCommittedTurn(records, {
     conversation: createNewJobTarget(parentId, call.callId),
     userMessage: createTurnUserMessage("Find out what moths eat."),
-    model: "qwen/qwen3-8b"
+    model: LM_STUDIO_QWEN3_8B
   })
 }
 
@@ -157,7 +158,7 @@ function createJobContinuationTurn(
   return createCommittedTurn(records, {
     conversation,
     userMessage: createTurnUserMessage("Look at butterflies too."),
-    model: "qwen/qwen3-8b"
+    model: LM_STUDIO_QWEN3_8B
   })
 }
 
@@ -183,6 +184,7 @@ function saveExistingConversation(records: ConversationRecordsHarness): void {
     id: createFixtureUuidV7(11),
     conversationId: EXISTING_CONVERSATION_ID,
     model: "qwen/qwen3-8b",
+    provider: "lmStudio",
     parts: [
       createTextPart({
         sequence: 511,
@@ -208,7 +210,7 @@ describe("createConversationTurn", () => {
     const turn = createCommittedTurn(records, {
       conversation: createNewConversationTarget("options-agent"),
       userMessage: createTurnUserMessage("Hello"),
-      model: "qwen/qwen3-8b"
+      model: LM_STUDIO_QWEN3_8B
     })
 
     expect(turn.isNewConversation).toBe(true)
@@ -232,13 +234,13 @@ describe("createConversationTurn", () => {
     ).toMatchObject({ agentCode: "options-agent", createdAt: NOW })
   })
 
-  it("appends a user message and a streaming reply without parts", () => {
+  it("appends a user message and a streaming reply without parts that records the model and its provider", () => {
     const records = openSqliteConversationRecords()
 
     const turn = createCommittedTurn(records, {
       conversation: createNewConversationTarget("lys"),
       userMessage: createTurnUserMessage("Hello"),
-      model: "qwen/qwen3-8b"
+      model: { provider: "ollamaCloud", modelKey: "gpt-oss:120b" }
     })
 
     expect(turn.userMessage).toEqual({
@@ -253,7 +255,8 @@ describe("createConversationTurn", () => {
     expect(turn.assistantMessage).toEqual({
       id: expect.any(String),
       role: "assistant",
-      model: "qwen/qwen3-8b",
+      model: "gpt-oss:120b",
+      provider: "ollamaCloud",
       parts: [],
       status: "streaming",
       finishReason: null,
@@ -272,7 +275,7 @@ describe("createConversationTurn", () => {
     const turn = createCommittedTurn(records, {
       conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
       userMessage: createTurnUserMessage("Next question"),
-      model: "qwen/qwen3-8b"
+      model: LM_STUDIO_QWEN3_8B
     })
 
     expect(turn.isNewConversation).toBe(false)
@@ -299,6 +302,7 @@ describe("createConversationTurn", () => {
       id: createFixtureUuidV7(12),
       conversationId: EXISTING_CONVERSATION_ID,
       model: "qwen/qwen3-8b",
+      provider: "lmStudio",
       parts: [
         createTextPart({
           sequence: 512,
@@ -319,7 +323,7 @@ describe("createConversationTurn", () => {
     const turn = createCommittedTurn(records, {
       conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
       userMessage: createTurnUserMessage("Next question"),
-      model: "qwen/qwen3-8b"
+      model: LM_STUDIO_QWEN3_8B
     })
 
     expect(turn.conversation.messages.at(-1)).toMatchObject({
@@ -345,6 +349,7 @@ describe("createConversationTurn", () => {
       id: createFixtureUuidV7(20),
       conversationId: otherConversationId,
       model: "qwen/qwen3-8b",
+      provider: "lmStudio",
       parts: [
         createTextPart({
           sequence: 520,
@@ -365,7 +370,7 @@ describe("createConversationTurn", () => {
     createCommittedTurn(records, {
       conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
       userMessage: createTurnUserMessage("Next question"),
-      model: "qwen/qwen3-8b"
+      model: LM_STUDIO_QWEN3_8B
     })
 
     expect(
@@ -383,7 +388,7 @@ describe("createConversationTurn", () => {
       createCommittedTurn(records, {
         conversation: { kind: "existing", id: EXISTING_CONVERSATION_ID },
         userMessage: createTurnUserMessage("Hello"),
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
     ).toThrow(ConversationNotFoundError)
 
@@ -399,11 +404,14 @@ describe("createConversationTurn", () => {
   it.each([
     [
       "empty user content",
-      { userMessage: createTurnUserMessage(""), model: "qwen/qwen3-8b" }
+      { userMessage: createTurnUserMessage(""), model: LM_STUDIO_QWEN3_8B }
     ],
     [
-      "an empty model",
-      { userMessage: createTurnUserMessage("Hello"), model: "" }
+      "an empty model key",
+      {
+        userMessage: createTurnUserMessage("Hello"),
+        model: { ...LM_STUDIO_QWEN3_8B, modelKey: "" }
+      }
     ]
   ])("rejects %s before any write", (_label, values) => {
     const records = openSqliteConversationRecords()
@@ -412,6 +420,7 @@ describe("createConversationTurn", () => {
       id: createFixtureUuidV7(12),
       conversationId: EXISTING_CONVERSATION_ID,
       model: "qwen/qwen3-8b",
+      provider: "lmStudio",
       parts: [
         createTextPart({
           sequence: 512,
@@ -545,7 +554,7 @@ describe("createConversationTurn", () => {
       createCommittedTurn(records, {
         conversation,
         userMessage: createTurnUserMessage("Find out what moths eat."),
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
     ).toThrow(ConversationNotFoundError)
 
@@ -608,6 +617,7 @@ describe("createConversationTurn", () => {
       id: createFixtureUuidV7(52),
       conversationId: otherId,
       model: "qwen/qwen3-8b",
+      provider: "lmStudio",
       parts: [],
       status: "streaming",
       finishReason: null,
@@ -635,7 +645,7 @@ describe("createConversationTurn", () => {
     const turn = createCommittedTurn(records, {
       conversation,
       userMessage: createTurnUserMessage("Reports from your jobs arrived."),
-      model: "qwen/qwen3-8b"
+      model: LM_STUDIO_QWEN3_8B
     })
 
     expect(turn.userMessage).toMatchObject({

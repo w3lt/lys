@@ -1,9 +1,10 @@
 import { APIUserAbortError, BadRequestError } from "openai"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import * as z from "zod"
 import ChatService, {
   type ChatServiceCreationOptions
 } from "../../../../src/modules/chat/chatService"
+import type { LlmChatEndpoint } from "../../../../src/modules/llm/llmProviderAccess"
 import { isLlmRuntimeUnavailableError } from "../../../../src/modules/llm/llmRuntimeUnavailableError"
 import {
   ChatCompletionCancelledError,
@@ -18,6 +19,20 @@ import {
   startOpenAiEndpointFake,
   type OpenAiEndpointResponder
 } from "../../support/openAiEndpointFake"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
+
+/** Llama 3.3 70B on Groq, a model on a hosted provider. */
+const GROQ_LLAMA_70B = Object.freeze({
+  provider: "groq",
+  modelKey: "llama-3.3-70b-versatile"
+} as const)
+
+/** Groq's endpoint as the cases reach it; the key is synthetic. */
+const GROQ_TEST_ENDPOINT: LlmChatEndpoint = Object.freeze({
+  baseUrl: "https://api.groq.test/openai/v1",
+  apiKey: "gsk_synthetic_0123456789",
+  replyCeilingField: "max_completion_tokens"
+})
 
 /** Endpoint base URL used by every service in these cases. */
 const OPENAI_BASE_URL = "http://lmstudio.test/v1"
@@ -95,7 +110,7 @@ describe("ChatService", () => {
             { role: "user", content: "Hello" }
           ],
           tools: [],
-          model: "qwen/qwen3-8b",
+          model: LM_STUDIO_QWEN3_8B,
           generationOptions: { temperature: 0.4, replyCeiling: 256 }
         })
       )
@@ -126,7 +141,7 @@ describe("ChatService", () => {
         await service.completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
           tools: [],
-          model: "qwen/qwen3-8b",
+          model: LM_STUDIO_QWEN3_8B,
           generationOptions: { temperature: 0 }
         })
       )
@@ -153,7 +168,7 @@ describe("ChatService", () => {
         await service.completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
           tools: [],
-          model: "llama3.2",
+          model: { provider: "ollama", modelKey: "llama3.2" },
           generationOptions: { temperature: 0.4, replyCeiling: 256 }
         })
       )
@@ -180,7 +195,7 @@ describe("ChatService", () => {
         await service.completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
           tools: [readTextFile],
-          model: "qwen/qwen3-8b",
+          model: LM_STUDIO_QWEN3_8B,
           generationOptions: { temperature: 0.4 }
         })
       )
@@ -199,7 +214,7 @@ describe("ChatService", () => {
         await service.completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
           tools: [],
-          model: "qwen/qwen3-8b",
+          model: LM_STUDIO_QWEN3_8B,
           generationOptions: { temperature: 0.4 }
         })
       )
@@ -221,7 +236,7 @@ describe("ChatService", () => {
         await service.completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
           tools: [],
-          model: "qwen/qwen3-8b",
+          model: LM_STUDIO_QWEN3_8B,
           generationOptions: { temperature: 0.4 }
         })
       )
@@ -247,7 +262,7 @@ describe("ChatService", () => {
           await client.completeChatStream({
             messages: [{ role: "user", content: "Hello" }],
             tools: [],
-            model: "qwen/qwen3-8b",
+            model: LM_STUDIO_QWEN3_8B,
             generationOptions: { temperature: 0.4 }
           })
         )
@@ -260,13 +275,69 @@ describe("ChatService", () => {
       expect(configured).toBe("Bearer local-key")
     })
 
-    it("sends each request to the provider connected when it starts", async () => {
-      let endpoint: ReturnType<ChatServiceCreationOptions["findChatEndpoint"]> =
-        {
-          baseUrl: OPENAI_BASE_URL,
-          apiKey: undefined,
-          replyCeilingField: "max_completion_tokens"
-        }
+    it("sends each request to the endpoint of its model's provider, with that provider's key", async () => {
+      const findChatEndpoint = vi.fn<
+        ChatServiceCreationOptions["findChatEndpoint"]
+      >((provider) =>
+        provider === "groq"
+          ? GROQ_TEST_ENDPOINT
+          : SERVICE_OPTIONS.findChatEndpoint()
+      )
+      const { service, endpoint: fake } = createServiceWithEndpoint(
+        () => createChatCompletionStreamResponse([]),
+        { findChatEndpoint }
+      )
+      const request = {
+        messages: [{ role: "user" as const, content: "Hello" }],
+        tools: [],
+        generationOptions: { temperature: 0.4 }
+      }
+
+      await listChunks(
+        await service.completeChatStream({ ...request, model: GROQ_LLAMA_70B })
+      )
+      await listChunks(
+        await service.completeChatStream({
+          ...request,
+          model: LM_STUDIO_QWEN3_8B
+        })
+      )
+      await service
+        .generateTitle({ message: "Hello", model: GROQ_LLAMA_70B })
+        .catch(() => undefined)
+
+      expect(findChatEndpoint.mock.calls).toEqual([
+        ["groq"],
+        ["lmStudio"],
+        ["groq"]
+      ])
+      expect(
+        fake.requests.map(({ url, body, headers }) => [
+          url,
+          (body as { model?: unknown }).model,
+          headers.get("authorization")
+        ])
+      ).toEqual([
+        [
+          "https://api.groq.test/openai/v1/chat/completions",
+          "llama-3.3-70b-versatile",
+          "Bearer gsk_synthetic_0123456789"
+        ],
+        [
+          `${OPENAI_BASE_URL}/chat/completions`,
+          "qwen/qwen3-8b",
+          expect.not.stringContaining("gsk_synthetic")
+        ],
+        [
+          "https://api.groq.test/openai/v1/chat/completions",
+          "llama-3.3-70b-versatile",
+          "Bearer gsk_synthetic_0123456789"
+        ]
+      ])
+    })
+
+    it("sends each request to the endpoint its provider is connected at when it starts", async () => {
+      let endpoint: LlmChatEndpoint = SERVICE_OPTIONS.findChatEndpoint()
       const { service, endpoint: fake } = createServiceWithEndpoint(
         () => createChatCompletionStreamResponse([]),
         { findChatEndpoint: () => endpoint }
@@ -274,16 +345,12 @@ describe("ChatService", () => {
       const request = {
         messages: [{ role: "user" as const, content: "Hello" }],
         tools: [],
-        model: "llama-3.3-70b-versatile",
+        model: GROQ_LLAMA_70B,
         generationOptions: { temperature: 0.4 }
       }
 
       await listChunks(await service.completeChatStream(request))
-      endpoint = {
-        baseUrl: "https://api.groq.test/openai/v1",
-        apiKey: "gsk_synthetic_0123456789",
-        replyCeilingField: "max_completion_tokens"
-      }
+      endpoint = GROQ_TEST_ENDPOINT
       await listChunks(await service.completeChatStream(request))
 
       expect(fake.requests.map(({ url }) => url)).toEqual([
@@ -295,24 +362,29 @@ describe("ChatService", () => {
       )
     })
 
-    it("refuses a request while no provider is connected, sending nothing", async () => {
+    it("refuses a request while its model's provider is not connected, even when another provider is, sending nothing", async () => {
       const { service, endpoint } = createServiceWithEndpoint(
         () => createChatCompletionStreamResponse([]),
-        { findChatEndpoint: () => undefined }
+        {
+          findChatEndpoint: (provider) =>
+            provider === "lmStudio"
+              ? SERVICE_OPTIONS.findChatEndpoint()
+              : undefined
+        }
       )
 
       const failure = await service
         .completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
           tools: [],
-          model: "qwen/qwen3-8b",
+          model: GROQ_LLAMA_70B,
           generationOptions: { temperature: 0.4 }
         })
         .catch((error: unknown) => error)
 
       expect(isLlmRuntimeUnavailableError(failure)).toBe(true)
       await expect(
-        service.generateTitle({ message: "Hello", model: "qwen/qwen3-8b" })
+        service.generateTitle({ message: "Hello", model: GROQ_LLAMA_70B })
       ).rejects.toSatisfy(isLlmRuntimeUnavailableError)
       expect(endpoint.requests).toEqual([])
     })
@@ -328,7 +400,7 @@ describe("ChatService", () => {
         .completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
           tools: [],
-          model: "qwen/qwen3-8b",
+          model: LM_STUDIO_QWEN3_8B,
           signal: cancellation.signal,
           generationOptions: { temperature: 0.4 }
         })
@@ -347,7 +419,7 @@ describe("ChatService", () => {
         service.completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
           tools: [],
-          model: "qwen/qwen3-8b",
+          model: LM_STUDIO_QWEN3_8B,
           signal: AbortSignal.abort(),
           generationOptions: { temperature: 0.4 }
         })
@@ -364,7 +436,7 @@ describe("ChatService", () => {
         .completeChatStream({
           messages: [{ role: "user", content: "Hello" }],
           tools: [],
-          model: "qwen/qwen3-8b",
+          model: LM_STUDIO_QWEN3_8B,
           generationOptions: { temperature: 0.4 }
         })
         .catch((error: unknown) => error)
@@ -382,7 +454,7 @@ describe("ChatService", () => {
 
       await service.generateTitle({
         message: "Plan my trip to Hanoi",
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
 
       expect(endpoint.requests[0]?.body).toMatchObject({
@@ -413,7 +485,7 @@ describe("ChatService", () => {
       const service = createServiceReplyingWithTitle('{"title":"  Trip  "}')
 
       await expect(
-        service.generateTitle({ message: "Plan", model: "qwen/qwen3-8b" })
+        service.generateTitle({ message: "Plan", model: LM_STUDIO_QWEN3_8B })
       ).resolves.toBe("Trip")
     })
 
@@ -428,7 +500,7 @@ describe("ChatService", () => {
       const service = createServiceReplyingWithTitle(content)
 
       await expect(
-        service.generateTitle({ message: "Plan", model: "qwen/qwen3-8b" })
+        service.generateTitle({ message: "Plan", model: LM_STUDIO_QWEN3_8B })
       ).resolves.toBe("Trip")
     })
 
@@ -437,7 +509,7 @@ describe("ChatService", () => {
       const service = createServiceReplyingWithTitle(JSON.stringify({ title }))
 
       await expect(
-        service.generateTitle({ message: "Plan", model: "qwen/qwen3-8b" })
+        service.generateTitle({ message: "Plan", model: LM_STUDIO_QWEN3_8B })
       ).resolves.toBe(title)
     })
 
@@ -460,7 +532,7 @@ describe("ChatService", () => {
       )
 
       await expect(
-        service.generateTitle({ message: "Plan", model: "qwen/qwen3-8b" })
+        service.generateTitle({ message: "Plan", model: LM_STUDIO_QWEN3_8B })
       ).resolves.toBe("First")
     })
 
@@ -474,7 +546,7 @@ describe("ChatService", () => {
         const service = createServiceReplyingWithTitle(content, finishReason)
 
         await expect(
-          service.generateTitle({ message: "Plan", model: "qwen/qwen3-8b" })
+          service.generateTitle({ message: "Plan", model: LM_STUDIO_QWEN3_8B })
         ).rejects.toBeInstanceOf(TitleGenerationOutputError)
       }
     )
@@ -487,7 +559,7 @@ describe("ChatService", () => {
       )
 
       await expect(
-        service.generateTitle({ message: "Plan", model: "qwen/qwen3-8b" })
+        service.generateTitle({ message: "Plan", model: LM_STUDIO_QWEN3_8B })
       ).rejects.toBeInstanceOf(TitleGenerationOutputError)
     })
 
@@ -495,7 +567,7 @@ describe("ChatService", () => {
       const service = createServiceReplyingWithTitle("Trip to Hanoi")
 
       const failure = await service
-        .generateTitle({ message: "Plan", model: "qwen/qwen3-8b" })
+        .generateTitle({ message: "Plan", model: LM_STUDIO_QWEN3_8B })
         .catch((error: unknown) => error)
 
       expect(failure).toBeInstanceOf(TitleGenerationOutputError)
@@ -515,7 +587,7 @@ describe("ChatService", () => {
       const service = createServiceReplyingWithTitle(content)
 
       const failure = await service
-        .generateTitle({ message: "Plan", model: "qwen/qwen3-8b" })
+        .generateTitle({ message: "Plan", model: LM_STUDIO_QWEN3_8B })
         .catch((error: unknown) => error)
 
       expect(failure).toBeInstanceOf(TitleGenerationOutputError)
@@ -528,7 +600,7 @@ describe("ChatService", () => {
       )
 
       const failure = await service
-        .generateTitle({ message: "Plan", model: "qwen/qwen3-8b" })
+        .generateTitle({ message: "Plan", model: LM_STUDIO_QWEN3_8B })
         .catch((error: unknown) => error)
 
       expect(failure).toBeInstanceOf(BadRequestError)
@@ -545,7 +617,7 @@ describe("ChatService", () => {
       const failure = await service
         .generateTitle({
           message: "Plan",
-          model: "qwen/qwen3-8b",
+          model: LM_STUDIO_QWEN3_8B,
           signal: cancellation.signal
         })
         .catch((error: unknown) => error)

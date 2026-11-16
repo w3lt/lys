@@ -1,8 +1,11 @@
-//! The account the server signs in with, read from `LYS_EMAIL_ACCOUNT`.
+//! The accounts the server signs in with: the person's, read from
+//! `LYS_EMAIL_ACCOUNT`, and Lys's own, read from `LYS_EMAIL_LYS_ACCOUNT`.
 //!
-//! The backend starts the server with one environment variable holding the
-//! saved account and its password as one line of JSON, the only channel a
-//! stdio MCP launch offers. The rules here repeat those of
+//! The backend starts the server with one environment variable per mailbox
+//! it serves, each holding the saved account and its password as one line
+//! of JSON, the only channel a stdio MCP launch offers. Each mailbox has a
+//! variable of its own because one variable may hold at most 4,096
+//! characters, which one account can nearly fill. The rules here repeat those of
 //! `emailAccountSchema` in `@lys/share`: the backend checked them before
 //! starting the server, and the server checks them again, because anyone
 //! on the machine can start the binary with a variable of their own, and
@@ -22,9 +25,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::error::Category;
 
 use crate::failure::Protocol;
-
-/// Environment variable holding the account and its password as JSON.
-pub const ACCOUNT_VARIABLE_NAME: &str = "LYS_EMAIL_ACCOUNT";
+use crate::mailbox::Mailbox;
 
 /// Most bytes an email address may have, inclusive: the longest path SMTP
 /// carries.
@@ -139,7 +140,7 @@ impl fmt::Debug for Account {
     }
 }
 
-/// Why the account variable gave no account; named without any value.
+/// Why an account variable gave no account; named without any value.
 ///
 /// The JSON reader stops at the first thing it cannot take, and that decides
 /// between [`AccountProblem::NotJson`] and [`AccountProblem::NotAnAccount`]:
@@ -282,19 +283,134 @@ impl<'de, T: Deserialize<'de>> Visitor<'de> for JsonObjectVisitor<T> {
     }
 }
 
-/// Reads the raw text of the account variable.
+/// Reads the raw text of a mailbox's account variable.
+///
+/// # Arguments
+///
+/// * `mailbox` - The mailbox whose variable is read.
 ///
 /// # Returns
 ///
 /// The variable's value, or why there is none.
-pub fn read_account_variable() -> Result<String, AccountProblem> {
-    match env::var_os(ACCOUNT_VARIABLE_NAME) {
+pub fn read_account_variable(mailbox: Mailbox) -> Result<String, AccountProblem> {
+    match env::var_os(mailbox.variable_name()) {
         None => Err(AccountProblem::Missing),
         Some(value) => value.into_string().map_err(|_| AccountProblem::NotUnicode),
     }
 }
 
-/// Parses the account variable's text into an account that passes every
+/// Reads a mailbox's account from its variable.
+///
+/// # Arguments
+///
+/// * `mailbox` - The mailbox whose account is read.
+///
+/// # Returns
+///
+/// The account, or the first problem found, named without its value.
+pub fn read_account(mailbox: Mailbox) -> Result<Account, AccountProblem> {
+    read_account_variable(mailbox).and_then(|text| parse_account_variable(&text))
+}
+
+/// Why the server has no mailbox it may serve; named without any value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServeProblem {
+    /// Neither account variable is set.
+    NoAccount,
+    /// A variable that is set gives no account.
+    Account {
+        /// The mailbox whose variable it is.
+        mailbox: Mailbox,
+        /// Why it gives no account.
+        problem: AccountProblem,
+    },
+    /// Lys's account signs in to the person's mailbox, as
+    /// [`is_same_mailbox`] tells.
+    SameMailbox,
+}
+
+impl fmt::Display for ServeProblem {
+    /// Formats the problem as the log line names it: the variables it
+    /// concerns, then what is wrong, without any part of their values.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoAccount => write!(
+                formatter,
+                "{} and {}: neither is set",
+                Mailbox::Person.variable_name(),
+                Mailbox::Lys.variable_name()
+            ),
+            Self::Account { mailbox, problem } => {
+                write!(formatter, "{}: {problem}", mailbox.variable_name())
+            }
+            Self::SameMailbox => write!(
+                formatter,
+                "{}: names the person's mailbox, while Lys's account must be a mailbox of its own: an address other than the person's, and not the person's user name on the same IMAP host and port",
+                Mailbox::Lys.variable_name()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ServeProblem {}
+
+/// Reads the accounts of the mailboxes the server serves: each one whose
+/// variable is set.
+///
+/// # Returns
+///
+/// The mailboxes and their accounts, the person's first when both are set;
+/// or why the server has none it may serve: neither variable is set, one
+/// that is set gives no account, or the two accounts are one mailbox.
+pub fn read_served_accounts() -> Result<Vec<(Mailbox, Account)>, ServeProblem> {
+    let mut accounts = Vec::new();
+    for mailbox in [Mailbox::Person, Mailbox::Lys] {
+        match read_account(mailbox) {
+            Ok(account) => accounts.push((mailbox, account)),
+            Err(AccountProblem::Missing) => {}
+            Err(problem) => return Err(ServeProblem::Account { mailbox, problem }),
+        }
+    }
+    match accounts.as_slice() {
+        [] => Err(ServeProblem::NoAccount),
+        [(_, person), (_, lys)] if is_same_mailbox(person, lys) => Err(ServeProblem::SameMailbox),
+        _ => Ok(accounts),
+    }
+}
+
+/// Tells whether two accounts sign in to the same mailbox: the same
+/// address, or the same user name on the same IMAP host and port, with
+/// texts compared without regard to ASCII case.
+///
+/// The rule matches `isSameEmailMailbox` in `@lys/share` and the desktop
+/// host's copy, which refuse such a settings file before the backend starts
+/// the server; the server checks it again, because anyone on the machine
+/// can start the binary with variables of their own.
+///
+/// # Arguments
+///
+/// * `first` - One account.
+/// * `second` - The other account.
+pub fn is_same_mailbox(first: &Account, second: &Account) -> bool {
+    let first_address: &str = first.address.as_ref();
+    let second_address: &str = second.address.as_ref();
+    first_address.eq_ignore_ascii_case(second_address) || is_same_sign_in(first, second)
+}
+
+/// Tells whether two accounts sign in with the same user name on the same
+/// IMAP host and port, with texts compared without regard to ASCII case.
+///
+/// # Arguments
+///
+/// * `first` - One account.
+/// * `second` - The other account.
+fn is_same_sign_in(first: &Account, second: &Account) -> bool {
+    first.user_name.eq_ignore_ascii_case(&second.user_name)
+        && first.imap.host.eq_ignore_ascii_case(&second.imap.host)
+        && first.imap.port == second.imap.port
+}
+
+/// Parses an account variable's text into an account that passes every
 /// rule.
 ///
 /// # Arguments
@@ -611,18 +727,20 @@ mod tests {
         })
     }
 
-    /// Builds the variable the backend writes for the account of a shared
+    /// The fields of a settings group that hold an account: the person's
+    /// and Lys's.
+    const ACCOUNT_FIELDS: [&str; 2] = ["account", "lysAccount"];
+
+    /// Builds the variable the backend writes for an account of a shared
     /// group: an account object gains the test password, and any other
     /// value stays as it is.
     ///
     /// # Returns
     ///
-    /// The variable's text, or `None` for a group that holds no account or
-    /// more than one field, whose case is about the group rather than the
-    /// account.
-    fn build_group_variable(group: &Value) -> Option<String> {
-        let fields = group.as_object().filter(|fields| fields.len() == 1)?;
-        match fields.get("account")? {
+    /// The variable's text, or `None` for a null account, which the backend
+    /// writes no variable for.
+    fn build_account_variable(account: &Value) -> Option<String> {
+        match account {
             Value::Null => None,
             Value::Object(account) => {
                 let mut account = account.clone();
@@ -635,15 +753,34 @@ mod tests {
         }
     }
 
-    /// Calculates whether the server accepts a shared group's account.
+    /// Calculates whether the server accepts a shared group's accounts:
+    /// each one parses, and two are not one mailbox.
     ///
     /// # Returns
     ///
-    /// Whether the server accepts the account, or `None` for a group whose
-    /// case is not about the account.
+    /// Whether the server accepts the accounts, or `None` for a group whose
+    /// case is not about them: it holds no account, or a field other than
+    /// the accounts.
     fn calculate_shared_group_acceptance(shared: &SharedGroup) -> Option<bool> {
-        let variable = build_group_variable(&shared.group)?;
-        Some(parse_account_variable(&variable).is_ok())
+        let fields = shared.group.as_object()?;
+        if fields
+            .keys()
+            .any(|name| !ACCOUNT_FIELDS.contains(&name.as_str()))
+        {
+            return None;
+        }
+        let parsed: Vec<Result<Account, AccountProblem>> = ACCOUNT_FIELDS
+            .iter()
+            .filter_map(|name| build_account_variable(fields.get(*name)?))
+            .map(|variable| parse_account_variable(&variable))
+            .collect();
+        match parsed.as_slice() {
+            [] => None,
+            [one] => Some(one.is_ok()),
+            [Ok(person), Ok(lys)] => Some(!is_same_mailbox(person, lys)),
+            // Two accounts, at least one of which does not parse.
+            _ => Some(false),
+        }
     }
 
     /// Builds the JSON the backend writes, with one field replaced.
@@ -983,9 +1120,10 @@ mod tests {
         }
     }
 
-    /// Checks that the server accepts or refuses the account of each shared
+    /// Checks that the server accepts or refuses the accounts of each shared
     /// settings group as the share package's rules do, over fixtures with
-    /// both outcomes.
+    /// both outcomes: the person's account, Lys's, and the two together,
+    /// which must be two mailboxes.
     #[test]
     fn judges_each_account_of_the_shared_groups_as_the_shared_rules_do() {
         /// Groups of the settings file that `emailSettingsSchema` in

@@ -8,7 +8,8 @@ import {
   type ConversationMessageOrigin,
   type ConversationSource,
   type ConversationUserMessage,
-  type JobReport
+  type JobReport,
+  type LlmModelReference
 } from "@lys/share"
 import type {
   ConversationTurn,
@@ -333,20 +334,21 @@ function buildNumberedUserMessage(
 
 /**
  * Builds the validated reply a turn starts.
- * @param model - Nonempty model identity stored on the reply.
+ * @param model - Model whose key and provider the reply stores.
  * @param now - Time of the turn.
  * @returns A streaming reply without parts, under a new UUIDv7.
  * @throws If the reply violates the conversation contract, as one with an
- * empty model does.
+ * empty model key does.
  */
 function buildStreamingReply(
-  model: string,
+  model: LlmModelReference,
   now: string
 ): ConversationAssistantMessage {
   return conversationAssistantMessageSchema.parse({
     id: uuidv7(),
     role: "assistant",
-    model,
+    model: model.modelKey,
+    provider: model.provider,
     parts: [],
     status: "streaming",
     finishReason: null,
@@ -515,7 +517,7 @@ function updateJobReportsToDelivered(
  * names; an existing conversation keeps its agent. A new job also stores its
  * parent, its title, and the number after its parent's highest; a continued
  * job gets the title of the job message. A job message is stored with the
- * call that sends it.
+ * call that sends it. The reply stores the model's key and provider.
  * @param now - Time of the turn, read once by the caller. Every value the turn
  * builds carries it: a new conversation's times, both messages' times, and
  * the update time of each reply the turn interrupts.

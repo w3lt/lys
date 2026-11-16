@@ -135,7 +135,7 @@ function findJobMessageAgent(
     return buildRefusedJobMessage({ kind: "agent-not-found", agentCode })
   if (found.deletedAt !== null)
     return buildRefusedJobMessage({ kind: "agent-deleted", agentCode })
-  const role = calculateAgentRole(found.agent.kind)
+  const role = calculateAgentRole(found.agent)
   if (!hasAgentPermission(role, "take-work"))
     return buildRefusedJobMessage({ kind: "agent-cannot-take-work", agentCode })
   const agent = runtime.loadChatAgent(agentCode)

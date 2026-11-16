@@ -43,7 +43,7 @@ import ReplyEventSubscription from "../replyEventSubscription"
 import type { StartTurn, StartTurnOptions, TurnSettings } from "../turnStart"
 import {
   findListedModelCapabilities,
-  type FindModelCapabilities,
+  type FindLlmModelCapabilities,
   type ModelCapabilities
 } from "./modelCapabilities"
 import {
@@ -88,10 +88,10 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findConversation: (conversationId: string) => Conversation | undefined
     /**
-     * Capabilities of the model a request names, read from the connected
-     * provider's inventory.
+     * Capabilities of the model a request names, read from its provider's
+     * inventory.
      */
-    findModelCapabilities: FindModelCapabilities
+    findModelCapabilities: FindLlmModelCapabilities
     /**
      * Saves each turn's attachment files, and deletes them when the turn is
      * not stored.
@@ -192,8 +192,8 @@ type SavedTurnOutcome = SavedTurn | MissingRequestedAgentOutcome
  * delegation hooks every turn the route starts takes part in delegation
  * through.
  * @param findModelCapabilities - Capabilities of the model a request names,
- * read from the connected provider's inventory and remembered by the lookup
- * while that provider stays connected; shared with the chat-context route.
+ * read from its provider's inventory and remembered by the lookup while that
+ * provider stays connected; shared with the chat-context route.
  * @throws If route registration fails.
  * @remarks The route accepts bodies up to the chat contract's limit, so a
  * message can carry its attachments. A full model-operation queue and a
@@ -202,7 +202,7 @@ type SavedTurnOutcome = SavedTurn | MissingRequestedAgentOutcome
  */
 export default function updateFastifyWithChatRoute(
   app: FastifyInstance,
-  findModelCapabilities: FindModelCapabilities
+  findModelCapabilities: FindLlmModelCapabilities
 ): void {
   const dependencies = {
     turns: app.conversationTurns,
@@ -327,10 +327,11 @@ async function handleChatRequest(
  * before the inventory is read; the conversation's stored attachments come
  * from that read. The model's capabilities are then read for every turn,
  * because they decide the images the model sees and the tools the backend
- * offers it; the lookup lists the connected provider's inventory only until
- * it has seen the model, so only a model's first turn with that provider
- * waits for the model-operation queue. The agent found here is not kept: the lookup that decides who
- * answers runs again when the turn is stored.
+ * offers it; the lookup lists the inventory of the model's own provider only
+ * until it has seen the model, so only a model's first turn with that
+ * provider waits for that provider's model-operation queue. The agent found
+ * here is not kept: the lookup that decides who answers runs again when the
+ * turn is stored.
  */
 async function parseTurnRequest(
   request: ChatRouteRequest,
@@ -609,8 +610,9 @@ function buildTurnOptions(
  * @param dependencies - Borrowed turn persistence and agent and conversation
  * lookups.
  * @returns The stored turn with its agent; or why no agent answers, with
- * nothing stored: a new conversation names a code no agent has, the
- * continued conversation is not stored, or its agent no longer exists.
+ * nothing stored: a new conversation names a code no agent has, a deleted
+ * agent's, or Armitage's, which answers no chat; the continued conversation
+ * is not stored; or its agent no longer exists.
  * @throws Any persistence failure of a lookup, and the turn persistence's
  * failure.
  * @remarks Nothing awaits between the lookup and the write, so the stored

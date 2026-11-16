@@ -1,8 +1,10 @@
+import type { LlmModelReference } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import { NO_UNOFFERED_TOOLS } from "../../../../src/modules/agent/unofferedTools"
 import type { TurnSettings } from "../../../../src/modules/chat/turnStart"
 import ConversationWakeSettings from "../../../../src/modules/delegation/conversationWakeSettings"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 
 /** Identity of the conversation most cases remember settings for. */
 const CONVERSATION_ID = createFixtureUuidV7(1)
@@ -14,12 +16,12 @@ const OTHER_CONVERSATION_ID = createFixtureUuidV7(2)
  * Builds the settings of a turn that offers `delegate_work` and no other
  * tool.
  *
- * @param model - Model the settings name, which tells them from the settings
- * of another model.
+ * @param model - Model the settings name, and its provider, which tells
+ * them from the settings of another model.
  * @returns Frozen settings, with frozen tool lists, for a model that sees no
  * images and is trained for tool use.
  */
-function buildTurnSettings(model: string): TurnSettings {
+function buildTurnSettings(model: LlmModelReference): TurnSettings {
   const generationOptions: TurnSettings["generationOptions"] = Object.freeze({
     temperature: 0.4
   })
@@ -36,11 +38,14 @@ function buildTurnSettings(model: string): TurnSettings {
   })
 }
 
-/** Settings of a turn whose reply `qwen/qwen3-8b` writes. */
-const QWEN_SETTINGS = buildTurnSettings("qwen/qwen3-8b")
+/** Settings of a turn whose reply `qwen/qwen3-8b` on LM Studio writes. */
+const QWEN_SETTINGS = buildTurnSettings(LM_STUDIO_QWEN3_8B)
 
-/** Settings of a turn whose reply `openai/gpt-oss-20b` writes. */
-const GPT_OSS_SETTINGS = buildTurnSettings("openai/gpt-oss-20b")
+/** Settings of a turn whose reply `openai/gpt-oss-20b` on LM Studio writes. */
+const GPT_OSS_SETTINGS = buildTurnSettings({
+  provider: "lmStudio",
+  modelKey: "openai/gpt-oss-20b"
+})
 
 describe("ConversationWakeSettings", () => {
   it("finds the settings added last for a conversation, and none for another", () => {

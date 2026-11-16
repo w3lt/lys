@@ -1,4 +1,8 @@
-import type { ReplyPart, ToolCallReplyPartStatus } from "@lys/share"
+import type {
+  LlmModelReference,
+  ReplyPart,
+  ToolCallReplyPartStatus
+} from "@lys/share"
 import { waitForSettlementOrAbort } from "../../utils/abort"
 
 /**
@@ -44,8 +48,8 @@ export type AgentRequestState = Readonly<{
   requestId: string
   /** UUIDv7 of the conversation the reply belongs to. */
   conversationId: string
-  /** Model that writes the reply. */
-  model: string
+  /** Model that writes the reply, and its provider. */
+  model: LlmModelReference
   /** Time the request started, in the stored format. */
   startedAt: string
   /** Step the request is at. */
@@ -58,8 +62,8 @@ export type AgentRequestStart = Readonly<{
   requestId: string
   /** UUIDv7 of the conversation the reply belongs to. */
   conversationId: string
-  /** Model that writes the reply. */
-  model: string
+  /** Model that writes the reply, and its provider. */
+  model: LlmModelReference
   /** Time the request started, in the stored format. */
   startedAt: string
   /** Names of the client tools the turn offers, which the app runs. */

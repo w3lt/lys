@@ -104,8 +104,8 @@ export const VMO_PORT = 8080
  */
 export const TAVILY_API_HOST = "api.tavily.com"
 /**
- * Host of Ollama Cloud, the only place requests go while Ollama Cloud is the
- * active provider.
+ * Host of Ollama Cloud, the only place requests for Ollama Cloud's models
+ * go.
  *
  * @remarks The backend sends model listings and chat requests, with the
  * person's Ollama API key, to `https://` followed by this host, and the
@@ -115,8 +115,7 @@ export const TAVILY_API_HOST = "api.tavily.com"
  */
 export const OLLAMA_CLOUD_API_HOST = "ollama.com"
 /**
- * Host of Groq's API, the only place requests go while Groq is the active
- * provider.
+ * Host of Groq's API, the only place requests for Groq's models go.
  *
  * @remarks The backend sends model listings and chat requests, with the
  * person's Groq API key, to `https://` followed by this host, and the
@@ -126,3 +125,19 @@ export const OLLAMA_CLOUD_API_HOST = "ollama.com"
  */
 export const GROQ_API_HOST = "api.groq.com"
 // ============== EXTERNAL SERVICES ============== //
+
+// ============== TOOL APPROVAL ============== //
+/**
+ * Whole minutes an approval prompt waits for the person's answer before it
+ * expires.
+ *
+ * @remarks The limit is exclusive: an answer is taken only while fewer than
+ * this many minutes have passed since the backend sent the prompt. At the
+ * limit the backend ends the prompt, refuses its token, and stores the call
+ * as failed with a sentence naming the limit, which the model reads; the
+ * desktop names the same limit when it tells the person the prompt expired.
+ * It is not persisted. Changing it changes how long a reply waits for the
+ * person and requires a coordinated desktop and backend release.
+ */
+export const TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES = 5
+// ============== TOOL APPROVAL ============== //

@@ -26,7 +26,11 @@ import {
   FIXTURE_JOB_ID,
   FIXTURE_JOB_REPLY_ID
 } from "../../support/conversationFixtures"
-import { buildToolCall, buildToolDefinition } from "../../support/toolFixtures"
+import {
+  buildToolCall,
+  buildToolDefinition,
+  createFixtureApprovalToken
+} from "../../support/toolFixtures"
 
 /**
  * Card of job 1, which call 65 of the parent started and call 66 continued.
@@ -83,6 +87,7 @@ describe("job-presentation", () => {
         },
         call,
         step: "approval",
+        approvalToken: createFixtureApprovalToken(1),
         answer: {
           status: "awaiting-person",
           definition: buildToolDefinition("read_text_file"),

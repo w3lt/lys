@@ -15,6 +15,7 @@ import {
   buildDelegationOffer,
   type ConversationDelegation
 } from "../../agent/turnDelegation"
+import { listAgentMcpTools } from "../../agent/builtInAgents"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
 import type { AttachmentFileStatus } from "../../attachment/attachmentFileStore"
 import { buildAttachmentImageFileStatusLookup } from "../../attachment/attachmentImageReader"
@@ -29,7 +30,7 @@ import type { McpTurnToolLookup } from "../../mcp/mcpServerRegistry"
 import type { BuiltInToolEntry } from "../../tool/builtIn/builtInTool"
 import {
   findListedModelCapabilities,
-  type FindModelCapabilities
+  type FindLlmModelCapabilities
 } from "./modelCapabilities"
 import {
   loadRequestedAgent,
@@ -56,10 +57,10 @@ type ChatContextRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findMcpTool: (toolName: string) => McpTurnToolLookup
     /**
-     * Capabilities of the model a request names, read from the connected
-     * provider's inventory.
+     * Capabilities of the model a request names, read from its provider's
+     * inventory.
      */
-    findModelCapabilities: FindModelCapabilities
+    findModelCapabilities: FindLlmModelCapabilities
     /** Examines stored attachment files without reading them. */
     attachmentFiles: Pick<AttachmentFileStore, "getAttachmentFileStatus">
     /**
@@ -115,19 +116,19 @@ const NEW_CONVERSATION_DELEGATION: ConversationDelegation = Object.freeze({
 
 /** Explanation sent when no loaded instance matches the requested model. */
 const MODEL_NOT_LOADED_DETAIL =
-  "The provider has not loaded the model. Load it, or choose a model the provider serves, in Settings → Model to measure the conversation."
+  "The provider has not loaded the model. Load it, or choose a model the provider serves, in Settings → Models to measure the conversation."
 
 /**
  * Registers the endpoint that measures the context a conversation's next
  * message would be sent with.
  *
  * @param app - Backend with validation, the Zod response serializer, the
- * agent service, the agent runtime service, the conversation reader, the LLM
- * service behind the agents, the built-in tools, the MCP server registry, and
- * the attachment file store installed.
+ * agent service, the agent runtime service, the conversation reader, the
+ * providers' LLM services behind the agents, the built-in tools, the MCP
+ * server registry, and the attachment file store installed.
  * @param findModelCapabilities - Capabilities of the model a request names,
- * read from the connected provider's inventory and remembered by the lookup
- * while that provider stays connected; shared with
+ * read from its provider's inventory and remembered by the lookup while that
+ * provider stays connected; shared with
  * the chat route, so a measurement offers what a turn would.
  * @throws If route registration fails.
  * @remarks Every response prevents caching, because a measurement observes
@@ -136,7 +137,7 @@ const MODEL_NOT_LOADED_DETAIL =
  */
 export default function registerChatContextRoute(
   app: FastifyInstance,
-  findModelCapabilities: FindModelCapabilities
+  findModelCapabilities: FindLlmModelCapabilities
 ): void {
   const dependencies = {
     loadChatAgent: (code: string) =>
@@ -188,13 +189,14 @@ export default function registerChatContextRoute(
  * inventory does not list sees no image and is offered no reader. Image
  * files are looked up, never read: an image counts from its stored sides.
  * An offered MCP tool whose server is not connected is left out, because
- * its definition is known only while the server is connected. The
- * delegation tools and the note about a job are counted as a turn would
- * offer them, from the offer {@link buildDelegationOffer} builds:
- * `delegate_work` for a new or main conversation whose request names it,
- * `stop_job` with `delegate_work` or once the stored conversation has a
- * job, and, for a stored job, `report_progress` and the note with its
- * delegator's display name.
+ * its definition is known only while the server is connected, and so is a
+ * tool only Lys may use when the agent is neither Caliginia nor Lysiptera,
+ * as its turn would not offer it. The delegation tools and the note about a
+ * job are counted as a turn would offer them, from the offer
+ * {@link buildDelegationOffer} builds: `delegate_work` for a new or main
+ * conversation whose request names it, `stop_job` with `delegate_work` or
+ * once the stored conversation has a job, and, for a stored job,
+ * `report_progress` and the note with its delegator's display name.
  */
 async function handleChatContextRequest(
   request: FastifyRequest<ChatContextApiRoute>,
@@ -225,18 +227,19 @@ async function handleChatContextRequest(
     body.model,
     dependencies.findModelCapabilities
   )
-  const measurement = await requestedAgent.agent.findContextMeasurement({
+  const directTools = listDirectDefinitions(
+    capabilities.trainedForToolUse,
+    measured.attachments
+  )
+  const { agent } = requestedAgent
+  const measurement = await agent.findContextMeasurement({
     history: measured.history,
     model: body.model,
     canSeeImages: capabilities.vision,
     getAttachmentImageFileStatus: measured.getAttachmentImageFileStatus,
     trainedForToolUse: capabilities.trainedForToolUse,
-    tools: buildOfferedDefinitions(
-      body,
-      requestedTools,
-      capabilities.trainedForToolUse &&
-        hasReadableTextAttachment(measured.attachments)
-    ),
+    directTools,
+    tools: buildOfferedDefinitions(body, requestedTools, agent.code),
     unofferedTools,
     delegation: buildDelegationOffer(
       storedConversation ?? NEW_CONVERSATION_DELEGATION,
@@ -287,6 +290,26 @@ function findMeasuredConversation(
 }
 
 /**
+ * Lists the direct tools a measurement counts.
+ *
+ * @param trainedForToolUse - Whether the measured model is trained for tool
+ * use.
+ * @param attachments - Attachments of the stored messages a turn would
+ * include.
+ * @returns The attachment reader alone when the model is trained for tool
+ * use and a stored message holds a text file, as a turn would offer it;
+ * nothing otherwise. The list is frozen.
+ */
+function listDirectDefinitions(
+  trainedForToolUse: boolean,
+  attachments: readonly ReadableAttachment[]
+): readonly ToolDefinition[] {
+  if (!trainedForToolUse || !hasReadableTextAttachment(attachments))
+    return Object.freeze([])
+  return Object.freeze([buildReadAttachmentDefinition()])
+}
+
+/**
  * Builds the stored transcript a measurement includes, with its attachments
  * and the lookup of its image files.
  *
@@ -316,25 +339,25 @@ function buildMeasuredHistory(
 }
 
 /**
- * Builds the definitions of the tools a turn would offer, as it orders them.
+ * Builds the definitions of the tools the request offers, as the agent's
+ * turn orders and offers them.
  *
  * @param body - Validated chat-context input.
  * @param requestedTools - The offered backend tools, in offer order.
- * @param offersReader - Whether the turn would offer the attachment reader:
- * the conversation holds a text attachment and the model is trained for
- * tool use.
+ * @param agentCode - Code of the agent the turn would run.
  * @returns The client definitions first, then the built-in tools', then the
- * reader's when the turn offers it, then the connected MCP tools'.
+ * connected MCP tools' the agent may use: a tool only Lys may use is left
+ * out unless the agent is Caliginia or Lysiptera.
  */
 function buildOfferedDefinitions(
   body: ChatContextApiRequestBody,
   requestedTools: RequestedBackendTools,
-  offersReader: boolean
+  agentCode: string
 ): readonly ToolDefinition[] {
+  const mcpTools = listAgentMcpTools(agentCode, requestedTools.mcpTools)
   return [
     ...(body.tools?.definitions ?? []),
     ...requestedTools.builtInTools.map((entry) => entry.definition),
-    ...(offersReader ? [buildReadAttachmentDefinition()] : []),
-    ...requestedTools.mcpTools.map((tool) => tool.definition)
+    ...mcpTools.map((tool) => tool.definition)
   ]
 }

@@ -2,8 +2,10 @@ import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import type { BackendServerStatus } from "@/lib/store"
-import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
-import type { ModelInventoryState } from "@/lib/store/model-runtime"
+import type {
+  LlmProviderStatus,
+  ModelInventoryState
+} from "@/lib/store/model-runtime"
 import { buildJsonResponse, startBackendFake } from "../../support/backendFake"
 import { buildLlmInfo } from "../../support/modelFixtures"
 import {
@@ -17,31 +19,66 @@ import {
 } from "../../support/settingsViewFixtures"
 import { waitForRenderedWork } from "../../support/rendering"
 
-/** Rail entries as their tabs are named, in order. */
-const RAIL_TABS = [
-  "Runtime01",
-  "Model02",
-  "Generation03",
-  "Agents04",
-  "Tools05",
-  "MCP06",
-  "Providers07",
-  "Secrets08"
+/** Rail entries as their buttons read, in order. */
+const RAIL_ENTRIES = [
+  "Lys01",
+  "Profile02",
+  "Runtime03",
+  "Models04",
+  "Generation05",
+  "Agents06",
+  "Tools07",
+  "MCP08",
+  "Providers09",
+  "Secrets10"
 ]
 
+/** A runtime the rail summarizes, and the summary at the rail's foot. */
+type RailStatusCase = {
+  /** Backend lifecycle state. */
+  readonly backendStatus: BackendServerStatus
+  /** Latest LM Studio status the backend reported. */
+  readonly lmStudioStatus: LlmProviderStatus
+  /** Latest LM Studio inventory observation. */
+  readonly modelInventory: ModelInventoryState
+  /** Text the rail ends with. */
+  readonly summary: string
+}
+
 /**
- * Gets one rail tab.
+ * Gets one pane's rail button.
  *
  * @param label - Pane label.
  * @param ordinal - Two-digit ordinal after the label.
- * @returns The tab.
+ * @returns The button.
  * @remarks With the view's styles applied, the label and ordinal are separate
  * blocks, so the name has a space between them, as a browser computes it.
  */
-function getRailTab(label: string, ordinal: string): HTMLElement {
-  return screen.getByRole("tab", {
+function getRailButton(label: string, ordinal: string): HTMLElement {
+  return screen.getByRole("button", {
     name: new RegExp(`^${label}\\s*${ordinal}$`)
   })
+}
+
+/**
+ * Gets the settings rail.
+ *
+ * @returns The navigation landmark named Settings sections.
+ */
+function getRail(): HTMLElement {
+  return screen.getByRole("navigation", { name: "Settings sections" })
+}
+
+/**
+ * Gets the disclosure button of one section of the shown pane.
+ *
+ * @param title - Matches the section's title in its heading's name.
+ * @returns The button in the level-two heading the title names.
+ */
+function getSectionButton(title: RegExp): HTMLElement {
+  return within(
+    screen.getByRole("heading", { level: 2, name: title })
+  ).getByRole("button")
 }
 
 describe("SettingsView", () => {
@@ -52,18 +89,19 @@ describe("SettingsView", () => {
     render(<SettingsView onDone={vi.fn()} />)
 
     const settings = screen.getByRole("main", { name: "Settings" })
-    const rail = within(settings).getByRole("tablist", {
+    const rail = within(settings).getByRole("navigation", {
       name: "Settings sections"
     })
     expect(
       within(rail)
-        .getAllByRole("tab")
-        .map((tab) => tab.textContent)
-    ).toEqual(RAIL_TABS)
-    expect(getRailTab("Generation", "03")).toHaveAttribute(
-      "aria-selected",
-      "true"
+        .getAllByRole("listitem")
+        .map((entry) => entry.textContent)
+    ).toEqual(RAIL_ENTRIES)
+    expect(getRailButton("Generation", "05")).toHaveAttribute(
+      "aria-current",
+      "page"
     )
+    expect(getRailButton("Runtime", "03")).not.toHaveAttribute("aria-current")
     expect(
       screen.getByRole("heading", { level: 1, name: "Generation" })
     ).toBeInTheDocument()
@@ -94,27 +132,58 @@ describe("SettingsView", () => {
     const user = userEvent.setup()
     render(<SettingsView onDone={vi.fn()} />)
 
-    await user.click(getRailTab("Model", "02"))
+    await user.click(getRailButton("Models", "04"))
 
     expect(useLysStore.getState().settingsPane).toBe("model")
     expect(
-      screen.getByRole("heading", { level: 1, name: "Model" })
+      screen.getByRole("heading", { level: 1, name: "Models" })
     ).toBeInTheDocument()
     await waitForRenderedWork()
   })
 
-  it("moves through the rail with the arrow keys and selects with Enter", async () => {
+  it("lists the Lys pane's sections under its entry, and jumps to one, opening it", async () => {
     startBackendFake({ [INVENTORY_ROUTE]: buildInventoryRoute() })
-    const { useLysStore, SettingsView } = await loadFreshSettingsView("runtime")
+    const { SettingsView } = await loadFreshSettingsView("lys")
     const user = userEvent.setup()
     render(<SettingsView onDone={vi.fn()} />)
-    getRailTab("Runtime", "01").focus()
+    await user.click(
+      await screen.findByRole("button", { name: "Collapse all" })
+    )
+    const email = getSectionButton(/Set up Lys's mailbox/)
 
-    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}")
+    expect(email).toHaveAttribute("aria-expanded", "false")
+    const sections = within(getRail()).getByRole("list", {
+      name: "Lys sections"
+    })
+    expect(
+      within(sections)
+        .getAllByRole("button")
+        .map((button) => button.textContent)
+    ).toEqual(["About Lys", "EmailNot set up"])
+    await user.click(within(sections).getByRole("button", { name: /^Email/ }))
 
-    expect(getRailTab("Generation", "03")).toHaveFocus()
-    expect(useLysStore.getState().settingsPane).toBe("generation")
-    await waitForRenderedWork()
+    expect(email).toHaveAttribute("aria-expanded", "true")
+    expect(email).toHaveFocus()
+    expect(screen.getByRole("button", { name: "Collapse all" })).toBeVisible()
+  })
+
+  it("opens every section again with Expand all", async () => {
+    startBackendFake({ [INVENTORY_ROUTE]: buildInventoryRoute() })
+    const { SettingsView } = await loadFreshSettingsView("profile")
+    const user = userEvent.setup()
+    render(<SettingsView onDone={vi.fn()} />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Collapse all" })
+    )
+    await user.click(screen.getByRole("button", { name: "Expand all" }))
+
+    for (const title of ["About you", "Location", "Preferences"]) {
+      expect(getSectionButton(new RegExp(title))).toHaveAttribute(
+        "aria-expanded",
+        "true"
+      )
+    }
   })
 
   it("leaves once per press of Done", async () => {
@@ -133,86 +202,116 @@ describe("SettingsView", () => {
     await waitForRenderedWork()
   })
 
-  it.each<
-    [string, BackendServerStatus, LmStudioStatus, ModelInventoryState, string]
-  >([
+  it.each<[string, RailStatusCase]>([
     [
       "a stopped backend",
-      "stopped",
-      "unknown",
-      { status: "unavailable" },
-      "backend stopped"
+      {
+        backendStatus: "stopped",
+        lmStudioStatus: "unknown",
+        modelInventory: { status: "unavailable" },
+        summary: "backend stopped"
+      }
     ],
     [
       "a starting backend",
-      "starting",
-      "unknown",
-      { status: "unavailable" },
-      "backend starting"
+      {
+        backendStatus: "starting",
+        lmStudioStatus: "unknown",
+        modelInventory: { status: "unavailable" },
+        summary: "backend starting"
+      }
     ],
     [
       "a stopping backend",
-      "stopping",
-      "connected",
-      { status: "unavailable" },
-      "backend stopping"
+      {
+        backendStatus: "stopping",
+        lmStudioStatus: "connected",
+        modelInventory: { status: "unavailable" },
+        summary: "backend stopping"
+      }
     ],
     [
       "an unresponsive backend",
-      "unresponsive",
-      "unknown",
-      { status: "unavailable" },
-      "backend not responding"
+      {
+        backendStatus: "unresponsive",
+        lmStudioStatus: "unknown",
+        modelInventory: { status: "unavailable" },
+        summary: "backend not responding"
+      }
     ],
     [
-      "LM Studio in an unknown state",
-      "running",
-      "unknown",
-      { status: "unavailable" },
-      "backend up · LM Studio status unknown"
+      "LM Studio in an unknown state, as about to be connected",
+      {
+        backendStatus: "running",
+        lmStudioStatus: "unknown",
+        modelInventory: { status: "unavailable" },
+        summary: "backend up · connecting to LM Studio"
+      }
+    ],
+    [
+      "LM Studio turned off on the backend",
+      {
+        backendStatus: "running",
+        lmStudioStatus: "off",
+        modelInventory: { status: "unavailable" },
+        summary: "backend up · LM Studio is off"
+      }
     ],
     [
       "LM Studio connecting",
-      "running",
-      "connecting",
-      { status: "unavailable" },
-      "backend up · connecting to LM Studio"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "connecting",
+        modelInventory: { status: "unavailable" },
+        summary: "backend up · connecting to LM Studio"
+      }
     ],
     [
       "LM Studio unreachable",
-      "running",
-      "unreachable",
-      { status: "unavailable" },
-      "backend up · LM Studio not reachable"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "unreachable",
+        modelInventory: { status: "unavailable" },
+        summary: "backend up · LM Studio not reachable"
+      }
     ],
     [
       "loaded weights",
-      "running",
-      "connected",
-      READY_RUNTIME.modelInventory,
-      "backend up · model loaded"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "connected",
+        modelInventory: READY_RUNTIME.modelInventory,
+        summary: "backend up · model loaded"
+      }
     ],
     [
       "no loaded weights",
-      "running",
-      "connected",
       {
-        status: "ready",
-        modelLoading: "lys",
-        models: [buildLlmInfo("qwen3-8b")]
-      },
-      "backend up · no model"
+        backendStatus: "running",
+        lmStudioStatus: "connected",
+        modelInventory: {
+          status: "ready",
+          modelLoading: "lys",
+          models: [buildLlmInfo("qwen3-8b")]
+        },
+        summary: "backend up · no model"
+      }
     ],
     [
       "an unreadable inventory",
-      "running",
-      "connected",
-      { status: "failed" },
-      "backend up · model state unavailable"
+      {
+        backendStatus: "running",
+        lmStudioStatus: "connected",
+        modelInventory: { status: "failed" },
+        summary: "backend up · model state unavailable"
+      }
     ]
   ])(
     "summarizes %s at the foot of the rail",
-    async (_case, backendStatus, lmStudioStatus, modelInventory, summary) => {
+    async (
+      _case,
+      { backendStatus, lmStudioStatus, modelInventory, summary }
+    ) => {
       const runtime = {
         ...READY_RUNTIME,
         backendStatus,
@@ -222,7 +321,7 @@ describe("SettingsView", () => {
       startBackendFake({
         [INVENTORY_ROUTE]: buildInventoryRoute(runtime),
         // A failed inventory read is followed by a re-read of LM Studio.
-        "GET /api/v1/llm/runtime": () =>
+        "GET /api/v1/llm/lmStudio/runtime": () =>
           buildJsonResponse(200, { status: lmStudioStatus })
       })
       const { SettingsView } = await loadFreshSettingsView(
@@ -233,13 +332,11 @@ describe("SettingsView", () => {
       render(<SettingsView onDone={vi.fn()} />)
       await waitForRenderedWork()
 
-      expect(
-        screen.getByRole("tablist", { name: "Settings sections" })
-      ).toHaveTextContent(new RegExp(`${summary}$`))
+      expect(getRail()).toHaveTextContent(new RegExp(`${summary}$`))
     }
   )
 
-  it("reads the model inventory when shown with a running backend", async () => {
+  it("reads the model inventory of each connected provider when shown with a running backend", async () => {
     const backend = startBackendFake({
       [INVENTORY_ROUTE]: buildInventoryRoute()
     })
@@ -250,7 +347,7 @@ describe("SettingsView", () => {
 
     expect(backend.requests.map((request) => request.method)).toEqual(["GET"])
     expect(new URL(backend.requests[0]?.url ?? "").pathname).toBe(
-      "/api/v1/llm/list"
+      "/api/v1/llm/lmStudio/list"
     )
   })
 

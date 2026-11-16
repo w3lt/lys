@@ -121,7 +121,7 @@ describe("LocationCard", () => {
       "saved · a model gets it only by calling get_location"
     )
     expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite")
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Save location" })).toBeDisabled()
   })
 
   it("saves the trimmed fields once on Enter, a blank field as null", async () => {
@@ -151,7 +151,7 @@ describe("LocationCard", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "unsaved · enter to remove your location, esc to discard"
     )
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.click(screen.getByRole("button", { name: "Save location" }))
 
     expect(onSaveLocation).toHaveBeenCalledWith({
       city: null,
@@ -176,7 +176,7 @@ describe("LocationCard", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "can't save yet · fix the marked field"
     )
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Save location" })).toBeDisabled()
     expect(onSaveLocation).not.toHaveBeenCalled()
   })
 
@@ -188,7 +188,7 @@ describe("LocationCard", () => {
     await user.keyboard("{Escape}")
 
     expect(getField("City")).toHaveValue("Lyon")
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Save location" })).toBeDisabled()
   })
 
   it("keeps the edit on an Escape that ends text composition", async () => {
@@ -204,7 +204,7 @@ describe("LocationCard", () => {
 
     expect(isNotPrevented).toBe(true)
     expect(getField("City")).toHaveValue("東京都")
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Save location" })).toBeEnabled()
   })
 
   it("shows the saved location once the save succeeds", async () => {
@@ -232,7 +232,7 @@ describe("LocationCard", () => {
     await waitForMicrotasks()
 
     expect(getField("City")).toHaveValue("Grenoble")
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Save location" })).toBeDisabled()
   })
 
   it("says a save runs, then that it failed, and keeps the edit", async () => {
@@ -254,7 +254,7 @@ describe("LocationCard", () => {
       "Lys couldn't write your location to its settings file."
     )
     expect(getField("City")).toHaveValue("Grenoble")
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Save location" })).toBeEnabled()
   })
 
   it("keeps an edit typed while the save ran once the save succeeds", async () => {
@@ -274,7 +274,7 @@ describe("LocationCard", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "unsaved · enter to save, esc to discard"
     )
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Save location" })).toBeEnabled()
   })
 
   it("asks for no save while one runs", async () => {
@@ -286,8 +286,78 @@ describe("LocationCard", () => {
     await user.clear(getField("City"))
     await user.type(getField("City"), "Grenoble{Enter}")
 
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Save location" })).toBeDisabled()
     expect(onSaveLocation).not.toHaveBeenCalled()
+  })
+
+  it("shares the location down to the city it was saved with, and previews it", () => {
+    startLocationCard()
+
+    expect(
+      screen.getByRole("group", { name: "Share down to" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "City" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByText('"Lyon, France"')).toBeInTheDocument()
+  })
+
+  it("saves only the parts down to the chosen precision", async () => {
+    const { onSaveLocation } = startLocationCard()
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole("button", { name: "Country" }))
+    expect(screen.getByText('"France"')).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save location" }))
+
+    expect(onSaveLocation).toHaveBeenCalledExactlyOnceWith({
+      city: null,
+      region: null,
+      country: "France"
+    })
+  })
+
+  it("shares a part typed below the chosen precision, so it is saved", async () => {
+    const { onSaveLocation } = startLocationCard({
+      savedLocation: locationSettingsSchema.parse({
+        city: null,
+        region: null,
+        country: "France"
+      })
+    })
+    const user = userEvent.setup()
+    expect(screen.getByRole("button", { name: "Country" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+
+    await user.type(getField("City"), "Paris")
+
+    expect(screen.getByRole("button", { name: "City" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    await user.click(screen.getByRole("button", { name: "Save location" }))
+    expect(onSaveLocation).toHaveBeenCalledExactlyOnceWith({
+      city: "Paris",
+      region: null,
+      country: "France"
+    })
+  })
+
+  it("removes the location when nothing is shared and saved", async () => {
+    const { onSaveLocation } = startLocationCard()
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole("button", { name: "Nothing" }))
+    await user.click(screen.getByRole("button", { name: "Save location" }))
+
+    expect(onSaveLocation).toHaveBeenCalledExactlyOnceWith({
+      city: null,
+      region: null,
+      country: null
+    })
   })
 
   it("shows a failed save in the status line", () => {

@@ -2,14 +2,17 @@ import { llmProviderSettingsSchema, providerAddressSchema } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   buildProvidersWithAddress,
+  buildProvidersWithProviderOn,
   calculateProviderBadge,
   calculateProviderKeyFieldValue,
   findProviderAccessKind,
   formatProviderAddressPlaceholder,
   formatProviderKeyPlaceholder,
   formatProviderMessage,
-  formatProviderModeTag,
+  formatProviderSaveMessage,
+  isProviderOn,
   parseProviderAddressDraft,
+  PROVIDER_DESCRIPTIONS,
   parseProviderKeyDraft,
   UNEDITED_PROVIDER_DRAFT,
   type ProviderFieldDraft,
@@ -28,18 +31,25 @@ const SECRETS: SecretsSettings = STORED_SETTINGS.secrets
 /** Saved address of the stored local Ollama. */
 const OLLAMA_ADDRESS = providerAddressSchema.parse("192.168.1.20:11434")
 
-/** Provider choice with Ollama Cloud active, the local address still saved. */
+/** Providers with only Ollama Cloud on, the local address still saved. */
 const OLLAMA_CLOUD: ProvidersSettings = llmProviderSettingsSchema.parse({
   ...STORED_PROVIDERS_SETTINGS,
-  active: "ollamaCloud",
+  enabled: ["ollamaCloud"],
   ollama: { address: OLLAMA_ADDRESS }
 })
 
-/** Provider choice with Groq active. */
+/** Providers with only Groq on. */
 const GROQ_ACTIVE: ProvidersSettings = llmProviderSettingsSchema.parse({
   ...STORED_PROVIDERS_SETTINGS,
-  active: "groq"
+  enabled: ["groq"]
 })
+
+/** Providers with both Ollama servers and Groq on. */
+const BOTH_OLLAMAS_AND_GROQ: ProvidersSettings =
+  llmProviderSettingsSchema.parse({
+    ...STORED_PROVIDERS_SETTINGS,
+    enabled: ["ollamaCloud", "ollama", "groq"]
+  })
 
 /**
  * Builds an edit of a field.
@@ -66,24 +76,58 @@ function buildStatusInput(
     secrets: SECRETS,
     status: "connected",
     backendStatus: "running",
-    saveState: { status: "idle" },
     draft: UNEDITED_PROVIDER_DRAFT,
     ...overrides
   }
 }
 
 describe("provider-presentation", () => {
-  it("tags each provider with where it runs", () => {
-    expect(formatProviderModeTag("lmStudio", STORED_PROVIDERS_SETTINGS)).toBe(
-      "local"
-    )
-    expect(formatProviderModeTag("ollama", STORED_PROVIDERS_SETTINGS)).toBe(
-      "local"
-    )
-    expect(formatProviderModeTag("ollama", OLLAMA_CLOUD)).toBe("cloud")
-    expect(formatProviderModeTag("groq", STORED_PROVIDERS_SETTINGS)).toBe(
-      "cloud"
-    )
+  it("names each provider and tags it with where it runs", () => {
+    expect(
+      Object.values(PROVIDER_DESCRIPTIONS).map(({ name, tag }) => [name, tag])
+    ).toEqual([
+      ["LM Studio", "local"],
+      ["Ollama", "local"],
+      ["Ollama Cloud", "cloud"],
+      ["Groq", "cloud"]
+    ])
+  })
+
+  describe("turning providers on and off", () => {
+    it("marks a provider on while the enabled list holds it", () => {
+      expect(isProviderOn("ollamaCloud", OLLAMA_CLOUD)).toBe(true)
+      expect(isProviderOn("ollama", OLLAMA_CLOUD)).toBe(false)
+      expect(isProviderOn("groq", BOTH_OLLAMAS_AND_GROQ)).toBe(true)
+      expect(isProviderOn("lmStudio", BOTH_OLLAMAS_AND_GROQ)).toBe(false)
+    })
+
+    it("adds a provider in provider order and keeps the others on and the addresses", () => {
+      expect(
+        buildProvidersWithProviderOn(GROQ_ACTIVE, "lmStudio", true)
+      ).toEqual({ ...GROQ_ACTIVE, enabled: ["lmStudio", "groq"] })
+      expect(
+        buildProvidersWithProviderOn(OLLAMA_CLOUD, "ollama", true)
+      ).toEqual({ ...OLLAMA_CLOUD, enabled: ["ollama", "ollamaCloud"] })
+    })
+
+    it("removes a provider and keeps the order of the rest", () => {
+      expect(
+        buildProvidersWithProviderOn(BOTH_OLLAMAS_AND_GROQ, "ollama", false)
+      ).toEqual({ ...BOTH_OLLAMAS_AND_GROQ, enabled: ["ollamaCloud", "groq"] })
+    })
+
+    it("leaves no provider on once the last one is turned off", () => {
+      expect(
+        buildProvidersWithProviderOn(GROQ_ACTIVE, "groq", false).enabled
+      ).toEqual([])
+    })
+
+    it("lists each provider once whatever the saved order", () => {
+      expect(
+        buildProvidersWithProviderOn(BOTH_OLLAMAS_AND_GROQ, "groq", true)
+          .enabled
+      ).toEqual(["ollama", "ollamaCloud", "groq"])
+    })
   })
 
   it("reaches LM Studio and local Ollama at an address, Ollama Cloud and Groq with a key", () => {
@@ -237,50 +281,71 @@ describe("provider-presentation", () => {
   })
 
   describe("calculateProviderBadge", () => {
-    it("stands a provider by while another is active", () => {
+    it("marks a provider that is turned off as off", () => {
       expect(
-        calculateProviderBadge(
-          "groq",
-          STORED_PROVIDERS_SETTINGS,
-          SECRETS,
-          "connected"
-        )
-      ).toEqual({ label: "standby", tone: "muted" })
+        calculateProviderBadge({
+          provider: "groq",
+          providers: STORED_PROVIDERS_SETTINGS,
+          secrets: SECRETS,
+          status: "connected"
+        })
+      ).toEqual({ label: "off", tone: "muted" })
     })
 
-    it("asks for a key the active provider needs and lacks", () => {
+    it("marks a provider the backend reports off as off", () => {
       expect(
-        calculateProviderBadge("ollama", OLLAMA_CLOUD, SECRETS, "unreachable")
+        calculateProviderBadge({
+          provider: "groq",
+          providers: GROQ_ACTIVE,
+          secrets: SECRETS,
+          status: "off"
+        })
+      ).toEqual({ label: "off", tone: "muted" })
+    })
+
+    it("asks for a key a turned-on provider needs and lacks", () => {
+      expect(
+        calculateProviderBadge({
+          provider: "ollamaCloud",
+          providers: OLLAMA_CLOUD,
+          secrets: SECRETS,
+          status: "unreachable"
+        })
       ).toEqual({ label: "needs key", tone: "attention" })
     })
 
-    it("follows the connection of the active provider", () => {
+    it("follows the connection of a turned-on provider", () => {
       expect(
-        calculateProviderBadge("groq", GROQ_ACTIVE, SECRETS, "connected")
+        calculateProviderBadge({
+          provider: "groq",
+          providers: GROQ_ACTIVE,
+          secrets: SECRETS,
+          status: "connected"
+        })
       ).toEqual({ label: "connected", tone: "success" })
       expect(
-        calculateProviderBadge(
-          "ollama",
-          STORED_PROVIDERS_SETTINGS,
-          SECRETS,
-          "unreachable"
-        )
-      ).toEqual({ label: "unreachable", tone: "danger" })
+        calculateProviderBadge({
+          provider: "ollama",
+          providers: STORED_PROVIDERS_SETTINGS,
+          secrets: SECRETS,
+          status: "unreachable"
+        })
+      ).toEqual({ label: "not reachable", tone: "danger" })
       expect(
-        calculateProviderBadge(
-          "ollama",
-          STORED_PROVIDERS_SETTINGS,
-          SECRETS,
-          "connecting"
-        )
+        calculateProviderBadge({
+          provider: "ollama",
+          providers: STORED_PROVIDERS_SETTINGS,
+          secrets: SECRETS,
+          status: "connecting"
+        })
       ).toEqual({ label: "connecting", tone: "attention" })
       expect(
-        calculateProviderBadge(
-          "ollama",
-          STORED_PROVIDERS_SETTINGS,
-          SECRETS,
-          "unknown"
-        )
+        calculateProviderBadge({
+          provider: "ollama",
+          providers: STORED_PROVIDERS_SETTINGS,
+          secrets: SECRETS,
+          status: "unknown"
+        })
       ).toEqual({ label: "unknown", tone: "muted" })
     })
   })
@@ -289,10 +354,7 @@ describe("provider-presentation", () => {
     it("explains an edit before anything else", () => {
       expect(
         formatProviderMessage(
-          buildStatusInput({
-            draft: buildEditedDraft("localhost"),
-            saveState: { status: "saving" }
-          })
+          buildStatusInput({ draft: buildEditedDraft("localhost") })
         )
       ).toEqual({
         text: "not an address: use host:port, such as 127.0.0.1:1234",
@@ -315,21 +377,6 @@ describe("provider-presentation", () => {
           })
         ).tone
       ).toBe("danger")
-    })
-
-    it("reports a running or failed save", () => {
-      expect(
-        formatProviderMessage(
-          buildStatusInput({ saveState: { status: "saving" } })
-        )
-      ).toEqual({ text: "saving…", tone: "pending" })
-      expect(
-        formatProviderMessage(
-          buildStatusInput({
-            saveState: { status: "failed", error: "Lys couldn't write." }
-          })
-        )
-      ).toEqual({ text: "Lys couldn't write.", tone: "danger" })
     })
 
     it("asks for a missing key before the connection", () => {
@@ -375,6 +422,15 @@ describe("provider-presentation", () => {
       ).toEqual({ text: "connecting to Ollama…", tone: "pending" })
     })
 
+    it("says the backend still has a turned-on provider off until it is checked again", () => {
+      expect(
+        formatProviderMessage(buildStatusInput({ status: "off" }))
+      ).toEqual({
+        text: "the backend has Ollama off · press Test to check again",
+        tone: "muted"
+      })
+    })
+
     it("words an unknown connection by what the backend is doing", () => {
       const lines = (
         ["running", "stopped", "starting", "stopping", "unresponsive"] as const
@@ -392,6 +448,51 @@ describe("provider-presentation", () => {
         "the backend is stopping",
         "the backend is not responding, so Lys can't reach Ollama"
       ])
+    })
+  })
+
+  describe("formatProviderSaveMessage", () => {
+    it("reports a running or failed save of the card's own provider", () => {
+      expect(
+        formatProviderSaveMessage("groq", {
+          status: "saving",
+          provider: "groq"
+        })
+      ).toEqual({ text: "saving…", tone: "pending" })
+      expect(
+        formatProviderSaveMessage("groq", {
+          status: "failed",
+          provider: "groq",
+          error: "Lys couldn't write."
+        })
+      ).toEqual({ text: "Lys couldn't write.", tone: "danger" })
+    })
+
+    it("leaves the line empty for a save of another provider", () => {
+      expect(
+        formatProviderSaveMessage("ollama", {
+          status: "saving",
+          provider: "groq"
+        })
+      ).toEqual({ text: "", tone: "muted" })
+      expect(
+        formatProviderSaveMessage("ollama", {
+          status: "failed",
+          provider: "groq",
+          error: "Lys couldn't write."
+        })
+      ).toEqual({ text: "", tone: "muted" })
+    })
+
+    it("leaves the line empty with no save, or after one that succeeded", () => {
+      expect(formatProviderSaveMessage("groq", { status: "idle" })).toEqual({
+        text: "",
+        tone: "muted"
+      })
+      expect(formatProviderSaveMessage("groq", { status: "saved" })).toEqual({
+        text: "",
+        tone: "muted"
+      })
     })
   })
 })

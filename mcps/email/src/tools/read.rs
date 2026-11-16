@@ -54,7 +54,7 @@ pub struct AttachmentArguments {
 /// id no longer names a message; or the server's refusal (`ImapRefused`)
 /// or a failure of the IMAP connection (`Connection`).
 pub async fn run_read_email(context: &ToolContext, arguments: IdArguments) -> ToolResult {
-    let id = parse_email_id(&arguments.id)?;
+    let id = parse_email_id(&arguments.id, context.mailbox)?;
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
     let (fetched, view) = get_message_view(&mut session, &folders, &id).await?;
@@ -93,11 +93,15 @@ pub async fn run_read_email(context: &ToolContext, arguments: IdArguments) -> To
 /// read; or the server's refusal (`ImapRefused`) or a failure of the IMAP
 /// connection (`Connection`).
 pub async fn run_read_conversation(context: &ToolContext, arguments: IdArguments) -> ToolResult {
-    let id = parse_email_id(&arguments.id)?;
+    let id = parse_email_id(&arguments.id, context.mailbox)?;
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
     let (_, view) = get_message_view(&mut session, &folders, &id).await?;
-    let mut found = find_conversation_hits(&mut session, &folders, &view).await?;
+    let start = ConversationStart {
+        id: &id,
+        view: &view,
+    };
+    let mut found = find_conversation_hits(&mut session, &folders, start).await?;
     if found.hits.is_empty() {
         found.hits.push(build_message_hit(&id, &view));
     }
@@ -105,6 +109,16 @@ pub async fn run_read_conversation(context: &ToolContext, arguments: IdArguments
     let entries = load_conversation_entries(&mut session, &folders, &found).await?;
     session.close().await;
     Ok(build_conversation_report(&found, &entries))
+}
+
+/// The message a conversation is read for: its id, whose mailbox the
+/// conversation is searched in, and the message as read.
+#[derive(Clone, Copy, Debug)]
+struct ConversationStart<'a> {
+    /// The message's id.
+    id: &'a EmailId,
+    /// The message as read, with the identifiers the search uses.
+    view: &'a MessageView,
 }
 
 /// The messages found to belong to a conversation, and the folders where
@@ -124,7 +138,7 @@ struct ConversationHits {
 ///
 /// * `session` - The signed-in session.
 /// * `folders` - The classified folders.
-/// * `view` - The message the conversation is read for.
+/// * `start` - The message the conversation is read for.
 ///
 /// # Returns
 ///
@@ -136,9 +150,9 @@ struct ConversationHits {
 async fn find_conversation_hits(
     session: &mut ImapSession,
     folders: &[Folder],
-    view: &MessageView,
+    start: ConversationStart<'_>,
 ) -> Result<ConversationHits, ToolFailure> {
-    let identifiers = list_conversation_identifiers(view);
+    let identifiers = list_conversation_identifiers(start.view);
     let mut found = ConversationHits::default();
     let Some(criteria) = build_conversation_criteria(&identifiers) else {
         return Ok(found);
@@ -146,6 +160,7 @@ async fn find_conversation_hits(
     let mut seen = HashSet::new();
     for folder in list_conversation_folders(folders) {
         let query = HitQuery {
+            mailbox: start.id.mailbox,
             criteria: &criteria,
             limit: CONVERSATION_LIMIT,
         };
@@ -408,7 +423,7 @@ pub async fn run_read_attachment(
     context: &ToolContext,
     arguments: AttachmentArguments,
 ) -> ToolResult {
-    let id = parse_email_id(&arguments.id)?;
+    let id = parse_email_id(&arguments.id, context.mailbox)?;
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
     let (_, view) = get_message_view(&mut session, &folders, &id).await?;
@@ -663,6 +678,7 @@ fn build_conversation_criteria(identifiers: &[String]) -> Option<Vec<SearchWord>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mailbox::Mailbox;
     use crate::message::parse_message;
 
     /// Checks that a conversation search matches each of its message ids in
@@ -707,6 +723,7 @@ mod tests {
     fn fits_entries_after_the_heading_within_the_result_limit() {
         let view = parse_message(b"Message-ID: <one@example.com>\r\n\r\nx").expect("message");
         let id = EmailId {
+            mailbox: Mailbox::Person,
             uid: 1,
             uid_validity: 7,
             folder: "INBOX".to_owned(),
@@ -754,6 +771,7 @@ mod tests {
     fn formats_a_message_with_its_attachments_and_cuts_the_text_when_asked() {
         let view = parse_message(b"From: Jane <jane@example.com>\r\nTo: person@example.com\r\nCc: cc@example.com\r\nReply-To: reply@example.com\r\nDate: Sun, 2 Nov 2026 10:30:00 +0000\r\nSubject: Hello\r\nMessage-ID: <one@example.com>\r\nIn-Reply-To: <zero@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nHello there, this is the text.\r\n--b\r\nContent-Type: text/csv\r\nContent-Disposition: attachment; filename=\"data.csv\"\r\n\r\na,b\r\n--b--\r\n").expect("message");
         let id = EmailId {
+            mailbox: Mailbox::Person,
             uid: 12,
             uid_validity: 345,
             folder: "INBOX".to_owned(),

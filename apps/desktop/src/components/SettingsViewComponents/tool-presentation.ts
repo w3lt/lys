@@ -15,6 +15,7 @@ import {
   formatTokenCount
 } from "@/components/ComposerComponents/composer-context"
 import type { ToolModelSupport } from "@/lib/models/tool-model-support"
+import type { McpServerListState } from "@/lib/store/mcp-servers"
 import {
   TOOL_APPROVALS,
   type ToolApproval,
@@ -184,6 +185,40 @@ export function calculateOfferedToolTotals(
  */
 export function formatToolTokenEstimate(tokenCount: number): string {
   return `~${formatTokenCount(tokenCount)} tok`
+}
+
+/** How much of the context the tool descriptions take. */
+export type ToolContextUse = {
+  /** The tokens, and their share of the context when it is known. */
+  readonly label: string
+  /** Share of the context, from 0 to 1, or null while it is unknown. */
+  readonly fraction: number | null
+}
+
+/**
+ * Formats how much of the context the descriptions of the switched-on
+ * tools take at most in a request.
+ *
+ * @param summary - Switch state and the switched-on tools.
+ * @param contextLength - Context length the loaded model was loaded with,
+ * or null while no model is loaded or its length is unknown.
+ * @returns The tokens sent, none while tool calls are off, and their share
+ * of the context when its length is known.
+ */
+export function formatToolContextUse(
+  summary: ToolCallsSummary,
+  contextLength: number | null
+): ToolContextUse {
+  const sentTokens = summary.areToolCallsOn ? summary.offeredTokenCount : 0
+  const tokens = formatToolTokenEstimate(sentTokens)
+  if (contextLength === null || contextLength <= 0) {
+    return { label: `${tokens} per request`, fraction: null }
+  }
+  const fraction = Math.min(1, sentTokens / contextLength)
+  return {
+    label: `${tokens} of ${formatTokenCount(contextLength)} tokens · ${(fraction * 100).toFixed(1)}%`,
+    fraction
+  }
 }
 
 /**
@@ -600,4 +635,23 @@ export function isFixedInSecretsPane(
   reason: ListedBackendToolUnavailableReason
 ): boolean {
   return reason === "api-key-missing"
+}
+
+/**
+ * Formats the note of the card that points to the MCP pane.
+ *
+ * @param list - The servers the backend applied, with their states.
+ * @returns How many servers run and how many tools they list, once the
+ * list was read, then where they are switched.
+ */
+export function formatMcpToolsPointerNote(list: McpServerListState): string {
+  /** Where the MCP servers' tools are switched. */
+  const where = "Switch them and choose which ask first under MCP."
+
+  if (list.status !== "loaded") return where
+  const runningToolCounts = list.servers.flatMap((server) =>
+    server.state.status === "connected" ? [server.state.toolCount] : []
+  )
+  const toolCount = runningToolCounts.reduce((sum, count) => sum + count, 0)
+  return `${runningToolCounts.length} of ${list.servers.length} servers running · ${toolCount} tools. ${where}`
 }

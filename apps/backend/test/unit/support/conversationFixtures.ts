@@ -16,6 +16,7 @@ import type {
   ConversationTurnTarget,
   ConversationTurnUserMessage
 } from "../../../src/modules/chat/persistence"
+import type { ToolCallDecisionRecord } from "../../../src/modules/toolApproval/toolCallDecisionRecord"
 
 /**
  * Creates a syntactically valid UUIDv7 whose last group encodes `sequence`.
@@ -27,6 +28,10 @@ import type {
 export function createFixtureUuidV7(sequence: number): string {
   return `01900000-0000-7000-8000-${sequence.toString(16).padStart(12, "0")}`
 }
+
+/** Matches a lowercase UUIDv7, as the backend gives a part or a call. */
+export const UUID_V7_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
 /** Conversation identity used by turn fixtures. */
 export const FIXTURE_CONVERSATION_ID = createFixtureUuidV7(1)
@@ -242,6 +247,15 @@ export function createReasoningPart(
   }
 }
 
+/**
+ * Decision of a tool call the policy allowed and the gate asked about, its
+ * tool being on Ask me.
+ */
+export const ASK_ME_TOOL_CALL_DECISION: ToolCallDecisionRecord = Object.freeze({
+  policyDecision: Object.freeze({ effect: "allow" }),
+  approvalMode: "ask-me"
+})
+
 /** Values that distinguish one tool-call part fixture from another. */
 export type ToolCallPartFixture = Readonly<{
   /** Identity sequence of the call. */
@@ -331,7 +345,8 @@ export function createToolCallPart(
  * @param sequence - Identity sequence of the message.
  * @param parts - Stored parts in order; empty for a reply without any.
  * @param state - Lifecycle status and, for completed replies, finish reason.
- * @returns A valid assistant message from model `fixture-model`.
+ * @returns A valid assistant message from model `fixture-model` on LM
+ * Studio.
  */
 export function createAssistantMessage(
   sequence: number,
@@ -342,6 +357,7 @@ export function createAssistantMessage(
     id: createFixtureUuidV7(sequence),
     role: "assistant",
     model: "fixture-model",
+    provider: "lmStudio",
     parts,
     status: state.status,
     finishReason: state.status === "completed" ? state.finishReason : null,

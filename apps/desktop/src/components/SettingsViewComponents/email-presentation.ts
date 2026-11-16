@@ -456,7 +456,7 @@ function formatRestingMessage(
 ): EmailAccountMessage {
   /** Line shown while no account is saved and nothing is edited. */
   const noAccountMessage: EmailAccountMessage = Object.freeze({
-    text: "No account yet. The email server stays off until you save one.",
+    text: "No account yet. This mailbox stays off until you save one.",
     tone: "muted"
   })
 

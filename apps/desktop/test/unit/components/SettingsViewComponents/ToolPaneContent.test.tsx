@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react"
+import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { UnavailableBackendTool } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
@@ -12,6 +12,7 @@ import { buildLlmInfo } from "../../support/modelFixtures"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import {
   READY_RUNTIME,
+  updateStoreRuntime,
   type RuntimeArrangement
 } from "../../support/runtimeFixtures"
 import {
@@ -23,6 +24,7 @@ import { createControlledPromise } from "../../support/settlement"
 import { STORED_SETTINGS_DOCUMENT } from "../../support/settingsFixtures"
 import {
   buildBackendToolDefinition,
+  buildMcpToolDefinition,
   buildToolDefinition
 } from "../../support/toolFixtures"
 import { waitForRenderedWork } from "../../support/rendering"
@@ -115,12 +117,7 @@ describe("ToolPaneContent", () => {
 
     expect(
       screen.getAllByRole("status").map((status) => status.textContent)
-    ).toEqual([
-      "",
-      "Reading tools settings",
-      "",
-      "No location saved. get_location fails until you save one."
-    ])
+    ).toEqual(["", "Reading tools settings", ""])
 
     tools.resolve(TOOLS)
     await waitForRenderedWork()
@@ -132,19 +129,51 @@ describe("ToolPaneContent", () => {
     ).toBeInTheDocument()
   })
 
-  it("shows the location section, with its labelled fields, while the tools cannot be read", async () => {
-    startNativeHostFake({
-      list_tools: () => Promise.reject("command list_tools failed")
+  it("lists only Lys's own tools, and shows the MCP pane for the servers' tools", async () => {
+    startNativeHostFake({ list_tools: () => TOOLS })
+    const useLysStore = await startToolPane(TRAINED_RUNTIME, [
+      READ_PAGE,
+      buildMcpToolDefinition("notes", "lookup")
+    ])
+    const user = userEvent.setup()
+
+    expect(screen.getByRole("region", { name: "web" })).toBeInTheDocument()
+    expect(screen.queryByText(/lookup/)).toBeNull()
+    expect(
+      screen.getByText("Tools from MCP servers live with their server")
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Open MCP" }))
+
+    expect(useLysStore.getState().settingsPane).toBe("mcp")
+  })
+
+  it("saves a folder added in the folders section, while the tools cannot be read, and lists it", async () => {
+    const host = startNativeHostFake({
+      list_tools: () => Promise.reject("command list_tools failed"),
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
     })
     await startToolPane()
+    const user = userEvent.setup()
+    const section = screen.getByRole("region", {
+      name: "Folders tools may use"
+    })
 
-    const section = screen.getByRole("region", { name: "your location" })
-    expect(section).toHaveTextContent(/Lys never detects where you are/)
-    for (const label of ["City", "Region", "Country"]) {
-      expect(screen.getByLabelText(label)).toHaveAccessibleDescription(
-        "Each field is optional and holds up to 100 characters."
-      )
-    }
+    await user.type(
+      within(section).getByRole("textbox", { name: "Folder" }),
+      "/Users/ada/work{Enter}"
+    )
+    await waitForRenderedWork()
+
+    expect(
+      within(section).getByRole("list", { name: "Folders tools may use" })
+    ).toHaveTextContent("/Users/ada/work")
+    expect(host.commands.at(-1)).toMatchObject({
+      command: "save_settings",
+      args: {
+        newSettings: { tools: { approvedFolders: ["/Users/ada/work"] } }
+      }
+    })
   })
 
   it("shows a failed read with Retry, which reads the tools again", async () => {
@@ -181,6 +210,28 @@ describe("ToolPaneContent", () => {
     await screen.findByRole("region", { name: "files" })
 
     expect(host.commands).toHaveLength(1)
+  })
+
+  it("measures the tool descriptions against the context length the model is loaded with", async () => {
+    startNativeHostFake({ list_tools: () => TOOLS })
+    await startToolPane({
+      ...TRAINED_RUNTIME,
+      modelInventory: {
+        status: "ready",
+        modelLoading: "lys",
+        models: [
+          buildLlmInfo("qwen3-8b", {
+            loaded: true,
+            trainedForToolUse: true,
+            loadedContextLength: 16_384
+          })
+        ]
+      }
+    })
+
+    expect(
+      screen.getByRole("img", { name: /^Tool descriptions: / })
+    ).toHaveAccessibleName(/ of 16k tokens · \d+\.\d%$/)
   })
 
   it("states what a trained model is offered, updates it as tools are switched, and saves the switch", async () => {
@@ -226,6 +277,7 @@ describe("ToolPaneContent", () => {
         settings: {
           ...settings,
           tools: {
+            approvedFolderPaths: [],
             justRunToolNames: new Set(),
             switches: new Map([
               ["read_page", true],
@@ -448,10 +500,7 @@ describe("ToolPaneContent", () => {
     await user.click(screen.getByRole("button", { name: "read_text_file" }))
 
     act(() => {
-      useLysStore.setState({
-        modelInventory: UNTRAINED_RUNTIME.modelInventory,
-        modelRuntime: { status: "loaded", modelKey: "gemma-3" }
-      })
+      updateStoreRuntime(useLysStore, UNTRAINED_RUNTIME)
     })
 
     expect(
@@ -468,10 +517,7 @@ describe("ToolPaneContent", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "false")
 
     act(() => {
-      useLysStore.setState({
-        modelInventory: TRAINED_RUNTIME.modelInventory,
-        modelRuntime: { status: "loaded", modelKey: "qwen3-8b" }
-      })
+      updateStoreRuntime(useLysStore, TRAINED_RUNTIME)
     })
 
     expect(

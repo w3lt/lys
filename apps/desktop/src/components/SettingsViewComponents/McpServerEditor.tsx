@@ -252,15 +252,15 @@ function McpJsonPasteOffer({
       <p>
         Have a config from another app? Paste it and the fields fill themselves.
       </p>
-      <button
-        className="settings-view__mcp-text-button"
+      <Button
         disabled={isReadOnly}
         onClick={onOpen}
         ref={isFocusedOnAttach ? handleFocusTargetAttach : undefined}
         type="button"
+        variant="text"
       >
         paste json
-      </button>
+      </Button>
     </div>
   )
 }
@@ -304,13 +304,9 @@ function McpJsonPasteField({
         <span className="settings-view__mcp-field-label">
           <label htmlFor={fieldId}>Paste JSON</label>
         </span>
-        <button
-          className="settings-view__mcp-text-button"
-          onClick={onClose}
-          type="button"
-        >
+        <Button onClick={onClose} type="button" variant="text">
           close
-        </button>
+        </Button>
       </div>
       <Textarea
         aria-describedby={messageId}
@@ -440,15 +436,15 @@ function McpEditorTopBar({
 }: McpEditorTopBarProps): ReactElement {
   return (
     <div className="settings-view__mcp-editor-top">
-      <button
-        className="settings-view__mcp-back"
+      <Button
         disabled={isSaving}
         onClick={onClose}
         type="button"
+        variant="back"
       >
         <ChevronLeft aria-hidden="true" />
         mcp servers
-      </button>
+      </Button>
       <span className="settings-view__mcp-editor-tags">
         {isChanged ? (
           <span className="settings-view__mcp-unsaved">unsaved</span>

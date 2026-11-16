@@ -2,6 +2,7 @@
 //! `read_attachment` against the fake IMAP server.
 
 use email::failure::ToolFailure;
+use email::mailbox::Mailbox;
 use email::tools::read::{
     AttachmentArguments, IdArguments, run_read_attachment, run_read_conversation, run_read_email,
 };
@@ -1010,8 +1011,10 @@ async fn refuses_ids_that_are_not_ids_or_no_longer_valid() {
     let stack = start_filled_stack().await;
     let read = |id: &str| run_read_email(&stack.context, IdArguments { id: id.to_owned() });
 
-    assert_eq!(read("nonsense").await, Err(ToolFailure::InvalidId));
-    assert_eq!(read("0.1001.INBOX").await, Err(ToolFailure::InvalidId));
+    let invalid = Err(ToolFailure::InvalidId(Mailbox::Person));
+    assert_eq!(read("nonsense").await, invalid);
+    assert_eq!(read("0.1001.INBOX").await, invalid);
+    assert_eq!(read("lys.24.1001.INBOX").await, invalid);
     assert_eq!(read("99.1001.INBOX").await, Err(ToolFailure::StaleId));
     assert_eq!(read("24.9999.INBOX").await, Err(ToolFailure::StaleId));
     assert_eq!(read("24.1001.Nowhere").await, Err(ToolFailure::StaleId));

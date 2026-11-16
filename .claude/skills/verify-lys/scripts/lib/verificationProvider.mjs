@@ -12,8 +12,24 @@
  * lead's final answer; every other request gets the fixed reply.
  */
 
+/**
+ * Provider the fake answers as: a local Ollama server. The seeded settings
+ * turn it on at the fake's address, and every model route and chat request
+ * a journey sends names it.
+ */
+export const VERIFICATION_PROVIDER = "ollama"
+
 /** Model name the fake lists, in Ollama's `name:tag` form. */
 export const VERIFICATION_MODEL_NAME = "lys-verify:latest"
+
+/**
+ * The fake's model as a chat request names it: its provider and the key
+ * that provider lists it under.
+ */
+export const VERIFICATION_MODEL_REFERENCE = Object.freeze({
+  provider: VERIFICATION_PROVIDER,
+  modelKey: VERIFICATION_MODEL_NAME
+})
 
 /** Context window the fake reports for its model, in tokens. */
 export const VERIFICATION_CONTEXT_LENGTH = 8192

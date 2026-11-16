@@ -23,15 +23,19 @@ This page documents only the flows implemented in the current codebase.
 5. Before it listens, the backend reads the `mcp` group of `settings.json`
    and starts connecting to each server it names in the background; see
    [Connect MCP servers](#connect-mcp-servers). It then opens its HTTP
-   listener without contacting the model provider or waiting for an MCP
-   server, and makes one connection attempt to the saved provider.
+   listener without contacting a model provider or waiting for an MCP
+   server, and starts one connection attempt of every provider at once. A
+   provider that is off becomes `off` without being contacted; one
+   provider's failure never stops another's.
 6. The store checks `GET /api/v1/heath` until it answers (`running`), the
    process exits (`stopped`), or 30 seconds pass (`unresponsive`).
-7. Once running, the store reads the provider's connection status, joining
-   the startup attempt if it is still `connecting`. The request shares that
-   attempt when the saved provider is the one the attempt read.
-8. If the provider is connected, the store requests model inventory;
-   otherwise the model list stays empty.
+7. Once running, the store reads every provider's connection status at once
+   from `GET /api/v1/llm/:provider/runtime`, joining a provider's startup
+   attempt if it is still `connecting`. The request shares that attempt when
+   it reads the provider's settings as the attempt read them.
+8. For each provider that is connected, the store requests that provider's
+   model inventory, apart from the others, so each list shows as soon as it
+   arrives; a provider that is not connected has no model list.
 
 A manual Start follows steps 4–8.
 
@@ -98,17 +102,21 @@ seconds. Quitting Lys stops vmo and the backend together.
 ## Reconnect to the model provider
 
 1. The user starts the provider, such as LM Studio or a local Ollama server,
-   and presses **Refresh** on the Runtime pane's provider card.
-2. The store shows `connecting` and sends `POST /api/v1/llm/runtime/connect`.
-3. The backend queues one attempt behind accepted model work. It keeps a held
-   runtime that still answers and otherwise acquires a new one. Requests that
-   arrive while the attempt is queued share it. A request that arrives once
-   it runs reads the saved provider and shares it when the attempt read the
-   same provider; otherwise it queues another attempt, which reads the
-   provider again when it starts.
-4. The response carries `connected` or `unreachable`, and the store publishes
-   it.
-5. On `connected`, the store requests model inventory.
+   and presses **Refresh** on the Runtime pane's Provider connections card,
+   which reconnects each turned-on provider that is not connecting, or Test
+   on the provider's card in Settings → Providers.
+2. The store shows `connecting` for each such provider and sends
+   `POST /api/v1/llm/:provider/runtime/connect`.
+3. The backend queues one attempt behind that provider's accepted model work;
+   other providers' queues are not involved. It keeps a held runtime that
+   still answers and otherwise acquires a new one. Requests that arrive while
+   the attempt is queued share it. A request that arrives once it runs reads
+   the provider's settings and shares it when both reads found the provider
+   on with the same address or key; otherwise it queues another attempt,
+   which reads the settings again when it starts.
+4. The response carries `connected`, `unreachable`, or `off` for a provider
+   that is turned off, which is not contacted, and the store publishes it.
+5. On `connected`, the store requests that provider's model inventory.
 
 ## Send one chat message
 
@@ -116,7 +124,8 @@ seconds. Quitting Lys stops vmo and the backend together.
 2. The desktop creates a request token and an `AbortController` that ends
    only its own observation of the stream.
 3. The desktop sends `POST /api/v1/chat` with `conversation`, `message`,
-   `model`, required `generationOptions`, and `attachments` when the tray
+   `model`, the conversation's model as `{ provider, modelKey }`, required
+   `generationOptions`, and `attachments` when the tray
    holds files, each with its name and base64 content. `conversation` is
    `{ kind: "new", agentCode }` for a new conversation, naming the agent
    selected in the composer (`caliginia` until another is selected), and
@@ -124,18 +133,20 @@ seconds. Quitting Lys stops vmo and the backend together.
    the current temperature and an optional reply ceiling; a local zero ceiling
    is omitted from the request.
 4. The backend reads what each attachment is from its bytes and finds the
-   agent that answers. It reads from the connected provider whether the model
+   agent that answers. It reads from the model's provider whether the model
    sees images and is trained for tool use, once per model while the backend
    stays connected to that provider. It
    then writes the attachment files under
    `$LYS_HOME/attachments/<conversation id>/<message id>/`, creates or reuses
    the conversation, inserts the user message with its numbered attachments
-   and the job reports waiting for the conversation, if any,
-   and inserts an empty streaming assistant message. When an attachment is
-   neither text nor an image Lys sends, no agent has the requested code, the
-   conversation is not stored or is a job, its agent was deleted, an image is attached
-   for a model without vision, or the connected provider cannot answer about
-   the model, the backend answers with a problem instead and stores nothing.
+   and the job reports waiting for the conversation, if any, and inserts an
+   empty streaming assistant message that stores the model's key and
+   provider. When an attachment is neither text nor an image Lys sends, no
+   agent has the requested code, the conversation is not stored or is a job,
+   its agent was deleted, an image is attached for a model without vision, or
+   the model's provider is not connected or cannot answer about the model,
+   the backend answers with a problem instead and stores nothing. Nothing goes
+   to another provider.
 5. The backend emits a `start-new-conversation-turn` or
    `start-existing-conversation-turn` event.
 6. The reply first takes one of the answering agent's
@@ -148,7 +159,8 @@ seconds. Quitting Lys stops vmo and the backend together.
    Before each round of the reply, the backend builds the round's context,
    in which each user message carries its text, the list of its attachments,
    and the images a model with vision sees, and measures it with the loaded
-   model's tokenizer, counting each image as its estimate. A round that does not fit the context
+   model's tokenizer on the model's provider, counting each image as its
+   estimate. A round that does not fit the context
    length the model is loaded with, together with the reply ceiling, or whose
    model is not loaded, is not sent: the reply is stored failed and the
    backend emits `error` with the reason. Otherwise the backend stores each
@@ -175,21 +187,24 @@ seconds. Quitting Lys stops vmo and the backend together.
 
 1. While the composer could send, it builds the measurement request that
    sending would make: `conversation` (`{ kind: "existing", id }` for the
-   shown conversation, `{ kind: "new", agentCode }` otherwise), the loaded
-   `model`, and the `tools` the Tools pane would offer.
+   shown conversation, `{ kind: "new", agentCode }` otherwise), the
+   conversation's `model` as `{ provider, modelKey }` while it is loaded, and
+   the `tools` sending would offer.
 2. The desktop sends `POST /api/v1/chat/context`. A newer request abandons an
    older one.
 3. The backend finds the agent and the conversation as the chat route does,
    builds the system prompt, offered tools, and stored messages a turn's first
    round would send, their attachment lists and, for a model with vision,
    their images included, and, when the model is trained for tool use,
-   `read_attachment` among the tools when the conversation holds a text file
-   and the agent state tools the agent's role gives, with
+   `read_attachment` first among the tools when the conversation holds a
+   text file, `find_tools` and the routing note in place of the offered
+   tools, and the agent state tools the agent's role gives, with
    an empty new message for the markup around the text, and measures them
-   with the loaded model's tokenizer through the model operation queue.
+   with the loaded model's tokenizer through the model operation queue of the
+   model's provider.
 4. The backend answers with the context length and the tokens of each part,
-   or with a `503` problem when the model is not loaded, LM Studio is not
-   connected, or the queue is full.
+   or with a `503` problem when the model is not loaded, its provider is not
+   connected, or that provider's queue is full.
 5. The composer adds an estimate of the draft's text, the staged images'
    estimates, and the reply ceiling,
    shows the result in its context meter, and disables Send while the request
@@ -242,36 +257,54 @@ calls it stored are part of the new turn's context.
    `backend-tool-unavailable` problem and stores nothing; the desktop shows
    the error and reads the tool list again. A name the backend does not know
    answers `400`.
-3. The backend offers the tools to the model in every round. Each round's
+3. The backend offers the tools to the model. A model trained for tool use is
+   first offered `find_tools` in their place, with the attachment reader and
+   the agent state tools, and a note at the end of the system prompt; when it
+   calls `find_tools`, Armitage, the tool keeper, searches the turn's tools on
+   a reply that is never stored or shown, and each tool it finds is offered
+   from the next round to the end of the reply, still asking as below
+   ([tool routing](/architecture/backend/#tool-routing)). Each round's
    reasoning and text are stored as parts of that round and streamed. When a
-   round ends with tool calls,
-   the backend checks each call's arguments against its definition, and a
-   backend tool also checks them by its own rules, such as `read_page`'s URL
-   rules; for an MCP tool it checks only the arguments' shape, and the server
-   checks the values. A call to an unknown tool, such as one the request names as
-   switched off or unable to run, or any call while tool calls are off, or
-   with invalid arguments is answered by the backend itself and stored as a
-   `failed` call. Every other call is
-   stored as a part too, `running` or `awaiting-approval`, and each later
-   change of it is stored and sent as a `reply-part` event.
+   round ends with tool calls, the backend checks each call's arguments
+   against its definition, and a backend tool also checks them by its own
+   rules, such as `read_page`'s URL rules; for an MCP tool it checks only the
+   arguments' shape, and the server checks the values. A call to an unknown
+   tool, such as one the request names as switched off or unable to run, a
+   call of a tool its round did not offer, such as one Armitage has not found,
+   any call while tool calls are off, or a call with invalid arguments is
+   answered by the backend itself and stored as a `failed` call. So is a valid
+   call the [tool call policy](/architecture/backend/#tool-call-policy) denies
+   because it names a private key or credential file, a path outside the
+   folders the person lets tools use, once any is listed, or a local or
+   private network address: it never runs and is never shown to the person,
+   even on Just run. Every other call is stored as a part too, `running` or
+   `awaiting-approval`, and each later change of it is stored and sent as a
+   `reply-part` event.
 4. The backend's tool approval service reads the Just run choices from the
-   settings file once for the round. For each valid call, in the model's order:
-   a tool saved as Just run goes on at once; any other tool's call is stored
-   as `awaiting-approval` and then shown to the person with a `tool-approval`
-   event, in the same step. A call the store refuses, because the reply has
-   ended, is never shown. If the settings file cannot be read, every call is
-   shown and the backend logs a warning.
+   settings file once for the round. For each call the policy does not deny,
+   in the model's order: a tool saved as Just run goes on at once, unless the
+   policy requires approval because the tool is an MCP tool its server marks
+   as destructive or as an open-world write, or because it is a reply's
+   `web_search` call from its sixth on; any other call is stored as `awaiting-approval` and then
+   shown to the person with a `tool-approval` event that carries a single-use
+   approval token, in the same step. A call the store refuses, because the
+   reply has ended, is never shown. If the settings file cannot be read, every
+   call is shown and the backend logs a warning.
 5. The desktop's tool-call store, which follows the reply on its own
    connection, shows each prompt above the composer, or answers it
    `showFailed` at once when it cannot describe the call. Allow once and
-   Reject send the answer to
+   Reject send the answer, with the prompt's token, to
    `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`.
-6. An allowed client tool's call goes to the desktop as a `tool-call` event
-   under the same `id`; the store runs the Tauri command at once and sends
-   its result to
+6. A call the person allows is stored as `running` and decided again with
+   the approved folders read at that moment; one they no longer approve is
+   stored as `failed` with the denial and never runs. An allowed client
+   tool's call goes to the desktop as a `tool-call` event
+   under the same `id`; the store runs the Tauri command at once and sends its
+   result to
    `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`.
    Both routes answer `204`, or `409` when the call no longer waits for that
-   answer.
+   answer or an approval's token is not its prompt's; the backend takes one
+   answer per token.
 7. An allowed backend tool runs in the backend under the reply's
    cancellation, whether or not a desktop follows the reply, and its result
    goes to the model and is stored with the call, cleaned of invisible
@@ -289,17 +322,22 @@ calls it stored are part of the new turn's context.
    characters, and a server that is no longer connected, an error, or a time
    limit becomes a failed call the model reads. Stop tells the server the call
    was cancelled. A rejected call runs nothing; the model
-   reads the rejection, which is stored as the call's result. Once every call of the round has an answer, the
+   reads the rejection, which is stored as the call's result. A prompt nobody
+   answers within five minutes expires: the backend refuses its token from
+   then on, stores the call as `failed` with a sentence naming the limit,
+   which the model reads as it reads a rejection, and the desktop turns the
+   card into a notice that says why the call did not run. Once every call of the round has an answer, the
    backend asks the model again with the results. The loop ends with the
    first round that makes no tool calls, even one that writes no text, then
    `done`. The desktop shows the rounds that called tools as the reply's
    steps, the last round's text as the answer with its `[n]` citations
    linked, and the sources the answer cites under it.
 
-The backend sets no time limit on a prompt or a pending call. It waits until
-the call is answered, the reply is stopped, its conversation is deleted, or
-the backend shuts down; a newer turn does not end it yet
-([#137](https://github.com/w3lt/lys/issues/137)). A client that was not
+A prompt waits at most five minutes. The backend sets no time limit on a call
+sent to the desktop to run: it waits until the call is answered, the reply is
+stopped, its conversation is deleted, or the backend shuts down; a newer turn
+does not end it yet ([#137](https://github.com/w3lt/lys/issues/137)). A
+client that was not
 following when a prompt or call was sent finds it in the next
 `reply-snapshot`'s `pendingToolApprovals` or `pendingToolCalls`.
 

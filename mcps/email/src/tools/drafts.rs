@@ -22,10 +22,11 @@ use crate::compose::{
     ComposedMessage, Composition, CompositionProblem, MessageStamp, build_draft_message,
     build_recipient, parse_recipient,
 };
-use crate::email_id::{EmailId, parse_email_id};
+use crate::email_id::{EmailId, FolderPlace, parse_email_id};
 use crate::failure::ToolFailure;
 use crate::folders::{Folder, FolderRole};
 use crate::imap::{AppendFailure, Deletion, FolderAccess, ImapSession, SearchWord, Summary};
+use crate::mailbox::Mailbox;
 use crate::message::{ParsedMailbox, build_message_view};
 use crate::smtp::SendProgress;
 
@@ -197,7 +198,7 @@ pub async fn run_save_draft(
     let replaced = arguments
         .draft_id
         .as_deref()
-        .map(parse_email_id)
+        .map(|id| parse_email_id(id, context.mailbox))
         .transpose()?;
     let mut session = None;
     let composition = build_composition(context, &mut session, &message).await?;
@@ -221,7 +222,12 @@ pub async fn run_save_draft(
         Some(replaced) => Some(delete_replaced_draft(&mut session, replaced).await),
         None => None,
     };
-    let id = find_saved_draft_id(&mut session, &drafts, &composed.message_id).await;
+    let stored = StoredDraft {
+        mailbox: context.mailbox,
+        drafts: &drafts,
+        message_id: &composed.message_id,
+    };
+    let id = find_saved_draft_id(&mut session, stored).await;
     session.close().await;
     let saved = SavedDraft { id, replacement };
     Ok(build_saved_draft_report(&composition, &drafts.name, &saved))
@@ -309,14 +315,25 @@ async fn delete_replaced_draft(session: &mut ImapSession, replaced: EmailId) -> 
     Replacement { replaced, deletion }
 }
 
+/// A draft just stored, as its id is looked for: the mailbox it was
+/// stored in, which its id names, the Drafts folder, and its Message-ID.
+#[derive(Clone, Copy, Debug)]
+struct StoredDraft<'a> {
+    /// The mailbox the draft was stored in.
+    mailbox: Mailbox,
+    /// The mailbox's Drafts folder.
+    drafts: &'a Folder,
+    /// The draft's Message-ID, without angle brackets.
+    message_id: &'a str,
+}
+
 /// Finds the id of a draft just stored: opens Drafts again, so that it
 /// lists the new draft, and searches it for the draft's Message-ID.
 ///
 /// # Arguments
 ///
 /// * `session` - The signed-in session.
-/// * `drafts` - The Drafts folder.
-/// * `message_id` - The draft's Message-ID, without angle brackets.
+/// * `stored` - The draft, and where it was stored.
 ///
 /// # Returns
 ///
@@ -324,9 +341,13 @@ async fn delete_replaced_draft(session: &mut ImapSession, replaced: EmailId) -> 
 /// failed.
 async fn find_saved_draft_id(
     session: &mut ImapSession,
-    drafts: &Folder,
-    message_id: &str,
+    stored: StoredDraft<'_>,
 ) -> Result<Option<EmailId>, ToolFailure> {
+    let StoredDraft {
+        mailbox,
+        drafts,
+        message_id,
+    } = stored;
     let selected = session
         .open_folder(&drafts.raw_name, FolderAccess::Change)
         .await
@@ -340,11 +361,12 @@ async fn find_saved_draft_id(
         .list_matching_uids(&criteria)
         .await
         .map_err(build_imap_failure_conversion("find the saved draft"))?;
-    Ok(uids.first().map(|uid| EmailId {
-        uid: *uid,
+    let place = FolderPlace {
+        mailbox,
+        folder: &drafts.name,
         uid_validity: selected.uid_validity,
-        folder: drafts.name.clone(),
-    }))
+    };
+    Ok(uids.first().map(|uid| place.build_id(*uid)))
 }
 
 /// Builds the report of a stored draft: its id and fields, or why its id
@@ -461,7 +483,7 @@ pub async fn run_send_draft(
     arguments: SendDraftArguments,
     progress: &SendProgress,
 ) -> ToolResult {
-    let id = parse_email_id(&arguments.draft_id)?;
+    let id = parse_email_id(&arguments.draft_id, context.mailbox)?;
     let given = build_compared_fields(parse_message_arguments(&build_given_fields(arguments))?)?;
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
@@ -551,7 +573,7 @@ fn format_deletion_for_log(deleted: &Result<Deletion, ToolFailure>) -> String {
 /// refusal (`ImapRefused`) or a failure of the IMAP connection
 /// (`Connection`). A refused expunge leaves the draft marked as deleted.
 pub async fn run_delete_draft(context: &ToolContext, arguments: DraftIdArguments) -> ToolResult {
-    let id = parse_email_id(&arguments.draft_id)?;
+    let id = parse_email_id(&arguments.draft_id, context.mailbox)?;
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
     let drafts = get_role_folder(&folders, FolderRole::Drafts)?.clone();
@@ -1130,6 +1152,7 @@ mod tests {
             delimiter: Some("/".to_owned()),
         };
         let inside = EmailId {
+            mailbox: Mailbox::Lys,
             uid: 1,
             uid_validity: 2,
             folder: "Drafts".to_owned(),

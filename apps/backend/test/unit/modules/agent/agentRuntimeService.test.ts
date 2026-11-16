@@ -1,7 +1,11 @@
+import type { MessageGenerationOptions } from "@lys/protocol"
 import {
+  ARMITAGE_AGENT_CODE,
   CALIGINIA_AGENT_CODE,
   LYSIPTERA_AGENT_CODE,
-  type AgentDefinition
+  type AgentDefinition,
+  type BuiltInAgent,
+  type EmailAddress
 } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import SqliteAgentRecordStore from "../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
@@ -14,7 +18,8 @@ import AgentService from "../../../../src/modules/agent/agentService"
 import { buildBuiltInAgents } from "../../../../src/modules/agent/builtInAgents"
 import type {
   ReplyModel,
-  ReplyStreamEvent
+  ReplyStreamEvent,
+  ReplyStreamRequest
 } from "../../../../src/modules/agent/replyModel"
 import { NO_UNOFFERED_TOOLS } from "../../../../src/modules/agent/unofferedTools"
 import {
@@ -29,8 +34,19 @@ import {
   createFixtureUuidV7,
   createUserMessage
 } from "../../support/conversationFixtures"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 import { createRoomyReplyContextMeter } from "../../support/replyContextMeterFakes"
-import { LEADER_STATE_TOOL_NAMES } from "../../support/toolFixtures"
+import {
+  LEADER_STATE_TOOL_NAMES,
+  TOOL_CALL_POLICY,
+  SEARCH_CALL_ID,
+  createToolSearchCallRecords
+} from "../../support/toolFixtures"
+import {
+  registerToolKeeperContractSuite,
+  TOOL_KEEPER_SEARCH_TOOLS,
+  type ToolKeeperScript
+} from "../../support/toolKeeperContract"
 import { NO_TURN_DELEGATION } from "../../support/turnDelegationFakes"
 
 /** Time the clock reads when a case starts. */
@@ -39,7 +55,8 @@ const NOW = "2026-10-24T10:00:00.000Z"
 /** Built-in agents of every service a case creates. */
 const BUILT_IN_AGENTS = buildBuiltInAgents({
   caliginia: "You are Caliginia.",
-  lysiptera: "You are Lysiptera."
+  lysiptera: "You are Lysiptera.",
+  armitage: "You are Armitage."
 })
 
 /**
@@ -58,12 +75,25 @@ const LEADER: AgentIdentity = Object.freeze({
 type RuntimeOptions = Readonly<{
   /** Model access every live agent borrows; ends every reply by default. */
   replyModel?: ReplyModel
+  /** Agents the backend ships with; {@link BUILT_IN_AGENTS} by default. */
+  builtInAgents?: readonly BuiltInAgent[]
   /**
    * Stored conversations by id, each with its title; a conversation it lacks
    * is not stored.
    */
   conversations?: ReadonlyMap<string, Readonly<{ title: string | null }>>
+  /** Reads the address of Lys's own mailbox; none is in use by default. */
+  readLysEmailAddress?: () => EmailAddress | null
 }>
+
+/**
+ * Reads the address of Lys's own mailbox in a case where none is in use.
+ *
+ * @returns Null.
+ */
+function readNoLysEmailAddress(): null {
+  return null
+}
 
 /**
  * Creates model access whose every reply ends at once.
@@ -98,17 +128,96 @@ function createWaitingReplyModel() {
 }
 
 /**
+ * Creates the stream of one round of a search whose model recommends the
+ * tools the search's task names, then ends.
+ *
+ * @param request - The round's request.
+ * @param handleToolFound - Called once the tools are recommended, before
+ * the stream ends; nothing is called when it is omitted.
+ * @returns A stream that calls `recommend_tool` once for each word of the
+ * request's last message, the task, in the task's order; or, when that
+ * message is a tool result, calls `handleToolFound` and finishes.
+ */
+async function* createTaskToolRecommendationStream(
+  request: ReplyStreamRequest,
+  handleToolFound?: () => void
+): AsyncGenerator<ReplyStreamEvent> {
+  const lastMessage = request.messages.at(-1)
+  if (lastMessage?.role === "tool") {
+    handleToolFound?.()
+    yield { type: "finish", finishReason: "stop" }
+    return
+  }
+  const toolNames = String(lastMessage?.content ?? "").split(" ")
+  const toolCalls = toolNames.map((name) => ({
+    toolName: "recommend_tool",
+    argumentText: JSON.stringify({ name })
+  }))
+  yield { type: "tool-calls", toolCalls }
+}
+
+/**
+ * Creates model access whose every reply follows the script of a search:
+ * it recommends the tools the search's task names, then ends; it ends at
+ * once, recommending nothing; or it fails.
+ *
+ * @param script - How each search ends.
+ * @param handleToolFound - Called each time a search under
+ * `finds-task-tools` has recommended its tools and has not ended yet.
+ * @returns The model, whose stream opener records each call.
+ */
+function createToolKeeperReplyModel(
+  script: ToolKeeperScript,
+  handleToolFound?: () => void
+): ReplyModel {
+  switch (script) {
+    case "finds-task-tools":
+      return {
+        openReplyStream: vi.fn<ReplyModel["openReplyStream"]>(async (request) =>
+          createTaskToolRecommendationStream(request, handleToolFound)
+        )
+      }
+    case "finds-nothing":
+      return createFinishingReplyModel()
+    case "fails":
+      return {
+        openReplyStream: vi
+          .fn<ReplyModel["openReplyStream"]>()
+          .mockRejectedValue(new Error("Armitage's model failed"))
+      }
+  }
+}
+
+/**
+ * Creates the keeper of one case of the tool keeper contract suite.
+ *
+ * @param script - How each search ends.
+ * @param handleToolFound - Called each time a search under
+ * `finds-task-tools` has found its tools and has not settled yet.
+ * @returns A runtime whose Armitage answers on a model that follows the
+ * script.
+ */
+function createScriptedToolKeeper(
+  script: ToolKeeperScript,
+  handleToolFound?: () => void
+) {
+  const replyModel = createToolKeeperReplyModel(script, handleToolFound)
+  return createRuntime({ replyModel }).runtime
+}
+
+/**
  * Creates the runtime service over an agent service on an in-memory database
  * owned by the current test, every live agent with {@link REQUEST_LIMITS}.
  *
- * @param options - Model access and stored conversations.
+ * @param options - Model access, built-in agents, and stored
+ * conversations.
  * @returns The runtime, the agent service it reads, and how many agent
  * lookups and searches it made.
  */
 function createRuntime(options: RuntimeOptions = {}) {
   const agentService = new AgentService({
     recordStore: SqliteAgentRecordStore.create(openTestDatabase()),
-    builtInAgents: BUILT_IN_AGENTS
+    builtInAgents: options.builtInAgents ?? BUILT_IN_AGENTS
   })
   const agents = {
     findAgent: vi.fn((code: string) => agentService.findAgent(code)),
@@ -123,7 +232,9 @@ function createRuntime(options: RuntimeOptions = {}) {
     replyContextMeter: createRoomyReplyContextMeter(),
     findConversationTitle: (conversationId) =>
       buildConversationTitleLookup(conversations.get(conversationId)),
-    requestLimits: REQUEST_LIMITS
+    requestLimits: REQUEST_LIMITS,
+    toolSearchCallRecords: createToolSearchCallRecords().records,
+    readLysEmailAddress: options.readLysEmailAddress ?? readNoLysEmailAddress
   })
   return {
     runtime,
@@ -181,8 +292,9 @@ async function createHelloReply(
     userMessage: createUserMessage(1, "Hello"),
     canSeeImages: false,
     findAttachmentImage: vi.fn(),
-    model: "qwen/qwen3-8b",
+    model: LM_STUDIO_QWEN3_8B,
     generationOptions: { temperature: 0.4 },
+    directTools: [],
     clientTools: [],
     builtInTools: [],
     mcpTools: [],
@@ -196,10 +308,12 @@ async function createHelloReply(
     updateReplyToolCall: vi.fn(),
     sendEvent: vi.fn(),
     sendClientToolCall: vi.fn(),
+    toolCallPolicy: TOOL_CALL_POLICY,
     createToolCallGate: vi.fn(),
     reportReplyCancellation: vi.fn(),
     reportReplyRefusal: vi.fn(),
-    reportReplyFailure: vi.fn()
+    reportReplyFailure: vi.fn(),
+    reportToolSearchFailure: vi.fn()
   })
 }
 
@@ -318,6 +432,12 @@ describe("AgentRuntimeService", () => {
       }
     )
 
+    it("finds no chat agent for Armitage, who answers agents, not chats", () => {
+      expect(
+        createRuntime().runtime.loadChatAgent(ARMITAGE_AGENT_CODE)
+      ).toBeUndefined()
+    })
+
     it("finds no agent for a deleted agent's code, even one that was live", () => {
       const { runtime, agentService } = createRuntime()
       agentService.createAgent(STATE_READER_RESEARCHER)
@@ -349,6 +469,29 @@ describe("AgentRuntimeService", () => {
         )
       ).toEqual(toolNames)
     })
+  })
+
+  describe("email address", () => {
+    it.each([
+      ["Caliginia", CALIGINIA_AGENT_CODE, 1],
+      ["Lysiptera", LYSIPTERA_AGENT_CODE, 1],
+      ["a stored agent", "researcher", 0]
+    ])(
+      "lends %s the reader of Lys's own address only when it is Lys, read once per turn",
+      async (_label, code, readCount) => {
+        const readLysEmailAddress = vi.fn(() => "lys@example.net")
+        const { runtime, agentService } = createRuntime({
+          readLysEmailAddress
+        })
+        agentService.createAgent(STATE_READER_RESEARCHER)
+
+        await createHelloReply(findLiveAgent(runtime, code), {
+          trainedForToolUse: true
+        })
+
+        expect(readLysEmailAddress).toHaveBeenCalledTimes(readCount)
+      }
+    )
   })
 
   describe("state reads", () => {
@@ -404,7 +547,7 @@ describe("AgentRuntimeService", () => {
               requestId: createFixtureUuidV7(21),
               conversationId: titled,
               conversationTitle: { status: "found", title: "Trip to Kyoto" },
-              model: "qwen/qwen3-8b",
+              model: LM_STUDIO_QWEN3_8B,
               startedAt: NOW,
               step: { kind: "preparing", round: 0 }
             },
@@ -498,6 +641,114 @@ describe("AgentRuntimeService", () => {
       expect(replyModel.openReplyStream).toHaveBeenCalledWith(
         buildHelloReplyRequest("You cite sources.")
       )
+    })
+  })
+  describe("tool searches", () => {
+    registerToolKeeperContractSuite(createScriptedToolKeeper)
+
+    it("runs each search on Armitage's live agent, with Armitage's prompt, as one of its requests on the asking conversation", async () => {
+      const conversationId = createFixtureUuidV7(31)
+      const { replyModel, releaseReplies } = createWaitingReplyModel()
+      const openReplyStream = vi.spyOn(replyModel, "openReplyStream")
+      const { runtime } = createRuntime({
+        replyModel,
+        conversations: new Map([[conversationId, { title: "Reading list" }]])
+      })
+
+      const generationOptions: MessageGenerationOptions = { temperature: 0.2 }
+      const search = runtime.findTools({
+        task: "read a web page",
+        searchCallId: SEARCH_CALL_ID,
+        tools: TOOL_KEEPER_SEARCH_TOOLS,
+        conversationId,
+        model: LM_STUDIO_QWEN3_8B,
+        generationOptions,
+        abortSignal: new AbortController().signal,
+        reportFailure: vi.fn(),
+        toolCallPolicy: TOOL_CALL_POLICY
+      })
+      await vi.waitFor(() => {
+        expect(openReplyStream).toHaveBeenCalledOnce()
+      })
+      const state = runtime.findAgentState(LEADER, ARMITAGE_AGENT_CODE)
+      releaseReplies()
+
+      await expect(search).resolves.toEqual({ status: "found", toolNames: [] })
+      expect(openReplyStream.mock.calls[0]?.[0].messages[0]).toEqual({
+        role: "system",
+        content: "You are Armitage."
+      })
+      expect(state).toMatchObject({
+        status: "found",
+        state: {
+          role: "tool-keeper",
+          requests: [
+            {
+              conversationId,
+              conversationTitle: { status: "found", title: "Reading list" }
+            }
+          ]
+        }
+      })
+      expect(runtime.loadChatAgent(ARMITAGE_AGENT_CODE)).toBeUndefined()
+    })
+
+    describe("without Armitage among the built-in agents", () => {
+      /**
+       * Starts a search on a runtime whose built-in agents lack Armitage.
+       *
+       * @param abortSignal - Cancellation of the asking reply.
+       * @returns The search's promise, the spy that receives its failures,
+       * the runtime's model, and the count of the runtime's agent reads.
+       */
+      function findToolsWithoutArmitage(abortSignal: AbortSignal) {
+        const replyModel = createFinishingReplyModel()
+        const { runtime, countAgentReads } = createRuntime({
+          replyModel,
+          builtInAgents: BUILT_IN_AGENTS.filter(
+            (agent) => agent.code !== ARMITAGE_AGENT_CODE
+          )
+        })
+        const reportFailure = vi.fn()
+        const generationOptions: MessageGenerationOptions = {
+          temperature: 0.2
+        }
+        const search = runtime.findTools({
+          task: "read a web page",
+          searchCallId: SEARCH_CALL_ID,
+          tools: TOOL_KEEPER_SEARCH_TOOLS,
+          conversationId: createFixtureUuidV7(31),
+          model: LM_STUDIO_QWEN3_8B,
+          generationOptions,
+          abortSignal,
+          reportFailure,
+          toolCallPolicy: TOOL_CALL_POLICY
+        })
+        return { search, reportFailure, replyModel, countAgentReads }
+      }
+
+      it("fails a search, after reporting why once, without reaching the model", async () => {
+        const { search, reportFailure, replyModel } = findToolsWithoutArmitage(
+          new AbortController().signal
+        )
+
+        await expect(search).resolves.toEqual({ status: "failed" })
+        expect(reportFailure).toHaveBeenCalledExactlyOnceWith(
+          new Error("Armitage, the built-in tool keeper, is not defined")
+        )
+        expect(replyModel.openReplyStream).not.toHaveBeenCalled()
+      })
+
+      it("rejects with the abort reason of a search stopped before it starts, reading no agent and reporting nothing", async () => {
+        const stopReason = new Error("stopped")
+
+        const { search, reportFailure, countAgentReads } =
+          findToolsWithoutArmitage(AbortSignal.abort(stopReason))
+
+        await expect(search).rejects.toBe(stopReason)
+        expect(countAgentReads()).toBe(0)
+        expect(reportFailure).not.toHaveBeenCalled()
+      })
     })
   })
 })

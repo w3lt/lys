@@ -3,10 +3,12 @@ import * as z from "zod"
 import type { ConversationTestServices } from "../../support/conversationDatabase"
 import { openConversationTestServices } from "../../support/conversationDatabase"
 import {
+  ASK_ME_TOOL_CALL_DECISION,
   createFixtureUuidV7,
   createNewConversationTarget,
   createTurnUserMessage
 } from "../../support/conversationFixtures"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 
 /** Wall-clock time observed by every case until it advances the clock. */
 const NOW = "2026-03-04T05:06:07.890Z"
@@ -28,7 +30,7 @@ function startTurn(): ConversationTestServices &
   const turn = services.turns.createConversationTurn({
     conversation: createNewConversationTarget("lys"),
     userMessage: createTurnUserMessage("Hello"),
-    model: "qwen/qwen3-8b"
+    model: LM_STUDIO_QWEN3_8B
   })
   return {
     ...services,
@@ -92,6 +94,7 @@ describe("StoredReplyParts", () => {
         round: 0,
         toolName: "web_search",
         argumentText: '{"query":"moths"}',
+        decision: ASK_ME_TOOL_CALL_DECISION,
         status: "awaiting-approval"
       })
 
@@ -118,6 +121,7 @@ describe("StoredReplyParts", () => {
           round: 0,
           toolName: "nope",
           argumentText: "{",
+          decision: ASK_ME_TOOL_CALL_DECISION,
           status: "failed",
           result: "No tool is named nope."
         })
@@ -135,6 +139,7 @@ describe("StoredReplyParts", () => {
           round: 0,
           toolName: "nope",
           argumentText: "{}",
+          decision: ASK_ME_TOOL_CALL_DECISION,
           status: "failed",
           result: ""
         } as const
@@ -228,6 +233,7 @@ describe("StoredReplyParts", () => {
         round: 0,
         toolName: "web_search",
         argumentText: '{"query":"moths"}',
+        decision: ASK_ME_TOOL_CALL_DECISION,
         status: "awaiting-approval"
       })
       vi.setSystemTime(new Date(LATER))

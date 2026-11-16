@@ -5,13 +5,15 @@ import type {
 import {
   CALIGINIA_AGENT_CODE,
   type ConversationAssistantMessageStatus,
-  type ConversationAttachmentDraft
+  type ConversationAttachmentDraft,
+  type LlmModelReference
 } from "@lys/share"
 import type { FastifyBaseLogger } from "fastify"
 import { describe, expect, it, onTestFinished, vi, type Mock } from "vitest"
 import Agent, { type AgentProfile } from "../../../../src/modules/agent/agent"
 import type { AgentRequestLimits } from "../../../../src/modules/agent/agentActivity"
 import type { AgentStateReader } from "../../../../src/modules/agent/agentStateTools"
+import type { ToolKeeper } from "../../../../src/modules/agent/findToolsTool"
 import type {
   ReplyModel,
   ReplyStreamEvent,
@@ -51,6 +53,7 @@ import {
   createTestFastify,
   type CapturedLogDestination
 } from "../../support/fastifyTestApp"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 import { waitForMicrotasks } from "../../support/microtasks"
 import {
   createRoomyReplyContextMeter,
@@ -62,7 +65,8 @@ import {
 } from "../../support/scriptedBuiltInTool"
 import {
   LEADER_STATE_TOOL_NAMES,
-  READ_TEXT_FILE_TOOL
+  READ_TEXT_FILE_TOOL,
+  TOOL_CALL_POLICY
 } from "../../support/toolFixtures"
 import {
   buildTurnDelegation,
@@ -74,7 +78,7 @@ import {
 type OpenReplyStream = ReplyModel["openReplyStream"]
 
 /** Model every case's settings select. */
-const MODEL = "qwen/qwen3-8b"
+const MODEL = LM_STUDIO_QWEN3_8B
 
 /** Sampling and reply length controls of every case's settings. */
 const GENERATION_OPTIONS: MessageGenerationOptions = Object.freeze({
@@ -89,6 +93,16 @@ const GENERATION_OPTIONS: MessageGenerationOptions = Object.freeze({
 const SETTINGS_TOOL_NAMES: readonly string[] = Object.freeze([
   "read_text_file",
   "look_up_word"
+])
+
+/**
+ * Names of the tools a model trained for tool use is offered in a turn's
+ * first round in place of the settings' tools: `find_tools`, through which
+ * it finds them, then the leader's state tools.
+ */
+const ROUTED_TOOL_NAMES: readonly string[] = Object.freeze([
+  "find_tools",
+  ...LEADER_STATE_TOOL_NAMES
 ])
 
 /** Text of the message every new conversation of a case starts with. */
@@ -155,8 +169,8 @@ type TurnStartHarness = Readonly<{
 
 /** What one model request shows of the settings its turn was started with. */
 type RequestedSettings = Readonly<{
-  /** Model the request names. */
-  model: string
+  /** Model the request names, and its provider. */
+  model: LlmModelReference
   /** Sampling and reply length controls the request carries. */
   generationOptions: MessageGenerationOptions
   /** Names of the tools the request offers, in offer order. */
@@ -222,6 +236,7 @@ function openTurnStartHarness(): TurnStartHarness {
     generateTitle,
     findLoadedContextLength,
     titleGenerationMaxAttempts: 1,
+    toolCallPolicy: TOOL_CALL_POLICY,
     toolApprovals: new ToolApprovalService(() =>
       Promise.reject(new Error("Unexpected Just run read"))
     )
@@ -272,7 +287,8 @@ function buildTurnSettings(trainedForToolUse: boolean): TurnSettings {
  *
  * @param openReplyStream - Model behavior.
  * @returns A leader with {@link AGENT_PROFILE}, under whose meter every
- * context fits.
+ * context fits; any state read and any tool search fail the case, and it
+ * has no email address.
  */
 function createTestAgent(openReplyStream: OpenReplyStream): Agent {
   /** State reader of an agent whose cases read no state; any read fails. */
@@ -281,11 +297,19 @@ function createTestAgent(openReplyStream: OpenReplyStream): Agent {
     findAgentState: handleUnexpectedStateRead
   })
 
+  /** Tool keeper of an agent whose cases search no tool; any search fails. */
+  const unexpectedToolKeeper: ToolKeeper = Object.freeze({
+    findTools: () =>
+      Promise.reject(new Error("Unexpected tool search in a turn start case"))
+  })
+
   const replyModel: ReplyModel = { openReplyStream }
   return new Agent(AGENT_PROFILE, {
     replyModel,
     replyContextMeter: createRoomyReplyContextMeter(),
-    stateReader: unexpectedStateReader
+    stateReader: unexpectedStateReader,
+    toolKeeper: unexpectedToolKeeper,
+    readEmailAddress: () => null
   })
 }
 
@@ -502,7 +526,7 @@ describe("startTurn", () => {
       {
         model: MODEL,
         generationOptions: GENERATION_OPTIONS,
-        toolNames: [...SETTINGS_TOOL_NAMES, ...LEADER_STATE_TOOL_NAMES]
+        toolNames: [...ROUTED_TOOL_NAMES]
       }
     ])
     expect(findStoredReplyStatus(harness.services, turn)).toBe("completed")
@@ -516,7 +540,7 @@ describe("startTurn", () => {
     const requested: RequestedSettings = {
       model: MODEL,
       generationOptions: GENERATION_OPTIONS,
-      toolNames: [...SETTINGS_TOOL_NAMES, ...LEADER_STATE_TOOL_NAMES]
+      toolNames: [...ROUTED_TOOL_NAMES]
     }
 
     const first = startTurn(harness.dependencies, {
@@ -544,7 +568,7 @@ describe("startTurn", () => {
     ])
   })
 
-  it("adds the attachment reader after the settings' backend tools for a turn whose message has a text attachment and a model trained for tool use", async () => {
+  it("offers the attachment reader before find_tools, never routed, for a turn whose message has a text attachment and a model trained for tool use", async () => {
     const harness = openTurnStartHarness()
     const openReplyStream = createEventStream(HI_REPLY)
     const turn = createStoredTurn(harness.services, [NOTES_ATTACHMENT])
@@ -560,9 +584,8 @@ describe("startTurn", () => {
     await generation.settled
 
     expect(listRequestedSettings(openReplyStream)[0]?.toolNames).toEqual([
-      ...SETTINGS_TOOL_NAMES,
       "read_attachment",
-      ...LEADER_STATE_TOOL_NAMES
+      ...ROUTED_TOOL_NAMES
     ])
   })
 
@@ -583,9 +606,8 @@ describe("startTurn", () => {
     await generation.settled
 
     expect(listRequestedSettings(openReplyStream)[0]?.toolNames).toEqual([
-      ...SETTINGS_TOOL_NAMES,
       "read_attachment",
-      ...LEADER_STATE_TOOL_NAMES
+      ...ROUTED_TOOL_NAMES
     ])
   })
 
@@ -610,14 +632,9 @@ describe("startTurn", () => {
       "a conversation whose only attachment is an image",
       [photoAttachment],
       true,
-      [...SETTINGS_TOOL_NAMES, ...LEADER_STATE_TOOL_NAMES]
+      ROUTED_TOOL_NAMES
     ],
-    [
-      "a conversation without attachments",
-      [],
-      true,
-      [...SETTINGS_TOOL_NAMES, ...LEADER_STATE_TOOL_NAMES]
-    ]
+    ["a conversation without attachments", [], true, ROUTED_TOOL_NAMES]
   ] as const)(
     "adds no attachment reader for %s",
     async ([, attachments, trainedForToolUse, toolNames]) => {
@@ -887,8 +904,7 @@ describe("startTurn", () => {
 
     expect(createReply.mock.calls[0]?.[0].delegation).toBe(delegation)
     expect(listRequestedSettings(openReplyStream)[0]?.toolNames).toEqual([
-      ...SETTINGS_TOOL_NAMES,
-      ...LEADER_STATE_TOOL_NAMES,
+      ...ROUTED_TOOL_NAMES,
       "delegate_work",
       "stop_job"
     ])

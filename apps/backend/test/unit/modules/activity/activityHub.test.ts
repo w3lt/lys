@@ -46,6 +46,15 @@ const APPROVAL_CALL = Object.freeze({
   arguments: Object.freeze({ url: "https://example.com/" })
 } satisfies ChatToolCall)
 
+/**
+ * The approval prompt of {@link APPROVAL_CALL} as the hub sends it, with the
+ * token its answer must carry.
+ */
+const APPROVAL_PROMPT = Object.freeze({
+  call: APPROVAL_CALL,
+  approvalToken: expect.any(String)
+})
+
 /** Call of a desktop tool a followed reply sends to run. */
 const DESKTOP_TOOL_CALL = Object.freeze({
   id: createFixtureUuidV7(11),
@@ -251,7 +260,7 @@ describe("ActivityHub", () => {
             {
               ...JOB_REPLY,
               pendingToolCalls: [DESKTOP_TOOL_CALL],
-              pendingToolApprovals: [APPROVAL_CALL]
+              pendingToolApprovals: [APPROVAL_PROMPT]
             },
             {
               ...WAKE_UP_REPLY,
@@ -272,7 +281,11 @@ describe("ActivityHub", () => {
       void replyTask.context.sendClientToolCall(DESKTOP_TOOL_CALL)
       await waitForMicrotasks()
 
-      generation.resolveToolCall(APPROVAL_CALL.id, { status: "allowed" })
+      const [prompt] = generation.pendingToolCalls.toolApprovals
+      generation.resolveToolCall(APPROVAL_CALL.id, {
+        status: "allowed",
+        approvalToken: prompt?.approvalToken ?? ""
+      })
       const stream = openRecordingStream(hub)
       await waitForMicrotasks()
 
@@ -307,11 +320,11 @@ describe("ActivityHub", () => {
             {
               ...JOB_REPLY,
               pendingToolCalls: [],
-              pendingToolApprovals: [APPROVAL_CALL]
+              pendingToolApprovals: [APPROVAL_PROMPT]
             }
           ]
         },
-        { type: "tool-approval", ...JOB_REPLY, call: APPROVAL_CALL }
+        { type: "tool-approval", ...JOB_REPLY, ...APPROVAL_PROMPT }
       ])
     })
 
@@ -398,7 +411,7 @@ describe("ActivityHub", () => {
 
       expect(stream.written).toEqual([
         buildIdleSnapshot([JOB_REPLY]),
-        { type: "tool-approval", ...JOB_REPLY, call: APPROVAL_CALL }
+        { type: "tool-approval", ...JOB_REPLY, ...APPROVAL_PROMPT }
       ])
     })
 
@@ -476,7 +489,7 @@ describe("ActivityHub", () => {
       ])
       expect(stream.written).toEqual([
         buildIdleSnapshot([JOB_REPLY]),
-        { type: "tool-approval", ...JOB_REPLY, call: APPROVAL_CALL }
+        { type: "tool-approval", ...JOB_REPLY, ...APPROVAL_PROMPT }
       ])
     })
 

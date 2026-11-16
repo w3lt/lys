@@ -1,17 +1,18 @@
 import type { ChatContextApiRequestBody } from "@lys/protocol"
-import type { ConversationMessage } from "@lys/share"
+import type { ConversationMessage, LlmModelReference } from "@lys/share"
 import { useEffect, useMemo, useState } from "react"
 
 import {
   getChatContextMeasurement,
   type ChatContextMeasurementResult
 } from "@/lib/apis/http/chat"
-import { findEligibleChatModel } from "@/lib/models/model-residency"
+import { findLoadedModelInfo } from "@/lib/models/model-availability"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore } from "@/lib/store"
 import { useAgentStore } from "@/lib/store/agents"
 import { calculateNewConversationAgentCode } from "@/lib/store/agents/conversation-agent"
 import { useChatViewStore } from "@/lib/store/chat-view"
+import { useConversationModel } from "./conversationModel"
 import {
   buildChatToolFields,
   buildChatToolOffer,
@@ -69,8 +70,11 @@ type ChatContextRequestInput = {
   readonly conversationId: string | undefined
   /** Agent that would answer a new conversation. */
   readonly newConversationAgentCode: string
-  /** Loaded model the message would be sent to, or null when none is. */
-  readonly model: string | null
+  /**
+   * The conversation's model while it is loaded, which the message would be
+   * sent to, or null while it is not.
+   */
+  readonly model: LlmModelReference | null
   /**
    * Tools the message would offer and what it would name about the others;
    * an `unavailable` offer is measured without tools.
@@ -79,8 +83,8 @@ type ChatContextRequestInput = {
 }
 
 /**
- * Measures how much of the loaded model's context window the composer's next
- * message would take, before its own text.
+ * Measures how much of the conversation's model's context window the
+ * composer's next message would take, before its own text.
  *
  * @param isComposerIdle - Reactive: whether the composer could send now. No
  * measurement starts while a reply is awaited or a conversation opens; the
@@ -88,9 +92,10 @@ type ChatContextRequestInput = {
  * @returns The latest settled outcome and whether a newer measurement is
  * pending.
  * @remarks The hook reads the stores the chat-view store reads when it sends:
- * the shown conversation or the agent a new one would start with, the loaded
- * model, and the tools the Tools pane would offer. A measurement starts when
- * the composer is idle, a model is loaded, and that request or the shown
+ * the shown conversation or the agent a new one would start with, the
+ * conversation's model, and the tools the Tools pane would offer. A
+ * measurement starts when the composer is idle, that model is loaded, and
+ * that request or the shown
  * conversation's stored messages changed since the last one started; the
  * backend counts it with the model's tokenizer. A change abandons the
  * previous measurement, whose result is then never published; unmounting
@@ -147,12 +152,11 @@ export function useChatContextMeasurement(
  * and starts reading the tool list when it is needed and was never read.
  *
  * @returns The request, the same object until one of its inputs changes; or
- * undefined while no model is loaded or the backend is not running.
+ * undefined while the conversation's model cannot answer, as when it is not
+ * loaded or the backend is not running.
  */
 function useChatContextRequest(): ChatContextApiRequestBody | undefined {
-  const backendStatus = useLysStore((state) => state.backendServerInfo.status)
-  const modelRuntime = useLysStore((state) => state.modelRuntime)
-  const modelInventory = useLysStore((state) => state.modelInventory)
+  const conversationModel = useConversationModel()
   const conversationId = useChatViewStore((state) => state.conversation?.id)
   const selectedAgentCode = useChatViewStore((state) => state.selectedAgentCode)
   const agentList = useAgentStore((state) => state.list)
@@ -160,9 +164,10 @@ function useChatContextRequest(): ChatContextApiRequestBody | undefined {
   const list = useToolStore((state) => state.list)
   const toolSwitches = useLysStore((state) => state.settings.tools.switches)
   const loadTools = useToolStore((state) => state.loadTools)
+  const loadedModel = findLoadedModelInfo(conversationModel.availability)
   const isTrainedForToolUse =
-    calculateToolModelSupport(modelRuntime, modelInventory).status === "trained"
-  const model = findEligibleChatModel(backendStatus, modelRuntime)
+    calculateToolModelSupport(loadedModel).status === "trained"
+  const model = loadedModel === undefined ? null : conversationModel.model
   const newConversationAgentCode = calculateNewConversationAgentCode(
     selectedAgentCode,
     agentList
@@ -223,7 +228,7 @@ function buildMeasuredToolOffer(
  * @param input - Conversation, agent, model, and tool offer.
  * @returns The request for the shown conversation, or for a new one its agent
  * would start, with the tool fields {@link buildChatToolFields} builds;
- * undefined when no model is loaded.
+ * undefined when the conversation's model is not loaded.
  */
 function buildChatContextRequest(
   input: ChatContextRequestInput

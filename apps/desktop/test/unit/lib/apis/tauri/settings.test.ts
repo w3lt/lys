@@ -13,13 +13,9 @@ import {
   saveProviderSettings,
   saveRuntimeAutoStartSettings,
   saveSecretsSettings,
-  saveSettings,
   saveToolSettings
 } from "@/lib/apis/tauri/settings"
-import type {
-  LoadConfigurationSettings,
-  LysSettings
-} from "@/lib/store/settings"
+import type { LoadConfigurationSettings } from "@/lib/store/settings"
 import {
   NO_NATIVE_COMMAND_ARGS,
   startNativeHostFake
@@ -30,6 +26,8 @@ import {
   waitForMicrotasks
 } from "../../../support/settlement"
 import {
+  LYS_EMAIL_ACCOUNT,
+  LYS_EMAIL_PASSWORD,
   STORED_EMAIL_ACCOUNT,
   STORED_EMAIL_PASSWORD,
   STORED_GROQ_API_KEY,
@@ -47,8 +45,18 @@ const NO_EMAIL_PASSWORD = Object.freeze({
   emailPassword: null
 })
 
+/** The stored document with Lys's own account and password saved as well. */
+const LYS_ACCOUNT_DOCUMENT = Object.freeze({
+  ...STORED_SETTINGS_DOCUMENT,
+  secrets: {
+    ...STORED_SETTINGS_DOCUMENT.secrets,
+    lysEmailPassword: LYS_EMAIL_PASSWORD
+  },
+  email: { account: STORED_EMAIL_ACCOUNT, lysAccount: LYS_EMAIL_ACCOUNT }
+})
+
 /** Email group of a settings file that saves no account. */
-const NO_EMAIL_ACCOUNT = Object.freeze({ account: null })
+const NO_EMAIL_ACCOUNT = Object.freeze({ account: null, lysAccount: null })
 
 /** Load settings of the model whose key names an object-prototype member. */
 const PROTOTYPE_KEY_LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
@@ -77,26 +85,13 @@ const PROTOTYPE_KEY_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   })
 })
 
-/** The renderer's settings for {@link PROTOTYPE_KEY_SETTINGS_DOCUMENT}. */
-const PROTOTYPE_KEY_SETTINGS: LysSettings = Object.freeze({
-  ...STORED_SETTINGS,
-  loadConfiguration: Object.freeze({
-    default: STORED_SETTINGS.loadConfiguration.default,
-    models: new Map([["__proto__", PROTOTYPE_KEY_LOAD_CONFIGURATION]])
-  }),
-  tools: Object.freeze({
-    justRunToolNames: STORED_SETTINGS.tools.justRunToolNames,
-    switches: new Map([["__proto__", false]])
-  })
-})
-
 /** Load settings a mixture-of-experts model has of its own after an edit. */
 const EDITED_MODEL_LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
   numExperts: 4
 })
 
 /**
- * Load settings the store holds after the Model pane edited them: only
+ * Load settings the store holds after the Models pane edited them: only
  * `qwen3-30b-a3b` has settings of its own, and the store's copy of the stored
  * default, read at startup, predates a hand edit of the file.
  */
@@ -136,7 +131,8 @@ describe("loadSettings", () => {
       tavilyApiKey: null,
       ollamaApiKey: null,
       groqApiKey: null,
-      emailPassword: null
+      emailPassword: null,
+      lysEmailPassword: null
     })
 
     startNativeHostFake({
@@ -181,7 +177,63 @@ describe("loadSettings", () => {
     }
   )
 
-  it("reads the provider choice with its addresses", async () => {
+  it("reads the stored default model's key on the first provider that is on, in provider order", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        providers: { ...STORED_PROVIDERS_SETTINGS, enabled: ["groq", "ollama"] }
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.runtime.defaultModel).toEqual({
+      provider: "ollama",
+      modelKey: "qwen3-8b"
+    })
+  })
+
+  it("reads the stored default model's key as no model while no provider is on", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        providers: { ...STORED_PROVIDERS_SETTINGS, enabled: [] }
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.runtime.defaultModel).toBeNull()
+  })
+
+  it("reads a settings file without a default model as no model", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        runtime: { ...STORED_SETTINGS_DOCUMENT.runtime, defaultModel: null }
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.runtime.defaultModel).toBeNull()
+  })
+
+  it("reads an empty stored default model's key as no model while a provider is on", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        providers: { ...STORED_PROVIDERS_SETTINGS, enabled: ["lmStudio"] },
+        runtime: { ...STORED_SETTINGS_DOCUMENT.runtime, defaultModel: "" }
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.runtime.defaultModel).toBeNull()
+  })
+
+  it("reads the providers that are on with their addresses", async () => {
     startNativeHostFake({ load_settings: () => STORED_SETTINGS_DOCUMENT })
 
     const settings = await loadSettings()
@@ -189,16 +241,16 @@ describe("loadSettings", () => {
     expect(settings.providers).toEqual(STORED_PROVIDERS_SETTINGS)
   })
 
-  it("rejects a provider choice that fails the provider rules", async () => {
+  it("rejects a providers group that fails the provider rules", async () => {
     startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
-        providers: { ...STORED_PROVIDERS_SETTINGS, active: "openai" }
+        providers: { ...STORED_PROVIDERS_SETTINGS, enabled: ["openai"] }
       })
     })
 
     await expect(loadSettings()).rejects.toThrow(
-      "The settings file holds an invalid provider choice."
+      "The settings file holds an invalid providers group."
     )
   })
 
@@ -250,9 +302,28 @@ describe("loadSettings", () => {
     const settings = await loadSettings()
 
     expect(settings.tools).toEqual({
+      approvedFolderPaths: [],
       justRunToolNames: new Set(),
       switches: new Map()
     })
+  })
+
+  it("reads the approved folders as a frozen list in the stored order", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        tools: {
+          justRun: [],
+          switches: {},
+          approvedFolders: ["/Users/ada/work", "/srv/shared"]
+        }
+      })
+    })
+
+    const { approvedFolderPaths } = (await loadSettings()).tools
+
+    expect(approvedFolderPaths).toEqual(["/Users/ada/work", "/srv/shared"])
+    expect(Object.isFrozen(approvedFolderPaths)).toBe(true)
   })
 
   it("reads a server's omitted lists as empty, an omitted switch as on, omitted built-in switches as off, and freezes the servers", async () => {
@@ -293,7 +364,7 @@ describe("loadSettings", () => {
           headers: []
         }
       ],
-      builtIn: { email: { enabled: false } }
+      builtIn: { email: { enabled: false, lysEnabled: false } }
     })
     expect(Object.isFrozen(settings.mcp.servers)).toBe(true)
     expect(Object.isFrozen(settings.mcp.servers[0])).toBe(true)
@@ -303,7 +374,10 @@ describe("loadSettings", () => {
     startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
-        mcp: { servers: [], builtIn: { email: { enabled: true } } }
+        mcp: {
+          servers: [],
+          builtIn: { email: { enabled: true, lysEnabled: false } }
+        }
       })
     })
 
@@ -311,7 +385,7 @@ describe("loadSettings", () => {
 
     expect(settings.mcp).toEqual({
       servers: [],
-      builtIn: { email: { enabled: true } }
+      builtIn: { email: { enabled: true, lysEnabled: false } }
     })
   })
 
@@ -352,9 +426,24 @@ describe("loadSettings", () => {
 
     const settings = await loadSettings()
 
-    expect(settings.email).toEqual({ account: STORED_EMAIL_ACCOUNT })
+    expect(settings.email).toEqual({
+      account: STORED_EMAIL_ACCOUNT,
+      lysAccount: null
+    })
     expect(Object.isFrozen(settings.email.account)).toBe(true)
     expect(settings.secrets.emailPassword).toBe(STORED_EMAIL_PASSWORD)
+  })
+
+  it("reads Lys's saved email account and her password, the password branded", async () => {
+    startNativeHostFake({
+      load_settings: () => LYS_ACCOUNT_DOCUMENT
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.email).toEqual(LYS_ACCOUNT_DOCUMENT.email)
+    expect(Object.isFrozen(settings.email.lysAccount)).toBe(true)
+    expect(settings.secrets.lysEmailPassword).toBe(LYS_EMAIL_PASSWORD)
   })
 
   it("reads a settings file without an email account as no account", async () => {
@@ -368,7 +457,7 @@ describe("loadSettings", () => {
 
     const settings = await loadSettings()
 
-    expect(settings.email).toEqual({ account: null })
+    expect(settings.email).toEqual({ account: null, lysAccount: null })
     expect(settings.secrets.emailPassword).toBeNull()
   })
 
@@ -401,31 +490,34 @@ describe("loadSettings", () => {
     expect(String(failure)).not.toContain("leaked")
   })
 
-  it("rejects an email password that fails the password rule without printing it", async () => {
-    const brokenPassword = "leaked\npassword"
-    startNativeHostFake({
-      load_settings: () => ({
-        ...STORED_SETTINGS_DOCUMENT,
-        secrets: {
-          ...STORED_SETTINGS_DOCUMENT.secrets,
-          emailPassword: brokenPassword
-        }
+  it.each(["emailPassword", "lysEmailPassword"])(
+    "rejects a password in %s that fails the password rule without printing it",
+    async (passwordField) => {
+      const brokenPassword = "leaked\npassword"
+      startNativeHostFake({
+        load_settings: () => ({
+          ...STORED_SETTINGS_DOCUMENT,
+          secrets: {
+            ...STORED_SETTINGS_DOCUMENT.secrets,
+            [passwordField]: brokenPassword
+          }
+        })
       })
-    })
 
-    const failure = await loadSettings().then(
-      () => {
-        throw new Error("The settings loaded")
-      },
-      (rejection: unknown) => rejection
-    )
+      const failure = await loadSettings().then(
+        () => {
+          throw new Error("The settings loaded")
+        },
+        (rejection: unknown) => rejection
+      )
 
-    expect(failure).toBeInstanceOf(Error)
-    expect(failure).toMatchObject({
-      message: "The settings file holds an invalid email password."
-    })
-    expect(String(failure)).not.toContain("leaked")
-  })
+      expect(failure).toBeInstanceOf(Error)
+      expect(failure).toMatchObject({
+        message: "The settings file holds an invalid email password."
+      })
+      expect(String(failure)).not.toContain("leaked")
+    }
+  )
 
   it("rejects with the host's rejection", async () => {
     startNativeHostFake({
@@ -433,57 +525,6 @@ describe("loadSettings", () => {
     })
 
     await expect(loadSettings()).rejects.toBe("Failed to parse settings.json")
-  })
-})
-
-describe("saveSettings", () => {
-  it("sends the settings as the command's newSettings document, the per-model load settings as one object keyed by model key", async () => {
-    const host = startNativeHostFake({ save_settings: () => null })
-
-    await saveSettings(STORED_SETTINGS)
-
-    expect(host.commands).toEqual([
-      {
-        command: "save_settings",
-        args: { newSettings: STORED_SETTINGS_DOCUMENT }
-      }
-    ])
-  })
-
-  it("sends a model key and a switched tool's name that name an object-prototype member as properties of their own", async () => {
-    const host = startNativeHostFake({ save_settings: () => null })
-
-    await saveSettings(PROTOTYPE_KEY_SETTINGS)
-
-    expect(host.commands).toEqual([
-      {
-        command: "save_settings",
-        args: { newSettings: PROTOTYPE_KEY_SETTINGS_DOCUMENT }
-      }
-    ])
-  })
-
-  it("resolves only after the host finishes writing", async () => {
-    const write = createControlledPromise<null>()
-    startNativeHostFake({ save_settings: () => write.promise })
-
-    const getSettlement = createSettlementReader(saveSettings(STORED_SETTINGS))
-    await waitForMicrotasks()
-    const beforeWrite = getSettlement()
-    write.resolve(null)
-    await waitForMicrotasks()
-
-    expect([beforeWrite, getSettlement()]).toEqual(["pending", "fulfilled"])
-  })
-
-  it("rejects with the host's rejection", async () => {
-    startNativeHostFake({
-      save_settings: () => Promise.reject("Failed to write settings.json")
-    })
-
-    await expect(saveSettings(STORED_SETTINGS)).rejects.toBe(
-      "Failed to write settings.json"
-    )
   })
 })
 
@@ -524,6 +565,24 @@ describe("saveGenerationSettings", () => {
     ])
   })
 
+  it("resolves only after the host finishes writing", async () => {
+    const write = createControlledPromise<null>()
+    startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => write.promise
+    })
+
+    const getSettlement = createSettlementReader(
+      saveGenerationSettings({ temperature: 0.9, replyCeiling: 0 })
+    )
+    await waitForMicrotasks()
+    const beforeWrite = getSettlement()
+    write.resolve(null)
+    await waitForMicrotasks()
+
+    expect([beforeWrite, getSettlement()]).toEqual(["pending", "fulfilled"])
+  })
+
   it("rejects when the merged document cannot be written", async () => {
     startNativeHostFake({
       load_settings: () => STORED_SETTINGS_DOCUMENT,
@@ -560,6 +619,28 @@ describe("saveLoadConfigurationSettings", () => {
         }
       }
     ])
+  })
+
+  it("writes a model key that names an object-prototype member as a property of its own", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveLoadConfigurationSettings({
+      default: STORED_SETTINGS.loadConfiguration.default,
+      models: new Map([["__proto__", PROTOTYPE_KEY_LOAD_CONFIGURATION]])
+    })
+
+    expect(host.commands[1]).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          loadConfiguration: PROTOTYPE_KEY_SETTINGS_DOCUMENT.loadConfiguration
+        }
+      }
+    })
   })
 
   it("writes nothing when the document cannot be loaded", async () => {
@@ -608,7 +689,8 @@ describe("saveSecretsSettings", () => {
               tavilyApiKey: null,
               ollamaApiKey: null,
               groqApiKey: STORED_GROQ_API_KEY,
-              emailPassword: STORED_EMAIL_PASSWORD
+              emailPassword: STORED_EMAIL_PASSWORD,
+              lysEmailPassword: null
             }
           }
         }
@@ -666,7 +748,7 @@ describe("saveProviderSettings", () => {
       save_settings: () => null
     })
     const providers = llmProviderSettingsSchema.parse({
-      active: "ollamaCloud",
+      enabled: ["lmStudio", "ollamaCloud"],
       lmStudio: { address: "10.0.0.5:1234" },
       ollama: { address: null }
     })
@@ -815,7 +897,7 @@ describe("saveEmailAccountSettings", () => {
     displayName: "Ada Edited"
   }
 
-  it("replaces the email account and its password together, in one write", async () => {
+  it("replaces the person's email account and its password together, in one write", async () => {
     const host = startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
@@ -825,7 +907,11 @@ describe("saveEmailAccountSettings", () => {
       save_settings: () => null
     })
 
-    await saveEmailAccountSettings(editedAccount, STORED_EMAIL_PASSWORD)
+    await saveEmailAccountSettings(
+      "person",
+      editedAccount,
+      STORED_EMAIL_PASSWORD
+    )
 
     expect(host.commands).toEqual([
       { command: "load_settings", args: {} },
@@ -834,7 +920,7 @@ describe("saveEmailAccountSettings", () => {
         args: {
           newSettings: {
             ...STORED_SETTINGS_DOCUMENT,
-            email: { account: editedAccount }
+            email: { account: editedAccount, lysAccount: null }
           }
         }
       }
@@ -847,7 +933,7 @@ describe("saveEmailAccountSettings", () => {
       save_settings: () => null
     })
 
-    await saveEmailAccountSettings(null, null)
+    await saveEmailAccountSettings("person", null, null)
 
     expect(host.commands.at(-1)).toEqual({
       command: "save_settings",
@@ -861,6 +947,49 @@ describe("saveEmailAccountSettings", () => {
     })
   })
 
+  it("keeps Lys's account and her password when the person's account is saved", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => LYS_ACCOUNT_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveEmailAccountSettings(
+      "person",
+      editedAccount,
+      STORED_EMAIL_PASSWORD
+    )
+
+    expect(host.commands.at(-1)).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: {
+          ...LYS_ACCOUNT_DOCUMENT,
+          email: { account: editedAccount, lysAccount: LYS_EMAIL_ACCOUNT }
+        }
+      }
+    })
+  })
+
+  it("saves and removes Lys's own account and her password, keeping the person's", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveEmailAccountSettings("lys", LYS_EMAIL_ACCOUNT, LYS_EMAIL_PASSWORD)
+    await saveEmailAccountSettings("lys", null, null)
+
+    expect(
+      host.commands.filter((invoked) => invoked.command === "save_settings")
+    ).toEqual([
+      { command: "save_settings", args: { newSettings: LYS_ACCOUNT_DOCUMENT } },
+      {
+        command: "save_settings",
+        args: { newSettings: STORED_SETTINGS_DOCUMENT }
+      }
+    ])
+  })
+
   it("writes nothing when the document cannot be loaded", async () => {
     const host = startNativeHostFake({
       load_settings: () => Promise.reject("Failed to read settings.json"),
@@ -868,7 +997,7 @@ describe("saveEmailAccountSettings", () => {
     })
 
     await expect(
-      saveEmailAccountSettings(editedAccount, STORED_EMAIL_PASSWORD)
+      saveEmailAccountSettings("person", editedAccount, STORED_EMAIL_PASSWORD)
     ).rejects.toBe("Failed to read settings.json")
     expect(host.commands.map((invoked) => invoked.command)).toEqual([
       "load_settings"
@@ -882,7 +1011,7 @@ describe("saveEmailAccountSettings", () => {
     })
 
     await expect(
-      saveEmailAccountSettings(editedAccount, STORED_EMAIL_PASSWORD)
+      saveEmailAccountSettings("person", editedAccount, STORED_EMAIL_PASSWORD)
     ).rejects.toBe("Disk full")
   })
 })
@@ -895,6 +1024,7 @@ describe("saveToolSettings", () => {
     })
 
     await saveToolSettings({
+      approvedFolderPaths: [],
       justRunToolNames: new Set(["read_text_file", "find_files"]),
       switches: new Map([
         ["web_search", true],
@@ -919,13 +1049,17 @@ describe("saveToolSettings", () => {
     ])
   })
 
-  it("writes an empty list and an empty object when no tool is on Just run or switched", async () => {
+  it("writes an empty list and an empty object when no tool is on Just run or switched, and no folder list when none is listed", async () => {
     const host = startNativeHostFake({
       load_settings: () => STORED_SETTINGS_DOCUMENT,
       save_settings: () => null
     })
 
-    await saveToolSettings({ justRunToolNames: new Set(), switches: new Map() })
+    await saveToolSettings({
+      approvedFolderPaths: [],
+      justRunToolNames: new Set(),
+      switches: new Map()
+    })
 
     expect(host.commands[1]).toEqual({
       command: "save_settings",
@@ -933,6 +1067,56 @@ describe("saveToolSettings", () => {
         newSettings: {
           ...STORED_SETTINGS_DOCUMENT,
           tools: { justRun: [], switches: {} }
+        }
+      }
+    })
+  })
+
+  it("writes a switched tool's name that names an object-prototype member as a property of its own", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveToolSettings({
+      approvedFolderPaths: [],
+      justRunToolNames: STORED_SETTINGS.tools.justRunToolNames,
+      switches: new Map([["__proto__", false]])
+    })
+
+    expect(host.commands[1]).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          tools: PROTOTYPE_KEY_SETTINGS_DOCUMENT.tools
+        }
+      }
+    })
+  })
+
+  it("writes the approved folders in the list's order", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveToolSettings({
+      approvedFolderPaths: ["/srv/shared", "/Users/ada/work"],
+      justRunToolNames: new Set(),
+      switches: new Map()
+    })
+
+    expect(host.commands[1]).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          tools: {
+            justRun: [],
+            switches: {},
+            approvedFolders: ["/srv/shared", "/Users/ada/work"]
+          }
         }
       }
     })
@@ -946,6 +1130,7 @@ describe("saveToolSettings", () => {
 
     await expect(
       saveToolSettings({
+        approvedFolderPaths: [],
         justRunToolNames: new Set(["find_files"]),
         switches: new Map()
       })
@@ -963,6 +1148,7 @@ describe("saveToolSettings", () => {
 
     await expect(
       saveToolSettings({
+        approvedFolderPaths: [],
         justRunToolNames: new Set(["find_files"]),
         switches: new Map()
       })
@@ -997,6 +1183,36 @@ describe("saveRuntimeAutoStartSettings", () => {
       { command: "load_settings", args: NO_NATIVE_COMMAND_ARGS },
       { command: "save_settings", args: saveSettingsArgs }
     ])
+  })
+
+  it("keeps the stored default model's key while no provider is on, though the renderer reads no default model then", async () => {
+    const noProviderOn: SettingsDocument = {
+      ...STORED_SETTINGS_DOCUMENT,
+      providers: { ...STORED_PROVIDERS_SETTINGS, enabled: [] }
+    }
+    const host = startNativeHostFake({
+      load_settings: () => noProviderOn,
+      save_settings: () => null
+    })
+
+    await saveRuntimeAutoStartSettings({
+      autoStartBackend: true,
+      autoStartVmo: false
+    })
+
+    expect(host.commands[1]).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: {
+          ...noProviderOn,
+          runtime: {
+            ...STORED_SETTINGS_DOCUMENT.runtime,
+            autoStartBackend: true,
+            autoStartVmo: false
+          }
+        }
+      }
+    })
   })
 
   it("writes nothing when the document cannot be loaded", async () => {

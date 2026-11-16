@@ -1,9 +1,12 @@
+import { ARMITAGE_AGENT_CODE } from "@lys/share"
+
 /**
- * Role of an agent: `leader` for the built-in agents, which see every agent
- * and give work to other agents, and `member` for the stored agents, which
- * see only themselves and take that work.
+ * Role of an agent: `leader` for the built-in agents that answer chats, which
+ * see every agent and give work to other agents; `member` for the stored
+ * agents, which see only themselves and take that work; and `tool-keeper`
+ * for Armitage, which searches tools and sees no agent.
  */
-export type AgentRole = "leader" | "member"
+export type AgentRole = "leader" | "member" | "tool-keeper"
 
 /**
  * What an agent may learn about agents and do with them: `read-own-state`
@@ -18,6 +21,14 @@ export type AgentPermission =
   | "delegate-work"
   | "take-work"
 
+/** What decides an agent's role: its code and its kind. */
+export type AgentRoleSource = Readonly<{
+  /** Code of the agent. */
+  code: string
+  /** Whether the agent ships with the backend or was stored. */
+  kind: "built-in" | "custom"
+}>
+
 /** Who an agent is when it asks about agents: its code and its role. */
 export type AgentIdentity = Readonly<{
   /** Code of the agent that asks. */
@@ -27,12 +38,46 @@ export type AgentIdentity = Readonly<{
 }>
 
 /**
- * Finds the role of an agent from its kind.
- * @param kind - Whether the agent ships with the backend or was stored.
- * @returns `leader` for a built-in agent, `member` for a stored one.
+ * Permissions of a leader: its own state, which agents exist, and theirs,
+ * and giving work to other agents.
  */
-export function calculateAgentRole(kind: "built-in" | "custom"): AgentRole {
-  return kind === "built-in" ? "leader" : "member"
+const LEADER_PERMISSIONS: readonly AgentPermission[] = Object.freeze([
+  "read-own-state",
+  "find-agents",
+  "read-any-state",
+  "delegate-work"
+])
+
+/** Permissions of a member: its own state, and being given work. */
+const MEMBER_PERMISSIONS: readonly AgentPermission[] = Object.freeze([
+  "read-own-state",
+  "take-work"
+])
+
+/** Permissions of the tool keeper: none. */
+const TOOL_KEEPER_PERMISSIONS: readonly AgentPermission[] = Object.freeze([])
+
+/**
+ * Permissions of each role; the tools an agent is offered and every check of
+ * a state read or an agent search follow them.
+ */
+const AGENT_ROLE_PERMISSIONS: Readonly<
+  Record<AgentRole, readonly AgentPermission[]>
+> = Object.freeze({
+  leader: LEADER_PERMISSIONS,
+  member: MEMBER_PERMISSIONS,
+  "tool-keeper": TOOL_KEEPER_PERMISSIONS
+})
+
+/**
+ * Finds the role of an agent from its code and kind.
+ * @param agent - Code and kind of the agent.
+ * @returns `tool-keeper` for the built-in Armitage, `leader` for every other
+ * built-in agent, and `member` for a stored one, whatever its code.
+ */
+export function calculateAgentRole(agent: AgentRoleSource): AgentRole {
+  if (agent.kind === "custom") return "member"
+  return agent.code === ARMITAGE_AGENT_CODE ? "tool-keeper" : "leader"
 }
 
 /**
@@ -45,21 +90,5 @@ export function hasAgentPermission(
   role: AgentRole,
   permission: AgentPermission
 ): boolean {
-  /**
-   * Permissions of each role; the tools an agent is offered and every check of
-   * a state read or an agent search follow them.
-   */
-  const agentRolePermissions: Readonly<
-    Record<AgentRole, readonly AgentPermission[]>
-  > = Object.freeze({
-    leader: Object.freeze<AgentPermission[]>([
-      "read-own-state",
-      "find-agents",
-      "read-any-state",
-      "delegate-work"
-    ]),
-    member: Object.freeze<AgentPermission[]>(["read-own-state", "take-work"])
-  })
-
-  return agentRolePermissions[role].includes(permission)
+  return AGENT_ROLE_PERMISSIONS[role].includes(permission)
 }

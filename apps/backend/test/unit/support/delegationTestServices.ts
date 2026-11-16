@@ -55,11 +55,14 @@ import {
   type ConversationTestServices
 } from "./conversationDatabase"
 import {
+  ASK_ME_TOOL_CALL_DECISION,
   createNewConversationTarget,
   createTurnUserMessage
 } from "./conversationFixtures"
 import { CapturedLogDestination } from "./fastifyTestApp"
+import { LM_STUDIO_QWEN3_8B } from "./llmFixtures"
 import { createRoomyReplyContextMeter } from "./replyContextMeterFakes"
+import { createToolSearchCallRecords } from "./toolFixtures"
 
 /** Code of the member most cases give work to. */
 export const FIRST_MEMBER = "researcher"
@@ -89,10 +92,11 @@ const NO_TOOLS: readonly never[] = Object.freeze([])
 
 /**
  * Settings of a person's turn that offers `delegate_work` and no other tool,
- * for `qwen/qwen3-8b`, trained for tool use and seeing no images.
+ * for `qwen/qwen3-8b` on LM Studio, trained for tool use and seeing no
+ * images.
  */
 export const DELEGATING_TURN_SETTINGS: TurnSettings = Object.freeze({
-  model: "qwen/qwen3-8b",
+  model: LM_STUDIO_QWEN3_8B,
   generationOptions: TEST_GENERATION_OPTIONS,
   clientTools: NO_TOOLS,
   builtInTools: NO_TOOLS,
@@ -424,10 +428,14 @@ function buildDelegationDependencies(
 function createTestAgentLookups(
   conversation: ConversationTestServices
 ): DelegationAgentLookups {
-  /** Built-in agents of every case's agent service: Caliginia and Lysiptera. */
+  /**
+   * Built-in agents of every case's agent service: Caliginia, Lysiptera, and
+   * Armitage.
+   */
   const testBuiltInAgents = buildBuiltInAgents({
     caliginia: "You are Caliginia.",
-    lysiptera: "You are Lysiptera."
+    lysiptera: "You are Lysiptera.",
+    armitage: "You are Armitage."
   })
 
   const recordStore = SqliteAgentRecordStore.create(conversation.database)
@@ -500,7 +508,8 @@ function saveTestMembers(agentService: AgentService): void {
  * conversations from.
  * @returns The service; each live agent has `requestLimits`, a meter
  * that finds every model loaded with room to spare, and model access that
- * rejects.
+ * rejects. Its tool searches' call records are kept in memory, and Lys has
+ * no email address.
  */
 function createTestAgentRuntimeService(
   agentService: AgentService,
@@ -527,7 +536,9 @@ function createTestAgentRuntimeService(
       buildConversationTitleLookup(
         conversation.history.getConversation(conversationId)
       ),
-    requestLimits
+    requestLimits,
+    toolSearchCallRecords: createToolSearchCallRecords().records,
+    readLysEmailAddress: () => null
   })
 }
 
@@ -897,6 +908,7 @@ export function createJobMessageDraft(
     round: 0,
     toolName: DELEGATE_WORK_TOOL_NAME,
     argumentText: "{}",
+    decision: ASK_ME_TOOL_CALL_DECISION,
     status: "running"
   })
   if (part === undefined)

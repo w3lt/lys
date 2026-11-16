@@ -43,8 +43,8 @@ export const backendConfigSchema = z
       .refine(isAbsolute, "Database file path must be absolute."),
     /**
      * Absolute filesystem path of the desktop's settings file, which the
-     * backend reads for the active model provider, its address or API key,
-     * and the Tavily API key of `web_search`.
+     * backend reads for whether each model provider is on, its address or
+     * API key, and the Tavily API key of `web_search`.
      *
      * @remarks The desktop host is the file's only writer; the backend only
      * reads it, on demand, and never caches what it read.
@@ -130,6 +130,14 @@ export const backendConfigSchema = z
      * surrounding whitespace trimmed, when the configuration is loaded.
      */
     lysipteraSystemPrompt: promptTextSchema,
+    /**
+     * System prompt of Armitage, the built-in tool keeper, sent first in the
+     * context of every tool search it runs for another agent.
+     *
+     * @remarks Read once from the maintained `armitage.txt` prompt file, with
+     * surrounding whitespace trimmed, when the configuration is loaded.
+     */
+    armitageSystemPrompt: promptTextSchema,
     /**
      * System prompt sent with every title-generation request.
      *
@@ -259,6 +267,7 @@ export function loadBackendConfig(): BackendConfig {
     vmoPort: VMO_PORT,
     caliginiaSystemPrompt: readPrompt("caliginia-system"),
     lysipteraSystemPrompt: readPrompt("lysiptera-system"),
+    armitageSystemPrompt: readPrompt("armitage-system"),
     titleGenerationPrompt: readPrompt("title-generation"),
     titleGenerationMaxAttempts,
     generatedTitleMaxLength,

@@ -50,11 +50,12 @@ const CATERPILLARS_REQUEST: JobMessageRequest = Object.freeze({
 
 /**
  * Settings of the turn that gives the work in some cases, whose reply
- * `openai/gpt-oss-20b` writes, which tells them from the default settings.
+ * `openai/gpt-oss-20b` on LM Studio writes, which tells them from the
+ * default settings.
  */
-const GPT_OSS_SETTINGS: TurnSettings = Object.freeze({
+const GPT_OSS_SETTINGS: TurnSettings = Object.freeze<TurnSettings>({
   ...DELEGATING_TURN_SETTINGS,
-  model: "openai/gpt-oss-20b"
+  model: { provider: "lmStudio", modelKey: "openai/gpt-oss-20b" }
 })
 
 /** A low limit, which a case reaches with few messages. */
@@ -111,6 +112,7 @@ describe("createJobMessage", () => {
             role: "assistant",
             id: job.replyId,
             model: "openai/gpt-oss-20b",
+            provider: "lmStudio",
             status: "streaming"
           }
         ]

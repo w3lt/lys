@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify"
 import { serializerCompiler } from "fastify-type-provider-zod"
 import registerChatContextRoute from "./chatContextRoute"
 import registerChatRoute from "./chatRoute"
-import { createModelCapabilitiesLookup } from "./modelCapabilities"
+import { createLlmModelCapabilitiesLookup } from "./modelCapabilities"
 import updateFastifyWithChatReplyRoutes from "./replyRoutes"
 
 /**
@@ -35,14 +35,14 @@ export default function registerChatRoutes(
  * @throws If a child route registrar fails.
  * @remarks The group's JSON responses are serialized with their Zod schemas.
  * The chat and chat-context routes share one model capability lookup, so a
- * model's capabilities are listed from the connected provider once for both,
- * and listed again after another provider connects.
+ * model's capabilities are listed from its connected provider once for both,
+ * and listed again after that provider connects at another address or with
+ * another key. Each provider's models are listed and remembered apart.
  */
 function registerChatRouteGroup(app: FastifyInstance): void {
   app.setSerializerCompiler(serializerCompiler)
-  const findModelCapabilities = createModelCapabilitiesLookup(
-    () => app.llmService.listDownloadedLlmModels(),
-    () => app.llmRuntimeService.connectedLlmProviderAccess
+  const findModelCapabilities = createLlmModelCapabilitiesLookup(
+    app.llmProviderServices
   )
   registerChatRoute(app, findModelCapabilities)
   registerChatContextRoute(app, findModelCapabilities)

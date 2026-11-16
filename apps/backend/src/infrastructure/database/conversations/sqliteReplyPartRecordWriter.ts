@@ -10,6 +10,8 @@ import type {
   UpdateReplyPartContentInput,
   UpdateReplyToolCallInput
 } from "../../../modules/conversation/records"
+import type { ToolCallDecisionRecord } from "../../../modules/toolApproval/toolCallDecisionRecord"
+import { TOOL_CALL_POLICY_ID } from "../../../modules/toolApproval/toolCallPolicy"
 import type {
   DatabaseStatementCompiler,
   DatabaseWriter
@@ -21,6 +23,26 @@ type ToolCallResultChange = Exclude<
   UpdateReplyToolCallInput["change"],
   { status: "running" }
 >
+
+/**
+ * What ended a call's prompt, as its decision record stores it: the person
+ * allowed the call, declined it, the client could not show it, or nobody
+ * answered within the prompt's time limit.
+ */
+type ToolCallDecisionAnswer = "allowed" | "declined" | "showFailed" | "expired"
+
+/** How one result change is written. */
+type ToolCallResultWrite = Readonly<{
+  /** Status the call is stored with. */
+  status: "succeeded" | "failed" | "rejected"
+  /** The one status the change follows. */
+  previousStatus: "awaiting-approval" | "running"
+  /**
+   * Answer the call's decision record gets; undefined for an outcome of the
+   * run, whose answer was stored when the call started running.
+   */
+  answer: ToolCallDecisionAnswer | undefined
+}>
 
 /** Column values of one stored piece that differ by kind and state. */
 type ReplyPartColumns = Readonly<{
@@ -93,6 +115,45 @@ const CREATE_CONVERSATION_SOURCE_SQL = `INSERT INTO conversation_sources
   WHERE m.id = ? AND NOT EXISTS (SELECT 1 FROM conversation_sources s
     WHERE s.conversation_id = m.conversation_id AND s.number = ? AND s.url = ?)`
 
+/**
+ * Stores the decision record of one tool call just stored: its conversation,
+ * the conversation's agent, its tool, and its status and times come from the
+ * call's row; bound to the policy's effect, reason, and identity and the
+ * approval mode, then the call.
+ */
+const CREATE_TOOL_CALL_DECISION_SQL = `INSERT INTO tool_call_decisions
+  (call_id, conversation_id, agent_code, tool_name, policy_effect,
+    policy_reason, policy_id, approval_mode, outcome, created_at, updated_at)
+  SELECT p.id, p.conversation_id, c.agent_code, p.tool_name, ?, ?, ?, ?,
+    p.status, p.created_at, p.updated_at
+  FROM conversation_messages p JOIN conversations c ON c.id = p.conversation_id
+  WHERE p.id = ? AND p.role = 'tool_call'`
+
+/**
+ * Stores the answer that moved a waiting call on in the call's decision
+ * record, if it has one; bound to the answer, then the call.
+ */
+const UPDATE_TOOL_CALL_DECISION_ANSWER_SQL = `UPDATE tool_call_decisions
+  SET answer = ? WHERE call_id = ?`
+
+/** Column values of one decision record that the backend decides. */
+type ToolCallDecisionColumns = Readonly<{
+  /**
+   * `allow`, `require-approval`, or `deny`; null when the policy was not
+   * asked.
+   */
+  policyEffect: string | null
+  /** Rule behind `require-approval` or `deny`; null otherwise. */
+  policyReason: string | null
+  /**
+   * Identity of the rule set that decided the call; null when the policy
+   * was not asked.
+   */
+  policyId: string | null
+  /** `ask-me` or `just-run`; null when the call never reached the gate. */
+  approvalMode: string | null
+}>
+
 /** Reads one stored tool call. */
 const FIND_TOOL_CALL_SQL = `SELECT id, role, round, content, status,
   tool_name AS toolName, tool_arguments AS toolArguments,
@@ -146,16 +207,38 @@ function buildReplyPartColumns(part: ReplyPart): ReplyPartColumns {
 }
 
 /**
- * Selects the call state a change follows.
+ * Builds how a result change is written.
  *
  * @param change - Change of a call's result.
- * @returns `awaiting-approval` for a rejection; `running` for an outcome of
- * the run.
+ * @returns For an outcome of the run, its status after `running` and no
+ * answer; for a rejection, `rejected` after `awaiting-approval` with its
+ * reason as the answer; for an expired prompt, `failed` after
+ * `awaiting-approval` with the answer `expired`.
  */
-function getPreviousToolCallStatus(
+function buildToolCallResultWrite(
   change: ToolCallResultChange
-): "awaiting-approval" | "running" {
-  return change.status === "rejected" ? "awaiting-approval" : "running"
+): ToolCallResultWrite {
+  switch (change.status) {
+    case "succeeded":
+    case "failed":
+      return {
+        status: change.status,
+        previousStatus: "running",
+        answer: undefined
+      }
+    case "rejected":
+      return {
+        status: "rejected",
+        previousStatus: "awaiting-approval",
+        answer: change.reason
+      }
+    case "expired":
+      return {
+        status: "failed",
+        previousStatus: "awaiting-approval",
+        answer: "expired"
+      }
+  }
 }
 
 /**
@@ -209,20 +292,23 @@ function updateToolCallResult(
   change: ToolCallResultChange
 ): boolean {
   const sources = listChangeSources(change)
+  const write = buildToolCallResultWrite(change)
   const isUpdated =
     statements
       .getStatement(UPDATE_REPLY_TOOL_CALL_RESULT_SQL)
       .run(
-        change.status,
+        write.status,
         change.result,
         buildSourceNumbersColumn(sources.map((source) => source.number)),
         input.updatedAt,
         input.toolCallId,
         input.assistantMessageId,
-        getPreviousToolCallStatus(change),
+        write.previousStatus,
         input.assistantMessageId
       ).changes === 1
   if (!isUpdated) return false
+  if (write.answer !== undefined)
+    updateToolCallDecisionAnswer(statements, input.toolCallId, write.answer)
   const createSource = statements.getStatement(CREATE_CONVERSATION_SOURCE_SQL)
   for (const source of sources)
     createSource.run(
@@ -234,6 +320,78 @@ function updateToolCallResult(
       source.url
     )
   return true
+}
+
+/**
+ * Builds the column values of one call's decision record.
+ *
+ * @param decision - How the call was decided.
+ * @returns The policy's effect, reason, and identity, which is this
+ * build's, and the approval mode, null where the decision has none.
+ */
+function buildToolCallDecisionColumns(
+  decision: ToolCallDecisionRecord
+): ToolCallDecisionColumns {
+  const { policyDecision } = decision
+  return {
+    policyEffect: policyDecision?.effect ?? null,
+    policyReason:
+      policyDecision === undefined || policyDecision.effect === "allow"
+        ? null
+        : policyDecision.reason,
+    policyId: policyDecision === undefined ? null : TOOL_CALL_POLICY_ID,
+    approvalMode: decision.approvalMode ?? null
+  }
+}
+
+/**
+ * Stores the decision record of one tool call just stored.
+ *
+ * @param statements - Statement compilation lent to the caller's transaction.
+ * @param toolCallId - UUIDv7 of the call, stored in this transaction.
+ * @param decision - How the call was decided.
+ * @throws If the call is not stored, a column breaks the table's rules, or
+ * the write fails; the caller's transaction then rolls back.
+ */
+function createToolCallDecision(
+  statements: DatabaseStatementCompiler,
+  toolCallId: string,
+  decision: ToolCallDecisionRecord
+): void {
+  const columns = buildToolCallDecisionColumns(decision)
+  const isCreated =
+    statements
+      .getStatement(CREATE_TOOL_CALL_DECISION_SQL)
+      .run(
+        columns.policyEffect,
+        columns.policyReason,
+        columns.policyId,
+        columns.approvalMode,
+        toolCallId
+      ).changes === 1
+  if (!isCreated)
+    throw new Error(`Tool call ${toolCallId} is not stored for its decision`)
+}
+
+/**
+ * Stores the answer that moved a waiting call on in its decision record.
+ *
+ * @param statements - Statement compilation lent to the caller's transaction.
+ * @param toolCallId - UUIDv7 of the call, changed in this transaction.
+ * @param answer - `allowed`, the rejection's reason, or `expired`.
+ * @remarks A call stored before the schema had decision records has none,
+ * and its answer is not recorded; every call stored since gets its record in
+ * the write that stores it.
+ * @throws If the write fails; the caller's transaction then rolls back.
+ */
+function updateToolCallDecisionAnswer(
+  statements: DatabaseStatementCompiler,
+  toolCallId: string,
+  answer: ToolCallDecisionAnswer
+): void {
+  statements
+    .getStatement(UPDATE_TOOL_CALL_DECISION_ANSWER_SQL)
+    .run(answer, toolCallId)
 }
 
 /**
@@ -254,7 +412,7 @@ function updateToolCall(
   const { change } = input
   if (change.status !== "running")
     return updateToolCallResult(statements, input, change)
-  return (
+  const isUpdated =
     statements
       .getStatement(UPDATE_REPLY_TOOL_CALL_TO_RUNNING_SQL)
       .run(
@@ -263,26 +421,35 @@ function updateToolCall(
         input.assistantMessageId,
         input.assistantMessageId
       ).changes === 1
-  )
+  if (isUpdated)
+    updateToolCallDecisionAnswer(statements, input.toolCallId, "allowed")
+  return isUpdated
 }
 
 /**
- * Stores one piece after its reply's last piece.
+ * Stores one piece after its reply's last piece and, for a tool call, its
+ * decision record.
  *
  * @param statements - Statement compilation lent to the caller's transaction.
- * @param input - Reply and the complete part.
+ * @param input - Reply, the complete part, and a tool call's decision.
  * @returns True when stored; false when the reply is not streaming or not
  * stored, which changes nothing.
- * @throws If the write fails, including when the part's identity is already
- * stored; the caller's transaction then rolls back.
+ * @throws If a tool call comes without its decision or another part with
+ * one, before anything is written; or if the write fails, including when the
+ * part's identity is already stored; the caller's transaction then rolls
+ * back.
  */
 function createStoredReplyPart(
   statements: DatabaseStatementCompiler,
   input: CreateReplyPartInput
 ): boolean {
-  const { part } = input
+  const { part, toolCallDecision } = input
+  if ((part.kind === "tool-call") !== (toolCallDecision !== undefined))
+    throw new Error(
+      "A tool call is stored with its decision, and no other part with one"
+    )
   const columns = buildReplyPartColumns(part)
-  return (
+  const isCreated =
     statements
       .getStatement(CREATE_REPLY_PART_SQL)
       .run(
@@ -298,7 +465,9 @@ function createStoredReplyPart(
         part.updatedAt,
         input.assistantMessageId
       ).changes === 1
-  )
+  if (isCreated && toolCallDecision !== undefined)
+    createToolCallDecision(statements, part.id, toolCallDecision)
+  return isCreated
 }
 
 /**
@@ -329,7 +498,8 @@ function updateStoredReplyPartContent(
 
 /**
  * Borrows the shared database's write transactions to store the parts of
- * streaming replies and the sources their calls read.
+ * streaming replies, the sources their calls read, and each call's decision
+ * record.
  *
  * @remarks Owns no resource: the database's owner closes the connection,
  * after which every operation fails with `Database is closed`. Each call is
@@ -352,7 +522,7 @@ export default class SqliteReplyPartRecordWriter implements ReplyPartRecordWrite
   /**
    * Implements {@link ReplyPartRecordWriter.createReplyPart}; the schema's
    * message-insert trigger moves the activity time forward.
-   * @param input - Interface-defined reply and part.
+   * @param input - Interface-defined reply, part, and tool call decision.
    * @returns The interface-defined storage outcome.
    * @throws The interface-defined closed and write failures.
    */
@@ -376,7 +546,8 @@ export default class SqliteReplyPartRecordWriter implements ReplyPartRecordWrite
   }
 
   /**
-   * Implements {@link ReplyPartRecordWriter.updateReplyToolCall}.
+   * Implements {@link ReplyPartRecordWriter.updateReplyToolCall}; the
+   * schema's decision trigger copies the call's new status into its record.
    * @param input - Interface-defined reply, call, change, and timestamp.
    * @returns The interface-defined stored call or absence.
    * @throws The interface-defined closed, write, and source failures.

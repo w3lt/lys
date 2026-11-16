@@ -411,4 +411,32 @@ describe("speech routes", () => {
     )
     await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_VOICE_UNAVAILABLE)
   })
+
+  it("refuses a foreign origin before the upgrade with 403", async () => {
+    const app = await createVoiceRoutesApp({
+      conversation: COMPLETED_CONVERSATION
+    })
+    const httpBase = app.baseUrl.replace(/^ws:/, "http:")
+    for (const path of [
+      buildSpeechUrl(chatSpeechApi.path, "start"),
+      buildSpeechUrl(chatNotificationApi.path)
+    ]) {
+      const response = await fetch(`${httpBase}${path}`, {
+        headers: { origin: "https://evil.example" }
+      })
+      expect(response.status).toBe(403)
+    }
+  })
+
+  it("does not refuse the desktop origin", async () => {
+    const app = await createVoiceRoutesApp({
+      conversation: COMPLETED_CONVERSATION
+    })
+    const httpBase = app.baseUrl.replace(/^ws:/, "http:")
+    const response = await fetch(
+      `${httpBase}${buildSpeechUrl(chatSpeechApi.path, "start")}`,
+      { headers: { origin: "http://localhost:1420" } }
+    )
+    expect(response.status).not.toBe(403)
+  })
 })

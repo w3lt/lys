@@ -2,7 +2,7 @@
 
 ## Claude Code subagents
 
-This section applies to Claude Code only. It names the subagent in [`.claude/agents/`](.claude/agents/) that does each kind of work in the operations that `AGENTS.md` links, so that a cheaper model does bulky or narrow work. It changes no rule: every rule, step, and check stays as `AGENTS.md` and `docs/` define it, and the agent that starts a subagent stays responsible for the step.
+This section applies to Claude Code only. It names the subagent in [`.claude/agents/`](.claude/agents/) that does each kind of work in the operations that `AGENTS.md` links, so that a cheaper model does bulky or narrow work. It changes no rule or check: every rule and check stays as `AGENTS.md` and `docs/` define it, and the agent that starts a subagent stays responsible for the step. The one step it adds is the description draft that the self-review reads in Work on an Issue, under "Self-review" below.
 
 These instructions are the explicit direction to start the agents below for the work named, with the model and effort their files set.
 

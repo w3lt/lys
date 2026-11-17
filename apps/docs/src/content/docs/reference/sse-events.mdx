@@ -354,9 +354,9 @@ events of the same name. The client answers them with the
 `tool-approval`, when the reply first stores the call in another state than
 `awaiting-approval`, and also reaches a client that found the prompt in its
 snapshot. `callId` is the call's `id`, and `status` is the state the call was
-stored in: `running` once someone allowed it, `rejected` once someone
-rejected it, and `failed` when nobody answered within five minutes and the
-prompt expired. It is the activity stream's counterpart of the `reply-part`
+stored in, always one of three: `running` once someone allowed it, `rejected`
+once someone rejected it, and `failed` when nobody answered within five
+minutes and the prompt expired. It is the activity stream's counterpart of the `reply-part`
 event that carries the call on the reply's own stream; the stream carries no
 other part of the reply.
 

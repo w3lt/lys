@@ -378,22 +378,27 @@ function buildForwardedEvent(
  * @param part - Part the reply reported stored.
  * @returns The `tool-approval-ended` event with the reply's identifiers, the
  * call's identifier, and its stored state, when the part is a call whose
- * prompt the hub forwarded and has not sent the end of, stored in another
- * state than waiting for approval; otherwise undefined.
+ * prompt the hub forwarded and has not sent the end of, stored as running,
+ * rejected, or failed; otherwise undefined.
+ * @remarks A prompt's call leaves waiting for approval only in one of those
+ * three states: it runs once allowed, and is stored as rejected or failed
+ * when rejected or expired. Any other state sends nothing.
  */
 function buildToolApprovalEndedEvent(
   followedReply: FollowedReply,
   part: ReplyPart
 ): ActivityEvent | undefined {
-  if (part.kind !== "tool-call" || part.status === "awaiting-approval")
-    return undefined
+  if (part.kind !== "tool-call") return undefined
   if (!followedReply.promptedCallIds.has(part.id)) return undefined
+  const { status } = part
+  if (status !== "running" && status !== "rejected" && status !== "failed")
+    return undefined
 
   return {
     type: "tool-approval-ended",
     ...followedReply.target,
     callId: part.id,
-    status: part.status
+    status
   }
 }
 

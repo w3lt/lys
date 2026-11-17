@@ -584,6 +584,32 @@ describe("ActivityHub", () => {
       ])
     })
 
+    it.for([
+      [
+        "succeeded",
+        { status: "succeeded", result: "Example Domain", sourceNumbers: [] }
+      ],
+      ["interrupted", { status: "interrupted" }]
+    ] as const)(
+      "sends no end of a prompt whose call is next stored as %s, a state no prompt ends in",
+      async ([, state]) => {
+        const hub = new ActivityHub()
+        const { generation, replyTask } = startControlledGeneration()
+        hub.addReply(JOB_REPLY, generation)
+        const stream = openRecordingStream(hub)
+        await waitForMicrotasks()
+
+        void replyTask.context.sendToolApprovalPrompt(APPROVAL_CALL)
+        replyTask.context.sendEvent(buildStoredCallEvent(APPROVAL_CALL, state))
+        await waitForMicrotasks()
+
+        expect(stream.written).toEqual([
+          buildIdleSnapshot([JOB_REPLY]),
+          { type: "tool-approval", ...JOB_REPLY, ...APPROVAL_PROMPT }
+        ])
+      }
+    )
+
     it("forwards no text reply-part, reply-part-delta, sources, title, done, interrupted, or error event, and keeps following the reply after them", async () => {
       /**
        * One generation event of every kind the activity stream does not carry,

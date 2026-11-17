@@ -131,7 +131,11 @@ const activityToolApprovalEndedEventSchema = z.strictObject({
    * it was allowed, `rejected` once it was rejected, and `failed` when nobody
    * answered within the prompt's time limit.
    */
-  status: toolCallReplyPartStatusSchema.exclude(["awaiting-approval"])
+  status: toolCallReplyPartStatusSchema.extract([
+    "running",
+    "rejected",
+    "failed"
+  ])
 })
 
 /**

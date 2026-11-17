@@ -103,7 +103,9 @@ type HeldToolApprovalAnswer =
        * The backend ended the prompt because nobody answered within its time
        * limit, and stored the call as failed without running it. The call
        * stays held, also after its reply's following stops, until the person
-       * dismisses it or a later reply of its conversation is followed.
+       * dismisses it or a later reply of its conversation is followed; the
+       * call of a reply the activity stream announced goes with that reply's
+       * end.
        */
       readonly status: "expired"
     }
@@ -254,12 +256,19 @@ type ToolCallActions = {
    * reject it; a store listener that throws does.
    * @remarks A snapshot replaces the announced replies: the calls of a reply
    * announced before and not listed now are dropped, and those of a reply
-   * the store follows itself are kept. `reply-ended` drops the reply's
-   * calls, answered or not. A call of a reply the stream has not announced
-   * is ignored, and a call already held is not held again. The store ends
-   * its own follow of a reply the stream announces; the calls it already
-   * holds for that reply stay. Held calls stay while the stream is down, and
-   * the next snapshot keeps or drops them. Job updates change nothing here.
+   * the store follows itself are kept. A prompt of a listed reply that the
+   * snapshot no longer lists as waiting, and whose answer the backend had
+   * not taken as far as the store knows, is marked answered and no longer
+   * shown, since the snapshot does not say whether it expired.
+   * `tool-approval-ended` ends one held prompt as a live change of its call
+   * does: a prompt whose call was stored as failed shows as expired, and one
+   * answered elsewhere is no longer shown. `reply-ended` drops the reply's
+   * calls, answered or not, expired prompts included. A call of a reply the
+   * stream has not announced is ignored, and a call already held is not held
+   * again. The store ends its own follow of a reply the stream announces;
+   * the calls it already holds for that reply stay. Held calls stay while
+   * the stream is down, and the next snapshot keeps, ends, or drops them.
+   * Job updates change nothing here.
    */
   handleActivityEvent: (event: ActivityEvent) => Promise<void>
   /**
@@ -370,9 +379,11 @@ const REFUSED_ANSWER = Object.freeze({ status: "refused" } as const)
 const EXPIRED_ANSWER = Object.freeze({ status: "expired" } as const)
 
 /**
- * Answer states of a held prompt that a live change of its call can end.
- * The backend sends a call's changes in order, so a call it ran after taking
- * an answer arrives as `running` before it can arrive as `failed`.
+ * Answer states of a held prompt whose answer the backend has not taken, as
+ * far as the store knows: a live change of its call can end it, and so can
+ * an activity snapshot that no longer lists it as waiting. The backend sends
+ * a call's changes in order, so a call it ran after taking an answer arrives
+ * as `running` before it can arrive as `failed`.
  */
 const LIVE_ENDABLE_APPROVAL_STATUSES: ReadonlySet<
   HeldToolApprovalAnswer["status"]
@@ -581,14 +592,57 @@ function buildHeldToolCallsWithoutReplies(
 }
 
 /**
+ * Answers whether a held call is a prompt whose answer the backend has not
+ * taken, as far as the store knows.
+ *
+ * @param heldCall - Call the store holds.
+ * @returns True while the call is in its approval step and its answer waits
+ * for the person, is being sent, failed to send, or was refused.
+ */
+function isOpenToolApproval(heldCall: HeldToolCall): boolean {
+  return (
+    heldCall.step === "approval" &&
+    LIVE_ENDABLE_APPROVAL_STATUSES.has(heldCall.answer.status)
+  )
+}
+
+/**
+ * Builds one held call as an activity snapshot leaves it.
+ *
+ * @param heldCall - Call the store holds, left unchanged.
+ * @param listedReplyIds - Assistant message ids of the replies the snapshot
+ * lists.
+ * @param waitingCallIds - Calls whose prompts the snapshot lists as waiting.
+ * @returns The call marked `answered` when it is an open prompt of a listed
+ * reply that the snapshot no longer lists as waiting: the backend no longer
+ * waits for it, and the snapshot does not say whether it expired. Otherwise
+ * the same call.
+ */
+function buildActivitySnapshotToolCall(
+  heldCall: HeldToolCall,
+  listedReplyIds: ReadonlySet<string>,
+  waitingCallIds: ReadonlySet<string>
+): HeldToolCall {
+  const isEndedApproval =
+    isOpenToolApproval(heldCall) &&
+    listedReplyIds.has(heldCall.target.assistantMessageId) &&
+    !waitingCallIds.has(heldCall.call.id)
+  if (!isEndedApproval) return heldCall
+
+  return Object.freeze({ ...heldCall, answer: ANSWERED_ANSWER })
+}
+
+/**
  * Builds the state an activity snapshot leaves.
  *
  * @param state - Current state, left unchanged.
  * @param replies - Every reply the snapshot lists.
  * @returns A state whose announced replies are the listed ones. The calls of
  * a reply announced before and not listed now are dropped, answered or not:
- * it ended while the stream was down. The calls of a reply the store follows
- * itself are kept, since the stream never announced it.
+ * it ended while the stream was down. A listed reply's open prompt that the
+ * snapshot no longer lists as waiting is marked answered, as
+ * {@link buildActivitySnapshotToolCall} describes. The calls of a reply the
+ * store follows itself are kept, since the stream never announced it.
  */
 function buildActivitySnapshotState(
   state: ToolCallState,
@@ -605,11 +659,20 @@ function buildActivitySnapshotState(
       (assistantMessageId) => !activityReplies.has(assistantMessageId)
     )
   )
+  const listedReplyIds = new Set(activityReplies.keys())
+  const waitingCallIds = new Set(
+    replies.flatMap((reply) =>
+      reply.pendingToolApprovals.map(({ call }) => call.id)
+    )
+  )
+  const heldCalls = buildHeldToolCallsWithoutReplies(
+    state.heldCalls,
+    endedReplyIds
+  ).map((heldCall) =>
+    buildActivitySnapshotToolCall(heldCall, listedReplyIds, waitingCallIds)
+  )
 
-  return {
-    activityReplies,
-    heldCalls: buildHeldToolCallsWithoutReplies(state.heldCalls, endedReplyIds)
-  }
+  return { activityReplies, heldCalls: Object.freeze(heldCalls) }
 }
 
 /**
@@ -988,31 +1051,51 @@ function createToolCallStore(
      * Moves a held prompt on when its call's stored state shows the backend
      * no longer waits for it.
      *
-     * @param part - One part of a followed reply, as stored.
-     * @param endableStatuses - Answer states of a held prompt this part may
+     * @param callId - Identifier of the call.
+     * @param status - State the backend stored the call in.
+     * @param endableStatuses - Answer states of a held prompt this state may
      * end.
-     * @remarks Only a tool call held in its approval step, whose answer is in
-     * one of the given states, changes: to `expired` when the call is stored
-     * as failed, or to `answered` once the backend took an answer, this
-     * store's or another caller's. A send still in flight then leaves the new
-     * state alone. A `refused` answer waits here for the state the backend
-     * stored before it refused.
+     * @remarks Only a call held in its approval step, whose answer is in one
+     * of the given states, changes: to `expired` when the call is stored as
+     * failed, or to `answered` once the backend took an answer, this store's
+     * or another caller's. A send still in flight then leaves the new state
+     * alone. A `refused` answer waits here for the state the backend stored
+     * before it refused.
      */
     function updateEndedToolApproval(
-      part: ReplyPart,
+      callId: string,
+      status: ToolCallReplyPartStatus,
       endableStatuses: ReadonlySet<HeldToolApprovalAnswer["status"]>
     ): void {
-      if (part.kind !== "tool-call") return
-      const heldCall = findHeldToolCall(part.id)
+      const heldCall = findHeldToolCall(callId)
       if (
         heldCall?.step !== "approval" ||
         !endableStatuses.has(heldCall.answer.status)
       )
         return
-      const answer = findEndedToolApprovalAnswer(part.status)
+      const answer = findEndedToolApprovalAnswer(status)
       if (answer === undefined) return
 
       updateHeldToolCall(Object.freeze({ ...heldCall, answer }))
+    }
+
+    /**
+     * Moves a held prompt on when a part of its followed reply stores its
+     * call in a state that shows the backend no longer waits for it.
+     *
+     * @param part - One part of a followed reply, as stored.
+     * @param endableStatuses - Answer states of a held prompt this part may
+     * end.
+     * @remarks A part that is not a tool call changes nothing; a tool call
+     * changes its prompt as {@link updateEndedToolApproval} describes.
+     */
+    function updateEndedToolApprovalOfPart(
+      part: ReplyPart,
+      endableStatuses: ReadonlySet<HeldToolApprovalAnswer["status"]>
+    ): void {
+      if (part.kind !== "tool-call") return
+
+      updateEndedToolApproval(part.id, part.status, endableStatuses)
     }
 
     /**
@@ -1290,6 +1373,30 @@ function createToolCallStore(
     }
 
     /**
+     * Handles the activity event that reports the end of one prompt of a
+     * backend-started reply.
+     *
+     * @param event - The event, naming the reply, the call, and the state the
+     * reply stored the call in.
+     * @remarks The prompt moves on as {@link updateEndedToolApproval}
+     * describes for a live change. The end of a prompt the store does not
+     * hold, or holds for another reply than the event names, changes nothing.
+     */
+    function handleActivityToolApprovalEnd(
+      event: Extract<ActivityEvent, { type: "tool-approval-ended" }>
+    ): void {
+      const heldCall = findHeldToolCall(event.callId)
+      if (heldCall?.target.assistantMessageId !== event.assistantMessageId)
+        return
+
+      updateEndedToolApproval(
+        event.callId,
+        event.status,
+        LIVE_ENDABLE_APPROVAL_STATUSES
+      )
+    }
+
+    /**
      * Implements {@link ToolCallActions.handleActivityEvent} for this store.
      *
      * @param event - Validated activity event.
@@ -1314,6 +1421,9 @@ function createToolCallStore(
             call: event.call,
             approvalToken: event.approvalToken
           })
+          return
+        case "tool-approval-ended":
+          handleActivityToolApprovalEnd(event)
           return
         case "tool-call":
           startActivityToolRun(event, event.call)
@@ -1340,7 +1450,10 @@ function createToolCallStore(
       switch (event.type) {
         case "reply-snapshot":
           for (const part of event.assistantMessage.parts) {
-            updateEndedToolApproval(part, SNAPSHOT_ENDABLE_APPROVAL_STATUSES)
+            updateEndedToolApprovalOfPart(
+              part,
+              SNAPSHOT_ENDABLE_APPROVAL_STATUSES
+            )
           }
           if (event.assistantMessage.status !== "streaming") {
             return "reply-ended"
@@ -1357,7 +1470,10 @@ function createToolCallStore(
           startToolRun(target, event.call)
           return "reply-continues"
         case "reply-part":
-          updateEndedToolApproval(event.part, LIVE_ENDABLE_APPROVAL_STATUSES)
+          updateEndedToolApprovalOfPart(
+            event.part,
+            LIVE_ENDABLE_APPROVAL_STATUSES
+          )
           return "reply-continues"
         case "title":
         case "reply-part-delta":

@@ -2228,20 +2228,23 @@ const WOKEN_CONVERSATION = buildConversationWithJobs(
 /** Route key of the reply-events endpoint for the wake-up reply. */
 const WAKE_EVENTS_ROUTE = `GET /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${FIXTURE_WAKE_REPLY_ID}/events`
 
-/** Activity event reporting that the backend started the wake-up reply. */
-const WAKE_REPLY_STARTED_EVENT: ActivityEvent = Object.freeze({
-  type: "reply-started",
+/** The wake-up reply as the activity stream names it. */
+const WAKE_REPLY_TARGET = Object.freeze({
   conversationId: FIXTURE_CONVERSATION_ID,
   parentConversationId: null,
   assistantMessageId: FIXTURE_WAKE_REPLY_ID
 })
 
+/** Activity event reporting that the backend started the wake-up reply. */
+const WAKE_REPLY_STARTED_EVENT: ActivityEvent = Object.freeze({
+  type: "reply-started",
+  ...WAKE_REPLY_TARGET
+})
+
 /** Activity event reporting that the wake-up reply completed. */
 const WAKE_REPLY_ENDED_EVENT: ActivityEvent = Object.freeze({
   type: "reply-ended",
-  conversationId: FIXTURE_CONVERSATION_ID,
-  parentConversationId: null,
-  assistantMessageId: FIXTURE_WAKE_REPLY_ID,
+  ...WAKE_REPLY_TARGET,
   status: "completed"
 })
 
@@ -2353,6 +2356,45 @@ describe("handleActivityEvent", () => {
 
     expect(listRouteKeys(backend)).toEqual([MAIN_READ_ROUTE])
   })
+
+  it.each<[string, ActivityEvent]>([
+    [
+      "a prompt",
+      {
+        type: "tool-approval",
+        ...WAKE_REPLY_TARGET,
+        call: buildToolCall(5, "read_text_file"),
+        approvalToken: createFixtureApprovalToken(5)
+      }
+    ],
+    [
+      "the end of a prompt",
+      {
+        type: "tool-approval-ended",
+        ...WAKE_REPLY_TARGET,
+        callId: buildToolCall(5, "read_text_file").id,
+        status: "failed"
+      }
+    ],
+    [
+      "a call to run",
+      {
+        type: "tool-call",
+        ...WAKE_REPLY_TARGET,
+        call: buildToolCall(4, "read_text_file")
+      }
+    ]
+  ])(
+    "leaves %s of a reply in the shown conversation to the tool-call store and reads nothing",
+    async (_label, event) => {
+      const { store, backend } = await openMainConversation()
+
+      store.getState().handleActivityEvent(event)
+      await waitForMicrotasks()
+
+      expect(listRouteKeys(backend)).toEqual([MAIN_READ_ROUTE])
+    }
+  )
 
   it("reads nothing while no conversation is shown", async () => {
     const backend = startBackendFake({})

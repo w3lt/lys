@@ -1,4 +1,8 @@
-import { conversationAssistantMessageSchema, jobSchema } from "@lys/share"
+import {
+  conversationAssistantMessageSchema,
+  jobSchema,
+  toolCallReplyPartStatusSchema
+} from "@lys/share"
 import * as z from "zod"
 import {
   chatToolApprovalPromptSchema,
@@ -105,6 +109,32 @@ const activityToolApprovalEventSchema = z.strictObject({
 })
 
 /**
+ * Validates the event reporting that one approval prompt of a
+ * backend-started reply ended before the reply did.
+ *
+ * @remarks Sent once for each prompt the reply sent as `tool-approval`,
+ * when the reply first stores its call in another state than waiting for
+ * approval; a client that found the prompt in its snapshot receives it too.
+ * A prompt that ended while a client was not connected is only left out of
+ * that client's next snapshot, which does not say how it ended.
+ */
+const activityToolApprovalEndedEventSchema = z.strictObject({
+  type: z.literal("tool-approval-ended"),
+  ...activityReplyTargetShape,
+  /**
+   * UUIDv7 identity of the call whose prompt ended, as its `tool-approval`
+   * carried it.
+   */
+  callId: z.uuidv7(),
+  /**
+   * State the reply stored the call in when its prompt ended: `running` once
+   * it was allowed, `rejected` once it was rejected, and `failed` when nobody
+   * answered within the prompt's time limit.
+   */
+  status: toolCallReplyPartStatusSchema.exclude(["awaiting-approval"])
+})
+
+/**
  * Validates the event asking a client to run one call of a client tool for a
  * backend-started reply.
  */
@@ -121,9 +151,12 @@ const activityToolCallEventSchema = z.strictObject({
  * @remarks The first event is always `activity-snapshot`. Each event is
  * delivered at most once. A call can be in the snapshot and arrive again as
  * a `tool-approval` or `tool-call` event, so a client merges calls by
- * `call.id`. `reply-ended` ends every pending call of that reply. Answers go
- * to the existing tool-approval and tool-result endpoints with the event's
- * `conversationId` and `assistantMessageId`.
+ * `call.id`. Each snapshot is authoritative for the replies it lists: a
+ * prompt of a listed reply that it does not list no longer waits.
+ * `tool-approval-ended` ends one prompt, and `reply-ended` ends every
+ * pending call of that reply. Answers go to the existing tool-approval and
+ * tool-result endpoints with the event's `conversationId` and
+ * `assistantMessageId`.
  */
 export const activityEventSchema = z.discriminatedUnion("type", [
   activitySnapshotEventSchema,
@@ -131,6 +164,7 @@ export const activityEventSchema = z.discriminatedUnion("type", [
   activityReplyEndedEventSchema,
   activityJobUpdatedEventSchema,
   activityToolApprovalEventSchema,
+  activityToolApprovalEndedEventSchema,
   activityToolCallEventSchema
 ])
 

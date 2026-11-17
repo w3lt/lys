@@ -3,7 +3,7 @@ import type {
   ActivityReply,
   ChatGenerationEvent
 } from "@lys/protocol"
-import type { Job } from "@lys/share"
+import type { Job, ReplyPart } from "@lys/share"
 import ReplyEventSubscription from "../chat/replyEventSubscription"
 import type ReplyGeneration from "../chat/replyGeneration"
 
@@ -53,6 +53,11 @@ type FollowedReply = Readonly<{
   generation: ActivityGeneration
   /** The hub's follower on that generation, which the hub closes. */
   subscription: ReplyEventSubscription<ChatGenerationEvent>
+  /**
+   * Calls whose approval prompt the hub forwarded and whose end it has not
+   * sent; owned by the hub.
+   */
+  promptedCallIds: Set<string>
 }>
 
 /** Whether the hub still sends events, and what it holds while it does. */
@@ -124,8 +129,8 @@ export default class ActivityHub {
 
   /**
    * Starts following a backend-started reply: sends `reply-started`, then
-   * forwards its approval prompts and desktop tool calls until it is
-   * removed.
+   * forwards its approval prompts, the end of each, and its desktop tool
+   * calls until it is removed.
    *
    * @param target - Identifiers of the reply; the hub keeps its own copy of
    * the three, so nothing else the object carries, and no later change of
@@ -136,8 +141,9 @@ export default class ActivityHub {
    * changes.
    * @remarks Call it in the synchronous step that started the generation,
    * so every prompt and tool call of the reply is forwarded. A call the
-   * reply already waits on is not sent as an event; it appears only in the
-   * snapshots of later streams. Does nothing once the hub is disposed.
+   * reply already waits on is not sent as an event, nor is the end of its
+   * prompt; it appears only in the snapshots of later streams. Does nothing
+   * once the hub is disposed.
    */
   public addReply(
     target: ActivityReplyTarget,
@@ -163,7 +169,8 @@ export default class ActivityHub {
     followedReplies.set(followedTarget.assistantMessageId, {
       target: followedTarget,
       generation,
-      subscription
+      subscription,
+      promptedCallIds: new Set()
     })
     this.#sendEvent({ type: "reply-started", ...followedTarget })
   }
@@ -177,9 +184,9 @@ export default class ActivityHub {
    * state could not be written; null when the reply is no longer stored or
    * could not be read.
    * @remarks Does nothing for a reply the hub does not follow, and nothing
-   * once the hub is disposed. No prompt or tool call of the reply is sent
-   * after its `reply-ended`, not even one the reply sent before this call.
-   * The generation is left as it is.
+   * once the hub is disposed. No prompt, end of a prompt, or tool call of the
+   * reply is sent after its `reply-ended`, not even one the reply sent before
+   * this call. The generation is left as it is.
    */
   public removeReply(
     assistantMessageId: string,
@@ -266,8 +273,8 @@ export default class ActivityHub {
   }
 
   /**
-   * Forwards one event of a followed reply when it is an approval prompt or
-   * a desktop tool call.
+   * Forwards one event of a followed reply when it is an approval prompt, the
+   * end of one, or a desktop tool call.
    *
    * @param target - The hub's copy of the identifiers of the reply whose
    * generation sent the event.
@@ -275,7 +282,8 @@ export default class ActivityHub {
    * @throws {TypeError} If the event is of a kind this module does not know.
    * @remarks An event delivered after the hub was disposed, or after its
    * reply was removed, is dropped, so nothing of a reply follows its
-   * `reply-ended`.
+   * `reply-ended`. The hub records each prompt it forwards until it forwards
+   * that prompt's end, so each end is sent once.
    */
   #handleFollowedReplyEvent(
     target: ActivityReplyTarget,
@@ -287,8 +295,13 @@ export default class ActivityHub {
     )
     if (followedReply?.target !== target) return
 
-    const forwardedEvent = buildForwardedEvent(target, event)
-    if (forwardedEvent !== undefined) this.#sendEvent(forwardedEvent)
+    const forwardedEvent = buildForwardedEvent(followedReply, event)
+    if (forwardedEvent === undefined) return
+    if (forwardedEvent.type === "tool-approval")
+      followedReply.promptedCallIds.add(forwardedEvent.call.id)
+    if (forwardedEvent.type === "tool-approval-ended")
+      followedReply.promptedCallIds.delete(forwardedEvent.callId)
+    this.#sendEvent(forwardedEvent)
   }
 
   /**
@@ -311,19 +324,23 @@ export default class ActivityHub {
 /**
  * Builds the activity event that forwards one event of a followed reply.
  *
- * @param target - Identifiers of the reply whose generation sent the event.
+ * @param followedReply - Reply whose generation sent the event, with the
+ * prompts the hub forwarded and has not sent the end of; left unchanged.
  * @param event - Event of that generation.
  * @returns The `tool-approval` event with the reply's identifiers, the call,
- * and the token its answer must carry, or the `tool-call` event with the
- * reply's identifiers and the call; undefined for every other kind, which the
- * activity stream does not carry: a reply's parts, sources, title, and end
- * reach clients through the reply's own stream and through `reply-ended`.
+ * and the token its answer must carry; the `tool-approval-ended` event that
+ * {@link buildToolApprovalEndedEvent} builds from a stored part; or the
+ * `tool-call` event with the reply's identifiers and the call. Undefined for
+ * every other event, which the activity stream does not carry: a reply's
+ * parts, sources, title, and end reach clients through the reply's own
+ * stream and through `reply-ended`.
  * @throws {TypeError} If the event is of a kind this module does not know.
  */
 function buildForwardedEvent(
-  target: ActivityReplyTarget,
+  followedReply: FollowedReply,
   event: ChatGenerationEvent
 ): ActivityEvent | undefined {
+  const { target } = followedReply
   switch (event.type) {
     case "tool-approval":
       return {
@@ -332,10 +349,11 @@ function buildForwardedEvent(
         call: event.call,
         approvalToken: event.approvalToken
       }
+    case "reply-part":
+      return buildToolApprovalEndedEvent(followedReply, event.part)
     case "tool-call":
       return { type: "tool-call", ...target, call: event.call }
     case "title":
-    case "reply-part":
     case "reply-part-delta":
     case "sources":
     case "done":
@@ -348,6 +366,34 @@ function buildForwardedEvent(
         `Unhandled generation event: ${JSON.stringify(unhandledEvent)}`
       )
     }
+  }
+}
+
+/**
+ * Builds the activity event that reports the end of one prompt of a followed
+ * reply.
+ *
+ * @param followedReply - Reply that stored the part, with the prompts the hub
+ * forwarded and has not sent the end of; left unchanged.
+ * @param part - Part the reply reported stored.
+ * @returns The `tool-approval-ended` event with the reply's identifiers, the
+ * call's identifier, and its stored state, when the part is a call whose
+ * prompt the hub forwarded and has not sent the end of, stored in another
+ * state than waiting for approval; otherwise undefined.
+ */
+function buildToolApprovalEndedEvent(
+  followedReply: FollowedReply,
+  part: ReplyPart
+): ActivityEvent | undefined {
+  if (part.kind !== "tool-call" || part.status === "awaiting-approval")
+    return undefined
+  if (!followedReply.promptedCallIds.has(part.id)) return undefined
+
+  return {
+    type: "tool-approval-ended",
+    ...followedReply.target,
+    callId: part.id,
+    status: part.status
   }
 }
 

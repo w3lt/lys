@@ -1,5 +1,6 @@
 import {
   activityEventSchema,
+  TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES,
   type ActivityEvent,
   type ChatGenerationEvent,
   type ChatToolCall
@@ -17,7 +18,9 @@ import ControlledReplyTask from "../../support/controlledReplyTask"
 import {
   createFixtureUuidV7,
   createTextPart,
-  FIXTURE_TIMESTAMP
+  createToolCallPart,
+  FIXTURE_TIMESTAMP,
+  type ToolCallPartFixtureState
 } from "../../support/conversationFixtures"
 import { waitForMicrotasks } from "../../support/microtasks"
 import { createSettlementReader } from "../../support/settlement"
@@ -118,6 +121,27 @@ function buildIdleSnapshot(
 
 /** Snapshot of a hub that follows no reply. */
 const EMPTY_SNAPSHOT = buildIdleSnapshot([])
+
+/**
+ * Builds the event in which a followed reply reports one of its calls stored
+ * in a new state, as a reply does after each change of a call.
+ *
+ * @param call - The call, built with a fixture identity.
+ * @param state - State the call is stored in.
+ * @returns The generation's `reply-part` event carrying the stored call.
+ */
+function buildStoredCallEvent(
+  call: ChatToolCall,
+  state: ToolCallPartFixtureState
+): ChatGenerationEvent {
+  const fixture = {
+    sequence: Number.parseInt(call.id.slice(-12), 16),
+    round: 0,
+    toolName: call.toolName,
+    argumentText: JSON.stringify(call.arguments)
+  }
+  return { type: "reply-part", part: createToolCallPart(fixture, state) }
+}
 
 /**
  * Fails the case for a task failure that no case arranges.
@@ -433,11 +457,139 @@ describe("ActivityHub", () => {
       ])
     })
 
-    it("forwards no reply-part, reply-part-delta, sources, title, done, interrupted, or error event, and keeps following the reply after them", async () => {
+    it("sends tool-approval-ended with the call stored as failed once a followed reply's prompt expires, and leaves the prompt out of the next snapshot", async () => {
+      const hub = new ActivityHub()
+      const { generation, replyTask } = startControlledGeneration()
+      hub.addReply(JOB_REPLY, generation)
+      const stream = openRecordingStream(hub)
+      await waitForMicrotasks()
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+      onTestFinished(() => {
+        vi.useRealTimers()
+      })
+      const outcome = replyTask.context.sendToolApprovalPrompt(APPROVAL_CALL)
+      vi.advanceTimersByTime(TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES * 60_000)
+      vi.useRealTimers()
+
+      // The reply stores the call as failed once its prompt expired.
+      expect(await outcome).toEqual({ status: "expired" })
+      replyTask.context.sendEvent(
+        buildStoredCallEvent(APPROVAL_CALL, {
+          status: "failed",
+          result: "Nobody answered the approval prompt in time."
+        })
+      )
+      await waitForMicrotasks()
+      const laterStream = openRecordingStream(hub)
+      await waitForMicrotasks()
+
+      expect(stream.written).toEqual([
+        buildIdleSnapshot([JOB_REPLY]),
+        { type: "tool-approval", ...JOB_REPLY, ...APPROVAL_PROMPT },
+        {
+          type: "tool-approval-ended",
+          ...JOB_REPLY,
+          callId: APPROVAL_CALL.id,
+          status: "failed"
+        }
+      ])
+      expect(laterStream.written).toEqual([buildIdleSnapshot([JOB_REPLY])])
+    })
+
+    it.each([
+      ["allowed", { status: "allowed" }, { status: "running" }],
+      [
+        "rejected",
+        {
+          status: "rejected",
+          reason: "declined",
+          content: "The person declined this call."
+        },
+        { status: "rejected", result: "The person declined this call." }
+      ]
+    ] as const)(
+      "sends tool-approval-ended with the call's new state once a followed reply's prompt is %s through the backend",
+      async (_label, answer, state) => {
+        const hub = new ActivityHub()
+        const { generation, replyTask } = startControlledGeneration()
+        hub.addReply(JOB_REPLY, generation)
+        const stream = openRecordingStream(hub)
+        await waitForMicrotasks()
+        const outcome = replyTask.context.sendToolApprovalPrompt(APPROVAL_CALL)
+        const [prompt] = generation.pendingToolCalls.toolApprovals
+
+        generation.resolveToolCall(APPROVAL_CALL.id, {
+          ...answer,
+          approvalToken: prompt?.approvalToken ?? ""
+        })
+        // The reply stores the call in its new state once the answer arrived.
+        expect(await outcome).toEqual(answer)
+        replyTask.context.sendEvent(buildStoredCallEvent(APPROVAL_CALL, state))
+        await waitForMicrotasks()
+
+        expect(stream.written).toEqual([
+          buildIdleSnapshot([JOB_REPLY]),
+          { type: "tool-approval", ...JOB_REPLY, ...APPROVAL_PROMPT },
+          {
+            type: "tool-approval-ended",
+            ...JOB_REPLY,
+            callId: APPROVAL_CALL.id,
+            status: state.status
+          }
+        ])
+      }
+    )
+
+    it("sends the end of a prompt once, and sends no stored state of a call before its prompt, after its end, or of a call that had no prompt", async () => {
+      const hub = new ActivityHub()
+      const { generation, replyTask } = startControlledGeneration()
+      hub.addReply(JOB_REPLY, generation)
+      const stream = openRecordingStream(hub)
+      await waitForMicrotasks()
+
+      replyTask.context.sendEvent(
+        buildStoredCallEvent(APPROVAL_CALL, { status: "awaiting-approval" })
+      )
+      void replyTask.context.sendToolApprovalPrompt(APPROVAL_CALL)
+      replyTask.context.sendEvent(
+        buildStoredCallEvent(APPROVAL_CALL, { status: "running" })
+      )
+      replyTask.context.sendEvent(
+        buildStoredCallEvent(APPROVAL_CALL, {
+          status: "succeeded",
+          result: "Example Domain",
+          sourceNumbers: []
+        })
+      )
+      replyTask.context.sendEvent(
+        buildStoredCallEvent(DESKTOP_TOOL_CALL, { status: "running" })
+      )
+      replyTask.context.sendEvent(
+        buildStoredCallEvent(DESKTOP_TOOL_CALL, {
+          status: "failed",
+          result: "The file does not exist."
+        })
+      )
+      await waitForMicrotasks()
+
+      expect(stream.written).toEqual([
+        buildIdleSnapshot([JOB_REPLY]),
+        { type: "tool-approval", ...JOB_REPLY, ...APPROVAL_PROMPT },
+        {
+          type: "tool-approval-ended",
+          ...JOB_REPLY,
+          callId: APPROVAL_CALL.id,
+          status: "running"
+        }
+      ])
+    })
+
+    it("forwards no text reply-part, reply-part-delta, sources, title, done, interrupted, or error event, and keeps following the reply after them", async () => {
       /**
        * One generation event of every kind the activity stream does not carry,
        * by its type; a kind added to the generation events must be placed here
-       * or among the forwarded ones.
+       * or among the forwarded ones. A `reply-part` is forwarded only as the
+       * end of a prompt, which the cases above cover.
        */
       const unforwardedEvents = Object.freeze({
         title: { type: "title", title: "Trip plan" },
@@ -561,6 +713,31 @@ describe("ActivityHub", () => {
       ])
     })
 
+    it("sends no end of a prompt after its reply's reply-ended", async () => {
+      const hub = new ActivityHub()
+      const { generation, replyTask } = startControlledGeneration()
+      hub.addReply(JOB_REPLY, generation)
+      const stream = openRecordingStream(hub)
+      await waitForMicrotasks()
+      void replyTask.context.sendToolApprovalPrompt(APPROVAL_CALL)
+      await waitForMicrotasks()
+
+      hub.removeReply(JOB_REPLY.assistantMessageId, "failed")
+      replyTask.context.sendEvent(
+        buildStoredCallEvent(APPROVAL_CALL, {
+          status: "failed",
+          result: "Nobody answered the approval prompt in time."
+        })
+      )
+      await waitForMicrotasks()
+
+      expect(stream.written).toEqual([
+        buildIdleSnapshot([JOB_REPLY]),
+        { type: "tool-approval", ...JOB_REPLY, ...APPROVAL_PROMPT },
+        { type: "reply-ended", ...JOB_REPLY, status: "failed" }
+      ])
+    })
+
     it("closes its subscription on the removed reply's generation, and on no other", async () => {
       const hub = new ActivityHub()
       const job = startControlledGeneration()
@@ -629,6 +806,9 @@ describe("ActivityHub", () => {
       await waitForMicrotasks()
       void replyTask.context.sendToolApprovalPrompt(APPROVAL_CALL)
       void replyTask.context.sendClientToolCall(DESKTOP_TOOL_CALL)
+      replyTask.context.sendEvent(
+        buildStoredCallEvent(APPROVAL_CALL, { status: "running" })
+      )
       await waitForMicrotasks()
       const laterStream = openRecordingStream(hub)
       hub.removeReply(JOB_REPLY.assistantMessageId, "completed")
@@ -641,6 +821,7 @@ describe("ActivityHub", () => {
         "job-updated",
         "tool-approval",
         "tool-call",
+        "tool-approval-ended",
         "reply-ended",
         "activity-snapshot",
         "reply-ended"

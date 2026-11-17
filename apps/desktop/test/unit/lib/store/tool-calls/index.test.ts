@@ -314,6 +314,26 @@ function buildJobRunEvent(call: ChatToolCall): ActivityEvent {
 }
 
 /**
+ * Builds the activity event that reports the end of one prompt of the job's
+ * reply.
+ *
+ * @param call - Call whose prompt ended.
+ * @param status - State the reply stored the call in when its prompt ended.
+ * @returns The validated `tool-approval-ended` event.
+ */
+function buildJobApprovalEndedEvent(
+  call: ChatToolCall,
+  status: "running" | "rejected" | "failed"
+): ActivityEvent {
+  return activityEventSchema.parse({
+    type: "tool-approval-ended",
+    ...JOB_REPLY_TARGET,
+    callId: call.id,
+    status
+  })
+}
+
+/**
  * Builds the route key of the tool-result endpoint for one call of
  * {@link REPLY}.
  *
@@ -1405,6 +1425,144 @@ describe("useToolCallStore", () => {
       ])
       expect(useToolCallStore.getState().heldCalls).toEqual([whileBothWait[0]])
       expect(useToolCallStore.getState().activityReplies.size).toBe(0)
+    })
+
+    it("shows a job's prompt as expired in the job and in its parent once the stream reports it ended with its call stored as failed", async () => {
+      startBackendFake({})
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const { handleActivityEvent } = useToolCallStore.getState()
+      await handleActivityEvent(JOB_PROMPT_SNAPSHOT_EVENT)
+
+      await handleActivityEvent(buildJobApprovalEndedEvent(JOB_CALL, "failed"))
+
+      const state = useToolCallStore.getState()
+      const expiredPrompt = { call: JOB_CALL, answer: { status: "expired" } }
+      expect(findShownToolCall(state, FIXTURE_JOB_ID)).toMatchObject(
+        expiredPrompt
+      )
+      expect(findShownToolCall(state, FIXTURE_CONVERSATION_ID)).toMatchObject(
+        expiredPrompt
+      )
+      expect(
+        isReplyAwaitingApproval(state.heldCalls, FIXTURE_JOB_REPLY_ID)
+      ).toBe(false)
+    })
+
+    it.each([
+      ["allowed", "running"],
+      ["rejected", "rejected"]
+    ] as const)(
+      "hides a job's prompt that another caller %s once the stream reports it ended",
+      async (_label, status) => {
+        startBackendFake({})
+        const { useToolCallStore } = await loadFreshToolCallStore()
+        const { handleActivityEvent } = useToolCallStore.getState()
+        await handleActivityEvent(JOB_PROMPT_SNAPSHOT_EVENT)
+
+        await handleActivityEvent(buildJobApprovalEndedEvent(JOB_CALL, status))
+
+        const state = useToolCallStore.getState()
+        expect(state.heldCalls).toMatchObject([
+          { call: JOB_CALL, answer: { status: "answered" } }
+        ])
+        expect(
+          findShownToolCall(state, FIXTURE_CONVERSATION_ID)
+        ).toBeUndefined()
+        expect(
+          isReplyAwaitingApproval(state.heldCalls, FIXTURE_JOB_REPLY_ID)
+        ).toBe(false)
+      }
+    )
+
+    it("ignores the end of a prompt that names another reply than the one whose call it holds", async () => {
+      startBackendFake({})
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const { handleActivityEvent } = useToolCallStore.getState()
+      const wakeUpReply = {
+        conversationId: FIXTURE_CONVERSATION_ID,
+        parentConversationId: null,
+        assistantMessageId: createFixtureUuidV7(98)
+      }
+      await handleActivityEvent(JOB_PROMPT_SNAPSHOT_EVENT)
+      await handleActivityEvent(
+        activityEventSchema.parse({ type: "reply-started", ...wakeUpReply })
+      )
+
+      await handleActivityEvent(
+        activityEventSchema.parse({
+          type: "tool-approval-ended",
+          ...wakeUpReply,
+          callId: JOB_CALL.id,
+          status: "failed"
+        })
+      )
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: JOB_CALL, answer: { status: "awaiting-person" } }
+      ])
+    })
+
+    it("ends a job's prompt that a reconnect's snapshot no longer lists as waiting while it still lists the job's reply", async () => {
+      startBackendFake({})
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const { handleActivityEvent } = useToolCallStore.getState()
+      await handleActivityEvent(JOB_PROMPT_SNAPSHOT_EVENT)
+
+      await handleActivityEvent(
+        buildActivitySnapshotEvent([buildActivityReply()])
+      )
+
+      const state = useToolCallStore.getState()
+      expect(state.heldCalls).toMatchObject([
+        { call: JOB_CALL, answer: { status: "answered" } }
+      ])
+      expect(findShownToolCall(state, FIXTURE_JOB_ID)).toBeUndefined()
+      expect(findShownToolCall(state, FIXTURE_CONVERSATION_ID)).toBeUndefined()
+      expect(
+        isReplyAwaitingApproval(state.heldCalls, FIXTURE_JOB_REPLY_ID)
+      ).toBe(false)
+    })
+
+    it("ends a job's prompt whose answer failed to send once a reconnect's snapshot no longer lists it as waiting", async () => {
+      const approvalRoute = `POST /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/tool-approvals/${JOB_CALL.id}`
+      startBackendFake({
+        [approvalRoute]: () => Promise.reject(createTransportFailure())
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const { handleActivityEvent } = useToolCallStore.getState()
+      await handleActivityEvent(JOB_PROMPT_SNAPSHOT_EVENT)
+      await useToolCallStore.getState().resolveToolCall(JOB_CALL.id)
+      const afterFailedSend = useToolCallStore.getState().heldCalls
+
+      await handleActivityEvent(
+        buildActivitySnapshotEvent([buildActivityReply()])
+      )
+
+      expect(afterFailedSend).toMatchObject([
+        { call: JOB_CALL, answer: { status: "send-failed" } }
+      ])
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: JOB_CALL, answer: { status: "answered" } }
+      ])
+      expect(
+        findShownToolCall(useToolCallStore.getState(), FIXTURE_JOB_ID)
+      ).toBeUndefined()
+    })
+
+    it("keeps a job's expired prompt when a reconnect's snapshot no longer lists it as waiting", async () => {
+      startBackendFake({})
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const { handleActivityEvent } = useToolCallStore.getState()
+      await handleActivityEvent(JOB_PROMPT_SNAPSHOT_EVENT)
+      await handleActivityEvent(buildJobApprovalEndedEvent(JOB_CALL, "failed"))
+      const [expiredPrompt] = useToolCallStore.getState().heldCalls
+
+      await handleActivityEvent(
+        buildActivitySnapshotEvent([buildActivityReply()])
+      )
+
+      expect(expiredPrompt?.answer.status).toBe("expired")
+      expect(useToolCallStore.getState().heldCalls).toEqual([expiredPrompt])
     })
 
     it.each([

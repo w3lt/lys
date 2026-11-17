@@ -495,8 +495,8 @@ export type ChatViewActions = {
    * the store follows it as an open does, and stops following a completed
    * reply's title. A job update replaces that job in the shown conversation,
    * or adds it in number order: the update that arrived last wins, also over
-   * a read or an open under way. Approval prompts and tool calls are left to
-   * the tool-call store.
+   * a read or an open under way. Approval prompts, their ends, and tool
+   * calls are left to the tool-call store.
    */
   handleActivityEvent: (event: ActivityEvent) => void
   /**
@@ -2564,6 +2564,7 @@ export function createChatViewStore(
           updateConversationJob(event.parentConversationId, event.job)
           return
         case "tool-approval":
+        case "tool-approval-ended":
         case "tool-call":
           return
         default: {

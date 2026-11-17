@@ -1589,8 +1589,10 @@ The tool-call store follows every reply the chat store starts or follows on
 its own reply-events connection, so tool calls keep moving while another
 conversation is shown. A reply the backend started, a job's or a wake-up
 turn's, comes from the activity stream instead, which announces it and
-carries its prompts and calls; its calls are dropped when the stream says
-the reply ended, or when a new snapshot no longer lists it. It takes each
+carries its prompts, the end of each prompt, and its calls; its calls are
+dropped when the stream says the reply ended, or when a new snapshot no
+longer lists it, and a prompt the new snapshot no longer lists as waiting
+for a reply it still lists has ended and is no longer shown. It takes each
 prompt, with its approval token, from a `tool-approval` event or the
 snapshot's `pendingToolApprovals`, and each call to run from a `tool-call`
 event or the snapshot's `pendingToolCalls`, once. A held call keeps its step,
@@ -1607,13 +1609,17 @@ so a snapshot built before the answer arrived does not bring it back:
    argument as it is.
 2. Every other prompt waits for the person, for at most five minutes. When
    the call arrives stored as `failed` while its prompt still waits, in a
-   `reply-part` event or a later snapshot's parts, the backend ended the prompt
-   at its time limit, and the card becomes a "Prompt expired" notice. A call
-   that arrives as `running` or `rejected` first was answered, so its later
-   failure is not taken for an expiry. When the backend refuses an answer
-   because the prompt no longer waits, the card is hidden until the call's
-   stored state arrives, so an answer sent just after the limit still ends in
-   the notice.
+   `reply-part` event or a later snapshot's parts, or in a
+   `tool-approval-ended` event for a reply of the activity stream, the
+   backend ended the prompt at its time limit: the card becomes a "Prompt
+   expired" notice, and a job's card no longer says it needs the person. A
+   call that arrives as `running` or `rejected` first was answered, here or
+   by another caller, so its card is hidden and its later failure is not
+   taken for an expiry. An activity snapshot carries no parts, so a prompt
+   that ended while the activity stream was down is hidden rather than shown
+   as expired. When the backend refuses an answer because the prompt no
+   longer waits, the card is hidden until the call's stored state arrives, so
+   an answer sent just after the limit still ends in the notice.
 3. A call to run is run at once and its result sent; a call the desktop
    cannot run is answered `runFailed`. Nothing is shown. The desktop does not
    check that the person allowed the call, so a call that another local
@@ -1662,8 +1668,9 @@ without running the tool again. An allowed answer still in flight when the
 call's run request arrives does not hold the run back. When the reply ends, by
 finishing, Stop, deleting its conversation, or backend shutdown, its waiting
 calls disappear; a notice of an expired prompt stays until it is dismissed or
-a later reply of its conversation is followed. A newer turn in the
-conversation does not end a waiting reply yet
+a later reply of its conversation is followed, except that the notice of a
+reply the activity stream announced goes when the stream says that reply
+ended. A newer turn in the conversation does not end a waiting reply yet
 ([#137](https://github.com/w3lt/lys/issues/137)). After a renderer reload, a
 call still waiting is found again through the reply's snapshot when its
 conversation is shown. Quitting the app stops the backend, so its waiting

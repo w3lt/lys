@@ -156,12 +156,14 @@ export type JobReportDelivery = Readonly<{
   messageId: string
   /**
    * Text the delegator reads, stored in place of the report's text;
-   * non-empty for a note and for a `failed` report.
+   * non-empty for a note and for a `failed` report, and empty for a
+   * `stopped` and for an `interrupted` report.
    */
   content: string
   /**
    * Numbers of the sources of the delegator's conversation the text cites,
-   * ascending; empty when it cites none.
+   * ascending; empty when it cites none, and always for a `stopped` and for
+   * an `interrupted` report.
    */
   sourceNumbers: readonly number[]
 }>
@@ -638,9 +640,10 @@ export interface JobTurnTransaction {
    * @throws `Job report is not waiting for delivery` when the report is not
    * stored or is already delivered; nothing is then changed, so a report is
    * delivered once.
-   * @throws The store's own error when the message is not stored, or the
-   * text of a note or of a `failed` report is empty, each of which breaks the
-   * precondition; the report then stays undelivered.
+   * @throws The store's own error when the message is not stored, the text
+   * of a note or of a `failed` report is empty, or a `stopped` or an
+   * `interrupted` report is given a text or a source number, each of which
+   * breaks the precondition; the report then stays undelivered.
    */
   updateJobReportToDelivered(delivery: JobReportDelivery): void
   /**

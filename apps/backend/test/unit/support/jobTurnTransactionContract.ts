@@ -529,6 +529,53 @@ function registerReportDeliveryRefusalCases(
       ])
     }
   )
+
+  it.for<
+    [
+      string,
+      Extract<JobReport["kind"], "stopped" | "interrupted">,
+      string,
+      readonly number[]
+    ]
+  >([
+    ["a text for a stopped report", "stopped", "Stopped early.", []],
+    ["a source for a stopped report", "stopped", "", [1]],
+    ["a text for an interrupted report", "interrupted", "Cut off.", []],
+    ["a source for an interrupted report", "interrupted", "", [1]]
+  ])(
+    "refuses %s and keeps the report as it is",
+    ([, kind, content, sourceNumbers]) => {
+      const harness = createHarness()
+      const waiting = saveWaitingReport(harness)
+      const fixture = createJobFixture(waiting.mainId, 2, "interrupted")
+      const row = saveReport(harness, saveJob(harness, fixture), {
+        sequence: 201,
+        kind,
+        title: "Find what butterflies eat",
+        content: "",
+        createdAt: createFixtureTimestamp(30, 1)
+      })
+      const delivery = {
+        ...waiting.delivery,
+        reportId: row.id,
+        content,
+        sourceNumbers
+      }
+
+      expect(() =>
+        harness.turnRecordWriter.handleConversationTurnWriteRequest(
+          (_transaction, jobs) => {
+            jobs.updateJobReportToDelivered(delivery)
+          }
+        )
+      ).toThrow()
+
+      expect(listUndeliveredReports(harness, waiting.mainId)).toEqual([
+        buildExpectedReport(waiting.row, 1),
+        buildExpectedReport(row, 2)
+      ])
+    }
+  )
 }
 
 /**

@@ -63,8 +63,9 @@ export default class SqliteJobTurnTransaction implements JobTurnTransaction {
    * source numbers are stored as a JSON list.
    * @param delivery - Interface-defined delivery.
    * @throws The interface-defined failures; a message that is not stored
-   * fails the foreign-key constraint, and an empty text of a note or of a
-   * `failed` report the check constraint.
+   * fails the foreign-key constraint, an empty text of a note or of a
+   * `failed` report one check constraint, and a text or a source number of a
+   * `stopped` or an `interrupted` report another.
    */
   public updateJobReportToDelivered(delivery: JobReportDelivery): void {
     /** What a delivery fails with when its report does not wait for one. */

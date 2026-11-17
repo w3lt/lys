@@ -387,6 +387,25 @@ type CoreServices = Omit<
   | typeof CLOSE_SINGLETON_SERVICES
 >
 
+/**
+ * The services {@link buildCoreServices} writes out by name, as their
+ * creation groups them.
+ */
+type CoreServiceGroups = Readonly<{
+  /** Chat service the bundle holds. */
+  chatService: CoreServices["chatService"]
+  /** Each provider's LLM services. */
+  llmProviderServices: CoreServices["llmProviderServices"]
+  /** Services that keep their data in the shared database. */
+  databaseServices: DatabaseServices
+  /** Services that define agents and run them. */
+  agentServices: AgentServices
+  /** Services that run, find, and approve tools. */
+  toolServices: ToolServices
+  /** Store of the attachment files of every conversation. */
+  attachmentFileStore: CoreServices["attachmentFileStore"]
+}>
+
 /** What a bundle is created with, besides the services it holds. */
 type SingletonBundleContext = Readonly<{
   /**
@@ -565,14 +584,14 @@ export async function createSingletonServices(
 
     return createSingletonServiceBundle(
       { config, logReporters, serviceLifetime, database },
-      {
+      buildCoreServices({
         chatService,
         llmProviderServices,
-        ...databaseServices,
-        ...agentServices,
-        ...tools.services,
+        databaseServices,
+        agentServices,
+        toolServices: tools.services,
         attachmentFileStore
-      }
+      })
     )
   } catch (creationError) {
     return await throwCreationFailureAfterClosingResources(
@@ -603,8 +622,12 @@ function createSingletonServiceBundle(
   const activityHub = new ActivityHub()
   serviceLifetime.use(activityHub)
   const delegationServices = createDelegationServices(context, {
-    ...coreServices,
-    ...turnStartServices,
+    agentService: coreServices.agentService,
+    agentRuntimeService: coreServices.agentRuntimeService,
+    conversationHistoryReader: coreServices.conversationHistoryReader,
+    conversationTurns: coreServices.conversationTurns,
+    startTurn: turnStartServices.startTurn,
+    replyGenerations: turnStartServices.replyGenerations,
     activityHub
   })
   serviceLifetime.defer(() => {
@@ -615,9 +638,54 @@ function createSingletonServiceBundle(
     replyGenerations: turnStartServices.replyGenerations,
     startTurn: turnStartServices.startTurn,
     activityHub,
-    ...delegationServices,
+    conversationWakeSettings: delegationServices.conversationWakeSettings,
+    handleTurnStarted: delegationServices.handleTurnStarted,
+    createTurnDelegation: delegationServices.createTurnDelegation,
+    handleReplyEnded: delegationServices.handleReplyEnded,
+    stopReply: delegationServices.stopReply,
+    stopConversationJobs: delegationServices.stopConversationJobs,
+    listWorkingReplies: delegationServices.listWorkingReplies,
+    stopDeletedReplies: delegationServices.stopDeletedReplies,
     [CLOSE_SINGLETON_SERVICES]: buildCloseSingletonServices(serviceLifetime)
   })
+}
+
+/**
+ * Writes the services of a bundle's groups out by name, as the services a
+ * bundle's turn start is created over.
+ *
+ * @param groups - The chat service, each provider's LLM services, the
+ * services over the shared database, the agent services, the tool services,
+ * and the attachment file store.
+ * @returns A new record of every one of those services; it holds the same
+ * services and owns none of them.
+ */
+function buildCoreServices({
+  chatService,
+  llmProviderServices,
+  databaseServices,
+  agentServices,
+  toolServices,
+  attachmentFileStore
+}: CoreServiceGroups): CoreServices {
+  return {
+    chatService,
+    llmProviderServices,
+    conversationTurns: databaseServices.conversationTurns,
+    replyParts: databaseServices.replyParts,
+    conversationHistoryReader: databaseServices.conversationHistoryReader,
+    conversationHistoryEditor: databaseServices.conversationHistoryEditor,
+    agentService: agentServices.agentService,
+    agentRuntimeService: agentServices.agentRuntimeService,
+    builtInTools: toolServices.builtInTools,
+    listedAgentTools: toolServices.listedAgentTools,
+    webSearchToolProvider: toolServices.webSearchToolProvider,
+    toolApprovalService: toolServices.toolApprovalService,
+    mcpServerRegistry: toolServices.mcpServerRegistry,
+    mcpServerProcessGroups: toolServices.mcpServerProcessGroups,
+    emailAccountChecker: toolServices.emailAccountChecker,
+    attachmentFileStore
+  }
 }
 
 /**

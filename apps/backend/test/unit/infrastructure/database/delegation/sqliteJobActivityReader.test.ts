@@ -1,4 +1,4 @@
-import { describe, expect, it, onTestFinished } from "vitest"
+import { describe, expect, it } from "vitest"
 import SqliteJobActivityReader from "../../../../../src/infrastructure/database/delegation/sqliteJobActivityReader"
 import { openTestDatabase } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
@@ -34,9 +34,6 @@ describe("SqliteJobActivityReader", () => {
     "refuses %s nested in another database operation",
     ([, readActivity]) => {
       const database = openTestDatabase()
-      onTestFinished(() => {
-        database[Symbol.dispose]()
-      })
       const jobActivityReader = new SqliteJobActivityReader(database)
 
       database.handleDatabaseWriteRequest(() => {

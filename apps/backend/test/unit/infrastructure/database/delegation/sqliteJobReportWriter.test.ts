@@ -1,4 +1,4 @@
-import { describe, expect, it, onTestFinished } from "vitest"
+import { describe, expect, it } from "vitest"
 import SqliteJobReportWriter from "../../../../../src/infrastructure/database/delegation/sqliteJobReportWriter"
 import {
   listJobReportRows,
@@ -13,9 +13,6 @@ describe("SqliteJobReportWriter", () => {
 
   it("refuses report writes nested in another database operation and stores nothing", () => {
     const database = openTestDatabase()
-    onTestFinished(() => {
-      database[Symbol.dispose]()
-    })
     const jobReportWriter = new SqliteJobReportWriter(database)
     const report = {
       id: createFixtureUuidV7(30),

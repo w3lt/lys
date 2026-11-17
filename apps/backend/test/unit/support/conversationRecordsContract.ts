@@ -3090,7 +3090,7 @@ function registerJobCreationCases(
           transaction.createConversation(metadata)
         }
       )
-    ).toThrow()
+    ).toThrow("FOREIGN KEY constraint failed")
 
     expect(harness.recordReader.findConversation(metadata.id)).toBeUndefined()
   })
@@ -3106,7 +3106,9 @@ function registerJobCreationCases(
           transaction.createConversation(metadata)
         }
       )
-    ).toThrow()
+    ).toThrow(
+      "CHECK constraint failed: (job_number IS NULL) = (parent_conversation_id IS NULL)"
+    )
 
     expect(harness.recordReader.findConversation(metadata.id)).toBeUndefined()
   })
@@ -3124,7 +3126,9 @@ function registerJobCreationCases(
           transaction.createConversation(metadata)
         }
       )
-    ).toThrow()
+    ).toThrow(
+      "UNIQUE constraint failed: conversations.parent_conversation_id, conversations.job_number"
+    )
 
     expect(harness.recordReader.findConversation(metadata.id)).toBeUndefined()
     expect(harness.recordReader.findConversation(mainId)?.jobs).toEqual([
@@ -3221,7 +3225,7 @@ function registerMessageAuthorCases(
           })
         }
       )
-    ).toThrow()
+    ).toThrow("FOREIGN KEY constraint failed")
 
     expect(
       harness.recordReader.findConversation(job.id)?.messages

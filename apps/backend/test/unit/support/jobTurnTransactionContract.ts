@@ -218,7 +218,9 @@ function registerJobTitleCases(
           jobs.updateJobTitle(job.id, "")
         }
       )
-    ).toThrow()
+    ).toThrow(
+      "CHECK constraint failed: (job_number IS NULL) = (parent_conversation_id IS NULL)"
+    )
 
     expect(harness.recordReader.findConversation(job.id)?.title).toBe("Job 1")
   })
@@ -493,7 +495,7 @@ function registerReportDeliveryRefusalCases(
           jobs.updateJobReportToDelivered(delivery)
         }
       )
-    ).toThrow()
+    ).toThrow("FOREIGN KEY constraint failed")
 
     expect(listUndeliveredReports(harness, waiting.mainId)).toEqual([
       buildExpectedReport(waiting.row, 1)
@@ -521,7 +523,9 @@ function registerReportDeliveryRefusalCases(
             jobs.updateJobReportToDelivered(delivery)
           }
         )
-      ).toThrow()
+      ).toThrow(
+        "CHECK constraint failed: kind NOT IN ('note', 'failed') OR content <> ''"
+      )
 
       expect(listUndeliveredReports(harness, waiting.mainId)).toEqual([
         buildExpectedReport(waiting.row, 1),
@@ -568,7 +572,9 @@ function registerReportDeliveryRefusalCases(
             jobs.updateJobReportToDelivered(delivery)
           }
         )
-      ).toThrow()
+      ).toThrow(
+        "CHECK constraint failed: kind NOT IN ('stopped', 'interrupted')"
+      )
 
       expect(listUndeliveredReports(harness, waiting.mainId)).toEqual([
         buildExpectedReport(waiting.row, 1),
@@ -603,20 +609,24 @@ function registerConversationSourceCases(
   it.each([
     [
       "whose number the conversation stores for another URL",
-      { ...NEW_SOURCE, number: STORED_SOURCE.number }
+      { ...NEW_SOURCE, number: STORED_SOURCE.number },
+      "UNIQUE constraint failed: conversation_sources.conversation_id, conversation_sources.number"
     ],
     [
       "whose URL the conversation stores under another number",
-      { ...NEW_SOURCE, url: STORED_SOURCE.url }
+      { ...NEW_SOURCE, url: STORED_SOURCE.url },
+      "UNIQUE constraint failed: conversation_sources.conversation_id, conversation_sources.url"
     ]
   ] as const)(
     "refuses a source %s and keeps the conversation's sources as they are",
-    (_label, source) => {
+    (_label, source, failure) => {
       const harness = createHarness()
       const mainId = saveMainConversation(harness, 1)
       harness.saveSource(mainId, STORED_SOURCE)
 
-      expect(() => createSourceInTurnWrite(harness, mainId, source)).toThrow()
+      expect(() => createSourceInTurnWrite(harness, mainId, source)).toThrow(
+        failure
+      )
 
       expect(harness.recordReader.findConversation(mainId)?.sources).toEqual([
         STORED_SOURCE
@@ -629,7 +639,7 @@ function registerConversationSourceCases(
 
     expect(() =>
       createSourceInTurnWrite(harness, UNKNOWN_ID, NEW_SOURCE)
-    ).toThrow()
+    ).toThrow("FOREIGN KEY constraint failed")
   })
 }
 

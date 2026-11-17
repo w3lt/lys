@@ -1048,7 +1048,7 @@ function registerEndReportCases(
 
     expect(() =>
       harness.jobReportWriter.createEndReport(createResultReport(otherJob, 200))
-    ).toThrow()
+    ).toThrow("UNIQUE constraint failed: job_reports.id")
 
     expect(harness.listJobReports()).toEqual([
       buildStoredReportRow(stored, "result")
@@ -1176,7 +1176,7 @@ function registerProgressNoteCases(
 
     expect(() =>
       harness.jobReportWriter.createProgressNote(createProgressNote(job, 200))
-    ).toThrow()
+    ).toThrow("UNIQUE constraint failed: job_reports.id")
 
     expect(harness.listJobReports()).toEqual([kept])
   })

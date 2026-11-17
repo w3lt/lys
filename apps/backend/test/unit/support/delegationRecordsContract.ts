@@ -791,7 +791,6 @@ function registerEndedReplyCases(
       conversationId: empty.id,
       parentConversationId: mainId,
       status: "failed",
-      finishReason: null,
       lastRoundText: ""
     })
   })
@@ -810,9 +809,12 @@ function registerEndedReplyCases(
       finishReason: "stop",
       lastRoundText: ""
     })
-    expect(harness.jobActivityReader.findEndedReply(job.replyId)).toMatchObject(
-      { status: "streaming", finishReason: null }
-    )
+    expect(harness.jobActivityReader.findEndedReply(job.replyId)).toEqual({
+      conversationId: job.id,
+      parentConversationId: mainId,
+      status: "streaming",
+      lastRoundText: ""
+    })
   })
 
   it("finds nothing for an unknown reply id, a user message, or a part of a reply", () => {

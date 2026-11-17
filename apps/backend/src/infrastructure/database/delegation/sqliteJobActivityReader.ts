@@ -106,6 +106,58 @@ function listStreamingReplies(
 }
 
 /**
+ * Validates one stored reply as the end of its generation is reported.
+ *
+ * @param row - The reply's row: its conversation and that conversation's
+ * parent, its state and finish reason, and the text of its last round.
+ * @returns The validated record; a reply in any state but `completed` has
+ * no finish reason.
+ * @throws If the row violates the record contract, as a completed reply
+ * without a finish reason, or another reply with one, does.
+ */
+function parseEndedReplyRecord(row: unknown): EndedReplyRecord {
+  /** Fields of a stored reply that do not depend on its state. */
+  const replyShape = {
+    /** Identity of the conversation that holds the reply. */
+    conversationId: conversationBaseSchema.shape.id,
+    /** Identity of that conversation's parent; null for a main conversation. */
+    parentConversationId: conversationBaseSchema.shape.id.nullable(),
+    /** Text of the reply's last round, possibly empty. */
+    lastRoundText: z.string()
+  }
+  const { status, finishReason } = conversationAssistantMessageSchema.shape
+  /** Validates a completed reply, which has a finish reason. */
+  const completedReplySchema = z.strictObject({
+    ...replyShape,
+    status: status.extract(["completed"]),
+    finishReason: finishReason.unwrap()
+  })
+  /**
+   * Validates a reply in any other state, whose stored finish reason is
+   * null and is left out of the record.
+   */
+  const uncompletedReplySchema = z
+    .strictObject({
+      ...replyShape,
+      status: status.exclude(["completed"]),
+      finishReason: z.null()
+    })
+    .transform((reply) => ({
+      conversationId: reply.conversationId,
+      parentConversationId: reply.parentConversationId,
+      status: reply.status,
+      lastRoundText: reply.lastRoundText
+    }))
+
+  return z
+    .discriminatedUnion("status", [
+      completedReplySchema,
+      uncompletedReplySchema
+    ])
+    .parse(row)
+}
+
+/**
  * Reads one stored reply as the end of its generation is reported, inside
  * the caller's read transaction.
  *
@@ -120,20 +172,6 @@ function findEndedReply(
   statements: DatabaseStatementCompiler,
   assistantMessageId: string
 ): EndedReplyRecord | undefined {
-  /** Validates one stored reply as the end of its generation is reported. */
-  const endedReplyRecordSchema = z.strictObject({
-    /** Identity of the conversation that holds the reply. */
-    conversationId: conversationBaseSchema.shape.id,
-    /** Identity of that conversation's parent; null for a main conversation. */
-    parentConversationId: conversationBaseSchema.shape.id.nullable(),
-    /** Stored state of the reply. */
-    status: conversationAssistantMessageSchema.shape.status,
-    /** Stored finish reason; null unless the reply completed. */
-    finishReason: conversationAssistantMessageSchema.shape.finishReason,
-    /** Text of the reply's last round, possibly empty. */
-    lastRoundText: z.string()
-  })
-
   const row = statements
     .getStatement(
       `SELECT r.conversation_id AS conversationId,
@@ -151,7 +189,7 @@ function findEndedReply(
     )
     .get(assistantMessageId)
   if (row === undefined) return undefined
-  return endedReplyRecordSchema.parse(row)
+  return parseEndedReplyRecord(row)
 }
 
 /**

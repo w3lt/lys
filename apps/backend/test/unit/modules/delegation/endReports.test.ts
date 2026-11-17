@@ -1,7 +1,3 @@
-import type {
-  ConversationAssistantMessageFinishReason,
-  ConversationAssistantMessageStatus
-} from "@lys/share"
 import { describe, expect, it } from "vitest"
 import { buildEndReport } from "../../../../src/modules/delegation/endReports"
 import type {
@@ -15,25 +11,34 @@ import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 const LAST_ROUND_TEXT = "Most moths drink nectar."
 
 /**
+ * Stored state of a reply of the cases: its status, with why it finished
+ * when it completed.
+ */
+type EndedJobReplyState =
+  | Pick<
+      Extract<EndedReplyRecord, { status: "completed" }>,
+      "status" | "finishReason"
+    >
+  | Pick<Exclude<EndedReplyRecord, { status: "completed" }>, "status">
+
+/**
  * Builds a reply of a job as stored once its end is reported.
  *
- * @param status - Stored state of the reply.
- * @param finishReason - Why it finished; null unless it completed.
+ * @param state - Stored state of the reply, with why it finished when it
+ * completed.
  * @param lastRoundText - Text of its last round; {@link LAST_ROUND_TEXT}
  * when omitted.
  * @returns The frozen record of the job's reply.
  */
 function buildEndedJobReply(
-  status: ConversationAssistantMessageStatus,
-  finishReason: ConversationAssistantMessageFinishReason | null,
+  state: EndedJobReplyState,
   lastRoundText: string = LAST_ROUND_TEXT
 ): EndedReplyRecord {
   return Object.freeze({
     conversationId: createFixtureUuidV7(2),
     parentConversationId: createFixtureUuidV7(1),
-    status,
-    finishReason,
-    lastRoundText
+    lastRoundText,
+    ...state
   })
 }
 
@@ -55,84 +60,84 @@ describe("buildEndReport", () => {
   >([
     [
       "completed",
-      buildEndedJobReply("completed", "stop"),
+      buildEndedJobReply({ status: "completed", finishReason: "stop" }),
       undefined,
       undefined,
       { kind: "result", content: LAST_ROUND_TEXT }
     ],
     [
       "completed with an empty last round",
-      buildEndedJobReply("completed", "stop", ""),
+      buildEndedJobReply({ status: "completed", finishReason: "stop" }, ""),
       undefined,
       undefined,
       { kind: "result", content: "" }
     ],
     [
       "completed at the length limit",
-      buildEndedJobReply("completed", "length"),
+      buildEndedJobReply({ status: "completed", finishReason: "length" }),
       undefined,
       undefined,
       { kind: "result", content: `${LAST_ROUND_TEXT}\n\n${lengthLimitNote}` }
     ],
     [
       "completed at the length limit with an empty last round",
-      buildEndedJobReply("completed", "length", ""),
+      buildEndedJobReply({ status: "completed", finishReason: "length" }, ""),
       undefined,
       undefined,
       { kind: "result", content: lengthLimitNote }
     ],
     [
       "completed before the stop its delegator asked for took effect",
-      buildEndedJobReply("completed", "stop"),
+      buildEndedJobReply({ status: "completed", finishReason: "stop" }),
       "delegator",
       undefined,
       { kind: "result", content: LAST_ROUND_TEXT }
     ],
     [
       "failed",
-      buildEndedJobReply("failed", null),
+      buildEndedJobReply({ status: "failed" }),
       undefined,
       "The model stopped answering.",
       { kind: "failed", content: "The model stopped answering." }
     ],
     [
       "failed without an error event",
-      buildEndedJobReply("failed", null),
+      buildEndedJobReply({ status: "failed" }),
       undefined,
       undefined,
       { kind: "failed", content: unknownFailure }
     ],
     [
       "failed with a blank error sentence",
-      buildEndedJobReply("failed", null),
+      buildEndedJobReply({ status: "failed" }),
       undefined,
       " \n",
       { kind: "failed", content: unknownFailure }
     ],
     [
       "was interrupted by stop_job",
-      buildEndedJobReply("interrupted", null),
+      buildEndedJobReply({ status: "interrupted" }),
       "delegator",
       undefined,
       undefined
     ],
     [
       "was interrupted by the person",
-      buildEndedJobReply("interrupted", null),
+      buildEndedJobReply({ status: "interrupted" }),
       "person",
       undefined,
       { kind: "stopped", content: "" }
     ],
     [
       "was interrupted with no requester",
-      buildEndedJobReply("interrupted", null),
+      buildEndedJobReply({ status: "interrupted" }),
       undefined,
       undefined,
       { kind: "interrupted", content: "" }
     ],
     [
       "is still stored as streaming",
-      buildEndedJobReply("streaming", null),
+      buildEndedJobReply({ status: "streaming" }),
       "person",
       undefined,
       undefined

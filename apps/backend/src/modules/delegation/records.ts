@@ -1,6 +1,5 @@
 import type {
   ConversationAssistantMessageFinishReason,
-  ConversationAssistantMessageStatus,
   Job,
   JobReportKind
 } from "@lys/share"
@@ -21,7 +20,37 @@ export type JobRecord = Readonly<{
   job: Job
 }>
 
-/** One stored reply as the end of its generation is reported. */
+/**
+ * Stored state of a reply as the end of its generation is reported, in the
+ * variant its status selects: only a completed reply has a finish reason.
+ */
+type EndedReplyState =
+  | Readonly<{
+      /** The reply completed. */
+      status: "completed"
+      /** Why it finished. */
+      finishReason: ConversationAssistantMessageFinishReason
+    }>
+  | Readonly<{
+      /** The reply failed. */
+      status: "failed"
+    }>
+  | Readonly<{
+      /** The reply was interrupted. */
+      status: "interrupted"
+    }>
+  | Readonly<{
+      /**
+       * The reply is still stored as streaming: it has not ended, or its
+       * final state could not be written.
+       */
+      status: "streaming"
+    }>
+
+/**
+ * One stored reply as the end of its generation is reported, in the
+ * variant its status selects.
+ */
 export type EndedReplyRecord = Readonly<{
   /** UUIDv7 of the conversation that holds the reply. */
   conversationId: string
@@ -30,17 +59,14 @@ export type EndedReplyRecord = Readonly<{
    * it is a main conversation.
    */
   parentConversationId: string | null
-  /** Stored state of the reply; `streaming` while it has not ended. */
-  status: ConversationAssistantMessageStatus
-  /** Why a completed reply finished; null in every other state. */
-  finishReason: ConversationAssistantMessageFinishReason | null
   /**
    * Text parts of the reply's last round, joined in order; empty when that
    * round wrote none. The last round is the highest one any part of the reply
    * belongs to.
    */
   lastRoundText: string
-}>
+}> &
+  EndedReplyState
 
 /** What an end report says: every kind of report except the progress note. */
 export type EndReportKind = Exclude<JobReportKind, "note">

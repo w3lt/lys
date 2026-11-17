@@ -23,9 +23,9 @@ export function buildEndReport(
   requester: StopRequester | undefined,
   errorMessage: string | undefined
 ): EndReport | undefined {
-  switch (reply.status) {
-    case "completed":
-      return buildResultReport(reply)
+  if (reply.status === "completed") return buildResultReport(reply)
+  const { status } = reply
+  switch (status) {
     case "failed":
       return buildFailedReport(errorMessage)
     case "interrupted":
@@ -33,7 +33,7 @@ export function buildEndReport(
     case "streaming":
       return undefined
     default: {
-      const unhandledStatus: never = reply.status
+      const unhandledStatus: never = status
       throw new TypeError(
         `Unhandled reply state: ${JSON.stringify(unhandledStatus)}`
       )
@@ -51,7 +51,10 @@ export function buildEndReport(
  * only whitespace.
  */
 function buildResultReport(
-  reply: Pick<EndedReplyRecord, "finishReason" | "lastRoundText">
+  reply: Pick<
+    Extract<EndedReplyRecord, { status: "completed" }>,
+    "finishReason" | "lastRoundText"
+  >
 ): Extract<EndReport, { kind: "result" }> {
   const { lastRoundText } = reply
   if (reply.finishReason !== "length")

@@ -1,10 +1,13 @@
-import { TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES } from "@lys/protocol"
+import {
+  TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES,
+  type ChatToolResult
+} from "@lys/protocol"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ComponentProps } from "react"
 import { describe, expect, it, vi } from "vitest"
 import ComposerToolApproval from "@/components/ComposerComponents/ComposerToolApproval"
-import type { ShownToolCall } from "@/lib/store/tool-calls"
+import type { ShownToolCall, ToolCallInput } from "@/lib/store/tool-calls"
 import {
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
@@ -226,20 +229,22 @@ describe("ComposerToolApproval", () => {
       const pageCall = buildToolCall(11, "read_page", {
         url: "https://example.com/docs"
       })
+      const pageReadInput = {
+        runner: "backend",
+        toolName: "read_page",
+        url: "https://example.com/docs"
+      } satisfies ToolCallInput
+      const pageReadAnswer = {
+        status: "awaiting-person",
+        definition: buildBackendToolDefinition("read_page"),
+        input: pageReadInput
+      } satisfies ShownToolCall["answer"]
       const waitingPageRead: ShownToolCall = {
         target: buildCallTarget(pageCall.id),
         call: pageCall,
         step: "approval",
         approvalToken: createFixtureApprovalToken(1),
-        answer: {
-          status: "awaiting-person",
-          definition: buildBackendToolDefinition("read_page"),
-          input: {
-            runner: "backend",
-            toolName: "read_page",
-            url: "https://example.com/docs"
-          }
-        }
+        answer: pageReadAnswer
       }
       startToolApproval({
         toolCall: waitingPageRead,
@@ -264,21 +269,23 @@ describe("ComposerToolApproval", () => {
       const webSearchCall = buildToolCall(12, "web_search", {
         query: "moths at night"
       })
+      const webSearchInput = {
+        runner: "backend",
+        toolName: "web_search",
+        query: "moths at night",
+        host: "api.tavily.com"
+      } satisfies ToolCallInput
+      const webSearchAnswer = {
+        status: "awaiting-person",
+        definition: buildBackendToolDefinition("web_search"),
+        input: webSearchInput
+      } satisfies ShownToolCall["answer"]
       const waitingWebSearch: ShownToolCall = {
         target: buildCallTarget(webSearchCall.id),
         call: webSearchCall,
         step: "approval",
         approvalToken: createFixtureApprovalToken(1),
-        answer: {
-          status: "awaiting-person",
-          definition: buildBackendToolDefinition("web_search"),
-          input: {
-            runner: "backend",
-            toolName: "web_search",
-            query: "moths at night",
-            host: "api.tavily.com"
-          }
-        }
+        answer: webSearchAnswer
       }
       const user = userEvent.setup()
       startToolApproval({
@@ -474,16 +481,21 @@ describe("ComposerToolApproval", () => {
   describe("an answer that failed to send", () => {
     it("announces the reason as an alert and offers only to try again", async () => {
       // The search ran, and its result could not be sent to the backend.
+      const searchResult: ChatToolResult = {
+        status: "succeeded",
+        content: "{}"
+      }
+      const unsentAnswer = {
+        status: "send-failed",
+        toolAnswer: searchResult,
+        error:
+          "Couldn't send the answer to Lys: The backend could not be reached."
+      } satisfies ShownToolCall["answer"]
       const unsentSearch: ShownToolCall = {
         target: buildCallTarget(SEARCH_CALL.id),
         call: SEARCH_CALL,
         step: "run",
-        answer: {
-          status: "send-failed",
-          toolAnswer: { status: "succeeded", content: "{}" },
-          error:
-            "Couldn't send the answer to Lys: The backend could not be reached."
-        }
+        answer: unsentAnswer
       }
       const user = userEvent.setup()
       const answers = startToolApproval({

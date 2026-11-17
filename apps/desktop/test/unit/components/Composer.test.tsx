@@ -11,7 +11,8 @@ import userEvent from "@testing-library/user-event"
 import {
   activityEventSchema,
   chatReplyEventSchema,
-  type ChatToolCall
+  type ChatToolCall,
+  type ListedBackendToolUnavailableReason
 } from "@lys/protocol"
 import {
   CALIGINIA_AGENT_CODE,
@@ -22,9 +23,11 @@ import {
 } from "@lys/share"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
+import type { ChatRequestState } from "@/lib/store/chat-view"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import { updateProviderModelState } from "@/lib/store/model-runtime"
 import type { HeldToolCall } from "@/lib/store/tool-calls"
+import type { ToolListState } from "@/lib/store/tools"
 import {
   buildActivityApprovalPrompt,
   buildActivityReply
@@ -365,13 +368,17 @@ async function loadFreshJobComposerWithPrompt(call: ChatToolCall) {
   const loaded = await loadFreshJobComposer()
   const { useToolStore } = await import("@/lib/store/tools")
   const { useToolCallStore } = await import("@/lib/store/tool-calls")
-  useToolStore.setState({
-    list: {
-      status: "loaded",
-      tools: [buildToolDefinition("read_text_file")],
-      unavailableTools: new Map()
-    }
-  })
+  const readTextFile = buildToolDefinition("read_text_file")
+  const noUnavailableTools: ReadonlyMap<
+    string,
+    ListedBackendToolUnavailableReason
+  > = new Map()
+  const loadedToolList: ToolListState = {
+    status: "loaded",
+    tools: [readTextFile],
+    unavailableTools: noUnavailableTools
+  }
+  useToolStore.setState({ list: loadedToolList })
   await useToolCallStore.getState().handleActivityEvent(
     activityEventSchema.parse({
       type: "activity-snapshot",
@@ -2206,15 +2213,16 @@ describe("Composer", () => {
 
     it("hides the bar while a reply streams", async () => {
       const { useChatViewStore, Composer } = await loadFreshComposer()
+      const streamingRequest: ChatRequestState = {
+        status: "reply-streaming",
+        token: 1,
+        assistantMessageId: REPLY.id
+      }
       useChatViewStore.setState({
         conversation: createStoredChatViewConversation(
           WORKING_JOBS_CONVERSATION
         ),
-        request: {
-          status: "reply-streaming",
-          token: 1,
-          assistantMessageId: REPLY.id
-        }
+        request: streamingRequest
       })
 
       render(

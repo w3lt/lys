@@ -1,10 +1,15 @@
 import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { activityEventSchema } from "@lys/protocol"
+import {
+  activityEventSchema,
+  type ListedBackendToolUnavailableReason
+} from "@lys/protocol"
 import type { Job } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
+import type { AgentListState } from "@/lib/store/agents"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import type { HeldToolCall } from "@/lib/store/tool-calls"
+import type { ToolListState } from "@/lib/store/tools"
 import { buildActivityReply } from "../../support/activityFixtures"
 import { buildAgent, buildAgentSummary } from "../../support/agentFixtures"
 import {
@@ -126,21 +131,25 @@ async function loadFreshJobToolCallPrompt(jobs: readonly Job[]) {
       buildConversationWithJobs(conversation, jobs)
     )
   })
-  useAgentStore.setState({
-    list: {
-      status: "loaded",
-      builtInAgents: [],
-      agents: [buildAgentSummary(buildAgent("nyx", { name: "Nyx" }))],
-      isRefreshing: false
-    }
-  })
-  useToolStore.setState({
-    list: {
-      status: "loaded",
-      tools: [buildToolDefinition("read_text_file")],
-      unavailableTools: new Map()
-    }
-  })
+  const nyx = buildAgentSummary(buildAgent("nyx", { name: "Nyx" }))
+  const loadedAgentList: AgentListState = {
+    status: "loaded",
+    builtInAgents: [],
+    agents: [nyx],
+    isRefreshing: false
+  }
+  useAgentStore.setState({ list: loadedAgentList })
+  const readTextFile = buildToolDefinition("read_text_file")
+  const noUnavailableTools: ReadonlyMap<
+    string,
+    ListedBackendToolUnavailableReason
+  > = new Map()
+  const loadedToolList: ToolListState = {
+    status: "loaded",
+    tools: [readTextFile],
+    unavailableTools: noUnavailableTools
+  }
+  useToolStore.setState({ list: loadedToolList })
   await useToolCallStore.getState().handleActivityEvent(
     activityEventSchema.parse({
       type: "activity-snapshot",

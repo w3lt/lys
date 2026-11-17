@@ -10,7 +10,11 @@ import {
   listMessageJobCards
 } from "@/components/ChatViewComponents/job-presentation"
 import type { AgentListState } from "@/lib/store/agents"
-import type { HeldToolCall } from "@/lib/store/tool-calls"
+import type {
+  HeldToolCall,
+  HeldToolCallAnswer,
+  ToolCallInput
+} from "@/lib/store/tool-calls"
 import { buildAgent, buildAgentSummary } from "../../support/agentFixtures"
 import {
   buildChatViewToolCallPart,
@@ -68,36 +72,51 @@ function buildDelegationCall(sequence: number) {
   )
 }
 
+/**
+ * Builds the prompt of a `read_text_file` call that job 1's reply made, not
+ * the call that started the job, while it waits for the person.
+ *
+ * @returns The held prompt.
+ */
+function buildJobReadPrompt(): HeldToolCall {
+  const call = buildToolCall(70, "read_text_file")
+  const target: HeldToolCall["target"] = {
+    conversationId: FIXTURE_JOB_ID,
+    assistantMessageId: FIXTURE_JOB_REPLY_ID,
+    callId: call.id
+  }
+  const readInput = { path: "/notes/todo.md" }
+  const clientInput: ToolCallInput = {
+    runner: "client",
+    toolName: "read_text_file",
+    input: readInput
+  }
+  const definition = buildToolDefinition("read_text_file")
+  const answer: Extract<HeldToolCallAnswer, { status: "awaiting-person" }> = {
+    status: "awaiting-person",
+    definition,
+    input: clientInput
+  }
+  return {
+    target,
+    call,
+    step: "approval",
+    approvalToken: createFixtureApprovalToken(1),
+    answer
+  }
+}
+
 describe("job-presentation", () => {
   describe("createJobCardPresentations", () => {
     it("shows a working job that waits for the person as needing approval", () => {
+      const nyx = buildAgentSummary(buildAgent("nyx", { name: "Nyx" }))
       const agentList: AgentListState = {
         status: "loaded",
         builtInAgents: [],
-        agents: [buildAgentSummary(buildAgent("nyx", { name: "Nyx" }))],
+        agents: [nyx],
         isRefreshing: false
       }
-      // A call the job's reply made, not the call that started the job.
-      const call = buildToolCall(70, "read_text_file")
-      const heldPrompt: HeldToolCall = {
-        target: {
-          conversationId: FIXTURE_JOB_ID,
-          assistantMessageId: FIXTURE_JOB_REPLY_ID,
-          callId: call.id
-        },
-        call,
-        step: "approval",
-        approvalToken: createFixtureApprovalToken(1),
-        answer: {
-          status: "awaiting-person",
-          definition: buildToolDefinition("read_text_file"),
-          input: {
-            runner: "client",
-            toolName: "read_text_file",
-            input: { path: "/notes/todo.md" }
-          }
-        }
-      }
+      const heldPrompt = buildJobReadPrompt()
 
       expect(
         createJobCardPresentations([buildJob()], [heldPrompt], agentList)[0]

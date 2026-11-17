@@ -1112,9 +1112,10 @@ one delegation from start to end.
 
 The agent adds these to a turn itself, for a model trained for tool use,
 after the agent state tools; like them, they are offered from a routed
-turn's first round and never found through `find_tools`. Their definitions have group `agents`, runner
-`backend`, and access `agents` for `delegate_work`, which gives work to
-another agent inside Lys and sends nothing off the machine itself.
+turn's first round and never found through `find_tools`. All three
+definitions have group and access `agents` and runner `backend`.
+`delegate_work` gives work to another agent inside Lys and sends nothing off
+the machine itself.
 
 | Tool              | Offered                                                                                                                     | Arguments                                                                                  | Approval        |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | --------------- |

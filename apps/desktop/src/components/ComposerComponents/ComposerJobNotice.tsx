@@ -26,9 +26,14 @@ export type ComposerJobNoticeProps = {
   readonly isBackFocusedOnShow: boolean
   /**
    * Host of the composer's message field, which takes focus when Back leaves
-   * while it has focus.
+   * while it has focus and the field is on.
    */
   readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
+  /**
+   * Host of the composer's New conversation button, which takes focus when
+   * Back leaves while it has focus and the message field is off.
+   */
+  readonly newConversationButtonRef: RefObject<HTMLButtonElement | null>
 }
 
 /** Properties accepted by {@link JobNoticeBackButton}. */
@@ -38,12 +43,12 @@ type JobNoticeBackButtonProps = {
   /** Requests that the parent open the job's parent conversation. */
   readonly onOpenParentConversation: () => void
   /**
-   * Requests that the notice move focus to the message field, because the
-   * button leaves while it has focus; called once, in the commit that
-   * removes the button. The notice moves focus in that commit, when the
-   * field is on again and focus fell to the document.
+   * Requests that the notice move focus to the button's successor, because
+   * the button leaves while it has focus; called once, in the commit that
+   * removes the button. The notice moves focus in that commit, when focus
+   * fell to the document.
    */
-  readonly onFocusMessageField: () => void
+  readonly onFocusSuccessor: () => void
 }
 
 /**
@@ -52,17 +57,16 @@ type JobNoticeBackButtonProps = {
  *
  * @remarks The notice owns whether the button is shown and where focus goes
  * once it leaves. The button takes focus as it appears when asked. When it
- * leaves while it has focus, it asks for the message field through
- * `onFocusMessageField` before its node is detached, the last moment its
- * focus can be read; a button that leaves without focus asks for nothing.
+ * leaves while it has focus, it asks for its successor through
+ * `onFocusSuccessor` before its node is detached, the last moment its focus
+ * can be read; a button that leaves without focus asks for nothing.
  * @param props - Whether the button takes focus as it appears, and the open
  * and focus requests.
  * @returns The button, named `Back to the conversation`.
  */
 function JobNoticeBackButton(props: JobNoticeBackButtonProps): ReactElement {
-  const { isFocusedOnMount, onFocusMessageField, onOpenParentConversation } =
-    props
-  const buttonRef = useFocusedRemovalReport(onFocusMessageField)
+  const { isFocusedOnMount, onFocusSuccessor, onOpenParentConversation } = props
+  const buttonRef = useFocusedRemovalReport(onFocusSuccessor)
 
   /**
    * Handles the button's appearance, by focusing it when asked.
@@ -102,11 +106,12 @@ function JobNoticeBackButton(props: JobNoticeBackButtonProps): ReactElement {
  * while the notice is not shown. Back to the conversation sits beside the
  * status line, outside it, and is rendered only while the notice is shown.
  * Back takes focus as it appears when the parent asks, and when Back leaves
- * while it has focus, focus moves to the message field once the field is on
- * again. The component owns no other state.
+ * while it has focus, focus moves to the message field, which is on again
+ * in the parent, or to New conversation when the field stays off there. The
+ * component owns no other state.
  * @param props - Whether the notice is shown, the delegator's name, the
  * parent-owned open request, whether Back takes focus as it appears, and the
- * message field's host.
+ * hosts of the message field and of New conversation.
  * @returns The composer's job notice.
  */
 export default function ComposerJobNotice({
@@ -114,9 +119,13 @@ export default function ComposerJobNotice({
   isBackFocusedOnShow,
   isShown,
   messageFieldRef,
+  newConversationButtonRef,
   onOpenParentConversation
 }: ComposerJobNoticeProps): ReactElement {
-  const handleFocusedBackRemoval = useFocusSuccessor(isShown, messageFieldRef)
+  const handleFocusedBackRemoval = useFocusSuccessor(isShown, [
+    messageFieldRef,
+    newConversationButtonRef
+  ])
 
   return (
     <div className="composer__notice" data-shown={isShown ? "" : undefined}>
@@ -128,7 +137,7 @@ export default function ComposerJobNotice({
       {isShown ? (
         <JobNoticeBackButton
           isFocusedOnMount={isBackFocusedOnShow}
-          onFocusMessageField={handleFocusedBackRemoval}
+          onFocusSuccessor={handleFocusedBackRemoval}
           onOpenParentConversation={onOpenParentConversation}
         />
       ) : null}

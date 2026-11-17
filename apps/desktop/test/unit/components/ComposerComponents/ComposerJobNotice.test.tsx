@@ -4,18 +4,28 @@ import { createRef, type ReactElement, type RefObject } from "react"
 import { describe, expect, it, vi } from "vitest"
 import ComposerJobNotice from "@/components/ComposerComponents/ComposerJobNotice"
 
+/** Hosts of the composer's controls that may take focus after Back. */
+type SuccessorHosts = {
+  /** Host of the message field. */
+  readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
+  /** Host of the New conversation button. */
+  readonly newConversationButtonRef: RefObject<HTMLButtonElement | null>
+}
+
 /**
- * Builds a notice for Caliginia's job beside a message field, as the
- * composer places them.
+ * Builds a notice for Caliginia's job before a message field and a New
+ * conversation button, as the composer places them.
  *
  * @param isShown - Whether the notice is shown.
- * @param messageFieldRef - Host of the message field.
- * @returns The notice, whose Back takes no focus when it appears, and the
- * field named `Message Lysiptera`.
+ * @param isFieldOff - Whether the message field is off.
+ * @param hosts - Hosts of the field and of the button.
+ * @returns The notice, whose Back takes no focus when it appears, the field
+ * named `Message Lysiptera`, and the button.
  */
-function buildNoticeWithField(
+function buildNoticeWithControls(
   isShown: boolean,
-  messageFieldRef: RefObject<HTMLTextAreaElement | null>
+  isFieldOff: boolean,
+  hosts: SuccessorHosts
 ): ReactElement {
   return (
     <>
@@ -23,25 +33,46 @@ function buildNoticeWithField(
         delegatorName="Caliginia"
         isBackFocusedOnShow={false}
         isShown={isShown}
-        messageFieldRef={messageFieldRef}
+        messageFieldRef={hosts.messageFieldRef}
+        newConversationButtonRef={hosts.newConversationButtonRef}
         onOpenParentConversation={vi.fn()}
       />
-      <textarea aria-label="Message Lysiptera" ref={messageFieldRef} />
+      <textarea
+        aria-label="Message Lysiptera"
+        disabled={isFieldOff}
+        ref={hosts.messageFieldRef}
+      />
+      <button ref={hosts.newConversationButtonRef} type="button">
+        New conversation
+      </button>
     </>
   )
 }
 
 /**
- * Renders a shown notice beside a message field.
+ * Renders a shown notice before a message field and a New conversation
+ * button.
  *
- * @returns A call that hides the notice, and the message field.
+ * @param isFieldOff - Whether the message field is off once the notice is
+ * hidden; it does not change.
+ * @returns A call that hides the notice, the message field, and the New
+ * conversation button.
  */
-function startShownNoticeWithField() {
-  const messageFieldRef = createRef<HTMLTextAreaElement>()
-  const { rerender } = render(buildNoticeWithField(true, messageFieldRef))
+function startShownNoticeWithControls(isFieldOff: boolean) {
+  const hosts: SuccessorHosts = {
+    messageFieldRef: createRef(),
+    newConversationButtonRef: createRef()
+  }
+  const { rerender } = render(buildNoticeWithControls(true, isFieldOff, hosts))
+  const field = screen.getByRole("textbox", { name: "Message Lysiptera" })
+  const newConversation = screen.getByRole("button", {
+    name: "New conversation"
+  })
   return {
-    hideNotice: () => rerender(buildNoticeWithField(false, messageFieldRef)),
-    field: screen.getByRole("textbox", { name: "Message Lysiptera" })
+    hideNotice: () =>
+      rerender(buildNoticeWithControls(false, isFieldOff, hosts)),
+    field,
+    newConversation
   }
 }
 
@@ -55,6 +86,7 @@ describe("ComposerJobNotice", () => {
         isBackFocusedOnShow={false}
         isShown
         messageFieldRef={createRef()}
+        newConversationButtonRef={createRef()}
         onOpenParentConversation={onOpen}
       />
     )
@@ -75,6 +107,7 @@ describe("ComposerJobNotice", () => {
         isBackFocusedOnShow={false}
         isShown={false}
         messageFieldRef={createRef()}
+        newConversationButtonRef={createRef()}
         onOpenParentConversation={vi.fn()}
       />
     )
@@ -84,7 +117,7 @@ describe("ComposerJobNotice", () => {
   })
 
   it("moves focus to the message field when Back leaves while it has focus", () => {
-    const { hideNotice, field } = startShownNoticeWithField()
+    const { hideNotice, field } = startShownNoticeWithControls(false)
     act(() =>
       screen.getByRole("button", { name: "Back to the conversation" }).focus()
     )
@@ -94,8 +127,19 @@ describe("ComposerJobNotice", () => {
     expect(field).toHaveFocus()
   })
 
+  it("moves focus to New conversation when Back leaves with focus while the field is off", () => {
+    const { hideNotice, newConversation } = startShownNoticeWithControls(true)
+    act(() =>
+      screen.getByRole("button", { name: "Back to the conversation" }).focus()
+    )
+
+    hideNotice()
+
+    expect(newConversation).toHaveFocus()
+  })
+
   it("moves no focus when Back leaves without it", () => {
-    const { hideNotice, field } = startShownNoticeWithField()
+    const { hideNotice, field } = startShownNoticeWithControls(false)
 
     hideNotice()
 

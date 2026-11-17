@@ -98,7 +98,7 @@ function JobCard(props: JobCardProps): ReactElement {
   const { job } = card
   const isStoppable = canStopJob(card.state)
   const titleRef = useRef<HTMLButtonElement>(null)
-  const handleFocusedStopRemoval = useFocusSuccessor(isStoppable, titleRef)
+  const handleFocusedStopRemoval = useFocusSuccessor(isStoppable, [titleRef])
 
   return (
     <article

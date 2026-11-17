@@ -69,7 +69,7 @@ export type ComposerProps = {
    * @remarks The parent uses it only to move focus into the field after the
    * user opens or starts a conversation; the job notice and the jobs bar
    * use it to move focus into the field after their Back or Stop all leaves
-   * with focus.
+   * with focus, unless the field is off.
    */
   readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
   /**
@@ -507,9 +507,14 @@ type ComposerNoticesProps = {
   readonly jobOpenedFromCardId: string | undefined
   /**
    * Host of the message field, which takes focus when Back or Stop all
-   * leaves with it.
+   * leaves with it and the field is on.
    */
   readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
+  /**
+   * Host of the session controls' New conversation button, which takes
+   * focus when Back or Stop all leaves with it and the message field is off.
+   */
+  readonly newConversationButtonRef: RefObject<HTMLButtonElement | null>
   /**
    * Requests that the parent open a conversation, by its identity: the
    * shown job's parent.
@@ -533,11 +538,12 @@ type ComposerNoticesProps = {
  * it appears for the job the person opened from its card. The jobs bar shows
  * while the activity is idle and jobs of the shown main conversation work,
  * and its Stop all asks the store to stop them. Every notice stays rendered
- * while hidden, so its status line exists before it speaks. The component
- * owns no state.
+ * while hidden, so its status line exists before it speaks. When Back or
+ * Stop all leaves with focus, focus moves to the message field, or to New
+ * conversation while the field is off. The component owns no state.
  * @param props - The agent, the model's unavailability, whether the activity
- * is idle, the job last opened from its card, the message field's host, and
- * the parent's requests.
+ * is idle, the job last opened from its card, the hosts of the message field
+ * and of New conversation, and the parent's requests.
  * @returns The deleted-agent notice, the job notice, and the jobs bar.
  */
 function ComposerNotices({
@@ -546,6 +552,7 @@ function ComposerNotices({
   isActivityIdle,
   jobOpenedFromCardId,
   messageFieldRef,
+  newConversationButtonRef,
   onOpenConversation,
   onStartConversation
 }: ComposerNoticesProps): ReactElement {
@@ -570,10 +577,12 @@ function ComposerNotices({
         isBackFocusedOnShow={isJob && job.id === jobOpenedFromCardId}
         isShown={isJob}
         messageFieldRef={messageFieldRef}
+        newConversationButtonRef={newConversationButtonRef}
         onOpenParentConversation={handleOpenParentConversation}
       />
       <ComposerJobsBar
         messageFieldRef={messageFieldRef}
+        newConversationButtonRef={newConversationButtonRef}
         onStopJobs={jobsBar.stopJobs}
         workingJobCount={jobsBar.workingJobCount}
       />
@@ -1019,18 +1028,31 @@ function ComposerEditor({
   )
 }
 
+/** Properties accepted by {@link ComposerNavigationButtons}. */
+type ComposerNavigationButtonsProps = {
+  /**
+   * Parent-owned host of the New conversation button, which takes focus
+   * when a notice's control leaves with it while the message field is off.
+   */
+  readonly newConversationButtonRef: RefObject<HTMLButtonElement | null>
+}
+
 /**
  * Offers a new conversation, past conversations, and the settings view.
  *
  * @remarks The chat-view store resets the conversation, the history store
  * owns whether past conversations are shown, and the application store owns
- * the active view; the component owns no state. The Past conversations
+ * the active view; the component owns no state. New conversation is always
+ * on, and the parent attaches its host to it. The Past conversations
  * button opens history, or closes it when open, exposes that state through
  * `aria-expanded`, and names its Command+K or Control+K shortcut. Each
  * button is named by hidden text beside its icon and titled for the pointer.
+ * @param props - The New conversation button's host.
  * @returns The New conversation, Past conversations, and Settings buttons.
  */
-function ComposerNavigationButtons(): ReactElement {
+function ComposerNavigationButtons({
+  newConversationButtonRef
+}: ComposerNavigationButtonsProps): ReactElement {
   const resetConversation = useChatViewStore((state) => state.resetConversation)
   const setActiveView = useLysStore((state) => state.setActiveView)
   const isHistoryOpen = useConversationHistoryStore(
@@ -1057,6 +1079,7 @@ function ComposerNavigationButtons(): ReactElement {
     <>
       <Button
         onClick={resetConversation}
+        ref={newConversationButtonRef}
         size="icon-xs"
         title="New conversation"
         type="button"
@@ -1112,6 +1135,11 @@ type ComposerSessionControlsProps = {
    * @param isOpen - Proposed state, shown once the parent passes it back.
    */
   readonly onIsModelMenuOpenChange: (isOpen: boolean) => void
+  /**
+   * Parent-owned host of the New conversation button, which takes focus
+   * when a notice's control leaves with it while the message field is off.
+   */
+  readonly newConversationButtonRef: RefObject<HTMLButtonElement | null>
 }
 
 /**
@@ -1128,8 +1156,9 @@ type ComposerSessionControlsProps = {
  * open. Choosing a model picks it for the shown conversation only. Edit
  * agents opens the Agents pane, and the model menu's Open Providers the
  * Providers pane. The component owns no state.
- * @param props - The activity, agent, model state, menu groups, and the
- * model menu's open state with its proposal.
+ * @param props - The activity, agent, model state, menu groups, the model
+ * menu's open state with its proposal, and the New conversation button's
+ * host.
  * @returns The composer's session controls.
  */
 function ComposerSessionControls({
@@ -1138,6 +1167,7 @@ function ComposerSessionControls({
   modelState,
   modelGroups,
   isModelMenuOpen,
+  newConversationButtonRef,
   onIsModelMenuOpenChange
 }: ComposerSessionControlsProps): ReactElement {
   const agentList = useAgentStore((state) => state.list)
@@ -1152,7 +1182,9 @@ function ComposerSessionControls({
 
   return (
     <div className="composer__actions">
-      <ComposerNavigationButtons />
+      <ComposerNavigationButtons
+        newConversationButtonRef={newConversationButtonRef}
+      />
 
       <span aria-hidden="true" className="composer__divider" />
 
@@ -1233,6 +1265,73 @@ function ComposerStatus({
   )
 }
 
+/** Properties accepted by {@link ComposerMeta}. */
+type ComposerMetaProps = {
+  /** Chat work that keeps the composer from sending. */
+  readonly activity: ComposerActivity
+  /** The agent that answers the next message. */
+  readonly agent: ConversationAgent
+  /** The conversation's model as the composer shows it. */
+  readonly model: ComposerModelView
+  /** What the composer knows of the context of the next message. */
+  readonly context: ComposerContextView
+  /** Whether the model menu is open; the parent owns it. */
+  readonly isModelMenuOpen: boolean
+  /**
+   * Proposes opening or closing the model menu.
+   *
+   * @param isOpen - Proposed state, shown once the parent passes it back.
+   */
+  readonly onIsModelMenuOpenChange: (isOpen: boolean) => void
+  /**
+   * Parent-owned host of the New conversation button, which takes focus
+   * when a notice's control leaves with it while the message field is off.
+   */
+  readonly newConversationButtonRef: RefObject<HTMLButtonElement | null>
+}
+
+/**
+ * Presents the row below the message field: the session controls, then
+ * what the composer is doing and the context meter.
+ *
+ * @remarks The parent owns the activity, the agent, the model, the context,
+ * whether the model menu is open, and the New conversation button's host;
+ * the component owns no state.
+ * @param props - The activity, agent, model, and context, the model menu's
+ * open state with its proposal, and the New conversation button's host.
+ * @returns The composer's meta row.
+ */
+function ComposerMeta({
+  activity,
+  agent,
+  context,
+  isModelMenuOpen,
+  model,
+  newConversationButtonRef,
+  onIsModelMenuOpenChange
+}: ComposerMetaProps): ReactElement {
+  return (
+    <div className="composer__meta">
+      <ComposerSessionControls
+        activity={activity}
+        agent={agent}
+        isModelMenuOpen={isModelMenuOpen}
+        modelGroups={model.groups}
+        modelState={model.state}
+        newConversationButtonRef={newConversationButtonRef}
+        onIsModelMenuOpenChange={onIsModelMenuOpenChange}
+      />
+
+      <ComposerStatus
+        activity={activity}
+        hasAttachedTextFiles={context.hasAttachedTextFiles}
+        isModelUnavailable={model.isUnavailable}
+        meter={context.meter}
+      />
+    </div>
+  )
+}
+
 /**
  * Presents the chat draft editor, its context tray, and the session controls.
  *
@@ -1299,13 +1398,15 @@ function ComposerStatus({
  * open the job's parent. Stop keeps working while the job's reply is
  * followed. Back takes focus as it appears for the job the person opened
  * from its card; when it leaves while it has focus, focus moves to the
- * field.
+ * field, or to New conversation in the session controls when the field
+ * stays off in the parent.
  *
  * While the shown conversation's jobs work and no reply is awaited, a bar
  * above the field says how many work and offers Stop all, which asks the
  * chat-view store to stop them; Send stays available, because jobs do not
  * hold the request. When Stop all leaves while it has focus, as once the
- * last job ends, focus moves to the field.
+ * last job ends, focus moves to the field, or to New conversation while the
+ * field is off.
  *
  * Above the field, the tool-call prompt shows the first tool call of the
  * shown conversation that waits for the person or whose answer failed to
@@ -1364,6 +1465,7 @@ export function Composer({
   const context = useComposerContextMeter(
     activity === "idle" && !model.isUnavailable
   )
+  const newConversationButtonRef = useRef<HTMLButtonElement>(null)
 
   return (
     <footer className="composer">
@@ -1377,6 +1479,7 @@ export function Composer({
         isModelUnavailable={model.isUnavailable}
         jobOpenedFromCardId={jobOpenedFromCardId}
         messageFieldRef={messageFieldRef}
+        newConversationButtonRef={newConversationButtonRef}
         onOpenConversation={onOpenConversation}
         onStartConversation={onStartConversation}
       />
@@ -1390,23 +1493,15 @@ export function Composer({
           modelState={model.state}
         />
 
-        <div className="composer__meta">
-          <ComposerSessionControls
-            activity={activity}
-            agent={agent}
-            isModelMenuOpen={isModelMenuOpen}
-            modelGroups={model.groups}
-            modelState={model.state}
-            onIsModelMenuOpenChange={setIsModelMenuOpen}
-          />
-
-          <ComposerStatus
-            activity={activity}
-            hasAttachedTextFiles={context.hasAttachedTextFiles}
-            isModelUnavailable={model.isUnavailable}
-            meter={context.meter}
-          />
-        </div>
+        <ComposerMeta
+          activity={activity}
+          agent={agent}
+          context={context}
+          isModelMenuOpen={isModelMenuOpen}
+          model={model}
+          newConversationButtonRef={newConversationButtonRef}
+          onIsModelMenuOpenChange={setIsModelMenuOpen}
+        />
       </div>
     </footer>
   )

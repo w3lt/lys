@@ -2266,6 +2266,58 @@ describe("Composer", () => {
 
       expect(getMessageField()).toHaveFocus()
     })
+
+    it.for([
+      [
+        "generation is unavailable",
+        buildUnreachableRuntime("running", "unreachable"),
+        WORKING_JOBS_CONVERSATION
+      ],
+      [
+        "the conversation's agent was deleted",
+        READY_RUNTIME,
+        buildConversationWithJobs(
+          buildDeletedAgentConversation(),
+          WORKING_JOBS_CONVERSATION.jobs
+        )
+      ]
+    ] as const)(
+      "moves focus to New conversation when Stop all leaves with focus while %s",
+      async ([, runtime, conversation]) => {
+        const stoppedJobs = [
+          buildJob({ state: "stopped" }),
+          buildJob({ id: SECOND_JOB_ID, number: 2, state: "stopped" })
+        ]
+        const { useChatViewStore, Composer } = await loadFreshComposer(runtime)
+        useChatViewStore.setState({
+          conversation: createStoredChatViewConversation(conversation)
+        })
+        render(
+          <Composer
+            jobOpenedFromCardId={undefined}
+            messageFieldRef={createRef()}
+            onOpenConversation={vi.fn()}
+            onStartConversation={vi.fn()}
+          />
+        )
+        act(() => screen.getByRole("button", { name: "Stop all jobs" }).focus())
+
+        act(() =>
+          useChatViewStore.setState({
+            conversation: createStoredChatViewConversation(
+              buildConversationWithJobs(conversation, stoppedJobs)
+            )
+          })
+        )
+
+        // The message field is off, so the session controls' New
+        // conversation, after every notice, takes focus.
+        expect(screen.getByRole("textbox")).toBeDisabled()
+        expect(
+          screen.getAllByRole("button", { name: "New conversation" }).at(-1)
+        ).toHaveFocus()
+      }
+    )
   })
 
   describe("session controls", () => {

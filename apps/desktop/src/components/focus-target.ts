@@ -73,29 +73,31 @@ export function useFocusedRemovalReport(
  *
  * @param isControlShown - Whether the owner shows the control; read
  * reactively, and the control is rendered exactly while it is true.
- * @param successorRef - Host of the element that takes focus after the
- * control; read when focus moves.
+ * @param successorRefs - Hosts of the elements that may take focus after
+ * the control, in the order they are tried; read when focus moves. The last
+ * one must be able to take focus whenever the control can leave.
  * @returns The callback for the control's {@link useFocusedRemovalReport}
  * to call as it leaves with focus; every version of it keeps working for the
  * owner's lifetime.
  * @remarks An owner moves focus only when its own control had it: the
  * control asks for its successor in the commit that removes it, and focus
- * moves to the successor in the layout phase of that commit, when focus has
- * fallen to the document by then, so it never rests there. Nothing moves
- * when the control leaves without focus, when another element holds focus
- * by then, or when the whole owner leaves. A successor that is not attached,
- * or cannot take focus, as a field that is off, takes none.
+ * moves in the layout phase of that commit, when focus has fallen to the
+ * document by then, so it never rests there. The successors are tried in
+ * order, and the first that takes focus keeps it: one that is not attached,
+ * or cannot take focus, as a field that is off, is passed over. Nothing
+ * moves when the control leaves without focus, when another element holds
+ * focus by then, or when the whole owner leaves.
  */
 export function useFocusSuccessor(
   isControlShown: boolean,
-  successorRef: RefObject<HTMLElement | null>
+  successorRefs: readonly RefObject<HTMLElement | null>[]
 ): () => void {
   const hasFocusedControlLeftRef = useRef(false)
 
   /**
    * Handles a change of whether the owner shows the control, by moving focus
-   * to the successor once the control left with focus and focus fell back to
-   * the document.
+   * to the first successor that takes it once the control left with focus
+   * and focus fell back to the document.
    *
    * @param isShown - Whether the owner shows the control after the change.
    */
@@ -104,7 +106,10 @@ export function useFocusSuccessor(
     hasFocusedControlLeftRef.current = false
     if (isShown || !hasFocusedControlLeft) return
 
-    if (isDocumentFocusLost()) successorRef.current?.focus()
+    for (const successorRef of successorRefs) {
+      if (!isDocumentFocusLost()) return
+      successorRef.current?.focus()
+    }
   }
   const handleControlShownChange = useEffectEvent(handleShownChange)
 

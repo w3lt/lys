@@ -1678,6 +1678,59 @@ describe("useToolCallStore", () => {
       ])
     })
 
+    it("holds the prompts of every reply a snapshot lists in the snapshot's order before it runs any call, then runs each reply's desktop tool calls", async () => {
+      const wakeUpReply = {
+        conversationId: FIXTURE_CONVERSATION_ID,
+        parentConversationId: null,
+        assistantMessageId: createFixtureUuidV7(98)
+      }
+      const wakeUpCall = buildToolCall(72, "read_text_file")
+      const wakeUpTimeCall = buildToolCall(73, "get_current_time", {})
+      const wakeUpTimeResultRoute = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${wakeUpReply.assistantMessageId}/tool-results/${wakeUpTimeCall.id}`
+      const host = startNativeHostFake({
+        get_current_time: () => JOB_CURRENT_TIME
+      })
+      const backend = startBackendFake({
+        [JOB_TIME_RESULT_ROUTE]: () =>
+          new Response(null, { status: ACCEPTED_STATUS }),
+        [wakeUpTimeResultRoute]: () =>
+          new Response(null, { status: ACCEPTED_STATUS })
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+
+      await useToolCallStore.getState().handleActivityEvent(
+        buildActivitySnapshotEvent([
+          buildActivityReply({
+            pendingToolApprovals: [JOB_CALL],
+            pendingToolCalls: [JOB_TIME_CALL]
+          }),
+          {
+            ...buildActivityReply({
+              pendingToolApprovals: [wakeUpCall],
+              pendingToolCalls: [wakeUpTimeCall]
+            }),
+            ...wakeUpReply
+          }
+        ])
+      )
+      await waitForMicrotasks()
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: JOB_CALL, step: "approval" },
+        { call: wakeUpCall, step: "approval" },
+        { call: JOB_TIME_CALL, step: "run", answer: { status: "answered" } },
+        { call: wakeUpTimeCall, step: "run", answer: { status: "answered" } }
+      ])
+      expect(host.commands).toEqual([
+        { command: "get_current_time", args: {} },
+        { command: "get_current_time", args: {} }
+      ])
+      expect(listRouteKeys(backend)).toEqual([
+        JOB_TIME_RESULT_ROUTE,
+        wakeUpTimeResultRoute
+      ])
+    })
+
     it("runs a desktop tool call of a job once when the next snapshot still lists it while it runs", async () => {
       const time = createControlledPromise<unknown>()
       const host = startNativeHostFake({ get_current_time: () => time.promise })

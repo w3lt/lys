@@ -129,13 +129,23 @@ function waitForActivityReconnectDelay(signal: AbortSignal): Promise<void> {
  * cannot be opened, or when the connection fails. Every read starts with a
  * snapshot that brings both stores up to date, so each of these ends is
  * followed by the same delay and a new read, without backoff, message, or
- * log entry.
+ * log entry. Each read starts from the end of the wait before it, so the
+ * follow keeps nothing of the reads that ended.
  */
-async function followActivityEvents(signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return
-  await readActivityStream(signal)
-  await waitForActivityReconnectDelay(signal)
-  return followActivityEvents(signal)
+function followActivityEvents(signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    /** Reads the stream once, then waits and starts the next read. */
+    function followOnce(): void {
+      if (signal.aborted) {
+        resolve()
+        return
+      }
+      readActivityStream(signal)
+        .then(() => waitForActivityReconnectDelay(signal))
+        .then(followOnce, reject)
+    }
+    followOnce()
+  })
 }
 
 /**

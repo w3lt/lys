@@ -714,10 +714,11 @@ async function deleteAttachmentsAfterFailure(
  * @param accepted - What the request parsed and looked up before the turn
  * was stored.
  * @returns The request's model, generation options, and client tools, none
- * when it offered none; the backend tools found for the turn, to which the
- * turn start adds the attachment reader; whether the request offered
- * `delegate_work`; what the request names about the tools the turn does not
- * offer; and whether the model sees images and is trained for tool use.
+ * when it offered none; the backend tools found for the turn, without the
+ * attachment reader, which the turn start offers among its direct tools;
+ * whether the request offered `delegate_work`; what the request names about
+ * the tools the turn does not offer; and whether the model sees images and
+ * is trained for tool use.
  */
 function buildTurnSettings(
   body: ChatApiRequestBody,

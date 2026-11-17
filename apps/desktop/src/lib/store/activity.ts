@@ -56,8 +56,8 @@ async function* readActivityEventsUntilReadFailure(
   }
   try {
     yield* readActivityEvents(connection)
-  } catch (failure) {
-    if (!isActivityReadFailure(failure, signal)) throw failure
+  } catch (readError) {
+    if (!isActivityReadFailure(readError, signal)) throw readError
     // A failed read ends like one the backend closed, without a message or a
     // log entry: the next read starts with a snapshot that brings both
     // stores up to date.
@@ -132,10 +132,10 @@ function waitForActivityReconnectDelay(signal: AbortSignal): Promise<void> {
  * log entry.
  */
 async function followActivityEvents(signal: AbortSignal): Promise<void> {
-  while (!signal.aborted) {
-    await readActivityStream(signal)
-    await waitForActivityReconnectDelay(signal)
-  }
+  if (signal.aborted) return
+  await readActivityStream(signal)
+  await waitForActivityReconnectDelay(signal)
+  return followActivityEvents(signal)
 }
 
 /**
@@ -167,9 +167,11 @@ export function registerActivityFollow(): () => void {
    */
   function startActivityFollow(): void {
     followController = new AbortController()
-    followActivityEvents(followController.signal).catch((failure: unknown) => {
-      reportError(failure)
-    })
+    followActivityEvents(followController.signal).catch(
+      (followError: unknown) => {
+        reportError(followError)
+      }
+    )
   }
 
   /** Stops the follow, if one runs. */

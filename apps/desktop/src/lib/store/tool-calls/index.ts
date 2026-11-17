@@ -901,6 +901,27 @@ function createToolCallStore(
   }
 
   /**
+   * Ends the store's own follow of a reply the activity stream announced,
+   * keeping the reply's held calls.
+   *
+   * @param assistantMessageId - Reply whose calls the stream now delivers.
+   * @remarks Nothing happens when the store does not follow the reply. The
+   * ended follow is no longer the reply's follow when it stops, so it
+   * drops nothing.
+   */
+  function stopOwnReplyFollow(assistantMessageId: string): void {
+    const abortController = replyFollows.get(assistantMessageId)
+    if (abortController === undefined) return
+
+    replyFollows = buildReplyFollows(
+      replyFollows,
+      assistantMessageId,
+      undefined
+    )
+    abortController.abort()
+  }
+
+  /**
    * Creates the state and actions that own this store's held calls.
    *
    * @param set - Zustand capability that applies observable state changes.
@@ -1022,27 +1043,6 @@ function createToolCallStore(
         (heldCall) =>
           heldCall.target.assistantMessageId === assistantMessageId &&
           !isExpiredToolCall(heldCall)
-      )
-      abortController.abort()
-    }
-
-    /**
-     * Ends the store's own follow of a reply the activity stream announced,
-     * keeping the reply's held calls.
-     *
-     * @param assistantMessageId - Reply whose calls the stream now delivers.
-     * @remarks Nothing happens when the store does not follow the reply. The
-     * ended follow is no longer the reply's follow when it stops, so it
-     * drops nothing.
-     */
-    function stopOwnReplyFollow(assistantMessageId: string): void {
-      const abortController = replyFollows.get(assistantMessageId)
-      if (abortController === undefined) return
-
-      replyFollows = buildReplyFollows(
-        replyFollows,
-        assistantMessageId,
-        undefined
       )
       abortController.abort()
     }
@@ -1325,8 +1325,9 @@ function createToolCallStore(
      * @returns A promise that settles once the listed calls are held.
      * @remarks The listed replies become the announced ones, as
      * {@link buildActivitySnapshotState} describes. The store ends its own
-     * follow of each of them, then holds their prompts and runs their calls,
-     * as a reply's own snapshot does; calls already held are not held again.
+     * follow of each of them, then holds the prompts of all of them, reading
+     * the tool list for each at once, and then runs their calls, as a
+     * reply's own snapshot does; calls already held are not held again.
      */
     async function handleActivitySnapshot(
       replies: readonly ActivityReply[]
@@ -1334,8 +1335,12 @@ function createToolCallStore(
       set((state) => buildActivitySnapshotState(state, replies))
       for (const reply of replies) stopOwnReplyFollow(reply.assistantMessageId)
 
+      await Promise.all(
+        replies.map((reply) =>
+          handleToolApprovalArrival(reply, reply.pendingToolApprovals)
+        )
+      )
       for (const reply of replies) {
-        await handleToolApprovalArrival(reply, reply.pendingToolApprovals)
         for (const call of reply.pendingToolCalls) {
           startActivityToolRun(reply, call)
         }

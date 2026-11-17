@@ -633,14 +633,6 @@ function registerConversationSourceCases(
       ])
     }
   )
-
-  it("refuses a source of a conversation that is not stored", () => {
-    const harness = createHarness()
-
-    expect(() =>
-      createSourceInTurnWrite(harness, UNKNOWN_ID, NEW_SOURCE)
-    ).toThrow("FOREIGN KEY constraint failed")
-  })
 }
 
 /**

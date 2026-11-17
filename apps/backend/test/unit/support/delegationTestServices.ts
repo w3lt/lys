@@ -652,8 +652,8 @@ function handleScriptedTurnStartFailure(
   } finally {
     try {
       options.handleReplyEnded(reply)
-    } catch (failure) {
-      start.taskFailures.push(failure)
+    } catch (hookError) {
+      start.taskFailures.push(hookError)
     }
   }
 }

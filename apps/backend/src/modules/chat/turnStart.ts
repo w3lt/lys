@@ -378,8 +378,8 @@ function handleTurnReplyEnded(
   })
   try {
     handleReplyEnded(reply)
-  } catch (failure) {
-    handleTaskFailure(logger, failure)
+  } catch (hookError) {
+    handleTaskFailure(logger, hookError)
   }
 }
 

@@ -1,7 +1,6 @@
 import type { LoggerInterface } from "@lmstudio/sdk"
-import type { ToolDefinition } from "@lys/share"
 import type { FastifyBaseLogger } from "fastify"
-import type { EmailAddress, LlmProvider } from "@lys/share"
+import type { EmailAddress, LlmProvider, ToolDefinition } from "@lys/share"
 import { homedir } from "node:os"
 import type { BackendConfig } from "../config"
 import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgentRecordStore"

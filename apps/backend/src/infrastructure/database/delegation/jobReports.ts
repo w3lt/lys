@@ -168,10 +168,11 @@ export function createInterruptedJobReports(
     VALUES ($id, $jobId, $replyId, 'interrupted', $title, '', '[]', $createdAt)
     ON CONFLICT (reply_id) WHERE kind <> 'note' DO NOTHING`
   )
-  const createdAtMilliseconds = Date.parse(createdAt)
+  /** Options that give each report's new identity the time `createdAt`. */
+  const identityOptions = Object.freeze({ msecs: Date.parse(createdAt) })
   for (const reply of replies)
     insertReport.run({
-      id: uuidv7({ msecs: createdAtMilliseconds }),
+      id: uuidv7(identityOptions),
       jobId: reply.jobId,
       replyId: reply.replyId,
       title: reply.title,

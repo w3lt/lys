@@ -238,49 +238,46 @@ function registerJobStateCases(
     }
   )
 
-  it.each([
+  it.for([
     [
       "completed, with a result report, as replied",
-      {
-        replyStatus: "completed",
-        report: { kind: "result", content: "They eat wool." },
-        state: "replied"
-      }
+      "completed",
+      "result",
+      "They eat wool.",
+      "replied"
     ],
     [
       "failed, with a failed report, as failed",
-      {
-        replyStatus: "failed",
-        report: { kind: "failed", content: "The feed was down." },
-        state: "failed"
-      }
+      "failed",
+      "failed",
+      "The feed was down.",
+      "failed"
     ],
     [
       "interrupted, with a stopped report, as stopped",
-      {
-        replyStatus: "interrupted",
-        report: { kind: "stopped", content: "" },
-        state: "stopped"
-      }
+      "interrupted",
+      "stopped",
+      "",
+      "stopped"
     ],
     [
       "interrupted, with an interrupted report, as interrupted",
-      {
-        replyStatus: "interrupted",
-        report: { kind: "interrupted", content: "" },
-        state: "interrupted"
-      }
+      "interrupted",
+      "interrupted",
+      "",
+      "interrupted"
     ]
   ] as const)(
     "reads a job whose latest reply is %s",
-    (_label, { replyStatus, report, state }) => {
+    ([, replyStatus, reportKind, reportContent, state]) => {
       const harness = createHarness()
       const mainId = saveMainConversation(harness, 1)
       const job = saveJob(harness, createJobFixture(mainId, 1, replyStatus))
       saveReport(harness, job, {
-        ...report,
         sequence: 200,
+        kind: reportKind,
         title: "Job 1",
+        content: reportContent,
         createdAt: createFixtureTimestamp(1, 3)
       })
 

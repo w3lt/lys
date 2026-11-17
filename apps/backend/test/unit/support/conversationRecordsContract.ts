@@ -1069,11 +1069,14 @@ function registerMainConversationListCases(
   it("does not find a main conversation by text that only its job contains", () => {
     const harness = createHarness()
     const mainId = saveMainConversation(harness, 1)
+    const jobText = createTextPart({
+      sequence: 15,
+      round: 0,
+      content: "Moths eat nectar"
+    })
     saveJob(harness, {
       ...createJobFixture(mainId, 1, "completed"),
-      replyParts: [
-        createTextPart({ sequence: 15, round: 0, content: "Moths eat nectar" })
-      ]
+      replyParts: [jobText]
     })
 
     expect(
@@ -1092,18 +1095,14 @@ function registerMainConversationListCases(
   it("skips a wake-up message as preview and in search, and uses the newest person or reply text instead", () => {
     const harness = createHarness()
     const answeredAt = createFixtureTimestamp(1, 31)
-    saveQuestionWithReply(
-      harness,
-      [
-        createTextPart({
-          sequence: 151,
-          round: 0,
-          content: "Answer",
-          times: { createdAt: answeredAt, updatedAt: answeredAt }
-        })
-      ],
-      "completed"
-    )
+    const answerTimes = { createdAt: answeredAt, updatedAt: answeredAt }
+    const answer = createTextPart({
+      sequence: 151,
+      round: 0,
+      content: "Answer",
+      times: answerTimes
+    })
+    saveQuestionWithReply(harness, [answer], "completed")
     harness.saveUserMessage({
       id: createFixtureUuidV7(160),
       conversationId: createFixtureUuidV7(1),

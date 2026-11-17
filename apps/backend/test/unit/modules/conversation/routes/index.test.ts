@@ -530,29 +530,27 @@ describe("updateFastifyWithConversationRoutes", () => {
     })
 
     it("still reads a job with GET", async () => {
+      const delegatorMessage = Object.freeze({
+        ...createUserMessage(8, "Find what moths eat"),
+        origin: "delegator"
+      })
+      const answer = createTextPart({
+        sequence: 10,
+        round: 0,
+        content: "Mostly nectar."
+      })
+      const completedState = Object.freeze({
+        status: "completed",
+        finishReason: "stop"
+      })
+      const reply = createAssistantMessage(9, [answer], completedState)
       /**
        * Complete transcript of {@link JOB_ID} returned by the stubbed history:
        * its delegator's message and one completed reply.
        */
       const job = Object.freeze({
         ...JOB_METADATA,
-        messages: [
-          {
-            ...createUserMessage(8, "Find what moths eat"),
-            origin: "delegator"
-          },
-          createAssistantMessage(
-            9,
-            [
-              createTextPart({
-                sequence: 10,
-                round: 0,
-                content: "Mostly nectar."
-              })
-            ],
-            { status: "completed", finishReason: "stop" }
-          )
-        ],
+        messages: [delegatorMessage, reply],
         sources: [],
         jobs: []
       } satisfies Conversation)
@@ -651,10 +649,12 @@ describe("updateFastifyWithConversationRoutes", () => {
         CONVERSATION_METADATA
       )
 
+      const titleChange = { title: "Trip plan" }
+
       const response = await app.inject({
         method: "PATCH",
         url: `/api/v1/conversations/${CONVERSATION_ID}`,
-        payload: { title: "Trip plan" }
+        payload: titleChange
       })
 
       expect(response.statusCode).toBe(200)
@@ -689,11 +689,12 @@ describe("updateFastifyWithConversationRoutes", () => {
       const { app, historyCalls } = await createConversationRouteApp()
       historyCalls.getConversationMetadata.mockReturnValue(JOB_METADATA)
       const url = `/api/v1/conversations/${JOB_ID}`
+      const titleChange = { title: "Moth food" }
 
       const response = await app.inject({
         method: "PATCH",
         url,
-        payload: { title: "Moth food" }
+        payload: titleChange
       })
 
       expect(response.statusCode).toBe(409)
@@ -716,10 +717,12 @@ describe("updateFastifyWithConversationRoutes", () => {
         throw new Error("database is locked")
       })
 
+      const titleChange = { title: "Trip plan" }
+
       const response = await app.inject({
         method: "PATCH",
         url: `/api/v1/conversations/${CONVERSATION_ID}`,
-        payload: { title: "Trip plan" }
+        payload: titleChange
       })
 
       expect(response.statusCode).toBe(500)
@@ -911,12 +914,17 @@ describe("updateFastifyWithConversationRoutes", () => {
     })
 
     it("aborts the reply request and the title request of a deleted conversation whose model holds its first piece, without the model sending anything", async () => {
+      const newConversation = Object.freeze({
+        kind: "new",
+        agentCode: "caliginia"
+      })
+      const generationOptions = Object.freeze({ temperature: 0.4 })
       /** Chat request body that starts a new conversation Caliginia answers. */
       const newConversationChatRequest = Object.freeze({
-        conversation: { kind: "new", agentCode: "caliginia" },
+        conversation: newConversation,
         message: "Plan my trip",
         model: LM_STUDIO_QWEN3_8B,
-        generationOptions: { temperature: 0.4 }
+        generationOptions
       })
 
       const testApp = await createHeldModelChatApp()

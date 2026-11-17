@@ -106,6 +106,12 @@ describe("readActivityEvents", () => {
         ...jobReply,
         ...buildActivityApprovalPrompt(buildToolCall(69, "read_text_file"))
       },
+      {
+        type: "tool-approval-ended",
+        ...jobReply,
+        callId: buildToolCall(69, "read_text_file").id,
+        status: "failed"
+      },
       { type: "reply-ended", ...jobReply, status: "completed" }
     ]
     const events = readActivityEvents({

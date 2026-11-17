@@ -45,7 +45,7 @@ describe("buildDelegationOffer", () => {
           offersDelegateWork,
           findBuiltInAgentName
         )
-      ).toEqual({ mayDelegate, hasJobs: false, job: undefined })
+      ).toEqual({ kind: "main", mayDelegate, hasJobs: false })
     }
   )
 
@@ -55,8 +55,7 @@ describe("buildDelegationOffer", () => {
     const offer = buildDelegationOffer(JOB_CONVERSATION, true, findAgentName)
 
     expect(offer).toEqual({
-      mayDelegate: false,
-      hasJobs: false,
+      kind: "job",
       job: { delegatorName: "Caliginia", jobNumber: 3 }
     })
     expect(findAgentName).toHaveBeenCalledExactlyOnceWith("caliginia")
@@ -64,8 +63,11 @@ describe("buildDelegationOffer", () => {
 
   it("names a job's delegator by its code when no agent has the code", () => {
     expect(
-      buildDelegationOffer(JOB_CONVERSATION, false, () => undefined).job
-    ).toEqual({ delegatorName: "caliginia", jobNumber: 3 })
+      buildDelegationOffer(JOB_CONVERSATION, false, () => undefined)
+    ).toEqual({
+      kind: "job",
+      job: { delegatorName: "caliginia", jobNumber: 3 }
+    })
   })
 
   it("says a conversation has jobs once a job was started from it", () => {
@@ -91,7 +93,7 @@ describe("buildDelegationOffer", () => {
 
     expect(
       buildDelegationOffer(mainConversationWithJob, true, findBuiltInAgentName)
-    ).toEqual({ mayDelegate: true, hasJobs: true, job: undefined })
+    ).toEqual({ kind: "main", mayDelegate: true, hasJobs: true })
   })
 
   it("returns a frozen offer and job", () => {
@@ -102,6 +104,6 @@ describe("buildDelegationOffer", () => {
     )
 
     expect(Object.isFrozen(offer)).toBe(true)
-    expect(Object.isFrozen(offer.job)).toBe(true)
+    expect(offer.kind === "job" && Object.isFrozen(offer.job)).toBe(true)
   })
 })

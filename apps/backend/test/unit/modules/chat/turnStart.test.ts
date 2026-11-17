@@ -887,9 +887,9 @@ describe("startTurn", () => {
     const agent = createTestAgent(openReplyStream)
     const createReply = vi.spyOn(agent, "createReply")
     const delegation = buildTurnDelegation({
+      kind: "main",
       mayDelegate: true,
-      hasJobs: false,
-      job: undefined
+      hasJobs: false
     })
 
     const generation = startTurn(harness.dependencies, {

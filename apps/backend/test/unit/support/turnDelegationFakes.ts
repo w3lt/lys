@@ -53,9 +53,9 @@ export function buildTurnDelegation(
 
 /** Offer of a turn that takes no part in delegation: nothing. */
 const NO_DELEGATION_OFFER: DelegationOffer = Object.freeze({
+  kind: "main",
   mayDelegate: false,
-  hasJobs: false,
-  job: undefined
+  hasJobs: false
 })
 
 /**

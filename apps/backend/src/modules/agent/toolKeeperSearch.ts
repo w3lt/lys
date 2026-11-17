@@ -20,7 +20,7 @@ import MemoryReply from "./memoryReply"
 import type { ReplyPartDraft, ReplyToolCallChange } from "./replyPartSequence"
 import ToolCatalog from "./toolCatalog"
 import { buildToolKeeperTools } from "./toolKeeperTools"
-import type { TurnDelegation } from "./turnDelegation"
+import type { DelegationOffer, TurnDelegation } from "./turnDelegation"
 import { NO_UNOFFERED_TOOLS } from "./unofferedTools"
 
 /**
@@ -30,16 +30,22 @@ import { NO_UNOFFERED_TOOLS } from "./unofferedTools"
 export const MAXIMUM_TOOL_KEEPER_ROUND_COUNT = 6
 
 /**
+ * Offer of every search in delegation: a turn that works on no job, may not
+ * delegate, and has no jobs.
+ */
+const NO_SEARCH_DELEGATION_OFFER: DelegationOffer = Object.freeze({
+  kind: "main",
+  mayDelegate: false,
+  hasJobs: false
+})
+
+/**
  * Part of every search in delegation: none. Its offer allows nothing, and
  * Armitage's role neither delegates nor takes work, so no delegation tool
  * is offered and a call of a callback is a defect.
  */
 const NO_SEARCH_DELEGATION: TurnDelegation = Object.freeze({
-  offer: Object.freeze({
-    mayDelegate: false,
-    hasJobs: false,
-    job: undefined
-  }),
+  offer: NO_SEARCH_DELEGATION_OFFER,
   createJobMessage: rejectSearchDelegationCall,
   createProgressNote: rejectSearchDelegationCall,
   stopJob: rejectSearchDelegationCall

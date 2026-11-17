@@ -46,14 +46,14 @@ describe("createTurnDelegation", () => {
     const notOffered = createTurnDelegation(services.runtime, notOffering)
 
     expect(offered.offer).toEqual({
+      kind: "main",
       mayDelegate: true,
-      hasJobs: false,
-      job: undefined
+      hasJobs: false
     })
     expect(notOffered.offer).toEqual({
+      kind: "main",
       mayDelegate: false,
-      hasJobs: false,
-      job: undefined
+      hasJobs: false
     })
   })
 
@@ -67,8 +67,7 @@ describe("createTurnDelegation", () => {
 
     expect(jobTurn.settings.offersDelegateWork).toBe(true)
     expect(delegation.offer).toEqual({
-      mayDelegate: false,
-      hasJobs: false,
+      kind: "job",
       job: { delegatorName: "Caliginia", jobNumber: 1 }
     })
   })
@@ -85,8 +84,8 @@ describe("createTurnDelegation", () => {
     const beforeJob = createTurnDelegation(services.runtime, first)
     const afterJob = createTurnDelegation(services.runtime, second)
 
-    expect(beforeJob.offer.hasJobs).toBe(false)
-    expect(afterJob.offer.hasJobs).toBe(true)
+    expect(beforeJob.offer).toMatchObject({ kind: "main", hasJobs: false })
+    expect(afterJob.offer).toMatchObject({ kind: "main", hasJobs: true })
   })
 
   it("sends job messages from its own turn's conversation, and stops that conversation's jobs", async () => {

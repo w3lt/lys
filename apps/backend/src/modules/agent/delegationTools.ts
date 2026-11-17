@@ -593,10 +593,10 @@ const REPORT_PROGRESS_ENTRY: DelegationToolEntry = Object.freeze({
  *
  * @param role - Role of the agent.
  * @param offer - What the turn's conversation and tool offer allow.
- * @returns A frozen list in offer order: `delegate_work` when the turn may
- * delegate and the role grants `delegate-work`, `stop_job` when the turn
- * offers `delegate_work` or the conversation has jobs, and
- * `report_progress` in a job's turn.
+ * @returns A frozen list in offer order: `report_progress` alone in a job's
+ * turn; otherwise `delegate_work` when the turn may delegate and the role
+ * grants `delegate-work`, and `stop_job` when the turn offers
+ * `delegate_work` or the conversation has jobs.
  * @remarks `stop_job` comes with `delegate_work` so that a turn which
  * starts its conversation's first job can stop it, as the refusal of a
  * message to a job that still works tells the model to.
@@ -605,12 +605,12 @@ function listOfferedEntries(
   role: AgentRole,
   offer: DelegationOffer
 ): readonly DelegationToolEntry[] {
+  if (offer.kind === "job") return Object.freeze([REPORT_PROGRESS_ENTRY])
   const entries: DelegationToolEntry[] = []
   const offersDelegateWork =
     offer.mayDelegate && hasAgentPermission(role, "delegate-work")
   if (offersDelegateWork) entries.push(DELEGATE_WORK_ENTRY)
   if (offersDelegateWork || offer.hasJobs) entries.push(STOP_JOB_ENTRY)
-  if (offer.job !== undefined) entries.push(REPORT_PROGRESS_ENTRY)
   return Object.freeze(entries)
 }
 
@@ -639,11 +639,11 @@ function buildTurnDelegationTool(
  *
  * @param role - Role of the agent.
  * @param offer - What the turn's conversation and tool offer allow.
- * @returns The frozen definitions, in offer order: `delegate_work` when the
- * turn may delegate and the role grants `delegate-work`, `stop_job` when the
- * turn offers `delegate_work` or the conversation has jobs, and
- * `report_progress` in a job's turn. Each is in the `agents` group, has
- * `agents` access, and runs in the backend.
+ * @returns The frozen definitions, in offer order: `report_progress` alone
+ * in a job's turn; otherwise `delegate_work` when the turn may delegate and
+ * the role grants `delegate-work`, and `stop_job` when the turn offers
+ * `delegate_work` or the conversation has jobs. Each is in the `agents`
+ * group, has `agents` access, and runs in the backend.
  */
 export function buildDelegationDefinitions(
   role: AgentRole,

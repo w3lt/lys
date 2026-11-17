@@ -998,9 +998,9 @@ describe("registerChatContextRoute", () => {
      * What a leader's turn in a main conversation that offers it may delegate.
      */
     const delegatingOffer = Object.freeze({
+      kind: "main",
       mayDelegate: true,
-      hasJobs: false,
-      job: undefined
+      hasJobs: false
     })
 
     const { app, replyContextMeter, listDownloadedLlmModels } =
@@ -1025,9 +1025,9 @@ describe("registerChatContextRoute", () => {
   it("measures stop_job after the leader's state tools for a stored conversation with a job, as a turn offers it", async () => {
     /** What a leader's turn in a main conversation with a job may stop. */
     const stoppingOffer = Object.freeze({
+      kind: "main",
       mayDelegate: false,
-      hasJobs: true,
-      job: undefined
+      hasJobs: true
     })
 
     const testApp = await createChatContextRouteApp()
@@ -1060,8 +1060,7 @@ describe("registerChatContextRoute", () => {
      * What the turn of job 1 of a conversation Caliginia answers may report.
      */
     const reportingOffer = Object.freeze({
-      mayDelegate: false,
-      hasJobs: false,
+      kind: "job",
       job: caliginiaJob
     })
 

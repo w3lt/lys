@@ -40,16 +40,16 @@ const JOB_TURN: JobTurn = Object.freeze({
 
 /** Offer of a main conversation's turn that may delegate and has no job yet. */
 const DELEGATING_OFFER: DelegationOffer = Object.freeze({
+  kind: "main",
   mayDelegate: true,
-  hasJobs: false,
-  job: undefined
+  hasJobs: false
 })
 
 /** Offer of a main conversation's turn that may delegate and has jobs. */
 const DELEGATING_OFFER_WITH_JOBS: DelegationOffer = Object.freeze({
+  kind: "main",
   mayDelegate: true,
-  hasJobs: true,
-  job: undefined
+  hasJobs: true
 })
 
 /**
@@ -57,15 +57,14 @@ const DELEGATING_OFFER_WITH_JOBS: DelegationOffer = Object.freeze({
  * `delegate_work` out.
  */
 const JOBS_ONLY_OFFER: DelegationOffer = Object.freeze({
+  kind: "main",
   mayDelegate: false,
-  hasJobs: true,
-  job: undefined
+  hasJobs: true
 })
 
 /** Offer of a turn of {@link JOB_TURN}'s job. */
 const JOB_OFFER: DelegationOffer = Object.freeze({
-  mayDelegate: false,
-  hasJobs: false,
+  kind: "job",
   job: JOB_TURN
 })
 
@@ -361,9 +360,9 @@ function createReportProgressHarness(): Promise<BuiltInToolHarness> {
 describe("buildDelegationDefinitions", () => {
   /** Offer of a turn that takes no part in delegation. */
   const noOffer: DelegationOffer = Object.freeze({
+    kind: "main",
     mayDelegate: false,
-    hasJobs: false,
-    job: undefined
+    hasJobs: false
   })
 
   it.for<OfferCase>([

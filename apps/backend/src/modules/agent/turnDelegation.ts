@@ -10,19 +10,30 @@ export type JobTurn = Readonly<{
 
 /**
  * What a turn's conversation and tool offer allow of delegation, before the
- * agent's role is applied.
+ * agent's role is applied; `kind` tells a turn that works on no job from a
+ * job's turn.
  */
-export type DelegationOffer = Readonly<{
-  /**
-   * Whether the conversation is a main one and the turn's tool offer names
-   * `delegate_work`.
-   */
-  mayDelegate: boolean
-  /** Whether the conversation had at least one job when the turn started. */
-  hasJobs: boolean
-  /** The job the turn works on; undefined outside a job's turn. */
-  job: JobTurn | undefined
-}>
+export type DelegationOffer =
+  | Readonly<{
+      /**
+       * The turn works on no job: a main conversation's turn, or a tool
+       * search's.
+       */
+      kind: "main"
+      /** Whether the turn's tool offer names `delegate_work`. */
+      mayDelegate: boolean
+      /**
+       * Whether the conversation had at least one job when the turn
+       * started.
+       */
+      hasJobs: boolean
+    }>
+  | Readonly<{
+      /** The turn is a job's, which has no jobs and delegates nothing. */
+      kind: "job"
+      /** The job the turn works on. */
+      job: JobTurn
+    }>
 
 /** One job message a `delegate_work` call asks to send. */
 export type JobMessageDraft = Readonly<{
@@ -216,41 +227,43 @@ export type ConversationDelegation = PickFromEachVariant<
  * `delegate_work`.
  * @param findAgentName - Finds the display name of an agent by its code;
  * undefined when no agent has the code.
- * @returns The frozen offer: `mayDelegate` for a main conversation whose
- * tool offer names `delegate_work`; `hasJobs` once a job was started from
- * the conversation; and, for a job, its number with its delegator's display
- * name, or the delegator's code when no agent has it.
+ * @returns The frozen offer: for a main conversation, the `main` variant,
+ * with `mayDelegate` when the tool offer names `delegate_work` and
+ * `hasJobs` once a job was started from the conversation; for a job, the
+ * `job` variant, with the job's number and its delegator's display name,
+ * or the delegator's code when no agent has it.
  */
 export function buildDelegationOffer(
   conversation: ConversationDelegation,
   offersDelegateWork: boolean,
   findAgentName: (code: string) => string | undefined
 ): DelegationOffer {
-  const isMainConversation = conversation.kind === "main"
-  const job = findJobTurn(conversation, findAgentName)
-  return Object.freeze({
-    mayDelegate: isMainConversation && offersDelegateWork,
-    hasJobs: conversation.jobs.length > 0,
-    job
-  })
+  if (conversation.kind === "main") {
+    return Object.freeze({
+      kind: "main",
+      mayDelegate: offersDelegateWork,
+      hasJobs: conversation.jobs.length > 0
+    })
+  }
+  const job = buildJobTurn(conversation, findAgentName)
+  return Object.freeze({ kind: "job", job })
 }
 
 /**
- * Finds the job a turn's conversation is, as the turn's agent is told about
- * it.
+ * Builds the job a turn's conversation is, as the turn's agent is told
+ * about it.
  *
- * @param conversation - Where the turn's conversation stands in delegation.
+ * @param conversation - Where the turn's conversation, a job, stands in
+ * delegation.
  * @param findAgentName - Finds the display name of an agent by its code;
  * undefined when no agent has the code.
  * @returns The frozen job with its number and its delegator's display name,
- * or the delegator's code when no agent has it; undefined for a main
- * conversation.
+ * or the delegator's code when no agent has it.
  */
-function findJobTurn(
-  conversation: ConversationDelegation,
+function buildJobTurn(
+  conversation: Extract<ConversationDelegation, { kind: "job" }>,
   findAgentName: (code: string) => string | undefined
-): JobTurn | undefined {
-  if (conversation.kind === "main") return undefined
+): JobTurn {
   const { jobNumber, delegatorAgentCode } = conversation
   const delegatorName = findAgentName(delegatorAgentCode) ?? delegatorAgentCode
   return Object.freeze({ delegatorName, jobNumber })

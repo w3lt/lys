@@ -749,15 +749,14 @@ const JOB_TURN: JobTurn = Object.freeze({
 
 /** Offer of a main conversation's turn that may delegate and has no job yet. */
 const DELEGATING_OFFER: DelegationOffer = Object.freeze({
+  kind: "main",
   mayDelegate: true,
-  hasJobs: false,
-  job: undefined
+  hasJobs: false
 })
 
 /** Offer of a turn of {@link JOB_TURN}'s job. */
 const JOB_OFFER: DelegationOffer = Object.freeze({
-  mayDelegate: false,
-  hasJobs: false,
+  kind: "job",
   job: JOB_TURN
 })
 
@@ -5963,6 +5962,13 @@ describe("Agent", () => {
   })
 
   describe("delegation tools", () => {
+    /** Offer of a main conversation's turn that may delegate and has jobs. */
+    const delegatingOfferWithJobs: DelegationOffer = Object.freeze({
+      kind: "main",
+      mayDelegate: true,
+      hasJobs: true
+    })
+
     it("offers delegate_work and stop_job to a leader whose turn may delegate, after its state tools", async () => {
       const openReplyStream = createRoundStreams(FINISH_ROUND)
 
@@ -6069,22 +6075,12 @@ describe("Agent", () => {
       ])
     })
 
-    it("offers no delegation tool to a model that is not trained for tool use", async () => {
-      /**
-       * Offer that allows every delegation tool at once, which no conversation
-       * does; a case uses it to show that a turn offers none of them.
-       */
-      const everyToolOffer: DelegationOffer = Object.freeze({
-        mayDelegate: true,
-        hasJobs: true,
-        job: JOB_TURN
-      })
-
+    it("offers no delegation tool to a model that is not trained for tool use, even when its turn may delegate and has jobs", async () => {
       const openReplyStream = createRoundStreams(FINISH_ROUND)
 
       await getAgentReplyOutcome({
         openReplyStream,
-        delegation: buildTurnDelegation(everyToolOffer)
+        delegation: buildTurnDelegation(delegatingOfferWithJobs)
       })
 
       expect(listOfferedToolNames(openReplyStream)).toEqual([])
@@ -6168,9 +6164,9 @@ describe("Agent", () => {
        * `delegate_work` out, as it does while tool calls are off.
        */
       const jobsOnlyOffer: DelegationOffer = Object.freeze({
+        kind: "main",
         mayDelegate: false,
-        hasJobs: true,
-        job: undefined
+        hasJobs: true
       })
 
       /** Round in which the model stops job 2. */
@@ -6321,13 +6317,6 @@ describe("Agent", () => {
       expect(run.parts).toEqual([
         expect.objectContaining({ status: "succeeded", result: cleaned })
       ])
-    })
-
-    /** Offer of a main conversation's turn that may delegate and has jobs. */
-    const delegatingOfferWithJobs: DelegationOffer = Object.freeze({
-      mayDelegate: true,
-      hasJobs: true,
-      job: undefined
     })
 
     it.for<MeasuredDelegationCase>([

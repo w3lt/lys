@@ -1030,7 +1030,7 @@ function findJobNote(
   offer: DelegationOffer,
   trainedForToolUse: boolean
 ): string | undefined {
-  return offer.job === undefined
+  return offer.kind === "main"
     ? undefined
     : formatJobNote(offer.job, trainedForToolUse)
 }

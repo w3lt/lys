@@ -10,8 +10,8 @@ the lead has not seen yet, and the lead answers.
 ## Sub-features
 
 - Settings, Tools lists `delegate_work` under `agents` with the access label
-  `gives work`. It is switched on by default, and every call needs the
-  person's approval.
+  `gives work`. By default it is switched on and set to Ask me, so each call
+  needs the person's approval.
 - Built-in agents (`caliginia`, `lysiptera`) are leaders. Every custom agent
   is a member that can take work and is never offered `delegate_work`.
 - Allowing the call starts job 1 of the conversation. It is stored as a
@@ -38,7 +38,8 @@ the lead has not seen yet, and the lead answers.
   `A job report was stored` for each report, and `A wake-up turn started`,
   each with the main conversation's `conversationId`.
 - Not covered here: `stop_job`, Stop on a card, `Stop all jobs`, declining
-  the call, the `delegate_work` switch turned off, `failed`, `stopped`, and
+  the call, the `delegate_work` switch turned off, `delegate_work` set to Just
+  run, which runs each call without asking, `failed`, `stopped`, and
   `interrupted` reports, several jobs at once, Lysiptera as the lead, recovery
   after a restart, and the sources a delivered report cites (they need the web
   tools).

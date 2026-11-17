@@ -60,12 +60,10 @@ import {
   formatComparableText
 } from "../lib/verificationProvider.mjs"
 import { waitForCondition } from "../lib/waiting.mjs"
+import { REPLY_CLOSING } from "./chatStreamUi.mjs"
 
 /** Accessible name of the button that opens the job from its card. */
 const JOB_CARD_LABEL = `${DELEGATION_JOB_TITLE}, job 1`
-
-/** Text of the line that opens to the reports the wake-up delivered. */
-const DELIVERED_REPORTS_LABEL = "Reports · 2"
 
 /**
  * Identities of the delegation the renderer showed, and when the journey
@@ -279,23 +277,24 @@ async function waitForInterimReplyEnd(page, evidence) {
  * @param {import("../lib/rendererPage.mjs").RendererPage} page - The page.
  * @param {import("../lib/journey.mjs").EvidenceRecorder} evidence - The
  * step's recorder.
- * @returns {Promise<object>} The card's state label, the delivered reports,
- * and the lead's last reply.
+ * @returns {Promise<object>} The card's state label, the delivered note and
+ * result, and the lead's last reply.
  * @throws {import("../lib/journey.mjs").JourneyFailure} If the card does not
  * read Replied, the reports are not the note and the result in that order,
  * or the lead's last reply is not the final text.
  */
 async function openDeliveredReports(page, evidence) {
+  const deliveredReportsLabel = "Reports · 2"
   await page.waitForPageCondition({
-    description: `the job to reply, ${DELIVERED_REPORTS_LABEL} to show, and the lead's woken reply to end`,
-    expression: `${buildJobCardExpression(JOB_CARD_LABEL)}?.state === "replied" && ${buildReportsLineExpression(DELIVERED_REPORTS_LABEL)} !== undefined && ${REPLY_FINISHED} && ${LAST_ASSISTANT_TEXT}.includes(${JSON.stringify(DELEGATION_FINAL_TEXT)})`,
+    description: `the job to reply, ${deliveredReportsLabel} to show, and the lead's woken reply to end`,
+    expression: `${buildJobCardExpression(JOB_CARD_LABEL)}?.state === "replied" && ${buildReportsLineExpression(deliveredReportsLabel)} !== undefined && ${REPLY_FINISHED} && ${LAST_ASSISTANT_TEXT}.includes(${JSON.stringify(DELEGATION_FINAL_TEXT)})`,
     timeoutMs: 60_000
   })
-  await page.click(buildReportsLineExpression(DELIVERED_REPORTS_LABEL))
+  await page.click(buildReportsLineExpression(deliveredReportsLabel))
   const delivered = await page.waitForPageCondition({
-    description: `the reports under ${DELIVERED_REPORTS_LABEL} to open`,
+    description: `the reports under ${deliveredReportsLabel} to open`,
     expression: `(() => {
-      const delivered = ${buildDeliveredReportsExpression(DELIVERED_REPORTS_LABEL)};
+      const delivered = ${buildDeliveredReportsExpression(deliveredReportsLabel)};
       return delivered?.isOpen ? delivered : false;
     })()`,
     timeoutMs: 5000
@@ -314,20 +313,22 @@ async function openDeliveredReports(page, evidence) {
     "The card must read Replied.",
     card
   )
-  parseDeliveredReports(delivered.reports)
+  const reports = parseDeliveredReports(delivered.reports)
   rejectUnless(
     lastReply.endsWith(DELEGATION_FINAL_TEXT),
     `The lead's last reply must end as ${DELEGATION_FINAL_TEXT}`,
     lastReply
   )
-  return { cardState: card.stateLabel, reports: delivered.reports, lastReply }
+  return { cardState: card.stateLabel, reports, lastReply }
 }
 
 /**
- * Checks the reports the wake-up message delivered, as its line shows them.
+ * Parses the reports the wake-up message delivered, as its line shows them.
  *
  * @param {readonly {heading: string | null, content: string}[]} reports -
  * The reports in shown order.
+ * @returns {{note: {heading: string, content: string}, result: {heading: string, content: string}}}
+ * The member's progress note and its result.
  * @throws {import("../lib/journey.mjs").JourneyFailure} If they are not the
  * member's progress note and then its result, each with its text.
  */
@@ -339,13 +340,15 @@ function parseDeliveredReports(reports) {
     "The delivered reports must be the member's progress note, then its result.",
     reports
   )
+  const [note, result] = reports
   rejectUnless(
-    reports[0].content === DELEGATION_NOTE &&
-      formatComparableText(reports[1].content) ===
+    note.content === DELEGATION_NOTE &&
+      formatComparableText(result.content) ===
         formatComparableText(VERIFICATION_REPLY_TEXT),
     "The note must hold the member's note and the result its whole reply.",
     reports
   )
+  return { note, result }
 }
 
 /**
@@ -367,7 +370,7 @@ async function openJobView(page, evidence) {
   await page.click(buildLabeledButtonExpression(JOB_CARD_LABEL))
   await page.waitForPageCondition({
     description: "the job's read-only notice and the member's whole reply",
-    expression: `${COMPOSER_NOTICE_TEXTS}.includes(${JSON.stringify(notice)}) && ${LAST_ASSISTANT_TEXT}.includes("all at once.")`,
+    expression: `${COMPOSER_NOTICE_TEXTS}.includes(${JSON.stringify(notice)}) && ${LAST_ASSISTANT_TEXT}.includes(${JSON.stringify(REPLY_CLOSING)})`,
     timeoutMs: 15_000
   })
   await page.captureScreenshot(evidence.buildPath("job-view.png"))
@@ -534,11 +537,13 @@ async function getHistoryDialog(page, mainTitle, evidence) {
 }
 
 /**
- * Checks the stored job and its job message.
+ * Parses the stored job and its job message.
  *
  * @param {{jobs: object[], jobMessages: object[]}} rows - Rows from
  * {@link readJobRows}.
  * @param {ShownDelegation} delegation - The identities the renderer showed.
+ * @returns {{job: object, message: object}} The job's row and its only job
+ * message's row.
  * @throws {import("../lib/journey.mjs").JourneyFailure} If the main
  * conversation does not have exactly the one job, numbered 1, for the
  * member, under its title, whose only message is the lead's job message for
@@ -572,14 +577,17 @@ function parseJobRows(rows, delegation) {
     "The job message must name the main conversation's delegate_work call.",
     message
   )
+  return { job, message }
 }
 
 /**
- * Checks the stored reports of the job.
+ * Parses the stored reports of the job.
  *
  * @param {readonly object[]} reports - Report rows from {@link readJobRows},
  * oldest first.
  * @param {string} mainId - UUIDv7 of the main conversation.
+ * @returns {{note: object, result: object}} The note's row and the result's
+ * row.
  * @throws {import("../lib/journey.mjs").JourneyFailure} If they are not a
  * note with the note's text and a result with the member's reply, both
  * delivered by one wake-up message of the main conversation.
@@ -610,6 +618,7 @@ function parseReportRows(reports, mainId) {
     "The delivering message must be a wake-up message of the main conversation.",
     note
   )
+  return { note, result }
 }
 
 /**
@@ -618,8 +627,11 @@ function parseReportRows(reports, mainId) {
  * @param {string} lysHome - The scratch Lys home.
  * @param {string} conversationId - UUIDv7 the entries name as
  * `conversationId`.
- * @returns {object[]} The parsed entries in log order; a line that is not
- * JSON is skipped.
+ * @returns {object[]} The parsed entries in log order. A line that does not
+ * start with `{`, as the empty one after the last entry, is left out.
+ * @throws {SyntaxError} If a line that starts with `{` is not JSON, as one
+ * the backend is still writing; {@link waitForDelegationLogEntries} takes
+ * that as not yet.
  */
 function listConversationLogEntries(lysHome, conversationId) {
   const logsDir = join(lysHome, "logs")
@@ -642,6 +654,7 @@ function listConversationLogEntries(lysHome, conversationId) {
  * one names the work given, two the stored reports (a note and a result),
  * and one the started wake-up turn.
  * @throws {Error} Naming how often each was logged, while the counts differ.
+ * @throws {SyntaxError} As {@link listConversationLogEntries} does.
  */
 function findDelegationLogEntries(lysHome, mainId) {
   const expectedCounts = {
@@ -775,9 +788,11 @@ function listExpectedProviderRequests() {
 }
 
 /**
- * Checks the streamed requests the provider answered during the journey.
+ * Parses the streamed requests the provider answered during the journey.
  *
  * @param {readonly object[]} requests - From {@link listStreamedChatRequests}.
+ * @returns {{requests: readonly object[], memberRequest: object}} The
+ * requests, and the member's request for the job's instructions.
  * @throws {import("../lib/journey.mjs").JourneyFailure} If there are not
  * exactly the five requests of {@link listExpectedProviderRequests}, one
  * each, or the member was offered `delegate_work`.
@@ -801,6 +816,7 @@ function parseProviderRequests(requests) {
     "The member, which may not give work, must not be offered delegate_work.",
     memberRequest
   )
+  return { requests, memberRequest }
 }
 
 /**
@@ -811,7 +827,9 @@ function parseProviderRequests(requests) {
  * @param {ShownDelegation} delegation - The identities the renderer showed.
  * @param {import("../lib/journey.mjs").EvidenceRecorder} evidence - The
  * step's recorder.
- * @returns {Promise<object>} The counts and kinds that were checked.
+ * @returns {Promise<object>} The job's number and its message's origin, the
+ * kinds of its reports, the log's messages, the number of streamed
+ * requests, and the tools the member was offered.
  * @throws {import("../lib/journey.mjs").JourneyFailure} If the rows or the
  * requests break their checks; a wait failure if the log lacks an entry.
  */
@@ -821,24 +839,26 @@ async function getStoredDelegation(context, delegation, evidence) {
     delegation.mainId
   )
   evidence.saveJson("sqlite-rows.json", rows)
-  parseJobRows(rows, delegation)
-  parseReportRows(rows.reports, delegation.mainId)
+  const { job, message } = parseJobRows(rows, delegation)
+  const { note, result } = parseReportRows(rows.reports, delegation.mainId)
   const logEntries = await waitForDelegationLogEntries(
     context.paths.lysHome,
     delegation.mainId
   )
   evidence.saveJson("backend-log.json", logEntries)
-  const requests = listStreamedChatRequests(
+  const listedRequests = listStreamedChatRequests(
     join(context.paths.logsDir, "provider-requests.ndjson"),
     delegation.startedAt
   )
-  evidence.saveJson("provider-requests.json", requests)
-  parseProviderRequests(requests)
+  evidence.saveJson("provider-requests.json", listedRequests)
+  const { requests, memberRequest } = parseProviderRequests(listedRequests)
   return {
-    jobNumbers: rows.jobs.map((job) => job.job_number),
-    reportKinds: rows.reports.map((report) => report.kind),
+    jobNumber: job.job_number,
+    jobMessageOrigin: message.origin,
+    reportKinds: [note.kind, result.kind],
     logMessages: logEntries.map((entry) => entry.msg),
-    streamedRequestCount: requests.length
+    streamedRequestCount: requests.length,
+    memberToolNames: memberRequest.offeredToolNames
   }
 }
 

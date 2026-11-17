@@ -160,11 +160,13 @@ its button `[aria-label="<title>, job <number>"]`, and its
 `.chat-view__job-meta span`, `.chat-view__job-state`, `.chat-view__job-note`,
 and `.chat-view__job-stop`; the delivered reports
 `details.chat-view__reports > summary` reading `Reports · <count>` with
-`li.chat-view__report` rows and their `.chat-view__report-heading`; the
+`li.chat-view__report` rows and their `.chat-view__report-heading` and
+`.chat-view__report-content`; the
 composer notices `output.composer__notice-message` (the jobs bar, the job's
 read-only notice); speakers `.chat-view__speaker` and user copy
 `.chat-view__user-copy` in `article.chat-view__message`; the Tools pane rows
-`.settings-view__tool-name` in `section.settings-view__tool-group` under an
+`.settings-view__tool-row` and their `.settings-view__tool-name` in
+`section.settings-view__tool-group` under an
 `h2`, the access label `[data-badge="access"]`, switches
 `[role="switch"][aria-label="Use <tool>"]`; and Settings' Done button
 `button.settings-view__done`.

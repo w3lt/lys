@@ -28,8 +28,11 @@ const STREAMING_CARET_PRESENT = `document.querySelector('[data-testid="streaming
 /** Opening words of the reply, expected in the mid-stream text. */
 const REPLY_OPENING = "Lys verification reply:"
 
-/** Closing words of the reply, expected only in the finished text. */
-const REPLY_CLOSING = "all at once."
+/**
+ * Closing words of the verification reply, expected only in the finished
+ * text; the delegation journey waits for them too.
+ */
+export const REPLY_CLOSING = "all at once."
 
 /**
  * Opens Past conversations and waits until it lists the conversation under

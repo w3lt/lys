@@ -172,19 +172,25 @@ function formatChunk({ model, content, toolCalls, finishReason, isFirst }) {
  */
 function sendStreamedText(request, response, { model, text }) {
   const fragments = listReplyFragments(text)
-  let index = 0
-  const timer = setInterval(() => {
-    if (index < fragments.length) {
-      response.write(
-        formatChunk({ model, content: fragments[index], isFirst: index === 0 })
-      )
-      index += 1
+  let sentCount = 0
+
+  /**
+   * Sends the text's next fragment, or, once every fragment is sent, stops
+   * the timer and sends the stop chunk and `[DONE]`.
+   */
+  function sendNextChunk() {
+    if (sentCount < fragments.length) {
+      const content = fragments[sentCount]
+      response.write(formatChunk({ model, content, isFirst: sentCount === 0 }))
+      sentCount += 1
       return
     }
     clearInterval(timer)
     response.write(formatChunk({ model, finishReason: "stop" }))
     response.end("data: [DONE]\n\n")
-  }, VERIFICATION_TOKEN_INTERVAL_MS)
+  }
+
+  const timer = setInterval(sendNextChunk, VERIFICATION_TOKEN_INTERVAL_MS)
   request.on("close", () => clearInterval(timer))
 }
 
@@ -224,16 +230,27 @@ function sendStreamedToolCall(response, model, toolCall) {
  * @param {import("node:http").ServerResponse} response - The response.
  * @param {{model: string, answer: import("./lib/verificationProvider.mjs").ScriptedAnswer}} reply -
  * Model name echoed in every chunk, and the answer.
+ * @throws {Error} If the answer has a kind the fake cannot stream, before
+ * the response's head is written.
  */
 function sendStreamedAnswer(request, response, { model, answer }) {
-  response.writeHead(200, {
+  const eventStreamHeaders = {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
     connection: "keep-alive"
-  })
-  if (answer.kind === "tool-call")
-    return sendStreamedToolCall(response, model, answer)
-  sendStreamedText(request, response, { model, text: answer.text })
+  }
+  switch (answer.kind) {
+    case "text":
+      response.writeHead(200, eventStreamHeaders)
+      return sendStreamedText(request, response, { model, text: answer.text })
+    case "tool-call":
+      response.writeHead(200, eventStreamHeaders)
+      return sendStreamedToolCall(response, model, answer)
+    default:
+      throw new Error(
+        `The fake cannot stream an answer of kind ${answer.kind}.`
+      )
+  }
 }
 
 /**

@@ -65,8 +65,8 @@ export const TRANSCRIPT_MESSAGES = `[...document.querySelectorAll("article.chat-
 export const COMPOSER_NOTICE_TEXTS = `[...document.querySelectorAll("output.composer__notice-message")].map((output) => output.textContent.trim()).filter((text) => text !== "")`
 
 /**
- * Expression selecting the card a reply shows while a tool call waits for
- * the person's answer.
+ * Expression selecting the composer's card that shows while a tool call
+ * waits for the person's answer.
  */
 export const TOOL_APPROVAL_CARD = `document.querySelector('[aria-label="Tool call waiting for your answer"]')`
 

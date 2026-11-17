@@ -126,14 +126,16 @@ function buildTextAnswer(text) {
  * Builds a tool-call answer.
  *
  * @param {string} name - Name of the called tool.
- * @param {Readonly<Record<string, unknown>>} callArguments - Its arguments.
+ * @param {Readonly<Record<string, unknown>>} callArguments - Its arguments,
+ * which stay as they are; the answer holds a frozen copy.
  * @returns {ScriptedAnswer} The frozen answer.
  */
 function buildToolCallAnswer(name, callArguments) {
+  const frozenArguments = Object.freeze({ ...callArguments })
   return Object.freeze({
     kind: "tool-call",
     name,
-    arguments: Object.freeze(callArguments)
+    arguments: frozenArguments
   })
 }
 

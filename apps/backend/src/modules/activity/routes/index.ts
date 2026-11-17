@@ -15,7 +15,7 @@ import type ActivityHub from "../activityHub"
  * @throws If Fastify cannot register the route. The failure rejects the
  * promise, so `app.register` reports it rather than an uncaught exception.
  * @remarks The route follows the application's activity hub, which the
- * application closes when it shuts down; nothing is closed here.
+ * application disposes of when it shuts down; nothing is disposed of here.
  */
 export default function registerActivityRoutes(
   app: FastifyInstance
@@ -46,8 +46,8 @@ function registerActivityEventsRoute(app: FastifyInstance): void {
 }
 
 /**
- * Follows the activity hub on one SSE connection until the hub closes or
- * the client disconnects.
+ * Follows the activity hub on one SSE connection until the hub is disposed
+ * of or the client disconnects.
  *
  * @param request - Request of the client, which carries no input.
  * @param reply - Owner of the SSE connection.
@@ -57,8 +57,8 @@ function registerActivityEventsRoute(app: FastifyInstance): void {
  * event the hub sends. Following changes nothing, and closing the stream
  * ends only this client's observation. Nothing is replayed: a client the
  * hub disconnected because it fell too far behind connects again for a new
- * snapshot. Once the hub is closed, the response ends at once without an
- * event. Connecting and closing each write one info log line. Like a
+ * snapshot. Once the hub is disposed of, the response ends at once without
+ * an event. Connecting and closing each write one info log line. Like a
  * reply's stream, it shows the pending tool calls to every caller of the
  * loopback API.
  */

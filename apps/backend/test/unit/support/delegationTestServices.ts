@@ -674,6 +674,11 @@ async function waitForReplyEnding(
   abortSignal: AbortSignal
 ): Promise<ScriptedReplyEnding> {
   const stopped = Promise.withResolvers<ScriptedReplyEnding>()
+  /**
+   * Resolves the stop with an `interrupted` ending without an error
+   * message. The abort listener calls it, or the wait calls it at once when
+   * the signal had already aborted.
+   */
   const resolveStopped = () => {
     /** Ending of a reply whose generation was stopped or disposed. */
     const stoppedReplyEnding: ScriptedReplyEnding = Object.freeze({

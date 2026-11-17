@@ -67,8 +67,10 @@ const activityReplyEndedEventSchema = z.strictObject({
   type: z.literal("reply-ended"),
   ...activityReplyTargetShape,
   /**
-   * Stored final state of the reply; null when it is no longer stored or
-   * could not be read.
+   * Final state of the reply: the stored one, or `interrupted` for a reply
+   * still stored as `streaming` because its final state could not be
+   * written, the state startup recovery stores for it; null when it is no
+   * longer stored or could not be read.
    */
   status: conversationAssistantMessageSchema.shape.status
     .exclude(["streaming"])

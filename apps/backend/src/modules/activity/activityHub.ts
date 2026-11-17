@@ -33,8 +33,10 @@ export type ActivityGeneration = Pick<
 >
 
 /**
- * Stored final state of a reply that ended: the status a `reply-ended`
- * event carries when it has one.
+ * Final state of a reply that ended, as a `reply-ended` event carries it
+ * when it has one: the stored final state, or `interrupted` for a reply
+ * still stored as `streaming` because its final state could not be
+ * written, the state startup recovery stores for it.
  */
 export type EndedActivityStatus = NonNullable<
   Extract<ActivityEvent, { type: "reply-ended" }>["status"]
@@ -170,8 +172,10 @@ export default class ActivityHub {
    * Stops following the reply and sends `reply-ended`.
    *
    * @param assistantMessageId - Identity of the reply that ended.
-   * @param status - Stored final state of the reply; null when the reply is
-   * no longer stored or could not be read.
+   * @param status - Final state of the reply: the stored one, or
+   * `interrupted` for a reply still stored as `streaming` because its final
+   * state could not be written; null when the reply is no longer stored or
+   * could not be read.
    * @remarks Does nothing for a reply the hub does not follow, and nothing
    * once the hub is disposed. No prompt or tool call of the reply is sent
    * after its `reply-ended`, not even one the reply sent before this call.

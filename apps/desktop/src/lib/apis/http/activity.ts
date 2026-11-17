@@ -17,6 +17,27 @@ export type ActivityConnection = {
 }
 
 /**
+ * Activity stream the backend refused to open: it answered with a failed
+ * status, without a body, or with a body that is not an event stream.
+ *
+ * @remarks Its type tells the activity follow that the stream could not be
+ * opened, so the follow opens it again later; its message names the status.
+ * The subclass preserves the native `Error` contract.
+ */
+export class ActivityStreamOpenError extends Error {
+  /**
+   * Creates the error for one refused open.
+   *
+   * @param status - HTTP status the backend answered with.
+   */
+  public constructor(status: number) {
+    super(
+      `The backend could not open the activity stream (HTTP ${String(status)}).`
+    )
+  }
+}
+
+/**
  * Opens and reads the backend's activity stream: the replies the backend
  * started, what they wait for, and the jobs they belong to.
  *
@@ -24,11 +45,11 @@ export type ActivityConnection = {
  * @returns An async generator yielding validated activity events, a snapshot
  * first. It completes when the backend closes the stream, which happens only
  * when the backend shuts down or this client falls too far behind.
- * @throws If the request fails or the signal aborts; with
- * `The backend could not open the activity stream (HTTP <status>).` when the
- * backend answers with a failed status, without a body, or with a body that
- * is not an event stream, after cancelling that body; and if reading, JSON
- * parsing, or event validation fails.
+ * @throws If the request fails or the signal aborts; an
+ * {@link ActivityStreamOpenError} when the backend answers with a failed
+ * status, without a body, or with a body that is not an event stream, after
+ * cancelling that body; and if reading, JSON parsing, or event validation
+ * fails.
  * @remarks Ending iteration or aborting the signal cancels the stream and
  * stops nothing on the backend. Nothing is replayed: a new read starts with a
  * new snapshot.
@@ -54,9 +75,7 @@ export async function* readActivityEvents(
     mediaType !== activityEventsApi.response.contentType
   ) {
     await response.body?.cancel()
-    throw new Error(
-      `The backend could not open the activity stream (HTTP ${response.status}).`
-    )
+    throw new ActivityStreamOpenError(response.status)
   }
 
   yield* readServerSentEvents(response.body, (value) =>

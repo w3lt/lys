@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { readActivityEvents } from "@/lib/apis/http/activity"
+import {
+  ActivityStreamOpenError,
+  readActivityEvents
+} from "@/lib/apis/http/activity"
 import {
   ACTIVITY_ROUTE,
   buildActivityApprovalPrompt,
@@ -181,7 +184,7 @@ describe("readActivityEvents", () => {
       () => buildJsonResponse(200, { type: "activity-snapshot", replies: [] })
     ]
   ])(
-    "names the status of %s when the stream cannot be opened",
+    "throws the open failure, naming the status, for %s",
     async (_label, status, route) => {
       startBackendFake({ [ACTIVITY_ROUTE]: route })
 
@@ -190,8 +193,8 @@ describe("readActivityEvents", () => {
         signal: new AbortController().signal
       })
 
-      await expect(events.next()).rejects.toThrow(
-        `The backend could not open the activity stream (HTTP ${String(status)}).`
+      await expect(events.next()).rejects.toStrictEqual(
+        new ActivityStreamOpenError(status)
       )
     }
   )

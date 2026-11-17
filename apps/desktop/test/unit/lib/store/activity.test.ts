@@ -111,6 +111,39 @@ function createActivityStreamRoute(snapshotEvent: ActivityEvent) {
 }
 
 /**
+ * Creates an activity route that answers each request with its own stream,
+ * which sent the given text and stays open until the case closes it, the
+ * client cancels it, or the case finishes.
+ *
+ * @param text - Raw stream text sent first, such as a malformed event.
+ * @returns The route and the streams it opened, in request order.
+ */
+function createRawActivityStreamRoute(text: string) {
+  const streams: BackendEventStream[] = []
+  const route: BackendRoute = () => {
+    const stream = startBackendEventStream()
+    stream.sendText(text)
+    streams.push(stream)
+    return stream.response
+  }
+  return { route, streams }
+}
+
+/**
+ * Installs a `reportError` recorder for the case, since jsdom has none;
+ * Vitest removes it when the case ends.
+ *
+ * @returns The failures reported, in report order.
+ */
+function recordReportedFailures(): unknown[] {
+  const reportedFailures: unknown[] = []
+  vi.stubGlobal("reportError", (failure: unknown) => {
+    reportedFailures.push(failure)
+  })
+  return reportedFailures
+}
+
+/**
  * Builds an activity route whose stream sends the given events in one chunk
  * and ends right after them, as a backend that shuts down sends its last
  * events.
@@ -300,12 +333,8 @@ describe("registerActivityFollow", () => {
   it.each<[string, BackendRoute]>([
     ["a failed open", () => Promise.reject(createTransportFailure())],
     [
-      "an event that does not match the contract",
-      () => {
-        const stream = startBackendEventStream()
-        stream.sendEvent({ type: "nonsense" })
-        return stream.response
-      }
+      "an open the backend refuses",
+      () => Promise.resolve(buildJsonResponse(503, { error: "unavailable" }))
     ]
   ])(
     "opens the stream again one second after %s",
@@ -330,6 +359,71 @@ describe("registerActivityFollow", () => {
       expect(laterActivity.streams[0]?.isCancelled()).toBe(false)
     }
   )
+
+  it.each([
+    [
+      "an event that is not JSON",
+      "data: {not json\n\n",
+      expect.any(SyntaxError)
+    ],
+    [
+      "an event that does not match the contract",
+      `data: ${JSON.stringify({ type: "nonsense" })}\n\n`,
+      expect.objectContaining({ name: "ZodError" })
+    ]
+  ])(
+    "ends the follow and reports the failure when the stream sends %s, without opening it again",
+    async (_label, eventText, expectedFailure) => {
+      startFakeTimers()
+      const reportedFailures = recordReportedFailures()
+      const activity = createRawActivityStreamRoute(eventText)
+      const backend = startBackendFake({ [ACTIVITY_ROUTE]: activity.route })
+      await startActivityFollow(RUNNING_BACKEND)
+
+      await vi.advanceTimersByTimeAsync(5000)
+
+      expect(reportedFailures).toEqual([expectedFailure])
+      expect(activity.streams[0]?.isCancelled()).toBe(true)
+      expect(vi.getTimerCount()).toBe(0)
+      expect(listRouteKeys(backend)).toEqual([ACTIVITY_ROUTE])
+    }
+  )
+
+  it("ends the follow and reports the failure when a store fails to handle an event, and follows again once the backend runs again", async () => {
+    startFakeTimers()
+    const reportedFailures = recordReportedFailures()
+    const activity = createRawActivityStreamRoute("")
+    const backend = startBackendFake({ [ACTIVITY_ROUTE]: activity.route })
+    const { useLysStore, useToolCallStore } =
+      await startActivityFollow(RUNNING_BACKEND)
+    await waitForMicrotasks()
+    const listenerFailure = new Error("A tool-call store listener failed.")
+    const unsubscribe = useToolCallStore.subscribe(() => {
+      throw listenerFailure
+    })
+
+    activity.streams[0]?.sendEvent(EMPTY_SNAPSHOT_EVENT)
+    await vi.advanceTimersByTimeAsync(5000)
+    const afterFailure = {
+      reportedFailures: [...reportedFailures],
+      isStreamCancelled: activity.streams[0]?.isCancelled(),
+      timerCount: vi.getTimerCount(),
+      requestCount: backend.requests.length
+    }
+    unsubscribe()
+    useLysStore.setState({ backendServerInfo: STOPPED_BACKEND })
+    useLysStore.setState({ backendServerInfo: RUNNING_BACKEND })
+    await waitForMicrotasks()
+
+    expect(afterFailure).toEqual({
+      reportedFailures: [listenerFailure],
+      isStreamCancelled: true,
+      timerCount: 0,
+      requestCount: 1
+    })
+    expect(listRouteKeys(backend)).toEqual([ACTIVITY_ROUTE, ACTIVITY_ROUTE])
+    expect(activity.streams[1]?.isCancelled()).toBe(false)
+  })
 
   it("stops following when the backend stops running", async () => {
     startFakeTimers()

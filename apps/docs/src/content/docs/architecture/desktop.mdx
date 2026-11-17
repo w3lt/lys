@@ -172,7 +172,12 @@ conversation and opens each job for reading.
 `registerActivityFollow` (`src/lib/store/activity.ts`), which the app shell
 registers once, follows `GET /api/v1/activity/events` while the backend's
 status is `running`, and opens it again one second after each read ends,
-without backoff, message, or log entry. Each event goes first to the
+without backoff, message, or log entry: when the backend closes the stream,
+refuses to open it, or the connection fails. An event that is not JSON or
+does not match the contract, or a store that fails to handle an event, is a
+defect instead: the follow ends, the failure goes to the platform's
+`reportError` as an uncaught one does, and no follow runs until the
+backend's status leaves `running` and returns. Each event goes first to the
 tool-call store, so it knows the replies the event announced and opens no
 connection of its own for their calls, and then to the chat store. A
 snapshot, and a reply the backend starts or ends in the shown conversation,
@@ -1799,7 +1804,9 @@ sizes in a browser on every pane.
   settings of the person's latest message in its main conversation until
   their next one there.
 - Activity stream failures are not shown or logged: the desktop has no log
-  of its own, and it opens the stream again one second later.
+  of its own. A failed read opens the stream again one second later; an
+  event the desktop cannot take ends the follow until the backend restarts,
+  and reaches only the web inspector's console.
 - The reply's steps show each call's result as plain text only; no tool has
   a view of its own. The reasoning summary shows `Thinking` without a running
   count of seconds, and a citation's hover shows the source's title and site,

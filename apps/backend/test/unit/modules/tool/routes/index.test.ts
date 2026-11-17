@@ -305,7 +305,7 @@ describe("registerToolRoutes", () => {
       })
     })
 
-    it("never lists delegate_work as unavailable, even while every built-in tool is", async () => {
+    it("never lists delegate_work as unavailable, even while read_page and web_search are", async () => {
       const { app } = await createToolRouteApp(
         { status: "missing" },
         await findClosedVmoOrigin()

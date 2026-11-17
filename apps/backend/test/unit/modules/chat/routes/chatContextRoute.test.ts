@@ -993,7 +993,7 @@ describe("registerChatContextRoute", () => {
     ).toBe(`${CALIGINIA.systemPrompt}\n\n${formatToolRoutingNote(3)}`)
   })
 
-  it("measures delegate_work after the leader's state tools for a new conversation whose request offers it, as a turn offers it", async () => {
+  it("measures delegate_work and stop_job after the leader's state tools for a new conversation whose request offers it, as a turn offers it", async () => {
     /**
      * What a leader's turn in a main conversation that offers it may delegate.
      */

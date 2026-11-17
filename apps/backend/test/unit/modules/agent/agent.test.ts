@@ -6242,6 +6242,10 @@ describe("Agent", () => {
       const stopJob = vi.fn<TurnDelegation["stopJob"]>((jobNumber) =>
         Promise.resolve({ status: "stopped", jobNumber })
       )
+      const delegation = buildTurnDelegation(DELEGATING_OFFER, {
+        createJobMessage,
+        stopJob
+      })
 
       const run = await getAgentReplyOutcome({
         openReplyStream: createRoundStreams(
@@ -6251,10 +6255,7 @@ describe("Agent", () => {
           FINISH_ROUND
         ),
         trainedForToolUse: true,
-        delegation: buildTurnDelegation(DELEGATING_OFFER, {
-          createJobMessage,
-          stopJob
-        }),
+        delegation,
         justRunToolNames: ["delegate_work"]
       })
 

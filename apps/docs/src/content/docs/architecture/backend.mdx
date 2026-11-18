@@ -441,8 +441,9 @@ that closed in the meantime cancels the new speech at voice.
 finished; `from=current` speaks from the sentence being written, or from the
 next text part when the stored reply's last part is not text. The speech
 turns markdown into plain text: links read as their text and inline code as
-its words; code blocks, math, tables, images, bare URLs, and citation
-markers, by the renderer's own `CITATION_MARKER_PATTERN`, are dropped; list
+its words; code blocks, math, tables, images, bare URLs, emoji, and citation
+markers, by the renderer's own `CITATION_MARKER_PATTERN`, are dropped, while
+other symbols, such as `$`, `+`, `→`, and `✓`, are read as written; list
 items, paragraphs, and headings end a sentence. A reference reads the same
 before its definition arrives as after, because reference syntax is read over
 each block's text outside inline code: a link reference by its text, and a

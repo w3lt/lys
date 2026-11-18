@@ -250,18 +250,15 @@ final class WebServer: Sendable {
     /// Reads the connection's request and sends the one response for it.
     ///
     /// A request that cannot reach a route gets the matching error response.
-    /// A head that does not arrive within ``headTimeout`` is answered with
-    /// `408` and the connection is cancelled; the timeout is logged.
+    /// A head that does not arrive within ``headTimeout`` is logged, answered
+    /// with `408`, and the connection is cancelled.
     ///
     /// - Parameter connection: Started connection whose request has not been
     ///   read.
     /// - Throws: The connection's `NWError` when receiving or sending fails.
     private func handleRequest(on connection: NWConnection) async throws {
         do {
-            guard case .head(let head) = try await readRequestHead(on: connection) else {
-                print("WebServer connection \(connection.endpoint) sent no request head within \(headTimeout)")
-                return
-            }
+            guard case .head(let head) = try await readRequestHead(on: connection) else { return }
             let request = try HTTPRequest(parsingHead: head)
             let response = await router.handleRequest(request)
             try await connection.sendResponse(response)
@@ -273,8 +270,10 @@ final class WebServer: Sendable {
     /// Reads the request head, waiting at most ``headTimeout`` for it.
     ///
     /// Task cancellation cannot end a pending read, so at the deadline this
-    /// answers `408 Request Timeout` and cancels the connection, which ends
-    /// the read; only then does it return.
+    /// logs the timeout, answers `408 Request Timeout`, and cancels the
+    /// connection, which ends the read; only then does it return. The timeout
+    /// is logged before the answer, so it stays on record when sending the
+    /// `408` fails because the peer is gone.
     ///
     /// - Parameter connection: Started connection whose request has not been
     ///   read.
@@ -293,6 +292,7 @@ final class WebServer: Sendable {
             defer { group.cancelAll() }
             guard case .head(let head) = try await group.next() else {
                 defer { connection.cancel() }
+                print("WebServer connection \(connection.endpoint) sent no request head within \(self.headTimeout)")
                 try await connection.sendResponse(HTTPResponse(requestError: .requestHeadTimeout))
                 return .timedOut
             }

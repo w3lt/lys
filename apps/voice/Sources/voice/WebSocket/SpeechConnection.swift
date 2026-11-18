@@ -459,7 +459,7 @@ final class SpeechConnection: @unchecked Sendable {
                     return
                 }
                 guard let text = String(data: content, encoding: .utf8) else {
-                    continuation.resume(throwing: ConnectionClosed())
+                    continuation.resume(throwing: TextNotUTF8())
                     return
                 }
                 continuation.resume(returning: .text(text))
@@ -471,3 +471,6 @@ final class SpeechConnection: @unchecked Sendable {
 /// The peer closed the connection without a close frame, or sent an empty
 /// message where a message was expected.
 private struct ConnectionClosed: Error {}
+
+/// The peer sent a text message that is not valid UTF-8.
+private struct TextNotUTF8: Error {}

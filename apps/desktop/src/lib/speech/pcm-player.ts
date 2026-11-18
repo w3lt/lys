@@ -47,7 +47,9 @@ export type PcmPlayer = {
  * @param frame - Raw bytes, two per sample, little-endian.
  * @returns The decoded samples; a trailing odd byte is dropped.
  */
-export function parsePcm16Le(frame: Uint8Array): Float32Array<ArrayBuffer> {
+export function calculatePcm16LeSamples(
+  frame: Uint8Array
+): Float32Array<ArrayBuffer> {
   const sampleCount = Math.floor(
     frame.byteLength / VOICE_AUDIO_BYTES_PER_SAMPLE
   )
@@ -192,7 +194,7 @@ export function createPcmPlayer(
       if (isClosed) return
       const audio = loadAudioOutput()
       audio.start()
-      const samples = parsePcm16Le(frame)
+      const samples = calculatePcm16LeSamples(frame)
       if (samples.length === 0) return
       const startAt = Math.max(audio.getCurrentTime(), nextStartTime)
       const stretch = audio.startStretch(samples, startAt, () => {

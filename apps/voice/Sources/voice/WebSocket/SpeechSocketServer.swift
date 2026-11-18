@@ -205,7 +205,7 @@ final class SpeechSocketServer: Sendable {
                         hub: self.hub,
                         handshakeTimeout: self.handshakeTimeout
                     )
-                    await speech.run()
+                    await speech.handleConnection()
                 }
             case .failed(let error):
                 throw error

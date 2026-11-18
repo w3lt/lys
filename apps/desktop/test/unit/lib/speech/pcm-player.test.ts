@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest"
 import {
   createPcmPlayer,
-  parsePcm16Le,
+  calculatePcm16LeSamples,
   type PcmOutput
 } from "@/lib/speech/pcm-player"
 
-describe("parsePcm16Le", () => {
+describe("calculatePcm16LeSamples", () => {
   it("decodes little-endian 16-bit samples to floats in [-1, 1)", () => {
     // 0x0000, 0x7FFF (max), 0x8000 (min), 0xFFFF (-1)
     const frame = new Uint8Array([
       0x00, 0x00, 0xff, 0x7f, 0x00, 0x80, 0xff, 0xff
     ])
 
-    const samples = parsePcm16Le(frame)
+    const samples = calculatePcm16LeSamples(frame)
 
     expect(samples).toHaveLength(4)
     expect(samples[0]).toBe(0)
@@ -24,11 +24,11 @@ describe("parsePcm16Le", () => {
   it("drops a trailing odd byte", () => {
     const frame = new Uint8Array([0x34, 0x12, 0x99])
 
-    expect([...parsePcm16Le(frame)]).toEqual([0x1234 / 32768])
+    expect([...calculatePcm16LeSamples(frame)]).toEqual([0x1234 / 32768])
   })
 
   it("decodes nothing for an empty frame", () => {
-    expect(parsePcm16Le(new Uint8Array(0))).toHaveLength(0)
+    expect(calculatePcm16LeSamples(new Uint8Array(0))).toHaveLength(0)
   })
 })
 

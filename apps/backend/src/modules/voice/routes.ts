@@ -28,7 +28,7 @@ export type SpeechRouteOptions = Readonly<{
   /** Probe whether voice is ready; defaults to the real health check. */
   isReady?: () => Promise<boolean>
   /** Open a speech at voice; defaults to the real connection. */
-  connect?: typeof openVoiceSpeech
+  openVoiceSpeech?: typeof openVoiceSpeech
 }>
 
 /**
@@ -74,7 +74,7 @@ function createSpeechDependencies(
     generations: app.replyGenerations,
     registry: new SpeechSocketRegistry(),
     isReady: options.isReady ?? isVoiceReady,
-    connect: options.connect ?? openVoiceSpeech
+    openVoiceSpeech: options.openVoiceSpeech ?? openVoiceSpeech
   })
 }
 

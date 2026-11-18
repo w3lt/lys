@@ -87,19 +87,24 @@ final class SpeechConnection: @unchecked Sendable {
         self.handshakeTimeout = handshakeTimeout
     }
 
-    /// Serves the connection until it closes; returns when it has closed.
+    /// Handles an accepted connection from its start until it closes:
+    /// starts it, reads the client's messages, and cancels it once the peer
+    /// closed or a receive failed. Returns when it has closed.
     ///
     /// Cancelling the calling task cancels the socket, which ends a pending
     /// receive with an error.
-    func run() async {
+    func handleConnection() async {
         await withTaskCancellationHandler {
-            await self.followClientMessages()
+            self.box.connection.start(queue: DispatchQueue(label: "voice.WebSocket"))
+            await self.readClientMessages()
+            await self.cancelConnection()
         } onCancel: {
             self.box.connection.cancel()
         }
     }
 
-    /// Receives messages until the peer closes or an error occurs.
+    /// Reads and handles the client's messages until the peer closes or a
+    /// receive fails.
     ///
     /// A receive failure before this side sent its close frame, such as a
     /// message over ``maximumMessageSize`` or a peer that went away without
@@ -108,8 +113,7 @@ final class SpeechConnection: @unchecked Sendable {
     /// closes the socket with `1002` itself. Any other message that breaks
     /// the speech protocol, a binary one among them, is logged and answered
     /// with its close code.
-    private func followClientMessages() async {
-        box.connection.start(queue: DispatchQueue(label: "voice.WebSocket"))
+    private func readClientMessages() async {
         let deadline = startHandshakeDeadline()
         defer { deadline.cancel() }
         while true {
@@ -124,10 +128,8 @@ final class SpeechConnection: @unchecked Sendable {
                 if !isCloseSent {
                     print("voice: speech connection \(box.connection.endpoint) failed: \(error)")
                 }
-                await cancelConnection()
                 return
             case .success(.close):
-                await cancelConnection()
                 return
             case .success(.text(let body)):
                 if !isCloseSent { await handleText(body) }
@@ -143,7 +145,7 @@ final class SpeechConnection: @unchecked Sendable {
     /// ``handshakeTimeout``, so an idle client cannot hold a place under the
     /// server's connection cap.
     ///
-    /// - Returns: The deadline's task, which ``followClientMessages()`` owns and cancels
+    /// - Returns: The deadline's task, which ``readClientMessages()`` owns and cancels
     ///   once the connection ended.
     private func startHandshakeDeadline() -> Task<Void, Never> {
         let box = self.box

@@ -152,8 +152,8 @@ type VoiceConnector = (handlers: VoiceSpeechHandlers) => Promise<VoiceSpeech>
 type FakeVoice = Readonly<{
   /** Every speech the backend opened, in order. */
   speeches: FakeVoiceSpeech[]
-  /** Injected `connect` matching the route option. */
-  connect: VoiceConnector
+  /** Injected `openVoiceSpeech` matching the route option. */
+  openVoiceSpeech: VoiceConnector
 }>
 
 /** Records one binary frame towards the list. */
@@ -164,12 +164,12 @@ function addBinaryFrame(frames: Buffer[], source: unknown): void {
 /** Creates a fake voice whose behavior the test drives. */
 function createFakeVoice(): { fake: FakeVoice } {
   const speeches: FakeVoiceSpeech[] = []
-  const connect: VoiceConnector = (handlers) => {
+  const openVoiceSpeech: VoiceConnector = (handlers) => {
     const speech = new FakeVoiceSpeech(handlers)
     speeches.push(speech)
     return Promise.resolve(speech)
   }
-  return { fake: { speeches, connect } }
+  return { fake: { speeches, openVoiceSpeech } }
 }
 
 /** A socket the tests drive through a real loopback server. */
@@ -218,7 +218,7 @@ type VoiceRoutesAppOptions = Readonly<{
   /** Voice readiness probe; defaults to always ready. */
   isReady?: () => Promise<boolean>
   /** Voice connection opener; defaults to the real one. */
-  connect?: FakeVoice["connect"]
+  openVoiceSpeech?: FakeVoice["openVoiceSpeech"]
 }>
 
 /** Creates the app under test with a stubbed history and a controllable voice. */
@@ -237,7 +237,9 @@ async function createVoiceRoutesApp(options: VoiceRoutesAppOptions) {
   testFastify.app.decorate("replyGenerations", generations)
   const voiceOptions = {
     isReady: options.isReady ?? (async () => true),
-    ...(options.connect === undefined ? {} : { connect: options.connect })
+    ...(options.openVoiceSpeech === undefined
+      ? {}
+      : { openVoiceSpeech: options.openVoiceSpeech })
   }
   await registerVoiceRoutes(testFastify.app, voiceOptions)
   const baseUrl = await startServer(testFastify.app)
@@ -350,7 +352,7 @@ describe("speech routes", () => {
           )
         ]
       },
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     openTestSocket(app.baseUrl, buildSpeechUrl(chatSpeechApi.path, "start"))
     await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
@@ -364,7 +366,7 @@ describe("speech routes", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: COMPLETED_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     const socket = openTestSocket(
       app.baseUrl,
@@ -383,7 +385,7 @@ describe("speech routes", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: STREAMING_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     const { replyTask } = startFixtureGeneration(app.generations)
     const socket = openTestSocket(
@@ -412,7 +414,7 @@ describe("speech routes", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: STREAMING_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     const { replyTask } = startFixtureGeneration(app.generations)
     const socket = openTestSocket(
@@ -430,7 +432,7 @@ describe("speech routes", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: COMPLETED_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     const first = openTestSocket(
       app.baseUrl,
@@ -450,7 +452,7 @@ describe("speech routes", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: COMPLETED_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     const socket = openTestSocket(
       app.baseUrl,
@@ -510,8 +512,8 @@ describe("speech routes", () => {
 
 /** A fake voice whose handshake the test answers. */
 type PendingVoice = Readonly<{
-  /** Injected `connect` that waits for {@link answer}. */
-  connect: VoiceConnector
+  /** Injected `openVoiceSpeech` that waits for {@link answer}. */
+  openVoiceSpeech: VoiceConnector
   /** Whether the backend dialed voice. */
   isDialed: () => boolean
   /** Accepts the handshake, returning the speech the backend received. */
@@ -523,7 +525,7 @@ function createPendingVoice(): PendingVoice {
   const handshake = Promise.withResolvers<VoiceSpeech>()
   let handlers: VoiceSpeechHandlers | undefined
   return {
-    connect: (dialed) => {
+    openVoiceSpeech: (dialed) => {
       handlers = dialed
       return handshake.promise
     },
@@ -545,7 +547,7 @@ describe("speech sockets over their lifecycle", () => {
     const app = await createVoiceRoutesApp({
       conversation: STREAMING_CONVERSATION,
       isReady,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     const { replyTask } = startFixtureGeneration(app.generations)
     const socket = openTestSocket(
@@ -580,7 +582,7 @@ describe("speech sockets over their lifecycle", () => {
     const voice = createPendingVoice()
     const app = await createVoiceRoutesApp({
       conversation: COMPLETED_CONVERSATION,
-      connect: voice.connect
+      openVoiceSpeech: voice.openVoiceSpeech
     })
     const socket = openTestSocket(
       app.baseUrl,
@@ -595,13 +597,13 @@ describe("speech sockets over their lifecycle", () => {
   })
 
   it("never dials voice when the UI closes its socket during the health check", async () => {
-    const connect = vi.fn(createFakeVoice().fake.connect)
+    const openVoiceSpeech = vi.fn(createFakeVoice().fake.openVoiceSpeech)
     const health = Promise.withResolvers<boolean>()
     const isReady = vi.fn(() => health.promise)
     const app = await createVoiceRoutesApp({
       conversation: COMPLETED_CONVERSATION,
       isReady,
-      connect
+      openVoiceSpeech
     })
     const socket = openTestSocket(
       app.baseUrl,
@@ -612,14 +614,14 @@ describe("speech sockets over their lifecycle", () => {
     await socket.closed
     health.resolve(true)
     await waitForMicrotasks()
-    expect(connect).not.toHaveBeenCalled()
+    expect(openVoiceSpeech).not.toHaveBeenCalled()
   })
 
   it("closes 1001 when the generation registry has already closed", async () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: COMPLETED_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     await app.generations[Symbol.asyncDispose]()
     const socket = openTestSocket(
@@ -634,7 +636,7 @@ describe("speech sockets over their lifecycle", () => {
     const voice = createPendingVoice()
     const app = await createVoiceRoutesApp({
       conversation: STREAMING_CONVERSATION,
-      connect: voice.connect
+      openVoiceSpeech: voice.openVoiceSpeech
     })
     const { replyTask, titleTask } = startFixtureGeneration(app.generations)
     const socket = openTestSocket(
@@ -661,7 +663,7 @@ describe("speech sockets over their lifecycle", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: STREAMING_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     const { replyTask } = startFixtureGeneration(app.generations)
     const socket = openTestSocket(
@@ -684,7 +686,7 @@ describe("speech sockets over their lifecycle", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: TWO_REPLY_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     startFixtureGeneration(app.generations)
     const first = openTestSocket(
@@ -703,7 +705,7 @@ describe("speech sockets over their lifecycle", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: COMPLETED_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     const socket = openTestSocket(
       app.baseUrl,
@@ -718,7 +720,7 @@ describe("speech sockets over their lifecycle", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: STREAMING_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     const { replyTask } = startFixtureGeneration(app.generations)
     const socket = openTestSocket(
@@ -735,7 +737,7 @@ describe("speech sockets over their lifecycle", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: STREAMING_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     const { replyTask, titleTask } = startFixtureGeneration(app.generations)
     const socket = openTestSocket(
@@ -752,7 +754,8 @@ describe("speech sockets over their lifecycle", () => {
   it("closes 4503 when voice refuses the speech handshake", async () => {
     const app = await createVoiceRoutesApp({
       conversation: COMPLETED_CONVERSATION,
-      connect: () => Promise.reject(new VoiceUnavailableError("refused"))
+      openVoiceSpeech: () =>
+        Promise.reject(new VoiceUnavailableError("refused"))
     })
     const socket = openTestSocket(
       app.baseUrl,
@@ -765,7 +768,7 @@ describe("speech sockets over their lifecycle", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: COMPLETED_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     app.getConversation.mockImplementation(() => {
       throw new Error("The database is locked")
@@ -791,7 +794,7 @@ describe("speech sockets over their lifecycle", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: COMPLETED_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     const socket = openTestSocket(
       app.baseUrl,
@@ -809,7 +812,7 @@ describe("speech sockets over their lifecycle", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: COMPLETED_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     const socket = openTestSocket(
       app.baseUrl,
@@ -824,7 +827,7 @@ describe("speech sockets over their lifecycle", () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: COMPLETED_CONVERSATION,
-      connect: fake.connect
+      openVoiceSpeech: fake.openVoiceSpeech
     })
     const url = `${app.baseUrl}${buildSpeechUrl(chatSpeechApi.path, "start")}`
     const socket = new WebSocket(url, {

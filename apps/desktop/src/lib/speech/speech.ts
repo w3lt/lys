@@ -159,7 +159,7 @@ function buildObservation(
       status
     }
   }
-  if (request.status === "idle") return followLastReply(conversation)
+  if (request.status === "idle") return buildLastReplyObservation(conversation)
   return { kind: "none" }
 }
 
@@ -171,7 +171,7 @@ function buildObservation(
  * @returns `settled` when its last message is a reply in a final state, and
  * `none` otherwise.
  */
-function followLastReply(
+function buildLastReplyObservation(
   conversation: ChatViewConversation
 ): SpeechObservation {
   const last = conversation.messages.at(-1)
@@ -238,13 +238,13 @@ export function startSpeech(): () => void {
     updateVoiceServerInfo
   })
 
-  const update = (previousRequestStatus?: string): void => {
+  const updateController = (previousRequestStatus?: string): void => {
     controller.update(buildObservation(previousRequestStatus))
   }
 
   const stopFollowingChat = useChatViewStore.subscribe(
     (_state, previousState) => {
-      update(previousState.request.status)
+      updateController(previousState.request.status)
     }
   )
   type LysStoreState = ReturnType<typeof useLysStore.getState>
@@ -252,15 +252,16 @@ export function startSpeech(): () => void {
     state: LysStoreState,
     previousState: LysStoreState
   ): void => {
-    if (state.voiceServerInfo !== previousState.voiceServerInfo) update()
+    if (state.voiceServerInfo !== previousState.voiceServerInfo)
+      updateController()
   }
   const stopFollowingVoice = useLysStore.subscribe(handleVoiceChange)
   const stopFollowingFocus = followWindowFocus((value) => {
     focused = value
-    update(useChatViewStore.getState().request.status)
+    updateController(useChatViewStore.getState().request.status)
   })
 
-  update()
+  updateController()
 
   return () => {
     stopFollowingFocus()

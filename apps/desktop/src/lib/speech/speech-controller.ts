@@ -278,7 +278,7 @@ export class SpeechController {
     // A reply this controller has not seen stream yet: speak at once, or
     // wait for focus or voice.
     if (context.focused && context.voiceReady) {
-      this.#startSpeech(reply, observation.beganAsNewTurn ? "start" : "current")
+      this.#openSpeech(reply, observation.beganAsNewTurn ? "start" : "current")
       return
     }
     this.#waiting = { reply, needsTrigger: false }
@@ -322,7 +322,7 @@ export class SpeechController {
     this.#waiting = null
     // The reply moved on while we waited; joining at the sentence being
     // written is the only honest place left.
-    this.#startSpeech(waiting.reply, "current")
+    this.#openSpeech(waiting.reply, "current")
   }
 
   /**
@@ -448,7 +448,7 @@ export class SpeechController {
    * @param reply - The reply to speak.
    * @param from - Where to start; `start` reads from the first word.
    */
-  #startSpeech(reply: SpeechReply, from: "start" | "current"): void {
+  #openSpeech(reply: SpeechReply, from: "start" | "current"): void {
     const socket = this.#deps.openSocket(
       this.#deps.buildSpeechPath(reply, from),
       {

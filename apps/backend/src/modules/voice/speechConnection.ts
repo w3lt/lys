@@ -77,7 +77,7 @@ export type SpeechConnectionDependencies = Readonly<{
    */
   isReady: () => Promise<boolean>
   /** Opens one speech at voice. */
-  connect: typeof openVoiceSpeech
+  openVoiceSpeech: typeof openVoiceSpeech
 }>
 
 /** What one speech socket connection needs. */
@@ -214,7 +214,7 @@ function openSession(
     stored,
     generation,
     request,
-    connect: deps.connect,
+    openVoiceSpeech: deps.openVoiceSpeech,
     log
   })
 }
@@ -303,7 +303,7 @@ type SpeechSessionOptions = Readonly<{
   /** What to speak and from where. */
   request: SpeechRequest
   /** Opens the speech at voice. */
-  connect: typeof openVoiceSpeech
+  openVoiceSpeech: typeof openVoiceSpeech
   /** Logger of the request that opened the socket. */
   log: FastifyBaseLogger
 }>
@@ -329,7 +329,7 @@ class SpeechSession {
   /** What to speak and from where. */
   readonly #request: SpeechRequest
   /** Opens the speech at voice. */
-  readonly #connect: typeof openVoiceSpeech
+  readonly #openVoiceSpeech: typeof openVoiceSpeech
   /** Logger of the request that opened the socket. */
   readonly #log: FastifyBaseLogger
   /** Hands out the sentences to speak; the snapshot seeds it. */
@@ -361,12 +361,13 @@ class SpeechSession {
    * request, the voice connection opener, and the logger.
    */
   public constructor(options: SpeechSessionOptions) {
-    const { socket, stored, generation, request, connect, log } = options
+    const { socket, stored, generation, request, openVoiceSpeech, log } =
+      options
     this.#socket = socket
     this.#stored = stored
     this.#generation = generation
     this.#request = request
-    this.#connect = connect
+    this.#openVoiceSpeech = openVoiceSpeech
     this.#log = log
     this.#buffer = new SpeechSentenceBuffer(
       request.kind === "reply" ? request.from : "start"
@@ -374,7 +375,7 @@ class SpeechSession {
     this.#textPartIds = new Set(stored.textPartIds)
     this.#hasText = stored.snapshot.text.length > 0
     this.#subscription = new ReplyEventSubscription<ChatReplyEvent>(
-      this.#receiveEvent
+      this.#handleDeliveredEvent
     )
   }
 
@@ -387,12 +388,12 @@ class SpeechSession {
    * stored reply, so that the following misses no event.
    */
   public async start(): Promise<void> {
-    this.#socket.on("close", this.#endSpeech)
-    void this.#subscription.closed.then(this.#endFollowing)
+    this.#socket.on("close", this.#handleSocketClose)
+    void this.#subscription.closed.then(this.#handleFollowingClosed)
     if (this.#request.kind === "reply")
       this.#generation?.openSubscription(this.#subscription)
 
-    const voice = await this.#openVoiceSpeech()
+    const voice = await this.#openVoice()
     if (voice === undefined) return
     if (!isOpen(this.#socket)) {
       voice.cancel()
@@ -413,7 +414,7 @@ class SpeechSession {
     }
     this.#isLive = true
     for (const event of this.#pending.splice(0)) this.#handleEvent(event)
-    if (this.#hasFollowingEndedEarly) this.#endFollowing()
+    if (this.#hasFollowingEndedEarly) this.#handleFollowingClosed()
   }
 
   /**
@@ -422,14 +423,14 @@ class SpeechSession {
    * @param event - Event of the followed reply.
    * @returns Settlement for the delivery chain; it never rejects.
    */
-  readonly #receiveEvent = (event: ChatReplyEvent): Promise<void> => {
+  readonly #handleDeliveredEvent = (event: ChatReplyEvent): Promise<void> => {
     if (this.#isLive) this.#handleEvent(event)
     else this.#pending.push(event)
     return Promise.resolve()
   }
 
   /** Cancels the speech at voice and ends the following once the socket closed. */
-  readonly #endSpeech = (): void => {
+  readonly #handleSocketClose = (): void => {
     this.#voice?.cancel()
     this.#subscription.close()
   }
@@ -439,7 +440,7 @@ class SpeechSession {
    * seen; before voice answered, only records that it ended, because the
    * end event may still wait among the pending ones.
    */
-  readonly #endFollowing = (): void => {
+  readonly #handleFollowingClosed = (): void => {
     if (!this.#isLive) {
       this.#hasFollowingEndedEarly = true
       return
@@ -455,7 +456,7 @@ class SpeechSession {
    *
    * @param code - Voice's close code; `1000` once everything was spoken.
    */
-  readonly #relayVoiceClose = (code: number): void => {
+  readonly #handleVoiceClose = (code: number): void => {
     if (!isOpen(this.#socket)) return
     if (code === VOICE_CLOSE_COMPLETE) {
       this.#socket.close(SPEECH_CLOSE_COMPLETE)
@@ -471,11 +472,11 @@ class SpeechSession {
    * @returns The speech, or undefined once the socket was closed with
    * `4503` for a refused handshake or `1011` for any other failure.
    */
-  async #openVoiceSpeech(): Promise<VoiceSpeech | undefined> {
+  async #openVoice(): Promise<VoiceSpeech | undefined> {
     try {
-      return await this.#connect({
+      return await this.#openVoiceSpeech({
         onAudio: (pcm) => this.#sendAudioFrame(pcm),
-        onClose: this.#relayVoiceClose
+        onClose: this.#handleVoiceClose
       })
     } catch (error) {
       const isRefused = error instanceof VoiceUnavailableError

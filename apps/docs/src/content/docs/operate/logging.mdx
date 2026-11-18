@@ -297,7 +297,10 @@ the origin refusal, names the reply in `conversationId` and
 | `Voice ended a speech that failed`       | `warn`  | `voiceCloseCode`               | Voice closed the speech with a code other than `1000`; the socket closes with `1011`                                 |
 | `Speech socket fell behind its audio`    | `warn`  | `bufferedBytes`                | More than 1 MB of audio waited for the client; the speech is cancelled and the socket closes with `1008`             |
 
-vmo's and voice's output is not kept in a release build
+voice prints its refusals, drops, and failures to its standard output and
+standard error, and never a reply's text: FluidAudio, which logs each
+sentence it speaks at the info level, logs only its notices, warnings, and
+errors in voice. vmo's and voice's output is not kept in a release build
 ([#229](https://github.com/w3lt/lys/issues/229)).
 
 ## Desktop runtime status

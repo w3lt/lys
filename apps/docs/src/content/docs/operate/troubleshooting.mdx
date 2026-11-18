@@ -144,10 +144,12 @@ Settings → Runtime says why:
   could not be read. Press **Stop**, then **Start**. voice needs macOS 15 or
   later; see
   [voice's requirements](/operate/dependencies/#voice).
-- **voice stopped** right after Start: the process exited before it answered.
-  In development, voice's build and error output appear in the terminal that
-  runs `pnpm dev`. If the model download was interrupted, delete
-  `~/.lys/voice/models` and start voice again.
+- **voice stopped** after Start: the process exited before it was ready,
+  for example because its models could not be downloaded or loaded, in which
+  case voice prints the cause and exits. In development, voice's build and
+  error output appear in the terminal that runs `pnpm dev`. If the model
+  download was interrupted, delete `~/.lys/voice/models` and start voice
+  again.
 
 Sound also depends on the window's focus: Lys reads a reply aloud while the
 window is focused, waits silently if it loses focus before the first word,

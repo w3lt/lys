@@ -91,7 +91,8 @@ seconds. Quitting Lys stops vmo and the backend together.
    WebSocket on `127.0.0.1:9091` at once, and loads its PocketTTS models from
    `~/.lys/voice/models`, which it downloads on the first start. Until they
    are loaded, `/health` answers `503` and the speech socket refuses
-   handshakes.
+   handshakes. When they cannot be loaded, voice prints the cause and exits
+   with status 1.
 4. Every second, for up to ten minutes, the store reads `get_voice_status`
    and, while voice runs, `get_voice_health`. voice becomes `running` once it
    answers, `stopped` when its process exits first, and `unresponsive` after

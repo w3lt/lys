@@ -39,6 +39,7 @@ import {
 import { openConversationTestServices } from "../../support/conversationDatabase"
 import { createTestFastify } from "../../support/fastifyTestApp"
 import ControlledReplyTask from "../../support/controlledReplyTask"
+import { waitForMicrotasks } from "../../support/microtasks"
 
 /** Conversation the reply routes are addressed with. */
 const CONVERSATION_ID = createFixtureUuidV7(1)
@@ -591,6 +592,42 @@ describe("speech sockets over their lifecycle", () => {
     const speech = voice.answer()
     await vi.waitFor(() => expect(speech.cancelled).toBe(true))
     expect(speech.speakCalled).toBe(false)
+  })
+
+  it("never dials voice when the UI closes its socket during the health check", async () => {
+    const connect = vi.fn(createFakeVoice().fake.connect)
+    const health = Promise.withResolvers<boolean>()
+    const isReady = vi.fn(() => health.promise)
+    const app = await createVoiceRoutesApp({
+      conversation: COMPLETED_CONVERSATION,
+      isReady,
+      connect
+    })
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(isReady).toHaveBeenCalled())
+    socket.close()
+    await socket.closed
+    health.resolve(true)
+    await waitForMicrotasks()
+    expect(connect).not.toHaveBeenCalled()
+  })
+
+  it("closes 1001 when the generation registry has already closed", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: COMPLETED_CONVERSATION,
+      connect: fake.connect
+    })
+    await app.generations[Symbol.asyncDispose]()
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_SHUTDOWN)
+    expect(fake.speeches).toHaveLength(0)
   })
 
   it("speaks a reply that ended while voice's handshake was pending", async () => {

@@ -1250,9 +1250,9 @@ starts by itself.
   remembers, in memory, who asked a reply to stop first, the person or the
   delegator, until the reply ends; the end report follows from it.
 - Deleting a main conversation deletes its jobs with it. The delete route
-  lists the working replies of the conversation and its jobs, with each
-  reply of the conversation that a newer turn superseded while its
-  generation still runs the reply, deletes the rows, and then disposes each
+  lists the working replies of the conversation and its jobs, including each
+  reply of the conversation that a newer turn superseded while its reply
+  task still runs, deletes the rows, and then disposes each
   running generation, which cancels its model
   request, every tool call and approval prompt it waits on, and its title
   request, and answers once they have ended

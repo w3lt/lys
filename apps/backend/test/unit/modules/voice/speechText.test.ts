@@ -64,6 +64,12 @@ describe("speech text", () => {
     ])
   })
 
+  it("keeps a citation-shaped index in inline code", () => {
+    expect(listFinishedSentences("Read `arr[1]` first [2].")).toEqual([
+      "Read arr[1] first."
+    ])
+  })
+
   it("keeps inline code as words", () => {
     expect(listFinishedSentences("Run `git status` first.")).toEqual([
       "Run git status first."

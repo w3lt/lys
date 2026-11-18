@@ -47,12 +47,6 @@ const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkMath)
 const sentenceSegmenter = new Intl.Segmenter("en", { granularity: "sentence" })
 
 /** Characters that terminate a spoken sentence, followed by optional closers. */
-/**
- * The citation markers the renderer links, such as `[1]`; a copy of the
- * shared pattern, because that one is frozen.
- */
-const CITATION_MARKERS = new RegExp(CITATION_MARKER_PATTERN.source, "g")
-
 const SENTENCE_END_PATTERN = /[.!?…]["'”’)\]]*$/
 
 /** Any letter, in any script. */
@@ -475,15 +469,16 @@ function removeTextFromReparsableMark(node: Root | RootContent): boolean {
 }
 
 /**
- * Cleans one block of inline text: citation markers dropped, whitespace
- * collapsed, and no space left before closing punctuation.
+ * Cleans one block of inline text: whitespace collapsed, and no space left
+ * before closing punctuation. Citation markers are already dropped from the
+ * block's text nodes, so a citation-shaped index in inline code, such as
+ * `arr[1]`, reads as written.
  *
  * @param text - Inline text of one block.
  * @returns The cleaned text, possibly empty.
  */
 function formatBlockText(text: string): string {
   return text
-    .replace(CITATION_MARKERS, "")
     .replace(/\s+/g, " ")
     .replace(/ ([.,;:!?)\]])/g, "$1")
     .trim()

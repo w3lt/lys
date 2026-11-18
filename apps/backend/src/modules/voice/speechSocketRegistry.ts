@@ -2,49 +2,36 @@ import { SPEECH_CLOSE_SUPERSEDED } from "@lys/protocol"
 import type { WebSocket } from "ws"
 
 /**
- * Tracks the speech sockets open for each reply, so a newer socket for the
- * same reply can retire the older one.
+ * Holds the one speech socket that may speak, so a newer socket retires the
+ * older one.
  *
- * @remarks One reply owns at most one socket: opening a speech or
- * notification socket for a reply closes the one already open for it with
- * the `superseded` close code, whichever endpoint opened it. Sockets are
- * forgotten when they close.
+ * @remarks Lys speaks one speech at a time, as voice does: opening a speech
+ * or notification socket, for any reply, closes the socket already open with
+ * the `superseded` close code. A socket is forgotten when it closes.
+ * Concurrency model: single-owner, on the backend's event loop.
  */
 export class SpeechSocketRegistry {
-  /** Open sockets by reply, in the order they opened. */
-  readonly #sockets = new Map<string, Set<WebSocket>>()
+  /** The socket that may speak, until it closes or a newer one opens. */
+  #current: WebSocket | undefined
 
   /**
-   * Registers a socket for a reply, closing every older socket for it.
+   * Makes a socket the one that may speak, closing the older one.
    *
-   * @param key - Identifies the reply the socket speaks for.
-   * @param socket - Socket to register.
+   * @param socket - Newly opened speech or notification socket.
    */
-  public register(key: string, socket: WebSocket): void {
-    const sockets = this.#sockets.get(key) ?? new Set<WebSocket>()
-    for (const older of sockets) {
-      older.close(SPEECH_CLOSE_SUPERSEDED)
-    }
-    sockets.clear()
-    sockets.add(socket)
-    this.#sockets.set(key, sockets)
+  public register(socket: WebSocket): void {
+    const older = this.#current
+    this.#current = socket
+    older?.close(SPEECH_CLOSE_SUPERSEDED)
   }
 
   /**
    * Forgets a socket that closed.
    *
-   * @param key - Identifies the reply the socket spoke for.
-   * @param socket - Socket to forget.
+   * @param socket - Socket that closed; a socket already replaced by a newer
+   * one is ignored.
    */
-  public unregister(key: string, socket: WebSocket): void {
-    const sockets = this.#sockets.get(key)
-    if (sockets === undefined) return
-    sockets.delete(socket)
-    if (sockets.size === 0) this.#sockets.delete(key)
-  }
-
-  /** Number of sockets tracked for a reply; exposed for tests. */
-  public count(key: string): number {
-    return this.#sockets.get(key)?.size ?? 0
+  public unregister(socket: WebSocket): void {
+    if (this.#current === socket) this.#current = undefined
   }
 }

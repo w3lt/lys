@@ -96,9 +96,11 @@ export const VMO_PORT = 8080
  * desktop names it on the voice card. It is not persisted. voice's
  * `WebServer` in `apps/voice` declares it again as its default host, and
  * `VOICE_ADDRESS` in the desktop's Tauri host, which checks voice's health,
- * as its host, under the same CONST-005 exception as {@link VMO_HOST} and
- * guarded by the same kind of test, so changing it requires changing all
- * three together.
+ * as its host. Those copies are kept under the voice address copy exception
+ * to CONST-005, which mirrors the approved one of {@link VMO_HOST}, is
+ * proposed with the voice pull request and is pending the maintainer's
+ * approval; the same kind of test guards it, so changing the host requires
+ * changing all three together.
  */
 export const VOICE_HOST = "127.0.0.1"
 /**
@@ -118,18 +120,20 @@ export const VOICE_PORT = 9090
  * @remarks voice serves only WebSockets carrying one speech each on this
  * port, on the same loopback host as {@link VOICE_HOST}. The backend opens
  * one socket per reply or notification and is the only client; the desktop
- * never connects to it.
+ * never connects to it. voice's `SpeechSocketServer` in `apps/voice`
+ * declares it again as its default port, under the same CONST-005
+ * exception as {@link VOICE_HOST}, so changing it requires changing both.
  */
 export const VOICE_SOCKET_PORT = 9091
 // ============== ENV CONFIG ============== //
 
 // ============== AUDIO ============== //
 /**
- * Sample rate of every audio frame language model and speech services
+ * Sample rate of every audio frame voice, the backend, and the desktop
  * exchange, in samples per second.
  *
- * @remarks Speech synthesis produces 24 kHz frames; the renderer plays them
- * at the same rate. It is not persisted.
+ * @remarks voice synthesizes 24 kHz audio, the backend relays its frames
+ * unchanged, and the desktop plays them at this rate. It is not persisted.
  */
 export const VOICE_AUDIO_SAMPLE_RATE_HZ = 24_000
 /**
@@ -150,8 +154,19 @@ export const VOICE_AUDIO_BYTES_PER_SAMPLE = 2
  */
 export const SPEECH_CLOSE_COMPLETE = 1000
 /**
- * Close code of a speech or notification socket whose speech failed inside
- * voice; the desktop stops playback and the reply text continues.
+ * Close code of a speech or notification socket whose backend is shutting
+ * down; nothing more is sent.
+ */
+export const SPEECH_CLOSE_SHUTDOWN = 1001
+/**
+ * Close code of a speech or notification socket whose client did not read
+ * its audio fast enough, so the audio waiting to be sent outgrew its bound.
+ */
+export const SPEECH_CLOSE_TOO_SLOW = 1008
+/**
+ * Close code of a speech or notification socket whose speech failed: voice
+ * failed, or the backend could not read the reply. The desktop stops
+ * playback and the reply text continues.
  */
 export const SPEECH_CLOSE_FAILED = 1011
 /**
@@ -159,8 +174,8 @@ export const SPEECH_CLOSE_FAILED = 1011
  */
 export const SPEECH_CLOSE_NO_SUCH_REPLY = 4404
 /**
- * Close code of a speech or notification socket superseded by a newer one
- * for the same reply.
+ * Close code of a speech or notification socket superseded by a newer one,
+ * for this reply or another, because Lys speaks one speech at a time.
  */
 export const SPEECH_CLOSE_SUPERSEDED = 4409
 /**

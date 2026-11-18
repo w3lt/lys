@@ -5,7 +5,7 @@ import { randomInt } from "node:crypto"
  * said anything. Each is spoken exactly as written; one is picked at
  * random per notification. They are never stored.
  */
-export const NOTIFICATION_LINES: readonly string[] = Object.freeze([
+const NOTIFICATION_LINES: readonly string[] = Object.freeze([
   "Master, your response is ready.",
   "Master, I've finished my answer.",
   "Your answer is waiting for you, Master.",

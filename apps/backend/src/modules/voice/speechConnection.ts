@@ -3,21 +3,31 @@ import {
   SPEECH_CLOSE_FAILED,
   SPEECH_CLOSE_NO_SUCH_REPLY,
   SPEECH_CLOSE_REPLY_ENDED,
+  SPEECH_CLOSE_SHUTDOWN,
+  SPEECH_CLOSE_TOO_SLOW,
   SPEECH_CLOSE_VOICE_UNAVAILABLE
 } from "@lys/protocol"
 import type { ChatReplyEvent } from "@lys/protocol"
 import type { ConversationAssistantMessage } from "@lys/share"
+import type { FastifyBaseLogger } from "fastify"
 import type { WebSocket } from "ws"
-import type ReplyGenerationRegistry from "../chat/replyGenerationRegistry"
+import type ReplyGeneration from "../chat/replyGeneration"
 import ReplyEventSubscription from "../chat/replyEventSubscription"
+import type ReplyGenerationRegistry from "../chat/replyGenerationRegistry"
+import { ReplyGenerationRegistryClosedError } from "../chat/replyGenerationRegistry"
 import type { ConversationReader } from "../conversation/capabilities"
 import type { SpeechSocketRegistry } from "./speechSocketRegistry"
 import {
+  VoiceUnavailableError,
   type connectVoiceSpeech,
-  type isVoiceReady,
   type VoiceSpeech
 } from "./voiceClient"
-import { SpeechSentenceBuffer } from "./speechText"
+import {
+  SpeechSentenceBuffer,
+  splitForVoice,
+  type SpeechSnapshot,
+  type SpeechStart
+} from "./speechText"
 
 /**
  * How many unsent bytes may wait for a slow UI socket before the speech is
@@ -25,8 +35,8 @@ import { SpeechSentenceBuffer } from "./speechText"
  */
 const MAX_BUFFERED_BYTES = 1_000_000
 
-/** Close code sent when the UI falls too far behind to keep up with audio. */
-const WS_BUFFERED_TOO_LONG = 1008
+/** Close code voice ends a speech with once everything was spoken. */
+const VOICE_CLOSE_COMPLETE = 1000
 
 /** Which reply a speech socket speaks for. */
 export type SpeechTarget = Readonly<{
@@ -45,7 +55,7 @@ export type SpeechRequest =
        * sentence being written and is refused when the reply is not being
        * written.
        */
-      from: "start" | "current"
+      from: SpeechStart
     }>
   | Readonly<{
       kind: "notification"
@@ -59,11 +69,14 @@ export type SpeechConnectionDependencies = Readonly<{
   history: ConversationReader
   /** Finds a running generation for the reply. */
   generations: ReplyGenerationRegistry
-  /** Registry that supersedes older sockets for the same reply. */
+  /** Holds the one socket that may speak and supersedes older ones. */
   registry: SpeechSocketRegistry
-  /** Voice readiness probe; injected in tests. */
-  isReady: typeof isVoiceReady
-  /** Voice connection opener; injected in tests. */
+  /**
+   * Asks voice whether it can speak; resolves `false` for a stopped,
+   * starting, or broken voice and never rejects.
+   */
+  isReady: () => Promise<boolean>
+  /** Opens one speech at voice. */
   connect: typeof connectVoiceSpeech
 }>
 
@@ -77,74 +90,66 @@ export type SpeechConnectionOptions = Readonly<{
   request: SpeechRequest
   /** Borrowed dependencies. */
   deps: SpeechConnectionDependencies
+  /** Logger of the request that opened the socket. */
+  log: FastifyBaseLogger
 }>
 
 /**
  * Speaks one reply or one notification line onto a socket the UI opened.
  *
- * @param options - The socket, its target, what to speak, and the deps.
- * @returns Settlement once the socket has been closed. Never throws.
- * @remarks Closes the socket with the code the UI understands: the reply is
- * missing (`4404`), voice is not ready (`4503`), the reply stopped or is not
+ * @param options - The socket, its target, what to speak, the dependencies,
+ * and the request's logger.
+ * @returns Settlement once everything to say was handed to voice, or the
+ * socket was closed without a speech.
+ * @throws Only an unexpected failure of the generation registry; every
+ * expected outcome closes the socket with its code instead.
+ * @remarks Closes the socket with the code the UI understands: voice is not
+ * ready (`4503`), the reply is missing (`4404`), the reply stopped or is not
  * being written when `from` is `current` (`4410`), the UI did not keep up
- * (`1008`), or voice's own outcome mapped to `1000` or `1011`. A newer socket
- * for the same reply closes this one with `4409` first.
+ * (`1008`), the reply could not be read (`1011`), the backend is shutting
+ * down (`1001`), or voice's own outcome mapped to `1000` or `1011`. A newer
+ * socket closes this one with `4409` first. Voice is asked first; the stored
+ * reply is then read and its generation followed in one synchronous step,
+ * so no fragment falls between the two. A socket closed before voice answers
+ * starts no speech, and one closed later cancels its speech at voice. The
+ * socket's opening, its close code, and every failure are logged.
  */
 export async function handleSpeechConnection(
   options: SpeechConnectionOptions
 ): Promise<void> {
-  const { socket, target, request, deps } = options
-  const key = `${target.conversationId}/${target.assistantMessageId}`
-  deps.registry.register(key, socket)
-  socket.on("close", () => deps.registry.unregister(key, socket))
-  // A socket error must not become an unhandled error; its close follows.
-  socket.on("error", () => {})
+  const { socket, request, deps, log } = options
+  deps.registry.register(socket)
+  socket.on("close", (code: number) => {
+    deps.registry.unregister(socket)
+    log.info({ code }, "Speech socket closed")
+  })
+  socket.on("error", (error: Error) => {
+    log.warn({ err: error }, "Speech socket failed")
+  })
+  log.info(
+    {
+      speech: request.kind,
+      from: request.kind === "reply" ? request.from : undefined
+    },
+    "Speech socket opened"
+  )
 
-  const storedReply = readStoredReply(deps.history, target)
-  if (storedReply.kind === "missing") {
-    socket.close(SPEECH_CLOSE_NO_SUCH_REPLY)
-    return
-  }
-  if (storedReply.kind === "unreadable") {
-    socket.close(SPEECH_CLOSE_FAILED)
-    return
-  }
-  const stored = storedReply.reply
-  if (!(await deps.isReady())) {
+  const isReady = await deps.isReady()
+  if (!isOpen(socket)) return
+  if (!isReady) {
     socket.close(SPEECH_CLOSE_VOICE_UNAVAILABLE)
     return
   }
-  // The generation is looked up before anything is sent, so that a
-  // `current` speech for a finished reply is refused up front. A settled
-  // generation may still be registered for an instant; the stored reply
-  // already says the reply is over, so speak it instead of waiting for
-  // events that will never arrive.
-  let generation = deps.generations.findReplyGeneration(target)
-  if (generation !== undefined && !stored.isStreaming) generation = undefined
-  if (
-    request.kind === "reply" &&
-    request.from === "current" &&
-    generation === undefined
-  ) {
-    socket.close(SPEECH_CLOSE_REPLY_ENDED)
-    return
-  }
-
-  const session = new SpeechSession({
-    socket,
-    stored,
-    generation,
-    request,
-    deps
-  })
-  await session.start()
+  // The session must start in the same synchronous step that read the
+  // stored reply, so that it follows every event the snapshot lacks.
+  await openSession(options)?.start()
 }
 
 /** The stored reply a socket speaks, with its text parts split out. */
 type StoredReply = Readonly<{
-  /** Markdown text of the reply's text parts, in order, joined by blank lines. */
-  text: string
-  /** Identifiers of the text parts, so streamed deltas can be matched. */
+  /** Text of the reply's text parts and whether the last one may grow. */
+  snapshot: SpeechSnapshot
+  /** Identifiers of the text parts, so streamed fragments can be matched. */
   textPartIds: ReadonlySet<string>
   /** Whether the stored reply is still streaming. */
   isStreaming: boolean
@@ -154,9 +159,74 @@ type StoredReply = Readonly<{
 type StoredReplyResult =
   | Readonly<{ kind: "found"; reply: StoredReply }>
   | Readonly<{ kind: "missing" }>
-  | Readonly<{ kind: "unreadable" }>
+  | Readonly<{
+      kind: "unreadable"
+      /** What the conversation store threw. */
+      cause: unknown
+    }>
 
-/** Reads the stored reply. */
+/**
+ * Reads the stored reply and creates the session that speaks it, closing
+ * the socket instead when nothing can be spoken.
+ *
+ * @param options - The connection's socket, target, request, dependencies,
+ * and logger.
+ * @returns The session, to start at once, or undefined once the socket was
+ * closed with the reason's code.
+ * @throws Only an unexpected failure of the generation registry.
+ */
+function openSession(
+  options: SpeechConnectionOptions
+): SpeechSession | undefined {
+  const { socket, target, request, deps, log } = options
+  const storedReply = readStoredReply(deps.history, target)
+  if (storedReply.kind === "missing") {
+    socket.close(SPEECH_CLOSE_NO_SUCH_REPLY)
+    return undefined
+  }
+  if (storedReply.kind === "unreadable") {
+    log.error({ err: storedReply.cause }, "Speech could not read the reply")
+    socket.close(SPEECH_CLOSE_FAILED)
+    return undefined
+  }
+  const stored = storedReply.reply
+  let generation: ReplyGeneration | undefined
+  try {
+    generation =
+      request.kind === "reply"
+        ? findWritingGeneration(deps.generations, target, stored)
+        : undefined
+  } catch (error) {
+    if (!(error instanceof ReplyGenerationRegistryClosedError)) throw error
+    socket.close(SPEECH_CLOSE_SHUTDOWN)
+    return undefined
+  }
+  if (
+    request.kind === "reply" &&
+    request.from === "current" &&
+    generation === undefined
+  ) {
+    socket.close(SPEECH_CLOSE_REPLY_ENDED)
+    return undefined
+  }
+  return new SpeechSession({
+    socket,
+    stored,
+    generation,
+    request,
+    connect: deps.connect,
+    log
+  })
+}
+
+/**
+ * Reads the stored reply a socket addresses.
+ *
+ * @param history - Reader of stored conversations.
+ * @param target - The conversation and the reply.
+ * @returns The reply's text parts, `missing` when the conversation or the
+ * reply does not exist, or `unreadable` with what the store threw.
+ */
 function readStoredReply(
   history: ConversationReader,
   target: SpeechTarget
@@ -164,8 +234,8 @@ function readStoredReply(
   let conversation
   try {
     conversation = history.getConversation(target.conversationId)
-  } catch {
-    return { kind: "unreadable" }
+  } catch (error) {
+    return { kind: "unreadable", cause: error }
   }
   const message = conversation?.messages.find(
     (candidate): candidate is ConversationAssistantMessage =>
@@ -174,193 +244,282 @@ function readStoredReply(
   )
   if (message === undefined) return { kind: "missing" }
   const textParts = message.parts.filter((part) => part.kind === "text")
+  const isStreaming = message.status === "streaming"
   return {
     kind: "found",
     reply: Object.freeze({
-      text: textParts.map((part) => part.content).join("\n\n"),
+      snapshot: Object.freeze({
+        text: textParts.map((part) => part.content).join("\n\n"),
+        lastTextPart:
+          isStreaming && message.parts.at(-1)?.kind === "text"
+            ? "open"
+            : "closed"
+      }),
       textPartIds: new Set(textParts.map((part) => part.id)),
-      isStreaming: message.status === "streaming"
+      isStreaming
     })
   }
 }
 
-/** Closes the socket with the code voice's close maps to. */
-function closeWithVoiceCode(socket: WebSocket, code: number): void {
-  socket.close(code === 1000 ? SPEECH_CLOSE_COMPLETE : SPEECH_CLOSE_FAILED)
+/**
+ * Finds the generation still writing a stored reply.
+ *
+ * @param generations - Registry of running generations.
+ * @param target - The conversation and the reply.
+ * @param stored - The reply as stored now.
+ * @returns The generation, or undefined when none runs or the stored reply
+ * already ended; a generation stays registered for an instant after its
+ * reply ended, while the stored reply already says so.
+ * @throws {ReplyGenerationRegistryClosedError} Once the backend began
+ * shutting down.
+ */
+function findWritingGeneration(
+  generations: ReplyGenerationRegistry,
+  target: SpeechTarget,
+  stored: StoredReply
+): ReplyGeneration | undefined {
+  const generation = generations.findReplyGeneration(target)
+  return stored.isStreaming ? generation : undefined
 }
 
 /**
- * Owns one speech from voice connection to close: what to speak, the frames
- * flowing voice to socket, and the end of the speech.
+ * Tells whether a socket still accepts messages.
+ *
+ * @param socket - The UI's socket.
+ * @returns Whether it is open, not closing or closed.
  */
+function isOpen(socket: WebSocket): boolean {
+  return socket.readyState === socket.OPEN
+}
+
 /** What one speech session needs. */
 type SpeechSessionOptions = Readonly<{
   /** The UI's socket. */
   socket: WebSocket
-  /** The reply stored when the socket opened. */
+  /** The reply stored when the session was created. */
   stored: StoredReply
-  /** The generation being followed, if any. */
-  generation: ReturnType<ReplyGenerationRegistry["findReplyGeneration"]>
+  /** The generation writing the reply, or undefined when it is over. */
+  generation: ReplyGeneration | undefined
   /** What to speak and from where. */
   request: SpeechRequest
-  /** Borrowed dependencies. */
-  deps: SpeechConnectionDependencies
+  /** Opens the speech at voice. */
+  connect: typeof connectVoiceSpeech
+  /** Logger of the request that opened the socket. */
+  log: FastifyBaseLogger
 }>
 
+/**
+ * Owns one speech from the voice connection to the close: what to speak, the
+ * frames flowing from voice to the socket, and the end of the speech.
+ *
+ * @remarks Lifecycle: created once voice is ready and the reply was read;
+ * `start` follows the reply's generation at once and then connects to
+ * voice; the session ends when the socket closes. Events that arrive before
+ * voice answers wait in order and are applied once it does. Closing the
+ * socket, from either side, cancels the speech at voice and ends the
+ * following. Concurrency model: single-owner, on the backend's event loop.
+ */
 class SpeechSession {
+  /** The UI's socket; borrowed, and closed with the outcome's code. */
   readonly #socket: WebSocket
+  /** The reply stored when the session was created. */
   readonly #stored: StoredReply
-  readonly #generation: ReturnType<
-    ReplyGenerationRegistry["findReplyGeneration"]
-  >
+  /** The generation writing the reply, or undefined when it is over. */
+  readonly #generation: ReplyGeneration | undefined
+  /** What to speak and from where. */
   readonly #request: SpeechRequest
-  readonly #deps: SpeechConnectionDependencies
-  /** Sentences flow here; the snapshot seeds it and deltas extend it. */
+  /** Opens the speech at voice. */
+  readonly #connect: typeof connectVoiceSpeech
+  /** Logger of the request that opened the socket. */
+  readonly #log: FastifyBaseLogger
+  /** Hands out the sentences to speak; the snapshot seeds it. */
   readonly #buffer: SpeechSentenceBuffer
-  /** Ids of the text parts seen so far; deltas of other parts are dropped. */
+  /** Ids of the text parts seen so far; other parts are not spoken. */
   readonly #textPartIds: Set<string>
+  /** Follows the generation's events for as long as the speech runs. */
   readonly #subscription: ReplyEventSubscription<ChatReplyEvent>
+  /** Events received before voice answered, in order. */
   readonly #pending: ChatReplyEvent[] = []
+  /** The speech at voice, once voice answered. */
   #voice: VoiceSpeech | undefined
-  #live = false
+  /** Whether events are applied at once rather than kept pending. */
+  #isLive = false
+  /** Whether any text was received, so a new text part needs a separator. */
   #hasText: boolean
-  /** Whether a terminal reply event was seen; guards the fallback when the subscription ends on its own. */
-  #terminalSeen = false
+  /** Whether the reply's end was seen, so the following is expected to end. */
+  #hasReplyEnded = false
 
+  /**
+   * Creates a session that has not followed anything or connected yet.
+   *
+   * @param options - The socket, the stored reply, its generation, the
+   * request, the voice connection opener, and the logger.
+   */
   public constructor(options: SpeechSessionOptions) {
-    const { socket, stored, generation, request, deps } = options
+    const { socket, stored, generation, request, connect, log } = options
     this.#socket = socket
     this.#stored = stored
     this.#generation = generation
     this.#request = request
-    this.#deps = deps
-    const from = request.kind === "reply" ? request.from : "start"
-    this.#buffer = new SpeechSentenceBuffer(from)
+    this.#connect = connect
+    this.#log = log
+    this.#buffer = new SpeechSentenceBuffer(
+      request.kind === "reply" ? request.from : "start"
+    )
     this.#textPartIds = new Set(stored.textPartIds)
-    this.#hasText = stored.text.length > 0
+    this.#hasText = stored.snapshot.text.length > 0
     this.#subscription = new ReplyEventSubscription<ChatReplyEvent>(
       this.#receiveEvent
     )
   }
 
   /**
-   * Queues an event until the session is live, then applies it.
+   * Follows the reply, connects to voice, and speaks.
    *
-   * @param event - Event of the followed reply.
-   * @returns Settlement for the delivery chain.
-   */
-  readonly #receiveEvent = (event: ChatReplyEvent): Promise<void> => {
-    if (!this.#live) this.#pending.push(event)
-    else this.#handleEvent(event)
-    return Promise.resolve()
-  }
-
-  /** Cuts the speech when the followed reply ends without a terminal event. */
-  readonly #subscriptionClosed = (): void => {
-    if (this.#terminalSeen) return
-    this.#terminalSeen = true
-    this.#voice?.cancel()
-    this.#socket.close(SPEECH_CLOSE_REPLY_ENDED)
-  }
-
-  /**
-   * Connects to voice, registers with the generation when the reply is being
-   * written, and speaks.
-   *
-   * @returns Settlement once the socket has been closed.
+   * @returns Settlement once everything known was handed to voice, or the
+   * socket was closed; it never rejects.
+   * @remarks Must be called in the same synchronous step that read the
+   * stored reply, so that the following misses no event.
    */
   public async start(): Promise<void> {
-    // A subscription that ends without a terminal event means the reply
-    // ended between the snapshot and the follow, or a write failed; the
-    // reply will say nothing more, so stop the speech.
-    void this.#subscription.closed.then(this.#subscriptionClosed)
-    if (this.#request.kind === "notification") {
-      await this.#startNotification()
-      return
-    }
+    this.#socket.on("close", this.#endSpeech)
+    void this.#subscription.closed.then(this.#endFollowing)
+    this.#generation?.openSubscription(this.#subscription)
 
-    // Opening the subscription before connecting to voice closes the gap in
-    // which fragments would otherwise be missed: they queue in `#pending`
-    // and are replayed once the pipeline is live.
-    if (this.#generation !== undefined) {
-      this.#generation.openSubscription(this.#subscription)
-    }
-
-    let voice: VoiceSpeech
-    try {
-      voice = await this.#deps.connect({
-        onAudio: (pcm) => this.#forwardAudio(pcm),
-        onClose: (code) => closeWithVoiceCode(this.#socket, code)
-      })
-    } catch {
-      this.#subscription.close()
-      this.#socket.close(SPEECH_CLOSE_VOICE_UNAVAILABLE)
+    const voice = await this.#connectVoice()
+    if (voice === undefined) return
+    if (!isOpen(this.#socket)) {
+      voice.cancel()
       return
     }
     this.#voice = voice
-    this.#socket.on("close", () => {
-      voice.cancel()
-      this.#subscription.close()
-    })
-
     voice.speak()
-    this.#speak(this.#buffer.loadSnapshot(this.#stored.text))
-
+    if (this.#request.kind === "notification") {
+      voice.speakText(this.#request.line)
+      voice.finish()
+      return
+    }
+    this.#speak(this.#buffer.loadSnapshot(this.#stored.snapshot))
     if (this.#generation === undefined) {
       this.#speak(this.#buffer.finish())
       voice.finish()
       return
     }
-    this.#live = true
+    this.#isLive = true
     for (const event of this.#pending.splice(0)) this.#handleEvent(event)
   }
 
-  /** Speaks one notification line on its own, without following a reply. */
-  async #startNotification(): Promise<void> {
-    const request = this.#request
-    if (request.kind !== "notification") return
-    let voice: VoiceSpeech
-    try {
-      voice = await this.#deps.connect({
-        onAudio: (pcm) => this.#forwardAudio(pcm),
-        onClose: (code) => closeWithVoiceCode(this.#socket, code)
-      })
-    } catch {
-      this.#socket.close(SPEECH_CLOSE_VOICE_UNAVAILABLE)
+  /**
+   * Queues an event until voice answered, then applies it.
+   *
+   * @param event - Event of the followed reply.
+   * @returns Settlement for the delivery chain; it never rejects.
+   */
+  readonly #receiveEvent = (event: ChatReplyEvent): Promise<void> => {
+    if (this.#isLive) this.#handleEvent(event)
+    else this.#pending.push(event)
+    return Promise.resolve()
+  }
+
+  /** Cancels the speech at voice and ends the following once the socket closed. */
+  readonly #endSpeech = (): void => {
+    this.#voice?.cancel()
+    this.#subscription.close()
+  }
+
+  /** Cuts the speech when the following ends before the reply's end was seen. */
+  readonly #endFollowing = (): void => {
+    if (this.#hasReplyEnded || !isOpen(this.#socket)) return
+    this.#hasReplyEnded = true
+    this.#voice?.cancel()
+    this.#socket.close(SPEECH_CLOSE_REPLY_ENDED)
+  }
+
+  /**
+   * Relays voice's close of the speech to the UI's socket.
+   *
+   * @param code - Voice's close code; `1000` once everything was spoken.
+   */
+  readonly #relayVoiceClose = (code: number): void => {
+    if (!isOpen(this.#socket)) return
+    if (code === VOICE_CLOSE_COMPLETE) {
+      this.#socket.close(SPEECH_CLOSE_COMPLETE)
       return
     }
-    this.#voice = voice
-    this.#socket.on("close", () => voice.cancel())
-    voice.speak()
-    voice.speakText(request.line)
-    voice.finish()
+    this.#log.warn({ voiceCloseCode: code }, "Voice ended a speech that failed")
+    this.#socket.close(SPEECH_CLOSE_FAILED)
   }
 
-  /** Sends sentences to voice, if connected. */
-  #speak(sentences: string[]): void {
-    for (const sentence of sentences) this.#voice?.speakText(sentence)
+  /**
+   * Opens the speech at voice, closing the socket when voice refuses.
+   *
+   * @returns The speech, or undefined once the socket was closed with
+   * `4503` for a refused handshake or `1011` for any other failure.
+   */
+  async #connectVoice(): Promise<VoiceSpeech | undefined> {
+    try {
+      return await this.#connect({
+        onAudio: (pcm) => this.#forwardAudio(pcm),
+        onClose: this.#relayVoiceClose
+      })
+    } catch (error) {
+      const isRefused = error instanceof VoiceUnavailableError
+      if (isRefused) this.#log.warn({ err: error }, "Voice refused a speech")
+      else this.#log.error({ err: error }, "Speech could not reach voice")
+      if (isOpen(this.#socket))
+        this.#socket.close(
+          isRefused ? SPEECH_CLOSE_VOICE_UNAVAILABLE : SPEECH_CLOSE_FAILED
+        )
+      return undefined
+    }
   }
 
-  /** Forwards one audio frame to the UI, closing on overflow. */
+  /**
+   * Hands sentences to voice, once connected, splitting any sentence too
+   * long for one voice message.
+   *
+   * @param sentences - Sentences to speak, in order.
+   */
+  #speak(sentences: readonly string[]): void {
+    for (const piece of sentences.flatMap((sentence) =>
+      splitForVoice(sentence)
+    )) {
+      this.#voice?.speakText(piece)
+    }
+  }
+
+  /**
+   * Forwards one audio frame to the UI, cutting the speech once the UI falls
+   * too far behind.
+   *
+   * @param pcm - Raw PCM bytes of the frame.
+   */
   #forwardAudio(pcm: Buffer): void {
-    if (this.#socket.bufferedAmount > MAX_BUFFERED_BYTES) {
+    if (!isOpen(this.#socket)) return
+    const bufferedBytes = this.#socket.bufferedAmount
+    if (bufferedBytes > MAX_BUFFERED_BYTES) {
+      this.#log.warn({ bufferedBytes }, "Speech socket fell behind its audio")
       this.#voice?.cancel()
-      this.#socket.close(WS_BUFFERED_TOO_LONG)
+      this.#socket.close(SPEECH_CLOSE_TOO_SLOW)
       return
     }
     this.#socket.send(pcm)
   }
 
-  /** Applies one event of the followed reply. */
+  /**
+   * Applies one event of the followed reply.
+   *
+   * @param event - Event of the followed reply, in order.
+   */
   #handleEvent(event: ChatReplyEvent): void {
     switch (event.type) {
       case "reply-part": {
         const part = event.part
         if (part.kind !== "text") return
         this.#textPartIds.add(part.id)
-        const prefix = this.#hasText ? "\n\n" : ""
+        const separator = this.#hasText ? "\n\n" : ""
         this.#hasText = true
-        this.#speak(this.#buffer.push(prefix + part.content))
+        this.#speak(this.#buffer.push(separator + part.content))
         return
       }
       case "reply-part-delta": {
@@ -370,7 +529,7 @@ class SpeechSession {
         return
       }
       case "done": {
-        this.#terminalSeen = true
+        this.#hasReplyEnded = true
         this.#speak(this.#buffer.finish())
         this.#voice?.finish()
         this.#subscription.close()
@@ -378,7 +537,7 @@ class SpeechSession {
       }
       case "interrupted":
       case "error": {
-        this.#terminalSeen = true
+        this.#hasReplyEnded = true
         this.#voice?.cancel()
         this.#socket.close(SPEECH_CLOSE_REPLY_ENDED)
         this.#subscription.close()

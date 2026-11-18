@@ -4,7 +4,12 @@ import {
   type ChatNotificationApiRoute,
   type ChatSpeechApiRoute
 } from "@lys/protocol"
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
+import type {
+  FastifyBaseLogger,
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest
+} from "fastify"
 import type { WebSocket } from "ws"
 import { isAllowedOrigin } from "../../httpOrigins"
 import { pickNotificationLine } from "./notificationLines"
@@ -15,40 +20,76 @@ import {
 } from "./speechConnection"
 import { connectVoiceSpeech, isVoiceReady } from "./voiceClient"
 
+/** Problem Details media type of the origin refusal. */
+const PROBLEM_MEDIA_TYPE = "application/problem+json"
+
 /** Options the speech routes borrow; defaults speak to the real voice. */
 export type SpeechRouteOptions = Readonly<{
   /** Probe whether voice is ready; defaults to the real health check. */
-  isReady?: typeof isVoiceReady
-  /** Open a speech to voice; defaults to the real connection. */
+  isReady?: () => Promise<boolean>
+  /** Open a speech at voice; defaults to the real connection. */
   connect?: typeof connectVoiceSpeech
 }>
 
 /**
- * Installs the speech WebSocket routes.
+ * Registers the speech and notification WebSocket routes.
  *
- * @param app - Backend with HTTP transport, the conversation history
+ * @param app - Application with WebSocket support, the conversation history
  * reader, and the reply generation registry every turn start registers its
- * generation with; the registry's owner disposes it.
- * @param options - Test seams for the voice probe and connection.
- * @throws If route registration fails.
- * @remarks The two sockets speak for one reply each. They accept the
- * backend's desktop origins only; a browser page sending another `Origin`
- * is refused before the upgrade, and everything else is local, as with the
- * HTTP routes.
+ * generation with; the registry's owner disposes of it.
+ * @param options - Test seams for the voice probe and connection; empty in
+ * the application.
+ * @returns A promise that resolves after route registration completes.
+ * @throws If Fastify cannot register a route. The failure rejects the
+ * promise, so `app.register` reports it rather than an uncaught exception.
+ * @remarks The two sockets speak for one reply each, and one socket speaks
+ * at a time across both. They accept the backend's desktop origins only; a
+ * browser page sending another `Origin` is refused before the upgrade, and
+ * everything else is local, as with the HTTP routes.
  */
-export default function updateFastifyWithSpeechRoutes(
+export default function registerVoiceRoutes(
   app: FastifyInstance,
   options: SpeechRouteOptions = {}
-): void {
-  const registry = new SpeechSocketRegistry()
-  const deps: SpeechConnectionDependencies = {
+): Promise<void> {
+  return new Promise((resolve) => {
+    registerSpeechSocketRoutes(app, createSpeechDependencies(app, options))
+    resolve()
+  })
+}
+
+/**
+ * Gathers the dependencies both socket endpoints share.
+ *
+ * @param app - Application with the conversation history reader and the
+ * reply generation registry installed; both are read once, here.
+ * @param options - Test seams for the voice probe and connection.
+ * @returns The dependencies, with one new socket registry.
+ */
+function createSpeechDependencies(
+  app: FastifyInstance,
+  options: SpeechRouteOptions
+): SpeechConnectionDependencies {
+  return Object.freeze({
     history: app.conversationHistoryReader,
     generations: app.replyGenerations,
-    registry,
+    registry: new SpeechSocketRegistry(),
     isReady: options.isReady ?? isVoiceReady,
     connect: options.connect ?? connectVoiceSpeech
-  }
+  })
+}
 
+/**
+ * Registers the two socket endpoints over one set of dependencies.
+ *
+ * @param app - Application with WebSocket support.
+ * @param deps - Dependencies both endpoints share, including the one
+ * socket registry that lets a single socket speak at a time.
+ * @throws If route registration fails.
+ */
+function registerSpeechSocketRoutes(
+  app: FastifyInstance,
+  deps: SpeechConnectionDependencies
+): void {
   app.route<ChatSpeechApiRoute>({
     method: chatSpeechApi.method,
     url: chatSpeechApi.path,
@@ -63,7 +104,8 @@ export default function updateFastifyWithSpeechRoutes(
         socket,
         target: request.params,
         request: { kind: "reply", from: request.query.from },
-        deps
+        deps,
+        log: createSpeechLog(request)
       })
   })
 
@@ -81,14 +123,33 @@ export default function updateFastifyWithSpeechRoutes(
         socket,
         target: request.params,
         request: { kind: "notification", line: pickNotificationLine() },
-        deps
+        deps,
+        log: createSpeechLog(request)
       })
+  })
+}
+
+/**
+ * Creates the logger of one speech socket.
+ *
+ * @param request - Its upgrade request, with the validated reply address.
+ * @returns A child of the request's logger that names the reply.
+ */
+function createSpeechLog(
+  request: FastifyRequest<ChatSpeechApiRoute | ChatNotificationApiRoute>
+): FastifyBaseLogger {
+  return request.log.child({
+    conversationId: request.params.conversationId,
+    assistantMessageId: request.params.assistantMessageId
   })
 }
 
 /**
  * Refuses a WebSocket upgrade whose `Origin` is not a desktop origin.
  *
+ * @param request - The upgrade request.
+ * @param reply - Its reply, sent a `403` Problem Details body on refusal.
+ * @param done - Continues the upgrade when called without an error.
  * @remarks Runs before the upgrade, so a web page is turned away without a
  * socket; requests without an `Origin`, such as ones from local processes,
  * are allowed, as with the HTTP routes.
@@ -102,7 +163,11 @@ function refuseForeignOrigins(
     done()
     return
   }
-  void reply.code(403).send({
+  request.log.warn(
+    { origin: request.headers.origin },
+    "Speech socket refused a foreign origin"
+  )
+  void reply.type(PROBLEM_MEDIA_TYPE).code(403).send({
     type: "about:blank",
     title: "Forbidden",
     status: 403,

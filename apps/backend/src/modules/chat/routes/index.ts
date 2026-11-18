@@ -4,7 +4,6 @@ import registerChatContextRoute from "./chatContextRoute"
 import registerChatRoute from "./chatRoute"
 import { createLlmModelCapabilitiesLookup } from "./modelCapabilities"
 import updateFastifyWithChatReplyRoutes from "./replyRoutes"
-import updateFastifyWithVoiceRoutes from "../../voice/routes"
 
 /**
  * Registers all chat routes.
@@ -28,8 +27,8 @@ export default function registerChatRoutes(
 }
 
 /**
- * Registers the chat, chat-context, reply, and speech endpoints with the
- * response serializer and the model capability lookup they share.
+ * Registers the chat, chat-context, and reply endpoints with the response
+ * serializer and the model capability lookup they share.
  *
  * @param app - Application with SSE, validation, and the singleton services
  * installed.
@@ -48,5 +47,4 @@ function registerChatRouteGroup(app: FastifyInstance): void {
   registerChatRoute(app, findModelCapabilities)
   registerChatContextRoute(app, findModelCapabilities)
   updateFastifyWithChatReplyRoutes(app)
-  updateFastifyWithVoiceRoutes(app)
 }

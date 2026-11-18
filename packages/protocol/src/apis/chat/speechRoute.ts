@@ -26,13 +26,14 @@ export type ChatSpeechQuery = z.infer<typeof chatSpeechQuerySchema>
  * @remarks A speech-protocol socket. The client opens it, the backend speaks
  * the reply's text through the voice service, and binary messages carry raw
  * 24 kHz mono 16-bit little-endian PCM until the socket closes. The close
- * code says why the socket closed: `1000` everything was sent, `1011` voice
- * failed, `4404` no such conversation or reply, `4409` a newer socket
- * replaced this one, `4410` the reply stopped or failed (or, for `current`,
- * is no longer being written), `4503` voice is not ready. Opening a socket
- * for a reply closes any older socket for that reply, whichever endpoint it
- * was opened on. Changing the method, path, or schemas requires coordinated
- * consumers.
+ * code says why the socket closed: `1000` everything was sent, `1001` the
+ * backend is shutting down, `1008` the client fell behind, `1011` voice
+ * failed or the backend could not read the reply, `4404` no such
+ * conversation or reply, `4409` a newer socket replaced this one, `4410` the
+ * reply stopped or failed (or, for `current`, is no longer being written),
+ * `4503` voice is not ready. Opening a socket closes every older one, for
+ * any reply and on either endpoint, because Lys speaks one speech at a time.
+ * Changing the method, path, or schemas requires coordinated consumers.
  */
 export const chatSpeechApi = Object.freeze({
   method: "GET",

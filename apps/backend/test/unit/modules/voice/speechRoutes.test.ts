@@ -4,9 +4,12 @@ import {
   chatNotificationApi,
   chatSpeechApi,
   SPEECH_CLOSE_COMPLETE,
+  SPEECH_CLOSE_FAILED,
   SPEECH_CLOSE_NO_SUCH_REPLY,
   SPEECH_CLOSE_REPLY_ENDED,
+  SPEECH_CLOSE_SHUTDOWN,
   SPEECH_CLOSE_SUPERSEDED,
+  SPEECH_CLOSE_TOO_SLOW,
   SPEECH_CLOSE_VOICE_UNAVAILABLE
 } from "@lys/protocol"
 import type { ChatGenerationEvent } from "@lys/protocol"
@@ -19,10 +22,11 @@ import type {
 import ReplyGenerationRegistry, {
   type ReplyTarget
 } from "../../../../src/modules/chat/replyGenerationRegistry"
-import updateFastifyWithVoiceRoutes from "../../../../src/modules/voice/routes"
-import type {
-  VoiceSpeech,
-  VoiceSpeechHandlers
+import registerVoiceRoutes from "../../../../src/modules/voice/routes"
+import {
+  VoiceUnavailableError,
+  type VoiceSpeech,
+  type VoiceSpeechHandlers
 } from "../../../../src/modules/voice/voiceClient"
 import {
   createAssistantMessage,
@@ -129,7 +133,6 @@ class FakeVoiceSpeech implements VoiceSpeech {
   public cancel(): void {
     this.cancelled = true
   }
-  public readonly bufferedAmount = 0
   /** Plays one audio frame to the socket, as voice does. */
   public emitAudio(pcm: Buffer): void {
     this.#onAudio?.(pcm)
@@ -234,9 +237,67 @@ async function createVoiceRoutesApp(options: VoiceRoutesAppOptions) {
     isReady: options.isReady ?? (async () => true),
     ...(options.connect === undefined ? {} : { connect: options.connect })
   }
-  updateFastifyWithVoiceRoutes(testFastify.app, voiceOptions)
+  await registerVoiceRoutes(testFastify.app, voiceOptions)
   const baseUrl = await listen(testFastify.app)
   return { ...testFastify, generations, getConversation, baseUrl }
+}
+
+/** The two tasks of a generation a test drives. */
+type FixtureGeneration = Readonly<{
+  /** Reply task, whose context sends the reply's events. */
+  replyTask: ControlledReplyTask<ReplyTaskContext>
+  /** Title task. */
+  titleTask: ControlledReplyTask<ReplyGenerationTaskContext>
+}>
+
+/** Starts a generation for the fixture reply, returning its tasks. */
+function startFixtureGeneration(
+  generations: ReplyGenerationRegistry
+): FixtureGeneration {
+  const replyTask = new ControlledReplyTask<ReplyTaskContext>()
+  const titleTask = new ControlledReplyTask<ReplyGenerationTaskContext>()
+  generations.startReplyGeneration(REPLY_TARGET, {
+    startReplyTask: (context: ReplyTaskContext) => replyTask.start(context),
+    startTitleTask: (context: ReplyGenerationTaskContext) =>
+      titleTask.start(context),
+    reportTaskFailure: vi.fn()
+  })
+  onTestFinished(() => {
+    replyTask.resolve()
+    titleTask.resolve()
+  })
+  return { replyTask, titleTask }
+}
+
+/** A streamed fragment of the fixture reply's text part. */
+function createTextDelta(content: string): ChatGenerationEvent {
+  return {
+    type: "reply-part-delta",
+    partId: TEXT_PART.id,
+    content,
+    updatedAt: FIXTURE_TIMESTAMP
+  }
+}
+
+/** A second completed reply in the same conversation. */
+const OTHER_ASSISTANT_MESSAGE = createAssistantMessage(
+  5,
+  [createTextPart({ sequence: 6, round: 0, content: "Other." })],
+  { status: "completed", finishReason: "stop" }
+)
+
+/** Conversation holding a streaming reply and a second completed one. */
+const TWO_REPLY_CONVERSATION = Object.freeze({
+  ...STREAMING_CONVERSATION,
+  messages: [USER_MESSAGE, ASSISTANT_MESSAGE, OTHER_ASSISTANT_MESSAGE]
+} satisfies Conversation)
+
+/** Builds the speech URL of the second reply. */
+function buildOtherReplySpeechUrl(): string {
+  return buildSpeechUrl(chatSpeechApi.path, "start").replace(
+    REPLY_TARGET.assistantMessageId,
+    OTHER_ASSISTANT_MESSAGE.id
+  )
 }
 
 describe("speech routes", () => {
@@ -272,6 +333,31 @@ describe("speech routes", () => {
     await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_REPLY_ENDED)
   })
 
+  it("hands voice a sentence too long for one message in pieces", async () => {
+    const sentence = Array.from({ length: 1000 }, () => "word").join(" ")
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: {
+        ...COMPLETED_CONVERSATION,
+        messages: [
+          USER_MESSAGE,
+          createAssistantMessage(
+            3,
+            [createTextPart({ sequence: 4, round: 0, content: sentence })],
+            { status: "completed", finishReason: "stop" }
+          )
+        ]
+      },
+      connect: fake.connect
+    })
+    openTestSocket(app.baseUrl, buildSpeechUrl(chatSpeechApi.path, "start"))
+    await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
+    const spoken = fake.speeches[0]?.spoken ?? []
+    expect(spoken.length).toBeGreaterThan(1)
+    expect(spoken.every((piece) => piece.length <= 2000)).toBe(true)
+    expect(spoken.join(" ")).toBe(`${sentence}.`)
+  })
+
   it("speaks the stored snapshot of a finished reply and closes 1000", async () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
@@ -297,18 +383,7 @@ describe("speech routes", () => {
       conversation: STREAMING_CONVERSATION,
       connect: fake.connect
     })
-    const replyTask = new ControlledReplyTask()
-    const titleTask = new ControlledReplyTask()
-    app.generations.startReplyGeneration(REPLY_TARGET, {
-      startReplyTask: (context: ReplyTaskContext) => replyTask.start(context),
-      startTitleTask: (context: ReplyGenerationTaskContext) =>
-        titleTask.start(context),
-      reportTaskFailure: vi.fn()
-    })
-    onTestFinished(() => {
-      replyTask.resolve()
-      titleTask.resolve()
-    })
+    const { replyTask } = startFixtureGeneration(app.generations)
     const socket = openTestSocket(
       app.baseUrl,
       buildSpeechUrl(chatSpeechApi.path, "current")
@@ -317,12 +392,7 @@ describe("speech routes", () => {
     // The stored snapshot holds "Hello the"; no complete sentence yet.
     expect(fake.speeches[0]?.spoken).toEqual([])
 
-    replyTask.context.sendEvent({
-      type: "reply-part-delta",
-      partId: TEXT_PART.id,
-      content: " world. Fresh start",
-      updatedAt: FIXTURE_TIMESTAMP
-    } satisfies ChatGenerationEvent)
+    replyTask.context.sendEvent(createTextDelta(" world. Fresh start"))
     await vi.waitFor(() =>
       expect(fake.speeches[0]?.spoken).toEqual(["Hello the world."])
     )
@@ -330,7 +400,7 @@ describe("speech routes", () => {
     await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
     expect(fake.speeches[0]?.spoken).toEqual([
       "Hello the world.",
-      "Fresh start"
+      "Fresh start."
     ])
     fake.speeches[0]?.closeFromVoice(1000)
     await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_COMPLETE)
@@ -342,18 +412,7 @@ describe("speech routes", () => {
       conversation: STREAMING_CONVERSATION,
       connect: fake.connect
     })
-    const replyTask = new ControlledReplyTask()
-    const titleTask = new ControlledReplyTask()
-    app.generations.startReplyGeneration(REPLY_TARGET, {
-      startReplyTask: (context: ReplyTaskContext) => replyTask.start(context),
-      startTitleTask: (context: ReplyGenerationTaskContext) =>
-        titleTask.start(context),
-      reportTaskFailure: vi.fn()
-    })
-    onTestFinished(() => {
-      replyTask.resolve()
-      titleTask.resolve()
-    })
+    const { replyTask } = startFixtureGeneration(app.generations)
     const socket = openTestSocket(
       app.baseUrl,
       buildSpeechUrl(chatSpeechApi.path, "start")
@@ -444,5 +503,249 @@ describe("speech routes", () => {
       { headers: { origin: "http://localhost:1420" } }
     )
     expect(response.status).not.toBe(403)
+  })
+})
+
+/** A fake voice whose handshake the test answers. */
+type PendingVoice = Readonly<{
+  /** Injected `connect` that waits for {@link answer}. */
+  connect: VoiceConnector
+  /** Whether the backend dialed voice. */
+  isDialed: () => boolean
+  /** Accepts the handshake, returning the speech the backend received. */
+  answer: () => FakeVoiceSpeech
+}>
+
+/** Creates a fake voice that holds the handshake until the test answers. */
+function createPendingVoice(): PendingVoice {
+  const handshake = Promise.withResolvers<VoiceSpeech>()
+  let handlers: VoiceSpeechHandlers | undefined
+  return {
+    connect: (dialed) => {
+      handlers = dialed
+      return handshake.promise
+    },
+    isDialed: () => handlers !== undefined,
+    answer: () => {
+      if (handlers === undefined) throw new Error("voice was not dialed")
+      const speech = new FakeVoiceSpeech(handlers)
+      handshake.resolve(speech)
+      return speech
+    }
+  }
+}
+
+describe("speech sockets over their lifecycle", () => {
+  it("speaks text stored while voice's health was being checked", async () => {
+    const { fake } = createFakeVoice()
+    const health = Promise.withResolvers<boolean>()
+    const isReady = vi.fn(() => health.promise)
+    const app = await createVoiceRoutesApp({
+      conversation: STREAMING_CONVERSATION,
+      isReady,
+      connect: fake.connect
+    })
+    const { replyTask } = startFixtureGeneration(app.generations)
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(isReady).toHaveBeenCalled())
+    replyTask.context.sendEvent(createTextDelta("re, friend. Next"))
+    app.getConversation.mockReturnValue({
+      ...STREAMING_CONVERSATION,
+      messages: [
+        USER_MESSAGE,
+        {
+          ...ASSISTANT_MESSAGE,
+          parts: [createStreamingPart("Hello there, friend. Next")]
+        }
+      ]
+    })
+    health.resolve(true)
+    await vi.waitFor(() => expect(fake.speeches[0]?.speakCalled).toBe(true))
+    replyTask.context.sendEvent(createTextDelta(" one."))
+    replyTask.context.sendEvent({ type: "done", finishReason: "stop" })
+    await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
+    expect(fake.speeches[0]?.spoken).toEqual([
+      "Hello there, friend.",
+      "Next one."
+    ])
+    socket.close()
+  })
+
+  it("cancels a speech voice accepts after the UI closed its socket", async () => {
+    const voice = createPendingVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: COMPLETED_CONVERSATION,
+      connect: voice.connect
+    })
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(voice.isDialed()).toBe(true))
+    socket.close()
+    await socket.closed
+    const speech = voice.answer()
+    await vi.waitFor(() => expect(speech.cancelled).toBe(true))
+    expect(speech.speakCalled).toBe(false)
+  })
+
+  it("supersedes the socket of another reply and cancels its speech", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: TWO_REPLY_CONVERSATION,
+      connect: fake.connect
+    })
+    startFixtureGeneration(app.generations)
+    const first = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(fake.speeches[0]?.speakCalled).toBe(true))
+    const second = openTestSocket(app.baseUrl, buildOtherReplySpeechUrl())
+    await expect(first.closed).resolves.toBe(SPEECH_CLOSE_SUPERSEDED)
+    await vi.waitFor(() => expect(fake.speeches[0]?.cancelled).toBe(true))
+    await vi.waitFor(() => expect(fake.speeches[1]?.spoken).toEqual(["Other."]))
+    second.close()
+  })
+
+  it("closes 1011 when voice ends a speech with a failure", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: COMPLETED_CONVERSATION,
+      connect: fake.connect
+    })
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
+    fake.speeches[0]?.closeFromVoice(1011)
+    await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_FAILED)
+  })
+
+  it("closes 4410 and cancels the speech when the reply fails", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: STREAMING_CONVERSATION,
+      connect: fake.connect
+    })
+    const { replyTask } = startFixtureGeneration(app.generations)
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(fake.speeches[0]?.speakCalled).toBe(true))
+    replyTask.context.sendEvent({ type: "error", message: "Model failed" })
+    await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_REPLY_ENDED)
+    expect(fake.speeches[0]?.cancelled).toBe(true)
+  })
+
+  it("closes 4410 when the reply's generation ends without an end event", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: STREAMING_CONVERSATION,
+      connect: fake.connect
+    })
+    const { replyTask, titleTask } = startFixtureGeneration(app.generations)
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(fake.speeches[0]?.speakCalled).toBe(true))
+    replyTask.resolve()
+    titleTask.resolve()
+    await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_REPLY_ENDED)
+    expect(fake.speeches[0]?.cancelled).toBe(true)
+  })
+
+  it("closes 4503 when voice refuses the speech handshake", async () => {
+    const app = await createVoiceRoutesApp({
+      conversation: COMPLETED_CONVERSATION,
+      connect: () => Promise.reject(new VoiceUnavailableError("refused"))
+    })
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_VOICE_UNAVAILABLE)
+  })
+
+  it("closes 1011 when the conversation store cannot be read", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: COMPLETED_CONVERSATION,
+      connect: fake.connect
+    })
+    app.getConversation.mockImplementation(() => {
+      throw new Error("The database is locked")
+    })
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_FAILED)
+    expect(fake.speeches).toHaveLength(0)
+  })
+
+  it("notification closes 4404 when the reply does not exist", async () => {
+    const app = await createVoiceRoutesApp({ conversation: undefined })
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatNotificationApi.path)
+    )
+    await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_NO_SUCH_REPLY)
+  })
+
+  it("closes 1008 and cancels the speech when the UI falls behind", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: COMPLETED_CONVERSATION,
+      connect: fake.connect
+    })
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
+    const frame = Buffer.alloc(64 * 1024)
+    for (let count = 0; count < 160; count += 1)
+      fake.speeches[0]?.emitAudio(frame)
+    await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_TOO_SLOW)
+    expect(fake.speeches[0]?.cancelled).toBe(true)
+  })
+
+  it("closes 1001 when the backend shuts down", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: COMPLETED_CONVERSATION,
+      connect: fake.connect
+    })
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
+    await app.app.close()
+    await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_SHUTDOWN)
+  })
+
+  it("refuses a foreign origin's upgrade, so no speech starts", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: COMPLETED_CONVERSATION,
+      connect: fake.connect
+    })
+    const url = `${app.baseUrl}${buildSpeechUrl(chatSpeechApi.path, "start")}`
+    const socket = new WebSocket(url, {
+      headers: { origin: "https://evil.example" }
+    })
+    const closed = new Promise<number>((resolve) => {
+      socket.addEventListener("close", (event) => resolve(event.code))
+    })
+    await expect(closed).resolves.toBe(1006)
+    expect(fake.speeches).toHaveLength(0)
   })
 })

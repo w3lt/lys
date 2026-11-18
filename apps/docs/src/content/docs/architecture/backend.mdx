@@ -479,18 +479,20 @@ reference and a `>` a tag or a comment, whose letters are not read. The last
 word being written waits too while more letters may make it a bare URL, such as
 `htt`, and so does inline code whose closing run ends the text, since one more
 backtick would make it text again. Three kinds of block hold the block before
-them while on their first line, since more text on that line, such as the
-backtick of `` ```a` `` or the letter of `#x`, may make it the block's next
-line: a block never spoken, such as a code fence; a heading or list item with no
-content, such as `#`; and a list holding only such list items. A block with
-content after its marker, such as `# <b>` or a quote holding a code fence,
-cannot become that line, so it holds nothing. Such a hold delays the sentences
-it covers, not only its marks: in "It takes ~5 minutes. Then do X.", nothing
-from the `~` on is read until the paragraph ends or a closing `~` arrives.
-Likewise, in `a<b` written without spaces, nothing from the `<` on is read until
-the paragraph ends or the text after it becomes a tag. When more text changes
-how earlier text reads, speech resumes after the last sentence sent that is
-still there, matched in order, so no sentence is skipped or spoken twice. Once a
+them while on their first line, since more text on that line may make some of
+them the block's next line, as the backtick of `` ```a` `` or the letter of `#x`
+does: a block never spoken, such as a code fence; a heading or list item with no
+content, such as `#`; and a list holding only such list items. The hold covers
+every block of these kinds, even one that no more text can join, such as a tilde
+fence or a `#` followed by a space; the sentences before it then only wait until
+that line ends. A block with content after its marker, such as `# <b>` or a
+quote holding a code fence, holds nothing. Such a hold delays the sentences it
+covers, not only its marks: in "It takes ~5 minutes. Then do X.", nothing from
+the `~` on is read until the paragraph ends or a closing `~` arrives. Likewise,
+in `a<b` written without spaces, nothing from the `<` on is read until the
+paragraph ends or the text after it becomes a tag. When more text changes how
+earlier text reads, speech resumes after the last sentence sent that is still
+there, matched in order, so no sentence is skipped or spoken twice. Once a
 block's next block, or a list item's next item, has a whole first line, and a
 table its delimiter row, no later text changes how the block reads, so each
 fragment parses only the text from the block or item still being written on,

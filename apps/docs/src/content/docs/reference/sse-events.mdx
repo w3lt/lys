@@ -320,15 +320,15 @@ and of [wake-up turns](/architecture/backend/#wake-up-turns), and the jobs
 they belong to. A reply the person started is not on it; the chat and
 reply-events routes carry it. Its events, selected by `type`:
 
-| Event name            | Payload fields                                                                     | Meaning                                                                                      |
-| --------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `activity-snapshot`   | `replies`                                                                          | The first event: every backend-started reply generating now, with what it waits for.         |
-| `reply-started`       | `conversationId`, `parentConversationId`, `assistantMessageId`                     | A job's reply or a wake-up reply started.                                                    |
-| `reply-ended`         | `conversationId`, `parentConversationId`, `assistantMessageId`, `status`           | A backend-started reply ended; every call and prompt it waited on ends with it.              |
-| `job-updated`         | `parentConversationId`, `job`                                                      | One job in its current state, after a job message, a progress note, or the end of its reply. |
-| `tool-approval`       | `conversationId`, `parentConversationId`, `assistantMessageId`, `call`             | A backend-started reply waits for the person to allow or reject this call.                   |
-| `tool-approval-ended` | `conversationId`, `parentConversationId`, `assistantMessageId`, `callId`, `status` | A prompt of a backend-started reply no longer waits: it was answered, or it expired.         |
-| `tool-call`           | `conversationId`, `parentConversationId`, `assistantMessageId`, `call`             | A backend-started reply waits for the client to run this call of a client tool.              |
+| Event name            | Payload fields                                                                          | Meaning                                                                                      |
+| --------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `activity-snapshot`   | `replies`                                                                               | The first event: every backend-started reply generating now, with what it waits for.         |
+| `reply-started`       | `conversationId`, `parentConversationId`, `assistantMessageId`                          | A job's reply or a wake-up reply started.                                                    |
+| `reply-ended`         | `conversationId`, `parentConversationId`, `assistantMessageId`, `status`                | A backend-started reply ended; every call and prompt it waited on ends with it.              |
+| `job-updated`         | `parentConversationId`, `job`                                                           | One job in its current state, after a job message, a progress note, or the end of its reply. |
+| `tool-approval`       | `conversationId`, `parentConversationId`, `assistantMessageId`, `call`, `approvalToken` | A backend-started reply waits for the person to allow or reject this call.                   |
+| `tool-approval-ended` | `conversationId`, `parentConversationId`, `assistantMessageId`, `callId`, `status`      | A prompt of a backend-started reply no longer waits: it was answered, or it expired.         |
+| `tool-call`           | `conversationId`, `parentConversationId`, `assistantMessageId`, `call`                  | A backend-started reply waits for the client to run this call of a client tool.              |
 
 `conversationId` is the conversation that holds the reply: the job, or the
 main conversation of a wake-up reply. `parentConversationId` is the job's
@@ -345,10 +345,12 @@ stored; a reply still stored as `streaming` then ends as `interrupted`, the
 state startup recovery gives it. `job-updated` carries the whole
 [job](/reference/api/#jobs), so a newer one replaces an older one of the same
 job. `tool-approval` and `tool-call` carry the call in the shape of the chat
-events of the same name. The client answers them with the
+events of the same name, and `tool-approval` also carries the prompt's
+single-use `approvalToken`. The client answers them with the
 [tool-approval](/reference/api/#tool-approvals) and
 [tool-result](/reference/api/#tool-results) routes, with the event's
-`conversationId` and `assistantMessageId`.
+`conversationId` and `assistantMessageId`; the answer to a `tool-approval`
+also carries its `approvalToken`.
 
 `tool-approval-ended` is sent once for each prompt the reply sent as
 `tool-approval`, when the reply first stores the call in another state than

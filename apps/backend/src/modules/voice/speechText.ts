@@ -207,6 +207,14 @@ const CODE_SPAN = new RegExp(`(${CODE_START}[^${CODE_END}]*${CODE_END})`)
 const BARE_URL = /\b(?:https?:\/\/|www\.)\S*[^\s.,:;!?"'’”)\]*_~]/giu
 
 /**
+ * An emoji, which is not spoken, matched whole: a pictograph such as `🎉`, a
+ * flag, a keycap, an emoji-style character such as `❤️`, or a sequence with
+ * skin tones or zero-width joiners. Other symbols, such as `$`, `+`, `%`,
+ * `→`, and `✓`, are spoken as written.
+ */
+const EMOJI = /\p{RGI_Emoji}/gv
+
+/**
  * Longest piece of text, in UTF-16 code units, sent to voice in one message.
  * voice refuses a message over 16 KiB; JSON writes one code unit as at most
  * six bytes, so a piece this long stays under that limit with the message's
@@ -271,7 +279,8 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  *
  * @remarks The text is what the renderer shows, spoken: code blocks, math,
  * tables, images, bare URLs, and citation markers like `[1]`, found by the
- * renderer's own pattern, are not words, so they are not spoken; inline code is
+ * renderer's own pattern, are not words, so they are not spoken, and neither
+ * are emoji, while other symbols, such as `$` and `→`, are; inline code is
  * read as words; formatting is dropped; a link is spoken by its text, and a
  * bare URL, in a link's text or not, is not spoken; each paragraph, heading,
  * and list item ends a sentence. A reference reads the same before its
@@ -683,7 +692,7 @@ function removeTextFromReparsableMark(node: Root | RootContent): boolean {
  * Cleans one block of inline text: reference syntax outside inline code read
  * as {@link formatReferenceSyntax} reads it, bare URLs and the citation
  * markers left outside inline code dropped, every marked character turned
- * back into the one it stands for,
+ * back into the one it stands for, every {@link EMOJI} dropped,
  * whitespace collapsed, and no space left before closing punctuation.
  * Inline code reads as written, so a citation-shaped index such as
  * `arr[1]`, or a URL, stays.
@@ -702,6 +711,7 @@ function formatBlockText(text: string): string {
     .replaceAll(SHORTCUT_OPEN_BRACKET, "[")
     .replaceAll(SHORTCUT_CLOSE_BRACKET, "]")
     .replace(TEXT_MARKS, "")
+    .replace(EMOJI, " ")
     .replace(/\s+/g, " ")
     .replace(/ ([.,;:!?)\]])/g, "$1")
     .trim()

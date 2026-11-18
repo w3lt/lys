@@ -101,6 +101,26 @@ describe("speech text", () => {
       "Body text."
     ])
   })
+
+  it("drops emoji whole, with their skin tones and joiners", () => {
+    const markdown = [
+      "Great work 🎉 👍🏽 🇫🇷 👨‍👩‍👧 ❤️ 1️⃣.",
+      "",
+      "🎉🎉",
+      "",
+      "Run `echo ⭐` next."
+    ].join("\n")
+    expect(listFinishedSentences(markdown)).toEqual([
+      "Great work.",
+      "Run echo next."
+    ])
+  })
+
+  it("speaks symbols that are not emoji as written", () => {
+    expect(
+      listFinishedSentences("Done ✓ → next: 2 + 2 = 4, 50% off, © ™ ★ ❤.")
+    ).toEqual(["Done ✓ → next: 2 + 2 = 4, 50% off, © ™ ★ ❤."])
+  })
 })
 
 describe("SpeechSentenceBuffer", () => {

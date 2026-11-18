@@ -160,6 +160,23 @@ describe("speech text", () => {
       listFinishedSentences("Done ✓ → ↔ ➡ next: 2 + 2 = 4, 50% off, ★.")
     ).toEqual(["Done ✓ → ↔ ➡ next: 2 + 2 = 4, 50% off, ★."])
   })
+
+  it("reads an arrow in its emoji form as the arrow, but drops a keycap", () => {
+    expect(
+      listFinishedSentences("Go ➡️ there. Back ↔️ here. Press #️⃣ now.")
+    ).toEqual(["Go ➡ there.", "Back ↔ here.", "Press now."])
+  })
+
+  it.each([
+    ["Really‽\n\nYes.", ["Really‽", "Yes."]],
+    ["日本語。\n\nYes.", ["日本語。", "Yes."]],
+    ["Wow！\n\nOk.", ["Wow！", "Ok."]]
+  ])(
+    "adds no period to a block ending in a sentence terminator in %j",
+    (markdown, sentences) => {
+      expect(listFinishedSentences(markdown)).toEqual(sentences)
+    }
+  )
 })
 
 describe("SpeechSentenceBuffer", () => {
@@ -463,6 +480,14 @@ describe("SpeechSentenceBuffer structure changes", () => {
     [
       "a tag whose single-quoted attribute holds a `>` follows a sentence",
       "Run it! <br class='x>y'>, then go"
+    ],
+    [
+      "a code span's closing backtick run grows into a longer run",
+      "Type ` then see https://x.y/z. Then type ``` for a fence."
+    ],
+    [
+      "a code span holding a tag loses its closing run",
+      "Try `A <i>x</i>. B``. Done."
     ]
   ])(
     "speaks text streamed one character at a time as the whole text when %s",

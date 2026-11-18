@@ -98,7 +98,7 @@ const markdownParser = unified()
 const sentenceSegmenter = new Intl.Segmenter("en", { granularity: "sentence" })
 
 /** Characters that terminate a spoken sentence, followed by optional closers. */
-const SENTENCE_END_PATTERN = /[.!?…‼⁇⁈⁉]["'”’)\]]*$/
+const SENTENCE_END_PATTERN = /[\p{Sentence_Terminal}…]["'”’)\]]*$/u
 
 /** Any letter, in any script. */
 const LETTER_PATTERN = /\p{L}/u
@@ -241,16 +241,24 @@ const CODE_SPAN = new RegExp(`(${CODE_START}[^${CODE_END}]*${CODE_END})`)
 const BARE_URL = /\b(?:https?:\/\/|www\.)\S*[^\s.,:;!?"'’”)\]*_~]/giu
 
 /**
+ * Pictographs spoken as written, as a character class: punctuation, such as
+ * `‼`, which ends a sentence, and arrows, such as `→` and `↔`.
+ */
+const SPOKEN_PICTOGRAPH_CLASS = String.raw`[\p{P}\u2190-\u21FF\u27A1\u2900-\u297F\u2B05-\u2B07]`
+
+/**
  * An emoji or other pictograph, which is not spoken: an emoji matched whole,
  * such as `🎉`, a flag, a keycap, an emoji-style character such as `❤️`, or a
  * sequence with skin tones or zero-width joiners; or a text-style pictograph,
- * such as `☀`, `❤`, `✔`, `©`, or `™`, other than an arrow or punctuation such
- * as `‼`, which ends a sentence, also in its emoji form `‼️`, which loses only
- * its variation selector. Other symbols, such as `$`, `+`, `%`, `★`, `✓`, `→`,
- * and `↔`, are spoken as written.
+ * such as `☀`, `❤`, `✔`, `©`, or `™`; but no {@link SPOKEN_PICTOGRAPH_CLASS}
+ * character, which in its emoji form, such as `‼️` or `➡️`, loses only its
+ * variation selector. Other symbols, such as `$`, `+`, `%`, `★`, and `✓`, are
+ * spoken as written.
  */
-const PICTOGRAPH =
-  /[\p{RGI_Emoji}--\q{\u203C\uFE0F|\u2049\uFE0F}]|[\p{Extended_Pictographic}--\p{P}--[\u2190-\u21FF\u27A1\u2900-\u297F\u2B05-\u2B07]]|\uFE0F/gv
+const PICTOGRAPH = new RegExp(
+  String.raw`(?!${SPOKEN_PICTOGRAPH_CLASS}\uFE0F(?!\u20E3))\p{RGI_Emoji}|[\p{Extended_Pictographic}--${SPOKEN_PICTOGRAPH_CLASS}]|\uFE0F`,
+  "gv"
+)
 
 /**
  * Longest piece of text, in UTF-16 code units, sent to voice in one message.
@@ -303,14 +311,14 @@ function findPieceEnd(text: string): number {
  * Blocks whose children are inline content, which reads the same at any
  * place in the text, a reference included.
  */
-const INLINE_PARENT_TYPES: ReadonlySet<string> = new Set([
-  "paragraph",
-  "heading",
-  "tableCell"
-])
+const INLINE_PARENT_TYPES: ReadonlySet<RootContent["type"]> = new Set<
+  RootContent["type"]
+>(["paragraph", "heading", "tableCell"])
 
 /** Blocks that carry no words to speak. */
-const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
+const SPOKEN_SILENCED: ReadonlySet<RootContent["type"]> = new Set<
+  RootContent["type"]
+>([
   "table",
   "code",
   "math",
@@ -329,22 +337,22 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * tables, images, bare URLs, and citation markers like `[1]`, found by the
  * renderer's own pattern, are not words, so they are not spoken, and neither
  * are emoji and other pictographs, such as `☀` and `©`, while other symbols,
- * such as `$`, `✓`, and arrows like `→` and `↔`, are; inline code is read as
- * words; formatting is dropped; a link is spoken by its text, and a bare URL,
- * in a link's text or not, is not spoken; each paragraph, heading, and list
- * item ends a sentence. A reference reads the same before its definition
- * arrives as after: a link by its text; a citation marker, an image, and a
- * footnote reference not at all; a bracket or a `!` an escape or a character
- * reference writes is never reference syntax, though a citation marker it
- * writes is still dropped, as the renderer still shows one, unless its other
- * bracket opens or closes a reference, as in `[see \[1]`, where it reads as
- * that reference's text, the same before the definition arrives as after. Any
- * other citation marker is dropped wherever it stands outside code, a link's
- * text included, where the renderer shows it as text. An unclosed code fence
- * holds the rest of the text back until it closes. A paragraph or heading still
- * being written waits until it ends when it holds a `|`, because its next line
- * may turn it into a table header, or when it starts with a label in brackets
- * and a colon, because a closing title quote may turn it into a link
+ * such as `$`, `✓`, and arrows like `→` and `↔`, also in emoji form, are;
+ * inline code is read as words; formatting is dropped; a link is spoken by its
+ * text, and a bare URL, in a link's text or not, is not spoken; each paragraph,
+ * heading, and list item ends a sentence. A reference reads the same before its
+ * definition arrives as after: a link by its text; a citation marker, an image,
+ * and a footnote reference not at all; a bracket or a `!` an escape or a
+ * character reference writes is never reference syntax, though a citation
+ * marker it writes is still dropped, as the renderer still shows one, unless
+ * its other bracket opens or closes a reference, as in `[see \[1]`, where it
+ * reads as that reference's text, the same before the definition arrives as
+ * after. Any other citation marker is dropped wherever it stands outside code,
+ * a link's text included, where the renderer shows it as text. An unclosed code
+ * fence holds the rest of the text back until it closes. A paragraph or heading
+ * still being written waits until it ends when it holds a `|`, because its next
+ * line may turn it into a table header, or when it starts with a label in
+ * brackets and a colon, because a closing title quote may turn it into a link
  * definition; from its first `$`, `![`, unclosed backtick, opening emphasis
  * mark, or `[^` that no bracket closes yet, counting nested pairs, or inline
  * HTML start outside code on, because a later `$` may turn that text into
@@ -352,7 +360,9 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * `~` may turn the text into code or formatting, whose marks are not spoken,
  * and a `]` may complete a footnote reference and a `>` a tag or a comment,
  * whose letters are not spoken. The last word of the text being written waits
- * too when more letters may turn it into a bare URL, such as `htt`.
+ * too when more letters may turn it into a bare URL, such as `htt`, and so does
+ * inline code or math whose closing run ends the text, since one more backtick
+ * or `$` would turn it back into text.
  *
  * Each round's text is a markdown document of its own, its text parts joined as
  * the renderer joins them, so whatever one round leaves open, such as a code
@@ -491,7 +501,7 @@ export class SpeechSentenceBuffer {
    * @returns The sentences handed out, in order; none when skipped.
    */
   #addFinalSentences(handling: "speak" | "skip"): string[] {
-    const split = splitSettledBlocks(
+    const split = buildSplitRoundText(
       markdownParser.parse(this.#markdown),
       this.#markdown
     )
@@ -634,8 +644,9 @@ type SplitRoundText = Readonly<{
 }>
 
 /**
- * Splits a parsed round's text whose last block may still grow before the
- * blocks still being written: from the last block whose first line ended,
+ * Builds the split of a parsed round's text, whose last block may still
+ * grow, before the blocks still being written: from the last block whose
+ * first line ended,
  * or, in the list that ends the text, from the last such item. No later
  * text changes how a block before it reads, since a reference reads the
  * same before its definition arrives as after. Nothing settles while the
@@ -648,12 +659,12 @@ type SplitRoundText = Readonly<{
  * @returns The settled blocks, the blocks still being written, and where
  * the line they start on starts.
  */
-function splitSettledBlocks(tree: Root, markdown: string): SplitRoundText {
-  const split = splitBeforeWritingBlocks(tree, markdown)
+function buildSplitRoundText(tree: Root, markdown: string): SplitRoundText {
+  const split = buildUncheckedSplitRoundText(tree, markdown)
   if (
     split.writingStart === 0 ||
-    describeBlockStructure(split.writing.children) ===
-      describeBlockStructure(
+    calculateBlockStructureKey(split.writing.children) ===
+      calculateBlockStructureKey(
         markdownParser.parse(markdown.slice(split.writingStart)).children
       )
   )
@@ -662,16 +673,16 @@ function splitSettledBlocks(tree: Root, markdown: string): SplitRoundText {
 }
 
 /**
- * Splits a parsed round's text before the blocks still being written, as
- * {@link splitSettledBlocks} does, however the text from them on parses
- * alone.
+ * Builds the split of a parsed round's text before the blocks still being
+ * written, as {@link buildSplitRoundText} does, however the text from them on
+ * parses alone.
  *
  * @param tree - The parsed round's text; its nodes move into the result.
  * @param markdown - The text, which `tree` was parsed from.
  * @returns The settled blocks, the blocks still being written, and where
  * the line they start on starts.
  */
-function splitBeforeWritingBlocks(
+function buildUncheckedSplitRoundText(
   tree: Root,
   markdown: string
 ): SplitRoundText {
@@ -764,19 +775,19 @@ function findLineStart(
 }
 
 /**
- * Describes how parsed text nests into blocks, which is all that may differ
- * between the same text parsed alone and after other text.
+ * Calculates a key for how parsed text nests into blocks, which is all that
+ * may differ between the same text parsed alone and after other text.
  *
  * @param nodes - Sibling blocks, in order.
  * @returns Each block's type, followed for a container by its blocks in
  * parentheses; inline content is left out.
  */
-function describeBlockStructure(nodes: readonly RootContent[]): string {
+function calculateBlockStructureKey(nodes: readonly RootContent[]): string {
   return nodes
     .map((node) =>
       INLINE_PARENT_TYPES.has(node.type) || !("children" in node)
         ? node.type
-        : `${node.type}(${describeBlockStructure(node.children)})`
+        : `${node.type}(${calculateBlockStructureKey(node.children)})`
     )
     .join(",")
 }
@@ -885,7 +896,7 @@ function removeReparsableLeaf(
     container.children.pop()
     return
   }
-  removeTextFromReparsableMark(leaf)
+  removeTextFromReparsableMark(leaf, markdown.length)
 }
 
 /**
@@ -911,17 +922,22 @@ function isPossibleDefinition(
 
 /**
  * Cuts a node's inline content at its first reparsable mark in plain text,
- * as {@link findReparsableMarkIndex} finds it: the text node holding the
- * mark keeps only its text before the mark, and every node after it is
- * left out. A mark in code or math is never parsed again, so it cuts
- * nothing.
+ * as {@link findReparsableMarkIndex} finds it, or at inline code or math
+ * that {@link isSpanClosedAtTextEnd} may yet turn back into text: the text
+ * node holding the mark keeps only its text before the mark, such a span is
+ * left out, and so is every node after it. A mark in code or math is never
+ * parsed again, so it cuts nothing.
  *
  * @param node - The node to cut; changed in place.
- * @returns Whether the node held such a mark.
+ * @param textEnd - The length of the text being written.
+ * @returns Whether the node held such a mark or span.
  * @remarks The tree is cut rather than rendered and rebuilt, so what
  * precedes the mark is rendered once, exactly as it would be without it.
  */
-function removeTextFromReparsableMark(node: Root | RootContent): boolean {
+function removeTextFromReparsableMark(
+  node: Root | RootContent,
+  textEnd: number
+): boolean {
   if (node.type === "text") {
     const index = findReparsableMarkIndex(node.value)
     if (index === undefined) return false
@@ -930,12 +946,32 @@ function removeTextFromReparsableMark(node: Root | RootContent): boolean {
   }
   if (!("children" in node)) return false
   for (const [index, child] of node.children.entries()) {
-    if (removeTextFromReparsableMark(child)) {
+    if (isSpanClosedAtTextEnd(child, textEnd)) {
+      node.children.length = index
+      return true
+    }
+    if (removeTextFromReparsableMark(child, textEnd)) {
       node.children.length = index + 1
       return true
     }
   }
   return false
+}
+
+/**
+ * Whether a node is inline code or math whose closing run ends the text
+ * being written: one more backtick or `$` would lengthen the run, which then
+ * no longer closes the span, so the span would turn back into text.
+ *
+ * @param node - An inline node of the text being written.
+ * @param textEnd - The length of that text.
+ * @returns Whether the node is such a span.
+ */
+function isSpanClosedAtTextEnd(node: RootContent, textEnd: number): boolean {
+  return (
+    (node.type === "inlineCode" || node.type === "inlineMath") &&
+    node.position?.end.offset === textEnd
+  )
 }
 
 /**

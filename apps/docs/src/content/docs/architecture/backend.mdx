@@ -450,11 +450,12 @@ line break ends it or the next sentence has begun with a letter, so `$3.50`,
 sentence is sent once a part of another kind follows it, and the rest at
 `done`. A sentence longer than 2,000 characters is sent in pieces, cut at a
 space, because voice refuses a message over 16 KiB. An unterminated code
-fence holds speech back until it closes, and so does a paragraph being
-written that holds a `|`, until it ends, because its next line may make it
-a table header. When more text changes how earlier text reads, speech
-resumes after the last sentence sent that is still there, so no later
-sentence is skipped. Reasoning, tool calls, and their results are never
+fence holds speech back until it closes. A paragraph or heading being
+written waits until it ends when it holds a `|`, because its next line may
+make it a table header, and from its first `$` outside code on, because a
+later `$` may make that text inline math. When more text changes how
+earlier text reads, speech resumes after the last sentence sent that is
+still there, so no sentence is skipped or spoken twice. Reasoning, tool calls, and their results are never
 spoken.
 
 Audio arrives from voice as binary frames of 24 kHz mono 16-bit little-endian

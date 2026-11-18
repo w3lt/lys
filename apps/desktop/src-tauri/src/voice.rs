@@ -55,10 +55,9 @@ const VOICE_HEALTHY_STATUS_LINE_PREFIX: &[u8] = b"HTTP/1.1 200 ";
 /// It must equal `VOICE_HOST` and `VOICE_PORT` in
 /// `packages/protocol/src/constant.ts`, which the backend and the renderer
 /// use, and the default host and port of voice's web server in
-/// `apps/voice`. This copy is kept under the voice address copy exception to
-/// CONST-005, which mirrors vmo's approved one and is proposed with the voice
-/// pull request, pending the maintainer's approval: the renderer cannot check
-/// it without a round trip, and a unit test fails when the three differ.
+/// `apps/voice`. This copy is kept under the approved voice address copy
+/// exception to CONST-005, like vmo's: the renderer cannot check it without a
+/// round trip, and a unit test fails when the three differ.
 const VOICE_ADDRESS: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9090);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

@@ -362,10 +362,14 @@ const SPOKEN_SILENCED: ReadonlySet<RootContent["type"]> = new Set<
  * whose letters are not spoken. The last word of the text being written waits
  * too when more letters may turn it into a bare URL, such as `htt`, and so does
  * inline code whose closing run ends the text, since one more backtick would
- * turn it back into text, and the text before a block still on its first line
- * that more text there may turn into that text's next line: a block never
+ * turn it back into text, and the text before a block of three kinds while
+ * that block is on its first line, since more text there may turn some of them
+ * into that text's next line, as `#x` does an empty heading: a block never
  * spoken, such as a code fence; a heading or list item with no content, such as
- * `#`; or a list holding only such list items.
+ * `#`; or a list holding only such list items. The hold covers every block of
+ * these kinds, even one that no more text can join, such as a tilde fence or a
+ * `#` followed by a space; the text before it then only waits until that line
+ * ends.
  *
  * Each round's text is a markdown document of its own, its text parts joined as
  * the renderer joins them, so whatever one round leaves open, such as a code
@@ -386,6 +390,7 @@ const SPOKEN_SILENCED: ReadonlySet<RootContent["type"]> = new Set<
  * paragraph does. A fragment parses only that text: its cost grows with the
  * block being written, such as a long table or blockquote, but not with the
  * blocks before it.
+ *
  * Feed the buffer the reply's text: the snapshot at the start, then every
  * text part and fragment as it arrives, and `closeRoundText()` when a tool
  * call ends a round or the reply ends. `start` hands out every sentence;
@@ -883,11 +888,13 @@ function removeReparsableText(root: Root, markdown: string): void {
 }
 
 /**
- * Whether a block that is silent or empty is still on its first line: more
- * text on that line may turn it back into the next line of the block before
- * it, as a backtick turns ```` ```a ```` into ```` ```a` ````, which is no
- * code fence, and a letter turns an empty heading `#` into `#x` and an empty
- * list item `-` into `-x`, so nothing before it is final yet.
+ * Whether a block that is silent or empty is still on its first line, where
+ * more text may turn some such blocks back into the next line of the block
+ * before it, as a backtick turns ```` ```a ```` into ```` ```a` ````, which is
+ * no code fence, and a letter turns an empty heading `#` into `#x` and an empty
+ * list item `-` into `-x`. Every such block counts while on its first line,
+ * even one that no more text can join, such as a tilde fence or a `#` followed
+ * by a space, so the text before it waits until that line ends.
  *
  * @param node - The last block of its container.
  * @param markdown - The reply's text, which `node` was parsed from.

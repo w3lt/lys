@@ -642,7 +642,7 @@ describe("SpeechSentenceBuffer structure changes", () => {
     ["a quote holding a code fence", "Pay $5 now. Then\n> ```"],
     ["a list item holding a code fence", "Pay $5 now. Then\n- ```"]
   ])(
-    "speaks the sentences before an unpaired dollar sign at once when %s starts the next line",
+    "speaks the sentence holding an unpaired dollar sign at once when %s starts the next line",
     (_block, text) => {
       const buffer = new SpeechSentenceBuffer("start")
       buffer.loadSnapshot({

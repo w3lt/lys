@@ -28,6 +28,11 @@ import { createPcmPlayer } from "./pcm-player"
  * @param onChange - Called with the window's focus once it is first read and
  * on every change; never called after the cleanup ran.
  * @returns The cleanup, which stops following.
+ * @remarks A throw from `onChange` after the first read, or from removing a
+ * focus listener that registered after the cleanup, goes to the platform's
+ * `reportError`, as an uncaught error does, since the desktop has no logger.
+ * A window that cannot report its focus leaves `onChange` uncalled, and the
+ * caller's default stands.
  */
 function followWindowFocus(onChange: (focused: boolean) => void): () => void {
   try {
@@ -37,10 +42,8 @@ function followWindowFocus(onChange: (focused: boolean) => void): () => void {
     const sendFocus = (focused: boolean): void => {
       if (!disposed) onChange(focused)
     }
-    // Only the window's own rejection means unknown focus. A failure of the
-    // speech update that `sendFocus` runs goes to the platform's
-    // `reportError`, as an uncaught one does, since the desktop has no
-    // logger.
+    // Only the window's own rejection means unknown focus; a throw from
+    // `onChange` goes on to `reportError`.
     currentWindow
       .isFocused()
       .then(sendFocus, () => {
@@ -60,6 +63,7 @@ function followWindowFocus(onChange: (focused: boolean) => void): () => void {
       .then(handleFocusListenerRegistered, () => {
         // Focus events are unavailable; focus stays at its last value.
       })
+      // A throw from removing a listener that registered after the cleanup.
       .catch((error: unknown) => {
         reportError(error)
       })

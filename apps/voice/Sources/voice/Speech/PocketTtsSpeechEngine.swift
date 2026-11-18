@@ -13,7 +13,7 @@ import Synchronization
 /// Concurrency model: reentrant. The readiness flag is the only state this
 /// class mutates, under its `Mutex`; the PocketTTS manager serializes its
 /// own model loading and sessions.
-final class PocketTtsSpeechEngine: SpeechEngine, @unchecked Sendable {
+final class PocketTtsSpeechEngine: SpeechEngine {
     /// Cloned voice to speak with, or `nil` for the preset voice.
     private let clonedVoice: PocketTtsVoiceData?
     /// FluidAudio's manager, which owns the models and makes sessions.
@@ -77,7 +77,7 @@ final class PocketTtsSpeechEngine: SpeechEngine, @unchecked Sendable {
 ///
 /// Concurrency model: reentrant. The class holds no mutable state; its
 /// calls forward to the PocketTTS session, and one task forwards its frames.
-private final class PocketTtsSpeechSession: SpeechSession, @unchecked Sendable {
+private final class PocketTtsSpeechSession: SpeechSession {
     /// The adapted PocketTTS session.
     private let session: PocketTtsSession
     /// Frames of the PocketTTS session as raw `[Float]` samples.

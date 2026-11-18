@@ -1,11 +1,6 @@
 import Foundation
 import Network
-
-/// Wraps one WebSocket connection so it can cross task boundaries.
-private struct ConnectionBox: @unchecked Sendable {
-    /// The wrapped connection; Network.framework serializes its sends.
-    let connection: NWConnection
-}
+import Synchronization
 
 /// One speech WebSocket connection accepted by ``SpeechSocketServer``.
 ///
@@ -25,9 +20,9 @@ private struct ConnectionBox: @unchecked Sendable {
 /// its cause.
 ///
 /// Concurrency model: one task runs ``handleConnection()`` per connection;
-/// the receive loop and the frame pump communicate through a lock-protected
-/// state, and every wait on the connection happens outside it.
-final class SpeechConnection: @unchecked Sendable {
+/// the receive loop and the frame pump communicate through the state under
+/// its `Mutex`, and every wait on the connection happens outside it.
+final class SpeechConnection: Sendable {
     /// Result of routing a `text` message to the active session.
     private enum EnqueueOutcome {
         /// No speech is active on this connection.
@@ -38,7 +33,7 @@ final class SpeechConnection: @unchecked Sendable {
         case enqueued(any SpeechSession)
     }
 
-    /// Shared PCM stream state, guarded by ``lock``.
+    /// Shared PCM stream state, guarded by its `Mutex`.
     private struct State {
         /// The speech this connection drives, once `speak` arrived.
         var session: (any SpeechSession)?
@@ -59,18 +54,16 @@ final class SpeechConnection: @unchecked Sendable {
     /// peer that stopped reading ends only when the connection is cancelled.
     static let pumpStopTimeout: Duration = .seconds(1)
 
-    /// The accepted connection.
-    private let box: ConnectionBox
+    /// The accepted connection; Network.framework serializes its sends.
+    private let connection: NWConnection
     /// Engine that makes this connection's speech sessions.
     private let engine: any SpeechEngine
     /// The one active speech across every connection.
     private let hub: SpeechHub
     /// Longest wait for the client's WebSocket handshake.
     private let handshakeTimeout: Duration
-    /// Guards ``state``.
-    private let lock = NSLock()
     /// The speech this connection drives and its close state.
-    private var state = State()
+    private let state = Mutex(State())
 
     /// Wraps an accepted connection that has not been started.
     ///
@@ -81,7 +74,7 @@ final class SpeechConnection: @unchecked Sendable {
     ///   - handshakeTimeout: Longest wait for the client's WebSocket
     ///     handshake before the connection is cancelled.
     init(connection: NWConnection, engine: any SpeechEngine, hub: SpeechHub, handshakeTimeout: Duration) {
-        self.box = ConnectionBox(connection: connection)
+        self.connection = connection
         self.engine = engine
         self.hub = hub
         self.handshakeTimeout = handshakeTimeout
@@ -95,11 +88,11 @@ final class SpeechConnection: @unchecked Sendable {
     /// receive with an error.
     func handleConnection() async {
         await withTaskCancellationHandler {
-            self.box.connection.start(queue: DispatchQueue(label: "voice.WebSocket"))
+            self.connection.start(queue: DispatchQueue(label: "voice.WebSocket"))
             await self.handleClientMessages()
             await self.cancelConnection()
         } onCancel: {
-            self.box.connection.cancel()
+            self.connection.cancel()
         }
     }
 
@@ -126,7 +119,7 @@ final class SpeechConnection: @unchecked Sendable {
             switch message {
             case .failure(let error):
                 if !isCloseSent {
-                    print("voice: speech connection \(box.connection.endpoint) failed: \(error)")
+                    print("voice: speech connection \(connection.endpoint) failed: \(error)")
                 }
                 return
             case .success(.close):
@@ -148,15 +141,15 @@ final class SpeechConnection: @unchecked Sendable {
     /// - Returns: The deadline's task, which ``handleClientMessages()`` owns
     ///   and cancels once the connection ended.
     private func startHandshakeDeadline() -> Task<Void, Never> {
-        let box = self.box
+        let connection = self.connection
         let timeout = handshakeTimeout
         return Task {
             try? await Task.sleep(for: timeout)
             guard !Task.isCancelled else { return }
-            switch box.connection.state {
+            switch connection.state {
             case .setup, .waiting, .preparing:
-                print("voice: speech connection \(box.connection.endpoint) completed no handshake within \(timeout)")
-                box.connection.cancel()
+                print("voice: speech connection \(connection.endpoint) completed no handshake within \(timeout)")
+                connection.cancel()
             default:
                 return
             }
@@ -213,7 +206,7 @@ final class SpeechConnection: @unchecked Sendable {
             // the going-away close code and stop synthesizing.
             Task { await self?.handleSuperseded() }
         }
-        lock.withLock {
+        state.withLock { state in
             state.session = session
             state.speechID = id
             state.finishReceived = false
@@ -224,7 +217,7 @@ final class SpeechConnection: @unchecked Sendable {
     /// Queues one sentence on the active speech. Text before `speak` or
     /// after `finish` is a protocol error.
     private func addText(_ sentence: String) async {
-        let outcome: EnqueueOutcome = lock.withLock {
+        let outcome: EnqueueOutcome = state.withLock { state in
             guard let session = state.session else { return .noSpeech }
             guard !state.finishReceived else { return .afterFinish }
             return .enqueued(session)
@@ -241,7 +234,7 @@ final class SpeechConnection: @unchecked Sendable {
 
     /// Signals the end of the text stream for the active speech.
     private func closeText() async {
-        let session = lock.withLock { () -> (any SpeechSession)? in
+        let session = state.withLock { state -> (any SpeechSession)? in
             guard let session = state.session else { return nil }
             state.finishReceived = true
             return session
@@ -262,7 +255,7 @@ final class SpeechConnection: @unchecked Sendable {
     ///     ignored.
     ///   - failed: Whether synthesis or sending failed.
     private func handleSpeechCompleted(id: UUID, failed: Bool) async {
-        let (isCurrent, session) = lock.withLock { () -> (Bool, (any SpeechSession)?) in
+        let (isCurrent, session) = state.withLock { state -> (Bool, (any SpeechSession)?) in
             guard state.speechID == id else { return (false, nil) }
             let session = state.session
             state.session = nil
@@ -315,7 +308,7 @@ final class SpeechConnection: @unchecked Sendable {
         // A pump that already completed its speech cleared the speech; its
         // handle is not stored, so a close never waits for the pump that
         // runs it.
-        lock.withLock {
+        state.withLock { state in
             if state.speechID == id { state.pumpTask = task }
         }
     }
@@ -329,7 +322,7 @@ final class SpeechConnection: @unchecked Sendable {
 
     /// Whether a close frame was sent; the pump stops when it was.
     private var isCloseSent: Bool {
-        lock.withLock { state.closeSent }
+        state.withLock { state in state.closeSent }
     }
 
     /// Logs a client message that breaks the speech protocol, then closes the
@@ -342,7 +335,7 @@ final class SpeechConnection: @unchecked Sendable {
         _ violation: String,
         code: NWProtocolWebSocket.CloseCode.Defined
     ) async {
-        print("voice: speech connection \(box.connection.endpoint) \(violation); closing with \(code)")
+        print("voice: speech connection \(connection.endpoint) \(violation); closing with \(code)")
         await startClose(.protocolCode(code))
     }
 
@@ -357,7 +350,7 @@ final class SpeechConnection: @unchecked Sendable {
     ///
     /// - Parameter code: Close code the peer receives.
     private func startClose(_ code: NWProtocolWebSocket.CloseCode) async {
-        let (sends, pump) = lock.withLock { () -> (Bool, Task<Void, Never>?) in
+        let (sends, pump) = state.withLock { state -> (Bool, Task<Void, Never>?) in
             if state.closeSent { return (false, nil) }
             state.closeSent = true
             let pump = state.pumpTask
@@ -384,14 +377,14 @@ final class SpeechConnection: @unchecked Sendable {
     ///
     /// - Parameter pump: The frame pump, already cancelled.
     private func waitForPump(_ pump: Task<Void, Never>) async {
-        let box = self.box
+        let connection = self.connection
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await pump.value }
             group.addTask {
                 try? await Task.sleep(for: Self.pumpStopTimeout)
                 guard !Task.isCancelled else { return }
-                print("voice: speech connection \(box.connection.endpoint) took no audio for \(Self.pumpStopTimeout); cancelling it")
-                box.connection.cancel()
+                print("voice: speech connection \(connection.endpoint) took no audio for \(Self.pumpStopTimeout); cancelling it")
+                connection.cancel()
             }
             await group.next()
             group.cancelAll()
@@ -401,10 +394,10 @@ final class SpeechConnection: @unchecked Sendable {
     /// Cancels the socket after a grace period, so a peer that never answers
     /// the close frame does not hold the connection open forever.
     private func startSocketCancelTimer() {
-        let box = self.box
+        let connection = self.connection
         Task {
             try? await Task.sleep(for: .seconds(1))
-            box.connection.cancel()
+            connection.cancel()
         }
     }
 
@@ -415,13 +408,12 @@ final class SpeechConnection: @unchecked Sendable {
     /// ``startClose(_:)`` for a close the peer should see.
     private func cancelConnection() async {
         await cancelSpeech()
-        box.connection.cancel()
+        connection.cancel()
     }
 
     /// Cancels the session and the pump and unregisters from the hub.
     private func cancelSpeech() async {
-        let (session, pump, id) = lock.withLock {
-            () -> ((any SpeechSession)?, Task<Void, Never>?, UUID?) in
+        let (session, pump, id) = state.withLock { state -> ((any SpeechSession)?, Task<Void, Never>?, UUID?) in
             let values = (state.session, state.pumpTask, state.speechID)
             state.session = nil
             state.pumpTask = nil
@@ -451,7 +443,7 @@ final class SpeechConnection: @unchecked Sendable {
         }
         let context = NWConnection.ContentContext(identifier: "speech", metadata: [metadata])
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-            box.connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { error in
+            connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
@@ -471,7 +463,7 @@ final class SpeechConnection: @unchecked Sendable {
     ///   empty message.
     private func readMessage() async throws -> Message {
         try await withCheckedThrowingContinuation { continuation in
-            box.connection.receiveMessage { content, context, _, error in
+            connection.receiveMessage { content, context, _, error in
                 if let error {
                     continuation.resume(throwing: error)
                     return

@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Synchronization
 
 /// Listener callbacks, delivered to the serving loop in the order the listener
 /// reported them.
@@ -23,33 +24,29 @@ private enum RequestHeadWait: Sendable {
 /// client queueing more connections than the process can serve.
 ///
 /// Concurrency model: serialized. Every read and write of the free slot
-/// count happens under ``lock``, so connection tasks may take and release
+/// count happens under its `Mutex`, so connection tasks may take and release
 /// slots from any thread.
-private final class ConnectionSlots: @unchecked Sendable {
+private final class ConnectionSlots: Sendable {
     /// Slots not taken by an open connection.
-    private var available: Int
-    /// Guards ``available``.
-    private let lock = NSLock()
+    private let available: Mutex<Int>
 
     /// - Parameter limit: Most connections served at once.
     init(limit: Int) {
-        self.available = limit
+        self.available = Mutex(limit)
     }
 
     /// Takes one slot, or returns `false` when none is free.
     func addConnection() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        guard available > 0 else { return false }
-        available -= 1
-        return true
+        available.withLock { available in
+            guard available > 0 else { return false }
+            available -= 1
+            return true
+        }
     }
 
     /// Releases one slot.
     func removeConnection() {
-        lock.lock()
-        available += 1
-        lock.unlock()
+        available.withLock { $0 += 1 }
     }
 }
 

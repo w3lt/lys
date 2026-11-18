@@ -446,11 +446,16 @@ markers, by the renderer's own `CITATION_MARKER_PATTERN`, are dropped; list
 items, paragraphs, and headings end a sentence. Sentences are cut with
 `Intl.Segmenter`. While the reply streams, a sentence is sent to voice once a
 line break ends it or the next sentence has begun with a letter, so `$3.50`,
-`2.5`, and `Fig. 3` are never cut at their period; the rest is sent at
+`2.5`, and `Fig. 3` are never cut at their period; a text part's last
+sentence is sent once a part of another kind follows it, and the rest at
 `done`. A sentence longer than 2,000 characters is sent in pieces, cut at a
 space, because voice refuses a message over 16 KiB. An unterminated code
-fence holds speech back until it closes. Reasoning, tool calls, and their
-results are never spoken.
+fence holds speech back until it closes, and so does a paragraph being
+written that holds a `|`, until it ends, because its next line may make it
+a table header. When more text changes how earlier text reads, speech
+resumes after the last sentence sent that is still there, so no later
+sentence is skipped. Reasoning, tool calls, and their results are never
+spoken.
 
 Audio arrives from voice as binary frames of 24 kHz mono 16-bit little-endian
 PCM and is relayed to the socket unchanged. A UI that falls more than 1 MB of

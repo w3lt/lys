@@ -73,8 +73,9 @@ The script stops at the first failing step. In order, it:
    previously installed backend.
 8. Replaces `$LYS_HOME/runtime/vmo` with a directory holding only the new
    `vmo` executable, and signs it ad hoc with the virtualization entitlement
-   in `apps/vmo/vmo.entitlements`; and `$LYS_HOME/runtime/voice` with only the
-   new `voice` executable.
+   in `apps/vmo/vmo.entitlements`; and replaces the `voice` executable in
+   `$LYS_HOME/runtime/voice`, keeping a cloned voice placed beside it as
+   `lys-voice.bin`.
 9. Installs the `email` executable step 3 built at
    `$LYS_HOME/runtime/email/email`, replacing the previously installed email
    MCP server.

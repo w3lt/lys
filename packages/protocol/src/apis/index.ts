@@ -4,6 +4,15 @@ export * from "./chat"
 export * from "./agent"
 export * from "./mcp"
 export {
+  apiVoiceDictationRoute,
+  dictationClientMessageSchema,
+  dictationServerMessageSchema,
+  MAXIMUM_DICTATION_TEXT_LENGTH,
+  voiceDictationApi,
+  type DictationClientMessage,
+  type DictationServerMessage
+} from "./voice"
+export {
   activityEventSchema,
   activityEventsApi,
   activityReplySchema,

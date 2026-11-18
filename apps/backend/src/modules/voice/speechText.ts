@@ -362,8 +362,8 @@ const SPOKEN_SILENCED: ReadonlySet<RootContent["type"]> = new Set<
  * whose letters are not spoken. The last word of the text being written waits
  * too when more letters may turn it into a bare URL, such as `htt`, and so does
  * inline code whose closing run ends the text, since one more backtick would
- * turn it back into text, and the text before a block that carries no words,
- * such as a code fence, while that block is on its first line.
+ * turn it back into text, and the text before a block that holds no words, such
+ * as a code fence or an empty heading, while that block is on its first line.
  *
  * Each round's text is a markdown document of its own, its text parts joined as
  * the renderer joins them, so whatever one round leaves open, such as a code
@@ -842,16 +842,16 @@ function formatSpeechTree(tree: Root, lastBlock: LastBlock): string {
 }
 
 /**
- * Leaves out the text of the paragraph or heading still being written that
- * more text may parse again into something never spoken: the whole block
- * when it holds a `|`, which the next line may turn into a table header, or
- * when it starts like a link definition, which a closing title quote may
- * complete, and the text from its first reparsable mark outside code on, as
- * {@link REPARSABLE_MARK} defines it. Those sentences wait until the block
- * ends. Handing them out earlier would let the reparse take them back, and
- * the sentence before them would then be spoken again. A last block that
- * {@link isSilentBlockOnFirstLine} is left out first, so the block before it
- * counts as still being written.
+ * Leaves out what more text may still parse again: at each level, first a last
+ * block for which {@link isWordlessBlockOnFirstLine} holds, so the block before
+ * it counts as still being written; then, of the paragraph or heading still
+ * being written, the text that more text may parse again into something never
+ * spoken: the whole block when it holds a `|`, which the next line may turn
+ * into a table header, or when it starts like a link definition, which a
+ * closing title quote may complete, and the text from its first reparsable mark
+ * outside code on, as {@link REPARSABLE_MARK} defines it. Those sentences wait
+ * until the block ends. Handing them out earlier would let the reparse take
+ * them back, and the sentence before them would then be spoken again.
  *
  * @param root - Parsed reply whose last block may still grow; changed in
  * place.
@@ -862,7 +862,7 @@ function removeReparsableText(root: Root, markdown: string): void {
   for (;;) {
     const last: RootContent | undefined = container.children.at(-1)
     if (last === undefined) return
-    if (isSilentBlockOnFirstLine(last, markdown)) {
+    if (isWordlessBlockOnFirstLine(last, markdown)) {
       container.children.pop()
       continue
     }
@@ -881,21 +881,37 @@ function removeReparsableText(root: Root, markdown: string): void {
 }
 
 /**
- * Whether a block that carries no words is still on its first line: more
- * text on that line may turn it back into the next line of the block before
- * it, as a backtick turns ```` ```a ```` into ```` ```a` ````, which is no
- * code fence, so nothing before it is final yet.
+ * Whether a block that holds no words is still on its first line: more text
+ * on that line may turn it back into the next line of the block before it,
+ * as a backtick turns ```` ```a ```` into ```` ```a` ````, which is no code
+ * fence, and a letter turns an empty heading `#` into `#x`, so nothing
+ * before it is final yet.
  *
  * @param node - The last block of its container.
  * @param markdown - The reply's text, which `node` was parsed from.
- * @returns Whether the block is one of {@link SPOKEN_SILENCED} whose first
+ * @returns Whether {@link isWordlessBlock} holds for the block and its first
  * line has not ended.
  */
-function isSilentBlockOnFirstLine(
+function isWordlessBlockOnFirstLine(
   node: RootContent,
   markdown: string
 ): boolean {
-  return SPOKEN_SILENCED.has(node.type) && !hasFirstLineEnded(node, markdown)
+  return isWordlessBlock(node) && !hasFirstLineEnded(node, markdown)
+}
+
+/**
+ * Whether a node holds no words to speak: one of {@link SPOKEN_SILENCED}, or
+ * a node with children, none of which holds a word, such as an empty heading,
+ * list item, or list.
+ *
+ * @param node - A node of the parsed text.
+ * @returns Whether nothing in it is spoken.
+ */
+function isWordlessBlock(node: RootContent): boolean {
+  if (SPOKEN_SILENCED.has(node.type)) return true
+  return (
+    "children" in node && node.children.every((child) => isWordlessBlock(child))
+  )
 }
 
 /**

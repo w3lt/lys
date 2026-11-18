@@ -504,6 +504,18 @@ describe("SpeechSentenceBuffer structure changes", () => {
     [
       "a thematic break after a paragraph turns back into its text",
       "Pay $5 now. Then\n***x and $3 more. End."
+    ],
+    [
+      "an empty heading after a paragraph turns back into its text",
+      "Pay $5 now. Then\n#x and $3 more. End."
+    ],
+    [
+      "an empty list item in a list item turns back into its text",
+      "- Pay $5 now. Then\n-x and $3 more. End."
+    ],
+    [
+      "an empty list item in a quote turns back into its text",
+      "> Pay $5 now. Then\n-x and $3 more. End."
     ]
   ])(
     "speaks text streamed one character at a time as the whole text when %s",

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest"
+import { unified } from "unified"
+import { describe, expect, it, vi } from "vitest"
 import {
   SpeechSentenceBuffer,
   buildVoiceTextPieces
@@ -8,18 +9,28 @@ import {
 function listFinishedSentences(markdown: string): string[] {
   const buffer = new SpeechSentenceBuffer("start")
   return [
-    ...buffer.loadSnapshot({ text: markdown, lastTextPart: "closed" }),
-    ...buffer.close()
+    ...buffer.loadSnapshot({ textParts: [markdown], lastTextPart: "closed" }),
+    ...buffer.closeTextPart()
   ]
 }
 
-/** Streams fragments into a `start` speech and collects what it hands out. */
+/**
+ * Streams one text part into a `start` speech, as the reply writes it: its
+ * first fragment starts the part and the others extend it.
+ */
 function listStreamedSentences(fragments: readonly string[]): string[] {
   const buffer = new SpeechSentenceBuffer("start")
-  const sentences = buffer.loadSnapshot({ text: "", lastTextPart: "open" })
-  for (const fragment of fragments)
-    sentences.push(...buffer.addFragment(fragment))
-  return [...sentences, ...buffer.close()]
+  const sentences = buffer.loadSnapshot({
+    textParts: [],
+    lastTextPart: "closed"
+  })
+  for (const [index, fragment] of fragments.entries())
+    sentences.push(
+      ...(index === 0
+        ? buffer.addTextPart(fragment)
+        : buffer.addFragment(fragment))
+    )
+  return [...sentences, ...buffer.closeTextPart()]
 }
 
 /**
@@ -126,11 +137,23 @@ describe("speech text", () => {
 describe("SpeechSentenceBuffer", () => {
   it("hands out a sentence once a later sentence follows it", () => {
     const buffer = new SpeechSentenceBuffer("start")
-    expect(buffer.loadSnapshot({ text: "", lastTextPart: "open" })).toEqual([])
+    expect(
+      buffer.loadSnapshot({ textParts: [""], lastTextPart: "open" })
+    ).toEqual([])
     expect(buffer.addFragment("Hello the")).toEqual([])
     expect(buffer.addFragment("re. How are")).toEqual(["Hello there."])
     expect(buffer.addFragment(" you?")).toEqual([])
-    expect(buffer.close()).toEqual(["How are you?"])
+    expect(buffer.closeTextPart()).toEqual(["How are you?"])
+  })
+
+  it("hands out the sentences before one without letters once a later one holds a letter", () => {
+    const buffer = new SpeechSentenceBuffer("start")
+    buffer.loadSnapshot({ textParts: [""], lastTextPart: "open" })
+    expect(buffer.addFragment("The answer is below. 42. ")).toEqual([])
+    expect(buffer.addFragment("Then more")).toEqual([
+      "The answer is below.",
+      "42."
+    ])
   })
 
   it("does not end a sentence at the period of a decimal number", () => {
@@ -153,14 +176,17 @@ describe("SpeechSentenceBuffer", () => {
 
   it("hands out a sentence ended by a line break at once", () => {
     const buffer = new SpeechSentenceBuffer("start")
-    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
+    buffer.loadSnapshot({ textParts: [""], lastTextPart: "open" })
     expect(buffer.addFragment("First point.\n\n2")).toEqual(["First point."])
   })
 
   it("replays the final sentences of a snapshot still being written", () => {
     const buffer = new SpeechSentenceBuffer("start")
     expect(
-      buffer.loadSnapshot({ text: "One. Two. Thr", lastTextPart: "open" })
+      buffer.loadSnapshot({
+        textParts: ["One. Two. Thr"],
+        lastTextPart: "open"
+      })
     ).toEqual(["One.", "Two."])
     expect(buffer.addFragment("ee. Four")).toEqual(["Three."])
   })
@@ -168,10 +194,13 @@ describe("SpeechSentenceBuffer", () => {
   it("joins a reply being written at the sentence being written", () => {
     const buffer = new SpeechSentenceBuffer("current")
     expect(
-      buffer.loadSnapshot({ text: "One. Two. Thr", lastTextPart: "open" })
+      buffer.loadSnapshot({
+        textParts: ["One. Two. Thr"],
+        lastTextPart: "open"
+      })
     ).toEqual([])
     expect(buffer.addFragment("ee. Four.")).toEqual(["Three."])
-    expect(buffer.close()).toEqual(["Four."])
+    expect(buffer.closeTextPart()).toEqual(["Four."])
   })
 
   it.each([
@@ -183,12 +212,15 @@ describe("SpeechSentenceBuffer", () => {
       const buffer = new SpeechSentenceBuffer("current")
       expect(
         buffer.loadSnapshot({
-          text: `Intro.\n\n${firstSentence} Second one is be`,
+          textParts: [`Intro.\n\n${firstSentence} Second one is be`],
           lastTextPart: "open"
         })
       ).toEqual([])
       expect(buffer.addFragment("ing written. Third.")).toEqual([])
-      expect(buffer.close()).toEqual(["Second one is being written.", "Third."])
+      expect(buffer.closeTextPart()).toEqual([
+        "Second one is being written.",
+        "Third."
+      ])
     }
   )
 
@@ -201,14 +233,16 @@ describe("SpeechSentenceBuffer", () => {
       const buffer = new SpeechSentenceBuffer("current")
       expect(
         buffer.loadSnapshot({
-          text: `Intro here. ${earlierSentence} Then more words. And the`,
+          textParts: [
+            `Intro here. ${earlierSentence} Then more words. And the`
+          ],
           lastTextPart: "open"
         })
       ).toEqual([])
-      expect([...buffer.addFragment(" end. Bye."), ...buffer.close()]).toEqual([
-        "And the end.",
-        "Bye."
-      ])
+      expect([
+        ...buffer.addFragment(" end. Bye."),
+        ...buffer.closeTextPart()
+      ]).toEqual(["And the end.", "Bye."])
     }
   )
 
@@ -216,29 +250,88 @@ describe("SpeechSentenceBuffer", () => {
     const buffer = new SpeechSentenceBuffer("current")
     expect(
       buffer.loadSnapshot({
-        text: "Done earlier. Let me check:",
+        textParts: ["Done earlier. Let me check:"],
         lastTextPart: "closed"
       })
     ).toEqual([])
-    expect(buffer.addFragment("\n\nIt is sunny. ")).toEqual([])
-    expect(buffer.close()).toEqual(["It is sunny."])
+    expect(buffer.addTextPart("It is sunny. ")).toEqual([])
+    expect(buffer.closeTextPart()).toEqual(["It is sunny."])
   })
 
   it("flushes the remainder on finish, however short, only once", () => {
     const buffer = new SpeechSentenceBuffer("start")
-    buffer.loadSnapshot({ text: "One. Trai", lastTextPart: "open" })
-    expect(buffer.close()).toEqual(["Trai."])
-    expect(buffer.close()).toEqual([])
+    buffer.loadSnapshot({ textParts: ["One. Trai"], lastTextPart: "open" })
+    expect(buffer.closeTextPart()).toEqual(["Trai."])
+    expect(buffer.closeTextPart()).toEqual([])
   })
 
-  it("holds an unterminated code fence back until it closes", () => {
+  it("holds an unterminated code fence back until it closes, not the text before it", () => {
     const buffer = new SpeechSentenceBuffer("start")
-    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
-    expect(buffer.addFragment("Before.\n\n```\nconst x = 1;\n")).toEqual([])
+    buffer.loadSnapshot({ textParts: [""], lastTextPart: "open" })
+    expect(buffer.addFragment("Before.\n\n```\nconst x = 1;\n")).toEqual([
+      "Before."
+    ])
     expect(buffer.addFragment("const y = 2;\n```\nAfter. Next")).toEqual([
-      "Before.",
       "After."
     ])
+  })
+})
+
+describe("SpeechSentenceBuffer text parts", () => {
+  /** A part that ends inside a code fence, before a tool call, and the answer after it. */
+  const parts = [
+    "Let me list the files:\n\n```bash\nls -la",
+    "There are three files here. The largest is notes.txt."
+  ]
+  const spoken = [
+    "Let me list the files:.",
+    "There are three files here.",
+    "The largest is notes.txt."
+  ]
+
+  it("ends what a stored text part leaves open with the part", () => {
+    const buffer = new SpeechSentenceBuffer("start")
+    expect([
+      ...buffer.loadSnapshot({ textParts: parts, lastTextPart: "closed" }),
+      ...buffer.closeTextPart()
+    ]).toEqual(spoken)
+  })
+
+  it("ends what a streamed text part leaves open with the part", () => {
+    const [first = "", second = ""] = parts
+    const buffer = new SpeechSentenceBuffer("start")
+    buffer.loadSnapshot({ textParts: [], lastTextPart: "closed" })
+    expect([
+      ...buffer.addTextPart(first),
+      ...buffer.closeTextPart(),
+      ...buffer.addTextPart(second),
+      ...buffer.closeTextPart()
+    ]).toEqual(spoken)
+  })
+})
+
+describe("SpeechSentenceBuffer parsing cost", () => {
+  it("parses no more than the blocks being written per fragment, however long the reply grows", () => {
+    const paragraph =
+      "A sentence about the weather, with **bold** text. Another one follows here.\n\n"
+    const item = "- An item that says something useful, with `code` in it.\n"
+    const reply = `${paragraph.repeat(40)}${item.repeat(40)}The end.`
+    const fragments = Array.from(
+      { length: Math.ceil(reply.length / 4) },
+      (_, index) => reply.slice(index * 4, index * 4 + 4)
+    )
+    const expected = listFinishedSentences(reply)
+    const parse = vi.spyOn(Object.getPrototypeOf(unified()), "parse")
+    try {
+      expect(listStreamedSentences(fragments)).toEqual(expected)
+      const parsedLengths = parse.mock.calls.map(
+        ([text]) => String(text).length
+      )
+      expect(reply.length).toBeGreaterThan(5_000)
+      expect(Math.max(...parsedLengths)).toBeLessThan(3 * paragraph.length)
+    } finally {
+      parse.mockRestore()
+    }
   })
 })
 
@@ -266,7 +359,7 @@ describe("SpeechSentenceBuffer structure changes", () => {
 
   it("speaks prose with a pipe once its paragraph ends", () => {
     const buffer = new SpeechSentenceBuffer("start")
-    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
+    buffer.loadSnapshot({ textParts: [""], lastTextPart: "open" })
     expect(buffer.addFragment("Run a | b first. Then c")).toEqual([])
     expect(buffer.addFragment("\n\nDone")).toEqual([
       "Run a | b first.",
@@ -287,7 +380,7 @@ describe("SpeechSentenceBuffer structure changes", () => {
 
   it("speaks the sentences before an unpaired dollar sign at once", () => {
     const buffer = new SpeechSentenceBuffer("start")
-    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
+    buffer.loadSnapshot({ textParts: [""], lastTextPart: "open" })
     expect(buffer.addFragment("Intro here. Pay $3 today. Then go")).toEqual([
       "Intro here."
     ])
@@ -299,7 +392,7 @@ describe("SpeechSentenceBuffer structure changes", () => {
 
   it("does not hold for a dollar sign in inline code", () => {
     const buffer = new SpeechSentenceBuffer("start")
-    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
+    buffer.loadSnapshot({ textParts: [""], lastTextPart: "open" })
     expect(buffer.addFragment("Run `echo $HOME` now. Then stop")).toEqual([
       "Run echo $HOME now."
     ])
@@ -320,7 +413,7 @@ describe("SpeechSentenceBuffer structure changes", () => {
 
   it("speaks what precedes a dollar sign held inside emphasis at once", () => {
     const buffer = new SpeechSentenceBuffer("start")
-    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
+    buffer.loadSnapshot({ textParts: [""], lastTextPart: "open" })
     expect(buffer.addFragment("Run `a` now. Then *pay $3*. Next")).toEqual([
       "Run a now."
     ])
@@ -517,6 +610,40 @@ describe("SpeechSentenceBuffer structure changes", () => {
     expect(listFinishedSentences(fragments.join(""))).toEqual(expected)
   })
 
+  it.each([
+    ["strong text", ["Hello **world. S", "till bold** here. Next one."]],
+    [
+      "a mark that ends a text node",
+      ["Hello *", "*world. Still bold*", "* here. Next one."]
+    ],
+    ["struck text", ["Hello ~~world. S", "till gone~~ here. Next one."]],
+    ["inline code", ["Run `npm in", "stall. Then` go. Next one."]]
+  ])(
+    "speaks %s that spans a sentence end without its marks while streaming",
+    (_shape, fragments) => {
+      expect(listStreamedSentences(fragments)).toEqual(
+        listFinishedSentences(fragments.join(""))
+      )
+      expect(
+        listStreamedSentences(fragments).some((sentence) =>
+          /[*~`]/.test(sentence)
+        )
+      ).toBe(false)
+    }
+  )
+
+  it("does not take back a block whose next line may still continue it", () => {
+    const fragments = ["- Item one\n*", "*bold** still item one. Next."]
+    expect(listFinishedSentences(fragments.join(""))).toEqual([
+      "Item one bold still item one.",
+      "Next."
+    ])
+    expect(listStreamedSentences(fragments)).toEqual([
+      "Item one bold still item one.",
+      "Next."
+    ])
+  })
+
   it("speaks an indented line that directly follows a definition", () => {
     const text = "Hello there.\n\n[a]: http://x\n    Read me now.\n\nBye."
     const expected = ["Hello there.", "Read me now.", "Bye."]
@@ -569,18 +696,18 @@ describe("SpeechSentenceBuffer structure changes", () => {
 
   it("hands out every sentence still held when the reply finishes", () => {
     const buffer = new SpeechSentenceBuffer("start")
-    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
+    buffer.loadSnapshot({ textParts: [""], lastTextPart: "open" })
     expect(buffer.addFragment("Pay $3. Then go. Bye")).toEqual([])
-    expect(buffer.close()).toEqual(["Pay $3.", "Then go.", "Bye."])
+    expect(buffer.closeTextPart()).toEqual(["Pay $3.", "Then go.", "Bye."])
   })
 
   it("hands out a text part's last sentence once the part ends", () => {
     const buffer = new SpeechSentenceBuffer("start")
-    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
+    buffer.loadSnapshot({ textParts: [""], lastTextPart: "open" })
     expect(buffer.addFragment("Let me check the weather.")).toEqual([])
     expect(buffer.closeTextPart()).toEqual(["Let me check the weather."])
-    expect(buffer.addFragment("\n\nIt is sunny")).toEqual([])
-    expect(buffer.close()).toEqual(["It is sunny."])
+    expect(buffer.addTextPart("It is sunny")).toEqual([])
+    expect(buffer.closeTextPart()).toEqual(["It is sunny."])
   })
 })
 

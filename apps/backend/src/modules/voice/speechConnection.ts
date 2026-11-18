@@ -7,7 +7,7 @@ import {
   SPEECH_CLOSE_TOO_SLOW,
   SPEECH_CLOSE_VOICE_UNAVAILABLE
 } from "@lys/protocol"
-import type { ChatReplyEvent } from "@lys/protocol"
+import type { ChatGenerationEvent } from "@lys/protocol"
 import type { ConversationAssistantMessage } from "@lys/share"
 import type { FastifyBaseLogger } from "fastify"
 import type { WebSocket } from "ws"
@@ -99,7 +99,8 @@ export type SpeechConnectionOptions = Readonly<{
  *
  * @param options - The socket, its target, what to speak, the dependencies,
  * and the request's logger.
- * @returns Settlement once everything to say was handed to voice, or the
+ * @returns Settlement once the speech is connected to voice and speaks what
+ * was stored, following the reply's generation while it runs, or once the
  * socket was closed without a speech.
  * @throws Only an unexpected failure of the generation registry; every
  * expected outcome closes the socket with its code instead.
@@ -249,7 +250,7 @@ function readStoredReply(
     kind: "found",
     reply: Object.freeze({
       snapshot: Object.freeze({
-        text: textParts.map((part) => part.content).join("\n\n"),
+        textParts: textParts.map((part) => part.content),
         lastTextPart:
           isStreaming && message.parts.at(-1)?.kind === "text"
             ? "open"
@@ -337,15 +338,13 @@ class SpeechSession {
   /** Ids of the text parts seen so far; other parts are not spoken. */
   readonly #textPartIds: Set<string>
   /** Follows the generation's events for as long as the speech runs. */
-  readonly #subscription: ReplyEventSubscription<ChatReplyEvent>
+  readonly #subscription: ReplyEventSubscription<ChatGenerationEvent>
   /** Events received before voice answered, in order. */
-  readonly #pending: ChatReplyEvent[] = []
+  readonly #pending: ChatGenerationEvent[] = []
   /** The speech at voice, once voice answered. */
   #voice: VoiceSpeech | undefined
   /** Whether events are applied at once rather than kept pending. */
   #isLive = false
-  /** Whether any text was received, so a new text part needs a separator. */
-  #hasText: boolean
   /** Whether the reply's end was seen, so the following is expected to end. */
   #hasReplyEnded = false
   /**
@@ -373,8 +372,7 @@ class SpeechSession {
       request.kind === "reply" ? request.from : "start"
     )
     this.#textPartIds = new Set(stored.textPartIds)
-    this.#hasText = stored.snapshot.text.length > 0
-    this.#subscription = new ReplyEventSubscription<ChatReplyEvent>(
+    this.#subscription = new ReplyEventSubscription<ChatGenerationEvent>(
       this.#handleDeliveredEvent
     )
   }
@@ -408,7 +406,7 @@ class SpeechSession {
     }
     this.#sendSentences(this.#buffer.loadSnapshot(this.#stored.snapshot))
     if (this.#generation === undefined) {
-      this.#sendSentences(this.#buffer.close())
+      this.#sendSentences(this.#buffer.closeTextPart())
       voice.sendFinish()
       return
     }
@@ -423,7 +421,9 @@ class SpeechSession {
    * @param event - Event of the followed reply.
    * @returns Settlement for the delivery chain; it never rejects.
    */
-  readonly #handleDeliveredEvent = (event: ChatReplyEvent): Promise<void> => {
+  readonly #handleDeliveredEvent = (
+    event: ChatGenerationEvent
+  ): Promise<void> => {
     if (this.#isLive) this.#handleEvent(event)
     else this.#pending.push(event)
     return Promise.resolve()
@@ -527,7 +527,7 @@ class SpeechSession {
    *
    * @param event - Event of the followed reply, in order.
    */
-  #handleEvent(event: ChatReplyEvent): void {
+  #handleEvent(event: ChatGenerationEvent): void {
     switch (event.type) {
       case "reply-part": {
         const part = event.part
@@ -536,20 +536,17 @@ class SpeechSession {
           return
         }
         this.#textPartIds.add(part.id)
-        const separator = this.#hasText ? "\n\n" : ""
-        this.#hasText = true
-        this.#sendSentences(this.#buffer.addFragment(separator + part.content))
+        this.#sendSentences(this.#buffer.addTextPart(part.content))
         return
       }
       case "reply-part-delta": {
         if (!this.#textPartIds.has(event.partId)) return
-        this.#hasText = true
         this.#sendSentences(this.#buffer.addFragment(event.content))
         return
       }
       case "done": {
         this.#hasReplyEnded = true
-        this.#sendSentences(this.#buffer.close())
+        this.#sendSentences(this.#buffer.closeTextPart())
         this.#voice?.sendFinish()
         this.#subscription.close()
         return
@@ -562,8 +559,17 @@ class SpeechSession {
         this.#subscription.close()
         return
       }
-      default:
+      case "title":
+      case "sources":
+      case "tool-call":
+      case "tool-approval":
         return
+      default: {
+        const unhandledEvent: never = event
+        throw new TypeError(
+          `Unhandled generation event: ${JSON.stringify(unhandledEvent)}`
+        )
+      }
     }
   }
 }

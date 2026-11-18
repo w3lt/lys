@@ -33,6 +33,7 @@ import {
   createFixtureUuidV7,
   createReasoningPart,
   createTextPart,
+  createToolCallPart,
   createUserMessage,
   FIXTURE_TIMESTAMP
 } from "../../support/conversationFixtures"
@@ -304,6 +305,31 @@ function buildOtherReplySpeechUrl(): string {
   )
 }
 
+/** The log entry a speech socket writes, matched by its level and message. */
+function matchLogEntry(level: string, msg: string, fields: object = {}) {
+  return expect.objectContaining({ level, msg, ...fields })
+}
+
+/** A text part of the fixture reply that ends inside an unclosed code fence. */
+const FENCE_TEXT_PART = createTextPart({
+  sequence: 4,
+  round: 0,
+  content: "Let me list the files:\n\n```bash\nls -la"
+})
+
+/** The tool call that follows the fenced text part. */
+const LIST_FILES_CALL = createToolCallPart(
+  { sequence: 5, round: 0, toolName: "list_files", argumentText: "{}" },
+  { status: "succeeded", result: "a.txt b.txt notes.txt", sourceNumbers: [] }
+)
+
+/** The answer after the tool call. */
+const ANSWER_TEXT_PART = createTextPart({
+  sequence: 6,
+  round: 1,
+  content: "There are three files here."
+})
+
 describe("speech routes", () => {
   it("closes with 4404 when the reply does not exist", async () => {
     const app = await createVoiceRoutesApp({ conversation: undefined })
@@ -379,6 +405,12 @@ describe("speech routes", () => {
     fake.speeches[0]?.closeFromVoice(1000)
     await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_COMPLETE)
     expect(socket.frames).toHaveLength(1)
+    expect(app.log.records).toContainEqual(
+      matchLogEntry("info", "Speech socket opened", {
+        speech: "reply",
+        from: "start"
+      })
+    )
   })
 
   it("joins a running reply at the sentence being written", async () => {
@@ -446,6 +478,81 @@ describe("speech routes", () => {
     await expect(first.closed).resolves.toBe(SPEECH_CLOSE_SUPERSEDED)
     second.close()
     await vi.waitFor(() => expect(fake.speeches).toHaveLength(2))
+  })
+
+  it("speaks the answer after a stored text part that ended inside a code fence", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: {
+        ...COMPLETED_CONVERSATION,
+        messages: [
+          USER_MESSAGE,
+          createAssistantMessage(
+            3,
+            [FENCE_TEXT_PART, LIST_FILES_CALL, ANSWER_TEXT_PART],
+            { status: "completed", finishReason: "stop" }
+          )
+        ]
+      },
+      openVoiceSpeech: fake.openVoiceSpeech
+    })
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
+    expect(fake.speeches[0]?.spoken).toEqual([
+      "Let me list the files:.",
+      "There are three files here."
+    ])
+    socket.close()
+  })
+
+  it("speaks the answer after a streamed text part that ended inside a code fence", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: STREAMING_CONVERSATION,
+      openVoiceSpeech: fake.openVoiceSpeech
+    })
+    const { replyTask } = startFixtureGeneration(app.generations)
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(fake.speeches[0]?.speakCalled).toBe(true))
+    replyTask.context.sendEvent(createTextDelta("re:\n\n```bash\nls -la"))
+    replyTask.context.sendEvent({ type: "reply-part", part: LIST_FILES_CALL })
+    replyTask.context.sendEvent({ type: "reply-part", part: ANSWER_TEXT_PART })
+    replyTask.context.sendEvent({ type: "done", finishReason: "stop" })
+    await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
+    expect(fake.speeches[0]?.spoken).toEqual([
+      "Hello there:.",
+      "There are three files here."
+    ])
+    socket.close()
+  })
+
+  it("supersedes a speaking speech socket when a notification socket opens", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: STREAMING_CONVERSATION,
+      openVoiceSpeech: fake.openVoiceSpeech
+    })
+    startFixtureGeneration(app.generations)
+    const speech = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(fake.speeches[0]?.speakCalled).toBe(true))
+    const notification = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatNotificationApi.path)
+    )
+    await expect(speech.closed).resolves.toBe(SPEECH_CLOSE_SUPERSEDED)
+    await vi.waitFor(() => expect(fake.speeches[0]?.cancelled).toBe(true))
+    await vi.waitFor(() => expect(fake.speeches[1]?.finishCalled).toBe(true))
+    expect(fake.speeches[1]?.spoken).toHaveLength(1)
+    notification.close()
   })
 
   it("notification speaks one line and relays the audio", async () => {
@@ -714,6 +821,18 @@ describe("speech sockets over their lifecycle", () => {
     await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
     fake.speeches[0]?.closeFromVoice(1011)
     await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_FAILED)
+    expect(app.log.records).toContainEqual(
+      matchLogEntry("warn", "Voice ended a speech that failed", {
+        voiceCloseCode: 1011
+      })
+    )
+    await vi.waitFor(() =>
+      expect(app.log.records).toContainEqual(
+        matchLogEntry("info", "Speech socket closed", {
+          code: SPEECH_CLOSE_FAILED
+        })
+      )
+    )
   })
 
   it("closes 4410 and cancels the speech when the reply fails", async () => {
@@ -762,6 +881,28 @@ describe("speech sockets over their lifecycle", () => {
       buildSpeechUrl(chatSpeechApi.path, "start")
     )
     await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_VOICE_UNAVAILABLE)
+    expect(app.log.records).toContainEqual(
+      matchLogEntry("warn", "Voice refused a speech", {
+        err: expect.objectContaining({ message: "refused" })
+      })
+    )
+  })
+
+  it("closes 1011 and logs the cause when voice cannot be reached", async () => {
+    const app = await createVoiceRoutesApp({
+      conversation: COMPLETED_CONVERSATION,
+      openVoiceSpeech: () => Promise.reject(new Error("connect ECONNREFUSED"))
+    })
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_FAILED)
+    expect(app.log.records).toContainEqual(
+      matchLogEntry("error", "Speech could not reach voice", {
+        err: expect.objectContaining({ message: "connect ECONNREFUSED" })
+      })
+    )
   })
 
   it("closes 1011 when the conversation store cannot be read", async () => {
@@ -779,6 +920,11 @@ describe("speech sockets over their lifecycle", () => {
     )
     await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_FAILED)
     expect(fake.speeches).toHaveLength(0)
+    expect(app.log.records).toContainEqual(
+      matchLogEntry("error", "Speech could not read the reply", {
+        err: expect.objectContaining({ message: "The database is locked" })
+      })
+    )
   })
 
   it("notification closes 4404 when the reply does not exist", async () => {
@@ -806,6 +952,11 @@ describe("speech sockets over their lifecycle", () => {
       fake.speeches[0]?.sendAudio(frame)
     await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_TOO_SLOW)
     expect(fake.speeches[0]?.cancelled).toBe(true)
+    expect(app.log.records).toContainEqual(
+      matchLogEntry("warn", "Speech socket fell behind its audio", {
+        bufferedBytes: expect.any(Number)
+      })
+    )
   })
 
   it("closes 1001 when the backend shuts down", async () => {
@@ -838,5 +989,10 @@ describe("speech sockets over their lifecycle", () => {
     })
     await expect(closed).resolves.toBe(1006)
     expect(fake.speeches).toHaveLength(0)
+    expect(app.log.records).toContainEqual(
+      matchLogEntry("warn", "Speech socket refused a foreign origin", {
+        origin: "https://evil.example"
+      })
+    )
   })
 })

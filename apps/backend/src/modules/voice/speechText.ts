@@ -65,8 +65,8 @@ export type SpeechStart = "start" | "current"
 
 /** Stored reply text a speech starts from. */
 export type SpeechSnapshot = Readonly<{
-  /** Markdown of the reply's text parts, in order, joined by blank lines. */
-  text: string
+  /** Markdown of the reply's text parts, in order. */
+  textParts: readonly string[]
   /**
    * `open` when the reply's last stored part is a text part still being
    * written, so its last sentence may grow; `closed` when that text part
@@ -99,10 +99,15 @@ const WHOLE_CITATION_MARKER = new RegExp(`^${CITATION_MARKER_PATTERN.source}$`)
 
 /**
  * A mark in plain text that more text may parse again into something never
- * spoken: a `$` that a later `$` may pair into inline math, or the `![` of an
- * image whose syntax is not complete yet.
+ * spoken: a `$` that a later `$` may pair into inline math, the `![` of an
+ * image whose syntax is not complete yet, a backtick that a later one may
+ * close into inline code, or a mark that may open emphasis, strong, or
+ * struck text, which a closing mark would turn into formatting: a `*` or
+ * `~` not before whitespace, or such a `_` not inside a word. A mark that
+ * ends a text node counts, since the node after it may be the emphasis that
+ * a second mark turns into strong text.
  */
-const REPARSABLE_MARK = /\$|!\[/
+const REPARSABLE_MARK = /\$|!\[|`|[*~]+(?!\s)|(?<![\p{L}\p{N}])_+(?!\s)/u
 
 /**
  * Where a paragraph still being written may yet become a link definition:
@@ -296,33 +301,43 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * still being written waits until it ends when it holds a `|`, because its next
  * line may turn it into a table header, or when it starts with a label in
  * brackets and a colon, because a closing title quote may turn it into a link
- * definition; and from its first `$` or `![` outside code on, because a later
- * `$` may turn that text into inline math and the `![` may begin an image.
+ * definition; and from its first `$`, `![`, unclosed backtick, or opening
+ * emphasis mark outside code on, because a later `$` may turn that text
+ * into inline math, the `![` may begin an image, and a closing backtick,
+ * `*`, `_`, or `~` may turn the text into code or formatting, whose marks
+ * are not spoken.
  *
- * A sentence is final once a later sentence holding a letter follows it, a
- * line break ends it, or its text part ends, so a period inside a number, a
+ * Each text part is a markdown document of its own, so whatever one leaves
+ * open, such as a code fence, ends with it. A sentence is final once a later
+ * sentence holding a letter follows it, a line break ends it, another block
+ * follows its block, or its text part ends, so a period inside a number, a
  * version, or an abbreviation, such as `$3.50`, never ends a sentence
- * early; `close()` hands out the rest, however short. A sentence is handed
- * out at most once and never taken back. When more text changes how earlier
- * text reads, such as a line that turns into a table header, the buffer
- * resumes after the last handed-out sentence still present, so no later
- * sentence is skipped.
+ * early; `closeTextPart()` hands out the rest, however short. A sentence is
+ * handed out at most once and never taken back. When more text changes how
+ * earlier text reads, such as a line that turns into a table header, the
+ * buffer resumes after the last handed-out sentence still present, so no
+ * later sentence is skipped. No later text changes how a block reads once
+ * another block follows it, or an item once another item of its list
+ * follows it, so the buffer keeps only the text from the block or the item
+ * still being written on, and each fragment parses only that text.
  *
  * Feed the buffer the reply's text: the snapshot at the start, then every
- * fragment as it arrives. `start` hands out every sentence; `current`
- * skips the sentences final when the snapshot loads and starts with the one
- * being written, or with the next text part when the snapshot's last text
- * part already ended. Concurrency model: single-owner.
+ * text part and fragment as it arrives. `start` hands out every sentence;
+ * `current` skips the sentences final when the snapshot loads and starts
+ * with the one being written, or with the next text part when the
+ * snapshot's last text part already ended. Concurrency model: single-owner.
  */
 export class SpeechSentenceBuffer {
-  /** The sentences handed out or skipped so far, in order. */
-  readonly #handedOut: HandedSentence[] = []
-  /** Markdown received so far, without the private-use marks it held. */
-  #markdown = ""
-  /** Whether the text's last block may still grow. */
-  #lastBlock: LastBlock = "open"
   /** Where the speech starts. */
   readonly #start: SpeechStart
+  /**
+   * Markdown of the text part being written, without the private-use marks
+   * it held, from the line where its block still being written starts;
+   * empty between text parts.
+   */
+  #markdown = ""
+  /** The sentences of {@link #markdown} handed out or skipped, in order. */
+  #handedOut: HandedSentence[] = []
 
   /**
    * Creates a buffer with no text.
@@ -335,100 +350,105 @@ export class SpeechSentenceBuffer {
   }
 
   /**
-   * Loads the stored reply text, before any fragment.
+   * Loads the stored reply text, before any text part or fragment.
    *
-   * @param snapshot - Stored text of the reply and whether its last text
-   * part may still grow.
+   * @param snapshot - Stored text parts of the reply and whether the last
+   * one may still grow.
    * @returns The sentences ready to speak now: every final one for `start`,
    * none for `current`.
    */
   public loadSnapshot(snapshot: SpeechSnapshot): string[] {
-    this.#markdown = snapshot.text.replace(TEXT_MARKS, "")
-    this.#lastBlock = snapshot.lastTextPart
-    if (this.#start === "start") return this.#addFinalSentences()
-    const segments = buildSentenceSegments(
-      formatUnheldSpeechText(this.#markdown, this.#lastBlock)
-    )
-    this.#addHandedOutSentences(segments, this.#calculateFinalCount(segments))
-    return []
+    const { textParts, lastTextPart } = snapshot
+    if (this.#start === "current") {
+      const writing = textParts.at(-1)
+      if (writing === undefined || lastTextPart === "closed") return []
+      this.#markdown = writing.replace(TEXT_MARKS, "")
+      this.#addFinalSentences("skip")
+      return []
+    }
+    const sentences: string[] = []
+    for (const text of textParts) sentences.push(...this.addTextPart(text))
+    if (lastTextPart === "closed") sentences.push(...this.closeTextPart())
+    return sentences
+  }
+
+  /**
+   * Starts a new text part, ending the one before.
+   *
+   * @param content - The new part's content as stored.
+   * @returns The rest of the part before, then the sentences of the new
+   * part that are final, in order.
+   */
+  public addTextPart(content: string): string[] {
+    const ended = this.closeTextPart()
+    this.#markdown = content.replace(TEXT_MARKS, "")
+    return [...ended, ...this.#addFinalSentences("speak")]
   }
 
   /**
    * Appends a streamed fragment of the text part being written.
    *
-   * @param fragment - Fragment exactly as stored, or a new text part's
-   * content after the blank line that separates it from the text before.
+   * @param fragment - Fragment exactly as stored.
    * @returns The sentences the fragment made final, in order.
    */
   public addFragment(fragment: string): string[] {
     this.#markdown += fragment.replace(TEXT_MARKS, "")
-    this.#lastBlock = "open"
-    return this.#addFinalSentences()
+    return this.#addFinalSentences("speak")
   }
 
   /**
    * Ends the text part being written, because a part of another kind
-   * follows it; the next fragment opens a new text part.
+   * follows it or the reply ended, and hands out what is left of it,
+   * however short.
    *
-   * @returns The sentences the part's end made final, in order.
+   * @returns The rest of the part's sentences, in order; empty when no text
+   * part is being written.
    */
   public closeTextPart(): string[] {
-    this.#lastBlock = "closed"
-    return this.#addFinalSentences()
-  }
-
-  /**
-   * Ends the text and hands out what is left, however short.
-   *
-   * @returns The rest of the text's sentences, in order; empty on a later
-   * call.
-   */
-  public close(): string[] {
-    this.#lastBlock = "closed"
-    const segments = this.#buildSegments()
-    return this.#addHandedOutSentences(segments, segments.length)
-  }
-
-  /**
-   * Splits the current text into sentences.
-   *
-   * @returns The sentences of the plain text, in order.
-   */
-  #buildSegments(): SentenceSegment[] {
-    return buildSentenceSegments(
-      formatSpeechText(this.#markdown, this.#lastBlock)
+    const segments = buildSentenceSegments(
+      formatSpeechTree(markdownParser.parse(this.#markdown), "closed")
     )
+    const sentences = this.#addHandedOutSentences(segments, segments.length)
+    this.#markdown = ""
+    this.#handedOut = []
+    return sentences
   }
 
   /**
-   * Counts the leading sentences that can no longer change.
+   * Hands out the final sentences of the text part being written that were
+   * not handed out yet, then keeps only the text that may still change.
    *
-   * @param segments - The sentences of the current text.
-   * @returns How many leading sentences are final.
+   * @param handling - `speak` returns the sentences; `skip` only marks them
+   * handed out, reading held text as it reads now, so that a `current`
+   * join skips every sentence before the one being written, also when that
+   * one waits in a held block.
+   * @returns The sentences handed out, in order; none when skipped.
    */
-  #calculateFinalCount(segments: readonly SentenceSegment[]): number {
-    if (this.#lastBlock === "closed") return segments.length
-    let count = 0
-    for (const [index, segment] of segments.entries()) {
-      const next = segments[index + 1]
-      if (next === undefined) break
-      if (!segment.endsLine && !LETTER_PATTERN.test(next.text)) break
-      count = index + 1
-    }
-    return count
-  }
-
-  /**
-   * Hands out every final sentence not handed out yet.
-   *
-   * @returns The newly final sentences, in order.
-   */
-  #addFinalSentences(): string[] {
-    const segments = this.#buildSegments()
-    return this.#addHandedOutSentences(
+  #addFinalSentences(handling: "speak" | "skip"): string[] {
+    const split = splitSettledBlocks(
+      markdownParser.parse(this.#markdown),
+      this.#markdown
+    )
+    if (handling === "speak")
+      removeReparsableText(split.writing, this.#markdown)
+    const settled = buildSentenceSegments(
+      formatSpeechTree(split.settled, "closed")
+    )
+    const segments = [
+      ...settled,
+      ...buildSentenceSegments(formatSpeechTree(split.writing, "open"))
+    ]
+    const sentences = this.#addHandedOutSentences(
       segments,
-      this.#calculateFinalCount(segments)
+      Math.max(settled.length, calculateFinalCount(segments))
     )
+    this.#markdown = this.#markdown.slice(split.writingStart)
+    this.#handedOut = this.#handedOut.flatMap((handed) =>
+      handed.index < settled.length
+        ? []
+        : [{ index: handed.index - settled.length, key: handed.key }]
+    )
+    return handling === "speak" ? sentences : []
   }
 
   /**
@@ -529,35 +549,126 @@ function hasTrailingLineBreak(segment: string): boolean {
   return segment.slice(segment.trimEnd().length).includes("\n")
 }
 
+/** A parsed text part, split before its blocks still being written. */
+type SplitTextPart = Readonly<{
+  /** The blocks before them, which no later text can change. */
+  settled: Root
+  /** The blocks still being written, or the items of a list that are. */
+  writing: Root
+  /**
+   * Where the line it starts on starts in the text; `0` when nothing
+   * settled.
+   */
+  writingStart: number
+}>
+
 /**
- * Converts reply markdown to the plain text voice speaks, one block per
- * line.
+ * Splits a parsed text part whose last block may still grow before the
+ * blocks still being written: from the last block whose first line ended,
+ * or, in the list that ends the text, from the last such item. No later
+ * text changes how a block before it reads, since a reference reads the
+ * same before its definition arrives as after.
  *
- * @param markdown - The text to convert.
- * @param lastBlock - Whether the last block may still grow; every other
- * block, and a closed last one, ends with sentence punctuation.
- * @returns The plain text.
+ * @param tree - The parsed text part; its nodes move into the result.
+ * @param markdown - The text, which `tree` was parsed from.
+ * @returns The settled blocks, the blocks still being written, and where
+ * the line they start on starts.
  */
-function formatSpeechText(markdown: string, lastBlock: LastBlock): string {
-  const tree = markdownParser.parse(markdown)
-  if (lastBlock === "open") removeReparsableText(tree, markdown)
-  return formatSpeechTree(tree, lastBlock)
+function splitSettledBlocks(tree: Root, markdown: string): SplitTextPart {
+  const blocks = tree.children
+  const last = blocks.at(-1)
+  if (last?.type === "list") {
+    const items = last.children
+    const index = findWritingIndex(items, markdown)
+    if (index > 0)
+      return {
+        settled: buildRoot([
+          ...blocks.slice(0, -1),
+          { ...last, children: items.slice(0, index) }
+        ]),
+        writing: buildRoot([{ ...last, children: items.slice(index) }]),
+        writingStart: findEndedLineStart(items[index], markdown)
+      }
+  }
+  const index = findWritingIndex(blocks, markdown)
+  if (index > 0)
+    return {
+      settled: buildRoot(blocks.slice(0, index)),
+      writing: buildRoot(blocks.slice(index)),
+      writingStart: findEndedLineStart(blocks[index], markdown)
+    }
+  return { settled: buildRoot([]), writing: tree, writingStart: 0 }
 }
 
 /**
- * Converts reply markdown to plain text as it reads now, with nothing held
- * back for a reparse, so that a `current` join skips every sentence before
- * the one being written, also when that one waits in a held block.
+ * Finds the first of the sibling blocks still being written: the last one
+ * whose first line ended. Until a block's first line ends, more text on it
+ * may turn it into the rest of the block before, as `*` starts a list item
+ * and `**` continues a paragraph. A block right after a link definition is
+ * not split off either, because it may be the rest of the definition's
+ * paragraph, which reads differently alone.
  *
- * @param markdown - The text to convert.
- * @param lastBlock - Whether the last block may still grow.
- * @returns The plain text.
+ * @param nodes - Sibling blocks, or the items of a list, in order.
+ * @param markdown - The text they were parsed from.
+ * @returns The block's index; `0` when no block after the first qualifies.
  */
-function formatUnheldSpeechText(
-  markdown: string,
-  lastBlock: LastBlock
-): string {
-  return formatSpeechTree(markdownParser.parse(markdown), lastBlock)
+function findWritingIndex(
+  nodes: readonly RootContent[],
+  markdown: string
+): number {
+  for (let index = nodes.length - 1; index > 0; index -= 1) {
+    if (
+      findEndedLineStart(nodes[index], markdown) > 0 &&
+      nodes[index - 1]?.type !== "definition"
+    )
+      return index
+  }
+  return 0
+}
+
+/**
+ * Finds where the line a node starts on starts, once that line ended.
+ *
+ * @param node - A block of a parsed text part.
+ * @param markdown - The text it was parsed from.
+ * @returns The index of the line's first character; `0` for the first
+ * line, a line that has not ended yet, or a node without a position.
+ */
+function findEndedLineStart(
+  node: RootContent | undefined,
+  markdown: string
+): number {
+  const offset = node?.position?.start.offset
+  if (offset === undefined || !markdown.includes("\n", offset)) return 0
+  return markdown.lastIndexOf("\n", offset - 1) + 1
+}
+
+/**
+ * Wraps blocks in a tree of their own.
+ *
+ * @param children - The blocks, in order.
+ * @returns A root holding them.
+ */
+function buildRoot(children: RootContent[]): Root {
+  return { type: "root", children }
+}
+
+/**
+ * Counts the leading sentences of text that may still grow that can no
+ * longer change: each one a later sentence holding a letter follows, and
+ * each one up to the last line break before the last sentence.
+ *
+ * @param segments - The sentences of the text.
+ * @returns How many leading sentences are final.
+ */
+function calculateFinalCount(segments: readonly SentenceSegment[]): number {
+  const lastWithLetter = segments.findLastIndex((segment) =>
+    LETTER_PATTERN.test(segment.text)
+  )
+  const lastLineEnd = segments.findLastIndex(
+    (segment, index) => segment.endsLine && index < segments.length - 1
+  )
+  return Math.max(lastWithLetter, lastLineEnd + 1, 0)
 }
 
 /**

@@ -148,7 +148,7 @@ export async function handleSpeechConnection(
 
 /** The stored reply a socket speaks, with its text parts split out. */
 type StoredReply = Readonly<{
-  /** Text of the reply's text parts and whether the last one may grow. */
+  /** The reply's text parts and whether its last round's text may grow. */
   snapshot: SpeechSnapshot
   /** Identifiers of the text parts, so streamed fragments can be matched. */
   textPartIds: ReadonlySet<string>
@@ -246,13 +246,19 @@ function readStoredReply(
   if (message === undefined) return { kind: "missing" }
   const textParts = message.parts.filter((part) => part.kind === "text")
   const isStreaming = message.status === "streaming"
+  const lastTextIndex = message.parts.findLastIndex(
+    (part) => part.kind === "text"
+  )
+  const hasRoundTextEnded = message.parts
+    .slice(lastTextIndex + 1)
+    .some((part) => part.kind === "tool-call")
   return {
     kind: "found",
     reply: Object.freeze({
       snapshot: Object.freeze({
-        textParts: textParts.map((part) => part.content),
-        lastTextPart:
-          isStreaming && message.parts.at(-1)?.kind === "text"
+        textParts: textParts.map(({ round, content }) => ({ round, content })),
+        lastRoundText:
+          isStreaming && lastTextIndex !== -1 && !hasRoundTextEnded
             ? "open"
             : "closed"
       }),
@@ -406,7 +412,7 @@ class SpeechSession {
     }
     this.#sendSentences(this.#buffer.loadSnapshot(this.#stored.snapshot))
     if (this.#generation === undefined) {
-      this.#sendSentences(this.#buffer.closeTextPart())
+      this.#sendSentences(this.#buffer.closeRoundText())
       voice.sendFinish()
       return
     }
@@ -531,12 +537,11 @@ class SpeechSession {
     switch (event.type) {
       case "reply-part": {
         const part = event.part
-        if (part.kind !== "text") {
-          this.#sendSentences(this.#buffer.closeTextPart())
-          return
-        }
+        if (part.kind === "tool-call")
+          this.#sendSentences(this.#buffer.closeRoundText())
+        if (part.kind !== "text") return
         this.#textPartIds.add(part.id)
-        this.#sendSentences(this.#buffer.addTextPart(part.content))
+        this.#sendSentences(this.#buffer.addTextPart(part))
         return
       }
       case "reply-part-delta": {
@@ -546,7 +551,7 @@ class SpeechSession {
       }
       case "done": {
         this.#hasReplyEnded = true
-        this.#sendSentences(this.#buffer.closeTextPart())
+        this.#sendSentences(this.#buffer.closeRoundText())
         this.#voice?.sendFinish()
         this.#subscription.close()
         return

@@ -1,3 +1,5 @@
+import { once } from "node:events"
+import { connect } from "node:net"
 import type { FastifyInstance } from "fastify"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import {
@@ -210,6 +212,37 @@ function openTestSocket(baseUrl: string, path: string): TestSocket {
     closed,
     close: () => ws?.close()
   }
+}
+
+/**
+ * Opens a speech socket over plain TCP and sends a frame no client may send:
+ * an unmasked text frame, which the server's socket fails on.
+ *
+ * @returns Settlement once the server closed the connection.
+ */
+async function sendUnmaskedTextFrame(
+  baseUrl: string,
+  path: string
+): Promise<void> {
+  const url = new URL(`${baseUrl}${path}`)
+  const connection = connect(Number(url.port), url.hostname)
+  await once(connection, "connect")
+  connection.write(
+    [
+      `GET ${url.pathname}${url.search} HTTP/1.1`,
+      `Host: ${url.host}`,
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+      "Sec-WebSocket-Version: 13",
+      "",
+      ""
+    ].join("\r\n")
+  )
+  const [handshake] = (await once(connection, "data")) as [Buffer]
+  expect(handshake.toString("latin1")).toMatch(/^HTTP\/1\.1 101 /)
+  connection.write(Buffer.from([0x81, 0x01, 0x61]))
+  await once(connection, "close")
 }
 
 /** Options for the app under test. */
@@ -766,7 +799,7 @@ describe("speech sockets over their lifecycle", () => {
     await expect(socket.closed).resolves.toBe(1000)
   })
 
-  it("speaks the sentence before a reasoning part without waiting for more text", async () => {
+  it("speaks the sentence before a tool call without waiting for more text", async () => {
     const { fake } = createFakeVoice()
     const app = await createVoiceRoutesApp({
       conversation: STREAMING_CONVERSATION,
@@ -779,13 +812,72 @@ describe("speech sockets over their lifecycle", () => {
     )
     await vi.waitFor(() => expect(fake.speeches[0]?.speakCalled).toBe(true))
     replyTask.context.sendEvent(createTextDelta(" weather."))
+    replyTask.context.sendEvent({ type: "reply-part", part: LIST_FILES_CALL })
+    await vi.waitFor(() =>
+      expect(fake.speeches[0]?.spoken).toEqual(["Hello the weather."])
+    )
+    socket.close()
+  })
+
+  it("reads a streamed round's text after its reasoning as the rest of the same text", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: STREAMING_CONVERSATION,
+      openVoiceSpeech: fake.openVoiceSpeech
+    })
+    const { replyTask } = startFixtureGeneration(app.generations)
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(fake.speeches[0]?.speakCalled).toBe(true))
+    replyTask.context.sendEvent(createTextDelta(" weather"))
     replyTask.context.sendEvent({
       type: "reply-part",
       part: createReasoningPart(7, 0, "Checking.")
     })
-    await vi.waitFor(() =>
-      expect(fake.speeches[0]?.spoken).toEqual(["Hello the weather."])
+    replyTask.context.sendEvent({
+      type: "reply-part",
+      part: createTextPart({ sequence: 8, round: 0, content: " today. Bye" })
+    })
+    replyTask.context.sendEvent({ type: "done", finishReason: "stop" })
+    await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
+    expect(fake.speeches[0]?.spoken).toEqual([
+      "Hello the weather today.",
+      "Bye."
+    ])
+    socket.close()
+  })
+
+  it("reads a stored round's text after its reasoning as the rest of the same text", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: {
+        ...STREAMING_CONVERSATION,
+        messages: [
+          USER_MESSAGE,
+          createAssistantMessage(
+            3,
+            [TEXT_PART, createReasoningPart(7, 0, "Checking.")],
+            { status: "streaming" }
+          )
+        ]
+      },
+      openVoiceSpeech: fake.openVoiceSpeech
+    })
+    const { replyTask } = startFixtureGeneration(app.generations)
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
     )
+    await vi.waitFor(() => expect(fake.speeches[0]?.speakCalled).toBe(true))
+    replyTask.context.sendEvent({
+      type: "reply-part",
+      part: createTextPart({ sequence: 8, round: 0, content: " weather. Bye" })
+    })
+    replyTask.context.sendEvent({ type: "done", finishReason: "stop" })
+    await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
+    expect(fake.speeches[0]?.spoken).toEqual(["Hello the weather.", "Bye."])
     socket.close()
   })
 
@@ -884,6 +976,28 @@ describe("speech sockets over their lifecycle", () => {
     expect(app.log.records).toContainEqual(
       matchLogEntry("warn", "Voice refused a speech", {
         err: expect.objectContaining({ message: "refused" })
+      })
+    )
+  })
+
+  it("logs the failure of a socket that sends a frame no client may send, and its close without a close frame", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: COMPLETED_CONVERSATION,
+      openVoiceSpeech: fake.openVoiceSpeech
+    })
+    await sendUnmaskedTextFrame(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() =>
+      expect(app.log.records).toContainEqual(
+        matchLogEntry("info", "Speech socket closed", { code: 1006 })
+      )
+    )
+    expect(app.log.records).toContainEqual(
+      matchLogEntry("warn", "Speech socket failed", {
+        err: expect.objectContaining({ code: "WS_ERR_EXPECTED_MASK" })
       })
     )
   })

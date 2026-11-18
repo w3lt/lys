@@ -55,24 +55,33 @@ type MarkdownToken = Parameters<TokenExitHandler>[0]
 type BlockContainer = Root | Blockquote | List | ListItem
 
 /**
- * Whether the last block of a text may still grow: `open` while its text
- * part is being written, `closed` once that part ended.
+ * Whether the last block of a text may still grow: `open` while its round
+ * may still write text, `closed` once that round's text ended.
  */
 type LastBlock = "open" | "closed"
 
 /** Where a speech starts: the reply's first word, or the sentence being written. */
 export type SpeechStart = "start" | "current"
 
+/** One text part of a reply, as stored. */
+export type SpeechTextPart = Readonly<{
+  /** Zero-based model round that wrote it. */
+  round: number
+  /** Its markdown as stored. */
+  content: string
+}>
+
 /** Stored reply text a speech starts from. */
 export type SpeechSnapshot = Readonly<{
-  /** Markdown of the reply's text parts, in order. */
-  textParts: readonly string[]
+  /** The reply's text parts, in order. */
+  textParts: readonly SpeechTextPart[]
   /**
-   * `open` when the reply's last stored part is a text part still being
-   * written, so its last sentence may grow; `closed` when that text part
-   * ended, because another kind of part follows it or the reply is over.
+   * `open` when the round of the last text part may still write text: the
+   * reply is being written and no tool call followed that part, so its
+   * last sentence may grow; `closed` once a tool call ended that round or
+   * the reply is over.
    */
-  lastTextPart: LastBlock
+  lastRoundText: LastBlock
 }>
 
 /**
@@ -108,6 +117,16 @@ const WHOLE_CITATION_MARKER = new RegExp(`^${CITATION_MARKER_PATTERN.source}$`)
  * a second mark turns into strong text.
  */
 const REPARSABLE_MARK = /\$|!\[|`|[*~]+(?!\s)|(?<![\p{L}\p{N}])_+(?!\s)/u
+
+/**
+ * A word ending the speech text of the blocks still being written that more
+ * letters may turn into a bare URL, which is not spoken: a start of
+ * `http://`, `https://`, or `www.` that {@link BARE_URL} does not match
+ * yet, since it needs a character after one. Its letters wait, so that they
+ * make no sentence before them final.
+ */
+const URL_START =
+  /\b(?:h(?:t(?:t(?:p(?:s?(?::(?:\/\/?)?)?)?)?)?)?|w(?:w(?:w\.?)?)?)$/i
 
 /**
  * Where a paragraph still being written may yet become a link definition:
@@ -212,12 +231,15 @@ const CODE_SPAN = new RegExp(`(${CODE_START}[^${CODE_END}]*${CODE_END})`)
 const BARE_URL = /\b(?:https?:\/\/|www\.)\S*[^\s.,:;!?"'’”)\]*_~]/giu
 
 /**
- * An emoji, which is not spoken, matched whole: a pictograph such as `🎉`, a
- * flag, a keycap, an emoji-style character such as `❤️`, or a sequence with
- * skin tones or zero-width joiners. Other symbols, such as `$`, `+`, `%`,
- * `→`, and `✓`, are spoken as written.
+ * An emoji or other pictograph, which is not spoken: an emoji matched whole,
+ * such as `🎉`, a flag, a keycap, an emoji-style character such as `❤️`, or
+ * a sequence with skin tones or zero-width joiners; or a text-style
+ * pictograph, such as `☀`, `❤`, `✔`, `©`, or `™`, other than an arrow. Other
+ * symbols, such as `$`, `+`, `%`, `★`, `✓`, `→`, and `↔`, are spoken as
+ * written.
  */
-const EMOJI = /\p{RGI_Emoji}/gv
+const EMOJI =
+  /\p{RGI_Emoji}|[\p{Extended_Pictographic}--[\u2190-\u21FF\u27A1\u2900-\u297F\u2B05-\u2B07]]/gv
 
 /**
  * Longest piece of text, in UTF-16 code units, sent to voice in one message.
@@ -285,7 +307,8 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * @remarks The text is what the renderer shows, spoken: code blocks, math,
  * tables, images, bare URLs, and citation markers like `[1]`, found by the
  * renderer's own pattern, are not words, so they are not spoken, and neither
- * are emoji, while other symbols, such as `$` and `→`, are; inline code is
+ * are emoji and other pictographs, such as `☀` and `©`, while other
+ * symbols, such as `$`, `✓`, and arrows like `→` and `↔`, are; inline code is
  * read as words; formatting is dropped; a link is spoken by its text, and a
  * bare URL, in a link's text or not, is not spoken; each paragraph, heading,
  * and list item ends a sentence. A reference reads the same before its
@@ -301,39 +324,49 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * still being written waits until it ends when it holds a `|`, because its next
  * line may turn it into a table header, or when it starts with a label in
  * brackets and a colon, because a closing title quote may turn it into a link
- * definition; and from its first `$`, `![`, unclosed backtick, or opening
+ * definition; from its first `$`, `![`, unclosed backtick, or opening
  * emphasis mark outside code on, because a later `$` may turn that text
  * into inline math, the `![` may begin an image, and a closing backtick,
  * `*`, `_`, or `~` may turn the text into code or formatting, whose marks
- * are not spoken.
+ * are not spoken. The last word of the text being written waits too when
+ * more letters may turn it into a bare URL, such as `htt`.
  *
- * Each text part is a markdown document of its own, so whatever one leaves
- * open, such as a code fence, ends with it. A sentence is final once a later
+ * Each round's text is a markdown document of its own, its text parts
+ * joined as the renderer joins them, so whatever one round leaves open,
+ * such as a code fence, ends with it. A sentence is final once a later
  * sentence holding a letter follows it, a line break ends it, another block
- * follows its block, or its text part ends, so a period inside a number, a
- * version, or an abbreviation, such as `$3.50`, never ends a sentence
- * early; `closeTextPart()` hands out the rest, however short. A sentence is
+ * follows its block, or its round's text ends, so a period inside a number,
+ * a version, or an abbreviation, such as `$3.50`, never ends a sentence
+ * early; `closeRoundText()` hands out the rest, however short. A sentence is
  * handed out at most once and never taken back. When more text changes how
  * earlier text reads, such as a line that turns into a table header, the
- * buffer resumes after the last handed-out sentence still present, so no
- * later sentence is skipped. No later text changes how a block reads once
- * another block follows it, or an item once another item of its list
- * follows it, so the buffer keeps only the text from the block or the item
- * still being written on, and each fragment parses only that text.
+ * buffer resumes after the last handed-out sentence still present in its
+ * order, so no later sentence is skipped and no earlier one that reads the
+ * same is spoken again. No later text changes how a block reads once the
+ * first line of the block after it ended, and for a table its delimiter row,
+ * or how an item reads once the first line of the item after it ended, so
+ * the buffer keeps only the text from the block or the item still being
+ * written on. A fragment parses only that text: its cost grows with the
+ * block being written, such as a long table or blockquote, but not with the
+ * blocks before it.
  *
  * Feed the buffer the reply's text: the snapshot at the start, then every
- * text part and fragment as it arrives. `start` hands out every sentence;
+ * text part and fragment as it arrives, and `closeRoundText()` when a tool
+ * call ends a round or the reply ends. `start` hands out every sentence;
  * `current` skips the sentences final when the snapshot loads and starts
- * with the one being written, or with the next text part when the
- * snapshot's last text part already ended. Concurrency model: single-owner.
+ * with the one being written, or with the next round's text when the
+ * snapshot's last round's text already ended. Concurrency model:
+ * single-owner.
  */
 export class SpeechSentenceBuffer {
   /** Where the speech starts. */
   readonly #start: SpeechStart
+  /** Round whose text is being written; none between rounds' texts. */
+  #round: number | undefined
   /**
-   * Markdown of the text part being written, without the private-use marks
-   * it held, from the line where its block still being written starts;
-   * empty between text parts.
+   * Markdown of the round's text being written, without the private-use
+   * marks it held, from the line where its block still being written
+   * starts; empty between rounds' texts.
    */
   #markdown = ""
   /** The sentences of {@link #markdown} handed out or skipped, in order. */
@@ -358,35 +391,44 @@ export class SpeechSentenceBuffer {
    * none for `current`.
    */
   public loadSnapshot(snapshot: SpeechSnapshot): string[] {
-    const { textParts, lastTextPart } = snapshot
+    const { textParts, lastRoundText } = snapshot
     if (this.#start === "current") {
-      const writing = textParts.at(-1)
-      if (writing === undefined || lastTextPart === "closed") return []
-      this.#markdown = writing.replace(TEXT_MARKS, "")
+      const round = textParts.at(-1)?.round
+      if (round === undefined || lastRoundText === "closed") return []
+      this.#round = round
+      this.#markdown = textParts
+        .filter((part) => part.round === round)
+        .map((part) => part.content)
+        .join("")
+        .replace(TEXT_MARKS, "")
       this.#addFinalSentences("skip")
       return []
     }
     const sentences: string[] = []
-    for (const text of textParts) sentences.push(...this.addTextPart(text))
-    if (lastTextPart === "closed") sentences.push(...this.closeTextPart())
+    for (const part of textParts) sentences.push(...this.addTextPart(part))
+    if (lastRoundText === "closed") sentences.push(...this.closeRoundText())
     return sentences
   }
 
   /**
-   * Starts a new text part, ending the one before.
+   * Adds a text part: one of the round whose text is being written
+   * continues that text, as the renderer joins a round's text parts; one
+   * of another round ends that text and starts its own round's.
    *
-   * @param content - The new part's content as stored.
-   * @returns The rest of the part before, then the sentences of the new
-   * part that are final, in order.
+   * @param part - The new part, with its content as stored.
+   * @returns The rest of the round's text it ended, then the sentences the
+   * part made final, in order.
    */
-  public addTextPart(content: string): string[] {
-    const ended = this.closeTextPart()
-    this.#markdown = content.replace(TEXT_MARKS, "")
+  public addTextPart(part: SpeechTextPart): string[] {
+    if (part.round === this.#round) return this.addFragment(part.content)
+    const ended = this.closeRoundText()
+    this.#round = part.round
+    this.#markdown = part.content.replace(TEXT_MARKS, "")
     return [...ended, ...this.#addFinalSentences("speak")]
   }
 
   /**
-   * Appends a streamed fragment of the text part being written.
+   * Appends a streamed fragment of the round's text being written.
    *
    * @param fragment - Fragment exactly as stored.
    * @returns The sentences the fragment made final, in order.
@@ -397,18 +439,19 @@ export class SpeechSentenceBuffer {
   }
 
   /**
-   * Ends the text part being written, because a part of another kind
-   * follows it or the reply ended, and hands out what is left of it,
-   * however short.
+   * Ends the round's text being written, because a tool call ended the
+   * round or the reply ended, and hands out what is left of it, however
+   * short.
    *
-   * @returns The rest of the part's sentences, in order; empty when no text
-   * part is being written.
+   * @returns The rest of the round's sentences, in order; empty when no
+   * round's text is being written.
    */
-  public closeTextPart(): string[] {
+  public closeRoundText(): string[] {
     const segments = buildSentenceSegments(
       formatSpeechTree(markdownParser.parse(this.#markdown), "closed")
     )
     const sentences = this.#addHandedOutSentences(segments, segments.length)
+    this.#round = undefined
     this.#markdown = ""
     this.#handedOut = []
     return sentences
@@ -434,9 +477,12 @@ export class SpeechSentenceBuffer {
     const settled = buildSentenceSegments(
       formatSpeechTree(split.settled, "closed")
     )
+    const writingText = formatSpeechTree(split.writing, "open")
     const segments = [
       ...settled,
-      ...buildSentenceSegments(formatSpeechTree(split.writing, "open"))
+      ...buildSentenceSegments(
+        handling === "speak" ? writingText.replace(URL_START, "") : writingText
+      )
     ]
     const sentences = this.#addHandedOutSentences(
       segments,
@@ -479,21 +525,23 @@ export class SpeechSentenceBuffer {
    * Finds where the sentences not handed out yet start.
    *
    * @param segments - The sentences of the current text.
-   * @returns The index after the last handed-out sentence still present,
-   * looking for each at or before where it stood; `0` when none is.
+   * @returns The index after the last handed-out sentence still present in
+   * order: each is looked for after the one handed out before it was found,
+   * at or before where it stood, so a sentence that is gone never matches
+   * an earlier one that reads the same; `0` when none is.
    */
   #findResumeIndex(segments: readonly SentenceSegment[]): number {
-    for (let rank = this.#handedOut.length - 1; rank >= 0; rank -= 1) {
-      const handed = this.#handedOut.at(rank)
-      if (handed === undefined) break
+    let resume = 0
+    for (const handed of this.#handedOut) {
       const found = segments.findLastIndex(
         (segment, index) =>
+          index >= resume &&
           index <= handed.index &&
           calculateSentenceKey(segment.text) === handed.key
       )
-      if (found !== -1) return found + 1
+      if (found !== -1) resume = found + 1
     }
-    return 0
+    return resume
   }
 }
 
@@ -587,7 +635,7 @@ function splitSettledBlocks(tree: Root, markdown: string): SplitTextPart {
           { ...last, children: items.slice(0, index) }
         ]),
         writing: buildRoot([{ ...last, children: items.slice(index) }]),
-        writingStart: findEndedLineStart(items[index], markdown)
+        writingStart: findLineStart(items[index], markdown)
       }
   }
   const index = findWritingIndex(blocks, markdown)
@@ -595,7 +643,7 @@ function splitSettledBlocks(tree: Root, markdown: string): SplitTextPart {
     return {
       settled: buildRoot(blocks.slice(0, index)),
       writing: buildRoot(blocks.slice(index)),
-      writingStart: findEndedLineStart(blocks[index], markdown)
+      writingStart: findLineStart(blocks[index], markdown)
     }
   return { settled: buildRoot([]), writing: tree, writingStart: 0 }
 }
@@ -618,7 +666,7 @@ function findWritingIndex(
 ): number {
   for (let index = nodes.length - 1; index > 0; index -= 1) {
     if (
-      findEndedLineStart(nodes[index], markdown) > 0 &&
+      hasFirstLineEnded(nodes[index], markdown) &&
       nodes[index - 1]?.type !== "definition"
     )
       return index
@@ -627,19 +675,39 @@ function findWritingIndex(
 }
 
 /**
- * Finds where the line a node starts on starts, once that line ended.
+ * Whether a block's first line ended, and for a table its delimiter row
+ * too: until that row ends, more text on it may turn the table back into
+ * the lines of the paragraph it interrupted.
  *
  * @param node - A block of a parsed text part.
  * @param markdown - The text it was parsed from.
- * @returns The index of the line's first character; `0` for the first
- * line, a line that has not ended yet, or a node without a position.
+ * @returns Whether a line break follows those lines; false for a node
+ * without a position.
  */
-function findEndedLineStart(
+function hasFirstLineEnded(
+  node: RootContent | undefined,
+  markdown: string
+): boolean {
+  const offset = node?.position?.start.offset
+  if (offset === undefined) return false
+  const lineEnd = markdown.indexOf("\n", offset)
+  if (lineEnd === -1) return false
+  return node?.type !== "table" || markdown.includes("\n", lineEnd + 1)
+}
+
+/**
+ * Finds where the line a node starts on starts.
+ *
+ * @param node - A block of a parsed text part.
+ * @param markdown - The text it was parsed from.
+ * @returns The index of the line's first character; `0` for the first line
+ * or a node without a position.
+ */
+function findLineStart(
   node: RootContent | undefined,
   markdown: string
 ): number {
-  const offset = node?.position?.start.offset
-  if (offset === undefined || !markdown.includes("\n", offset)) return 0
+  const offset = node?.position?.start.offset ?? 0
   return markdown.lastIndexOf("\n", offset - 1) + 1
 }
 

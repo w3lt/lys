@@ -1,5 +1,13 @@
 import { CITATION_MARKER_PATTERN } from "@lys/share"
-import type { Blockquote, List, ListItem, Root, RootContent } from "mdast"
+import type {
+  Blockquote,
+  Heading,
+  List,
+  ListItem,
+  Paragraph,
+  Root,
+  RootContent
+} from "mdast"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import remarkParse from "remark-parse"
@@ -118,9 +126,11 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * words, so they are not spoken; inline code is read as words; formatting
  * is dropped; a link is spoken by its text, unless the text is the URL
  * itself; each paragraph, heading, and list item ends a sentence. An
- * unclosed code fence holds the rest of the text back until it closes, and
- * a paragraph or heading still being written that holds a `|` waits until it
- * ends, because its next line may turn it into a table header.
+ * unclosed code fence holds the rest of the text back until it closes. A
+ * paragraph or heading still being written waits until it ends when it
+ * holds a `|`, because its next line may turn it into a table header, and
+ * from its first `$` outside code on, because a later `$` may turn that text
+ * into inline math.
  *
  * A sentence is final once a later sentence holding a letter follows it, a
  * line break ends it, or its text part ends, so a period inside a number, a
@@ -201,14 +211,13 @@ export class SpeechSentenceBuffer {
   /**
    * Ends the text and hands out what is left, however short.
    *
-   * @returns The rest of the text as zero or one sentences; empty on a later
+   * @returns The rest of the text's sentences, in order; empty on a later
    * call.
    */
   public finish(): string[] {
     this.#lastBlock = "closed"
     const segments = this.#segments()
-    const rest = this.#take(segments, segments.length).join(" ")
-    return rest === "" ? [] : [rest]
+    return this.#take(segments, segments.length)
   }
 
   /**
@@ -345,7 +354,7 @@ function endsWithLineBreak(segment: string): boolean {
 function toPlainText(markdown: string, lastBlock: LastBlock): string {
   const tree = markdownParser.parse(markdown)
   const definitions = collectDefinitions(tree)
-  if (lastBlock === "open") holdPossibleTableHeader(tree, definitions)
+  if (lastBlock === "open") holdReparsableText(tree, definitions)
   const blocks: string[] = []
   for (const child of tree.children) collectBlock(child, definitions, blocks)
   return blocks
@@ -359,24 +368,25 @@ function toPlainText(markdown: string, lastBlock: LastBlock): string {
 }
 
 /**
- * Leaves out the paragraph or heading still being written when it holds a
- * `|`: the next line may turn it into a table header, which is never
- * spoken, so its sentences wait until the block ends. Handing them out
- * earlier would let the table take them back, after which the count of
- * handed-out sentences would skip a later one.
+ * Leaves out the text of the paragraph or heading still being written that
+ * more text may parse again into something never spoken: the whole block
+ * when it holds a `|`, which the next line may turn into a table header,
+ * and the text from its first `$` outside code on, which a later `$` may
+ * turn into inline math. Those sentences wait until the block ends.
+ * Handing them out earlier would let the reparse take them back, and the
+ * sentence before them would then be spoken again.
  *
  * @param root - Parsed reply whose last block may still grow; changed in
  * place.
  * @param definitions - Link definitions of the reply.
  */
-function holdPossibleTableHeader(root: Root, definitions: Definitions): void {
+function holdReparsableText(root: Root, definitions: Definitions): void {
   let container: BlockContainer = root
   for (;;) {
     const last: RootContent | undefined = container.children.at(-1)
     if (last === undefined) return
     if (last.type === "paragraph" || last.type === "heading") {
-      if (inlineChildren(last, definitions).includes("|"))
-        container.children.pop()
+      holdReparsableLeaf(container, last, definitions)
       return
     }
     if (
@@ -387,6 +397,55 @@ function holdPossibleTableHeader(root: Root, definitions: Definitions): void {
       return
     container = last
   }
+}
+
+/**
+ * Leaves out the text of the open paragraph or heading that more text may
+ * parse again, as {@link holdReparsableText} describes.
+ *
+ * @param container - The block holding the leaf as its last child; changed
+ * in place.
+ * @param leaf - The paragraph or heading still being written; changed in
+ * place.
+ * @param definitions - Link definitions of the reply.
+ */
+function holdReparsableLeaf(
+  container: BlockContainer,
+  leaf: Paragraph | Heading,
+  definitions: Definitions
+): void {
+  if (inlineChildren(leaf, definitions).includes("|")) {
+    container.children.pop()
+    return
+  }
+  const before = textBeforeOpenDollar(leaf, definitions)
+  if (before !== undefined) leaf.children = [{ type: "text", value: before }]
+}
+
+/**
+ * Renders a node's inline text up to its first `$` in plain text, which a
+ * later `$` may still pair with; a `$` in code or math never pairs.
+ *
+ * @param node - The node to render.
+ * @param definitions - Link definitions of the reply.
+ * @returns The text before that `$`, or undefined when there is none.
+ */
+function textBeforeOpenDollar(
+  node: Root | RootContent,
+  definitions: Definitions
+): string | undefined {
+  if (node.type === "text") {
+    const index = node.value.indexOf("$")
+    return index === -1 ? undefined : node.value.slice(0, index)
+  }
+  if (!("children" in node)) return undefined
+  let before = ""
+  for (const child of node.children) {
+    const prefix = textBeforeOpenDollar(child, definitions)
+    if (prefix !== undefined) return before + prefix
+    before += inline(child, definitions)
+  }
+  return undefined
 }
 
 /**

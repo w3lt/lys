@@ -194,6 +194,36 @@ describe("SpeechSentenceBuffer structure changes", () => {
     expect(buffer.push("\n\nDone")).toEqual(["Run a | b first.", "Then c."])
   })
 
+  it("speaks a sentence once when a later dollar sign turns it into math", () => {
+    const fragments = ["It costs $3. Then", " $4 more. Bye."]
+    expect(speakStreamed(fragments)).toEqual(speakFinished(fragments.join("")))
+    expect(speakStreamed(fragments)).toEqual(["It costs 4 more.", "Bye."])
+  })
+
+  it("speaks the sentences before an unpaired dollar sign at once", () => {
+    const buffer = new SpeechSentenceBuffer("start")
+    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
+    expect(buffer.push("Intro here. Pay $3 today. Then go")).toEqual([
+      "Intro here."
+    ])
+    expect(buffer.push("\n\nDone")).toEqual(["Pay $3 today.", "Then go."])
+  })
+
+  it("does not hold for a dollar sign in inline code", () => {
+    const buffer = new SpeechSentenceBuffer("start")
+    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
+    expect(buffer.push("Run `echo $HOME` now. Then stop")).toEqual([
+      "Run echo $HOME now."
+    ])
+  })
+
+  it("hands out every sentence still held when the reply finishes", () => {
+    const buffer = new SpeechSentenceBuffer("start")
+    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
+    expect(buffer.push("Pay $3. Then go. Bye")).toEqual([])
+    expect(buffer.finish()).toEqual(["Pay $3.", "Then go.", "Bye."])
+  })
+
   it("hands out a text part's last sentence once the part ends", () => {
     const buffer = new SpeechSentenceBuffer("start")
     buffer.loadSnapshot({ text: "", lastTextPart: "open" })

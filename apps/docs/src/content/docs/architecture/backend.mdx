@@ -446,7 +446,9 @@ markers, by the renderer's own `CITATION_MARKER_PATTERN`, are dropped; list
 items, paragraphs, and headings end a sentence. A reference reads the same
 before its definition arrives as after, because reference syntax is read over
 each block's text outside inline code: a link reference by its text, and a
-citation marker, an image, or a footnote reference not at all. Sentences are
+citation marker, an image, or a footnote reference not at all. A bracket or a
+`!` that an escape or a character reference writes is never syntax, as the
+renderer never reads it as syntax. Sentences are
 cut with `Intl.Segmenter`. While the reply streams, a sentence is sent to
 voice once a line break ends it or the next sentence has begun with a
 letter, so `$3.50`, `2.5`, and `Fig. 3` are never cut at their period; a
@@ -457,8 +459,8 @@ unterminated code fence holds speech back until it closes. A paragraph or
 heading being written waits until it ends when it holds a `|`, because its
 next line may make it a table header, or when it starts with `[label]:`,
 because a closing title quote may make it a link definition; and from its
-first `$` or `![` outside code on, because a later `$` may make that text inline math and the `![` may
-begin an image. When more text changes how earlier text reads, speech
+first `$` or `![` outside code on, because a later `$` may make that text
+inline math and the `![` may begin an image. When more text changes how earlier text reads, speech
 resumes after the last sentence sent that is still there, so no sentence is
 skipped or spoken twice. Reasoning, tool calls, and their results are never
 spoken.

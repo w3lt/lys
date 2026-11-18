@@ -41,8 +41,8 @@ route definitions. Two of the routes are WebSockets, marked `WS` below.
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                       | none                                                                                                 | Bodyless `204`, or `409` Problem Details                                   |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`       | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                                   |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`     | `{ status, reason?, content?, approvalToken }`                                                       | Bodyless `204`, or `409` Problem Details                                   |
-| `WS`     | `/api/v1/chat/:conversationId/replies/:assistantMessageId/speech?from=start\|current` | none; the `from` query parameter is required                                                         | Binary PCM audio (24 kHz, mono, 16-bit little-endian) with text frames     |
-| `WS`     | `/api/v1/chat/:conversationId/replies/:assistantMessageId/notification`               | none                                                                                                 | Binary PCM audio with text frames                                          |
+| `WS`     | `/api/v1/chat/:conversationId/replies/:assistantMessageId/speech?from=start\|current` | none; `from` is `start` when omitted                                                                 | Binary PCM (24 kHz, mono, 16-bit little-endian), then a close code         |
+| `WS`     | `/api/v1/chat/:conversationId/replies/:assistantMessageId/notification`               | none                                                                                                 | Binary PCM, then a close code                                              |
 | `POST`   | `/api/v1/chat/:conversationId/jobs/stop`                                              | none                                                                                                 | Bodyless `204`, or `404` Problem Details                                   |
 | `GET`    | `/api/v1/activity/events`                                                             | none                                                                                                 | `text/event-stream` (activity snapshot, then live events)                  |
 
@@ -398,31 +398,36 @@ with `urn:lys:problem:chat:reply-not-found`.
 
 `GET /api/v1/chat/:conversationId/replies/:assistantMessageId/speech?from=start|current`
 is a WebSocket for Lys's desktop. The backend accepts the upgrade only from
-a desktop `Origin`; other origins are refused before the upgrade. `from=start`
-reads the reply from its first word; `from=current` joins at the sentence
-being written and is refused once the reply is no longer being written. The
-reply's sentences are synthesized by the voice service and relayed as binary
-messages of raw 24 kHz mono 16-bit little-endian PCM. There are no text
-messages: the close code is the whole signal.
+a desktop `Origin`; a request with another `Origin` is refused before the
+upgrade with a `403` Problem Details body. A request without an `Origin`, from
+a local process, is accepted, as on the HTTP routes. `from=start`, the
+default, reads the reply from its first word, even one that already finished;
+`from=current` joins at the sentence being written and is refused when the
+reply is not being written. The reply's sentences are synthesized by the
+voice service and relayed as binary messages of raw 24 kHz mono 16-bit
+little-endian PCM. There are no text messages: the close code is the whole
+signal.
 
-Opening a socket for a reply closes any older socket open for the same
-reply, whichever endpoint it was opened on. The socket closes with:
+Lys speaks one speech at a time: opening a socket closes every older one,
+for this reply or another, on either endpoint. The socket closes with:
 
-| Code   | Meaning                                                                                                   |
-| ------ | --------------------------------------------------------------------------------------------------------- |
-| `1000` | The reply finished and its whole audio was sent.                                                          |
-| `1008` | The client did not consume the audio and the buffer overflowed.                                           |
-| `1011` | The voice service failed, or the reply failed.                                                            |
-| `4404` | The conversation or reply does not exist.                                                                 |
-| `4409` | A newer socket opened for the same reply.                                                                 |
-| `4410` | The reply ended, was interrupted, or failed before `1000`; or `from=current` names a reply that finished. |
-| `4503` | Voice is not ready; nothing was sent.                                                                     |
+| Code   | Meaning                                                                                                                                  |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `1000` | Everything to say was spoken and its whole audio was sent.                                                                               |
+| `1001` | The backend is shutting down.                                                                                                            |
+| `1008` | The client fell more than about 1 MB of audio behind, and the speech was cut off.                                                        |
+| `1011` | The voice service failed during the speech, or the backend could not read the reply.                                                     |
+| `4404` | The conversation or reply does not exist.                                                                                                |
+| `4409` | A newer socket opened, for this reply or another.                                                                                        |
+| `4410` | The reply was interrupted or failed, or stopped being written without an end; or `from=current` names a reply that is not being written. |
+| `4503` | Voice is not ready, or refused or did not answer the speech within two seconds; nothing was sent.                                        |
 
 `GET /api/v1/chat/:conversationId/replies/:assistantMessageId/notification`
 is the same socket without the `from` query, and speaks one short line chosen
 by the backend at random, for a reply that finished in the background. Its
-line is never stored, and the close codes match. Neither socket accepts a
-message from the client; the PCM frames are the only payload, one direction.
+line is never stored. Its close codes are the same, except `4410`, which it
+never sends. Neither socket accepts a message from the client; the PCM frames
+are the only payload, one direction.
 
 ## Chat context measurement
 

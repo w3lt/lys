@@ -48,8 +48,7 @@ The script stops at the first failing step. In order, it:
 
 1. Runs `pnpm install --frozen-lockfile`.
 2. Builds vmo, the page reader `read_page` uses, in release with
-   `swift build -c release --package-path apps/vmo`, then voice, the speech
-   server, the same way. It stops first when the
+   `swift build -c release --package-path apps/vmo`. It stops first when the
    Swift toolchain is missing. Nothing is installed yet, so a machine that
    cannot build vmo keeps its current install.
 3. Builds the email MCP server Lys ships in release with
@@ -60,7 +59,9 @@ The script stops at the first failing step. In order, it:
    write its messages as JSON, from which `jq` reads the path of the `email`
    executable, wherever `CARGO_TARGET_DIR`, a Cargo configuration, or a build
    target put it; a build that fails or names no executable stops the script
-   there.
+   there. It then builds voice, the speech server, in release with
+   `swift build -c release --package-path apps/voice`, still before anything
+   is installed.
 4. Runs `pnpm run backend:build`, which bundles the backend into
    `apps/backend/dist/backend.mjs` and copies its prompt files beside it.
 5. Creates `$LYS_HOME/runtime`, using `${LYS_HOME:-$HOME/.lys}`.
@@ -85,10 +86,11 @@ The script stops at the first failing step. In order, it:
 
 The script needs the toolchain from [Environment setup](/develop/setup/),
 including the Swift toolchain and the Rust toolchain, plus `curl`, `jq`, and
-network access to `nodejs.org`, to `github.com` for vmo's and voice's Swift packages
-until `apps/vmo/.build` holds them, and to `crates.io` for the email server's
-crates until Cargo's cache holds them. vmo builds and runs only on Apple silicon with
-macOS 26; see [Runtime dependencies](/operate/dependencies/#vmo).
+network access to `nodejs.org`, to `github.com` for vmo's and voice's Swift
+packages until `apps/vmo/.build` and `apps/voice/.build` hold them, and to
+`crates.io` for the email server's crates until Cargo's cache holds them. vmo
+builds and runs only on Apple silicon with macOS 26, and voice needs macOS 15
+or later; see [Runtime dependencies](/operate/dependencies/#vmo).
 
 :::caution[Desktop runtime is still under development]
 Release builds of the desktop app start the backend, vmo, and voice from a runtime

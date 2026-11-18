@@ -139,7 +139,8 @@ The first start downloads voice's models, about 780 MB, into
 `~/.lys/voice/models`; the voice card shows **voice starting** meanwhile.
 When `swift build` fails, `run.sh` stops and voice does not start: the card
 shows **voice stopped**, and the build error appears in the terminal that
-runs `pnpm dev`. voice needs macOS 26 on Apple silicon, as vmo does.
+runs `pnpm dev`. voice needs macOS 15 or later, the platform its package
+declares.
 
 `runtime.autoStartVoice` defaults to `false`, and the Runtime pane's "Start
 voice when Lys opens" switch saves it. Reloading the window keeps the voice

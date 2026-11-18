@@ -407,8 +407,8 @@ reader is offered.
 ## Speech sockets
 
 The backend relays a reply's audio to the UI over two WebSocket routes, both
-on the same Fastify server as the HTTP API and registered by the same chat
-plugin, under
+on the same Fastify server as the HTTP API and registered by the voice
+module's plugin, `registerVoiceRoutes` in `modules/voice/routes.ts`, under
 `/api/v1/chat/:conversationId/replies/:assistantMessageId/`:
 
 - `speech?from=start|current`, `chatSpeechApi`: streams the reply as audio.
@@ -418,38 +418,54 @@ plugin, under
 
 Only the desktop origin may open either socket: requests whose `Origin`
 header is not one of the backend's HTTP origins are refused before the
-upgrade with `403`, as with CORS on the HTTP routes. A socket is bound to one
-reply for its whole life; opening a second socket for the same reply closes
-the first with `4409`.
+upgrade with a `403` Problem Details body, as with CORS on the HTTP routes. A
+socket is bound to one reply for its whole life. Lys speaks one speech at a
+time, as voice does: one registry, shared by both routes, holds the socket
+that speaks, and opening a socket closes the older one with `4409`, for this
+reply or another, which cancels the older speech at voice.
+
+After the upgrade, the backend asks voice's `GET /health`, waiting at most
+two seconds; a voice that is not ready closes the socket with `4503`, and a
+socket the UI closed meanwhile starts nothing. Then, in one synchronous step,
+it reads the stored reply and starts following the reply's generation, so no
+fragment falls between the snapshot and the live events. A missing reply
+closes the socket with `4404`, a store that cannot be read with `1011`, and a
+backend that is shutting down with `1001`. `from=current` is refused with
+`4410` when no generation is writing the reply. The backend then opens a
+speech at voice's speech socket, waiting at most two seconds for the
+handshake: a refused, closed, or unanswered handshake closes the socket with
+`4503`. Events that arrive in the meantime wait in order, and a UI socket
+that closed in the meantime cancels the new speech at voice.
 
 `from=start` speaks the reply from its first word, even one that already
-finished; `from=current` speaks from the sentence being written and is
-refused with `4410` while the reply is not being written. The speech
-follow reads the stored reply the way the reply event stream does — snapshot
-first, then the live events from the reply's generation — and turns it into
-speech: markdown becomes plain text (links read as their text, code blocks,
-math, tables, citation markers, images, and bare URLs are dropped, list
-items, paragraphs, and headings end a sentence), code speaks verbatim, and
-sentences are cut with `Intl.Segmenter`. Completed sentences are sent to
-voice in order; an unterminated code fence holds speech back until it
-closes. Audio arrives from voice as binary frames of 24 kHz mono 16-bit
-little-endian PCM and is relayed to the socket unchanged. Reasoning, tool
-calls, and their results are never spoken.
+finished; `from=current` speaks from the sentence being written, or from the
+next text part when the stored reply's last part is not text. The speech
+turns markdown into plain text: links read as their text and inline code as
+its words; code blocks, math, tables, images, bare URLs, and citation
+markers, by the renderer's own `CITATION_MARKER_PATTERN`, are dropped; list
+items, paragraphs, and headings end a sentence. Sentences are cut with
+`Intl.Segmenter`. While the reply streams, a sentence is sent to voice once a
+line break ends it or the next sentence has begun with a letter, so `$3.50`,
+`2.5`, and `Fig. 3` are never cut at their period; the rest is sent at
+`done`. A sentence longer than 2,000 characters is sent in pieces, cut at a
+space, because voice refuses a message over 16 KiB. An unterminated code
+fence holds speech back until it closes. Reasoning, tool calls, and their
+results are never spoken.
 
-Before the socket upgrades anything, the backend asks voice's `GET /health`;
-a voice that is not ready closes the socket at once with `4503`. A slow UI
-that falls behind by a megabyte of unsent audio is disconnected with `1008`.
-Voice's own close codes map to the UI's: `1000` stays `1000`, anything else
-becomes `1011`. A reply that stops, fails, or is deleted closes the speech
-socket with `4410`; a `done` event lets the socket finish with `1000`. The
-backend keeps no audio and no per-socket audio buffer beyond the one frame
-in flight per send, so a burst of sentences waits on voice's pace, not the
-other way round.
+Audio arrives from voice as binary frames of 24 kHz mono 16-bit little-endian
+PCM and is relayed to the socket unchanged. A UI that falls more than 1 MB of
+unsent audio behind, about twenty seconds, is disconnected with `1008` and its
+speech cancelled. Voice's own close codes map to the UI's: `1000` stays
+`1000`, anything else becomes `1011`. A `done` event lets the speech finish
+with `1000`; an `interrupted` or `error` event, or a generation that ends
+without either, closes the socket with `4410` and cancels the speech. When the
+backend shuts down, every open WebSocket is closed with `1001`. The UI
+closing its socket, for any reason, cancels the speech at voice. Every open,
+close, and failure is logged; see
+[Speech socket entries](/operate/logging/#speech-socket-entries).
 
-Codes the UI understands: `1000` everything was sent, `1011` voice failed,
-`4404` no such conversation or reply, `4409` a newer socket replaced this
-one, `4410` the reply stopped or is not being written, and `4503` voice is
-not ready. The constants live in `@lys/protocol` next to the routes.
+The close codes are `SPEECH_CLOSE_*` in `@lys/protocol`, next to the routes,
+and the [API reference](/reference/api/#speech-sockets) lists them.
 
 ## Tool call policy
 

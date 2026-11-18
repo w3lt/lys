@@ -562,12 +562,12 @@ without polling. The composer banner names the first missing prerequisite
 of the conversation's model and offers the action that fixes it; see
 [The conversation's model](#the-conversations-model).
 
-`initialize` shows the shell as soon as settings load; the backend and vmo
-then start in the background, together and without waiting for each other,
-each when its startup switch is on or the host already owns its process. A
-vmo the host is still stopping, as after a window reload during Stop, is
-joined instead: the card shows the stop, and vmo stays stopped whatever its
-switch says.
+`initialize` shows the shell as soon as settings load; the backend, vmo, and
+voice then start in the background, together and without waiting for each
+other, each when its startup switch is on or the host already owns its
+process. A vmo or voice the host is still stopping, as after a window reload
+during Stop, is joined instead: the card shows the stop, and the process
+stays stopped whatever its switch says.
 
 ## Speech playback
 
@@ -583,27 +583,36 @@ readiness, and applies these rules:
 - A reply that starts streaming while the window is focused and voice is
   ready is read from its first word. One the view joined that was already
   running is read from the sentence being written.
-- Before the first word is spoken, a blur waits silently; the read resumes at
-  the sentence being written when the window regains focus, when voice
-  becomes ready, or when the conversation is opened. Losing focus while she is
-  reading changes nothing.
+- A blur before the first word is spoken closes the speech socket and waits
+  silently; the read resumes at the sentence being written when the window
+  regains focus, when voice becomes ready, or when the conversation is
+  opened. Losing focus while she is reading changes nothing.
+- A reply that finishes with `done` while the window is focused is read to
+  its end: the socket stays open until the backend closes it with `1000`.
 - A reply that finishes with `done` before anything was said, with the window
   in the background, earns one spoken line through the notification socket.
   If anything was said, it does not.
 - A stopped or failed reply, a new message, a switched or closed conversation,
-  or voice stopping all stop the playback at once and drop the unplayed
-  frames.
+  or voice stopping all stop the playback, and any notification, at once and
+  drop the unplayed frames, also frames still queued after a `1000`.
 - Only `1000` keeps the queued audio playing out; any other close stops it.
+  After such a close the reply is joined again only when the window regains
+  focus, voice becomes ready, or the conversation is opened, never on an
+  ordinary chat update. A `4503` or `1011` close also makes the store read
+  voice's status again, so a voice that died shows as stopped or not
+  responding on its card.
 
 The player decodes the 24 kHz mono 16-bit little-endian PCM the backend
-relays, schedules it back to back on a Web Audio context created on the
-first frame, and drops samples that would not fit the i16 range. The context
-is resumed on every frame and on send, since WebKit keeps it suspended until
-a user gesture. One WebSocket per speech goes to
+relays, decoding every whole sample and dropping a trailing odd byte, and
+schedules it back to back on a Web Audio context. The context is created on
+the first update that finds voice ready, and resumed on every update and
+every frame, since WebKit keeps a context suspended until a user gesture.
+One WebSocket per speech goes to
 `GET /api/v1/chat/:conversationId/replies/:assistantMessageId/speech?from=start|current`;
-the notification line goes to the sibling `notification` socket. Nothing is
-retried or buffered across a reconnect: the controller opens at most one
-socket per reply at a time.
+the notification line goes to the sibling `notification` socket, and at most
+one of the two is open at a time. Nothing is retried or buffered across a
+reconnect. The application shell's cleanup closes both sockets and the audio
+context, and the controller then ignores every later change.
 
 ## vmo status
 

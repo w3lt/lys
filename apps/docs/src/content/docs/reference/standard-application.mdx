@@ -643,15 +643,14 @@ and question Q3 of its
 
 ## voice address copy exception
 
-voice's address has an approved exception to
+voice's address has a proposed exception to
 [CONST-005](https://github.com/w3lt/lys/blob/main/docs/code_standards/CONSTANT.md),
-mirroring the vmo exception above: `VOICE_HOST` and `VOICE_PORT` in
+pending the maintainer's approval, mirroring the vmo exception above: `VOICE_HOST` and `VOICE_PORT` in
 `@lys/protocol` define voice's HTTP address, and `VOICE_SOCKET_PORT` defines
 its WebSocket port, but the Tauri host and voice declare `127.0.0.1:9090`
 and `127.0.0.1:9091` again, because Rust and Swift cannot import a
-TypeScript constant. This exception is submitted for the maintainer's
-approval with the voice pull request; until it is approved it relies on the
-same test as the vmo exception.
+TypeScript constant. It is proposed with the voice pull request, and the
+same kind of test as for the vmo exception guards it.
 
 - **Scope:** `VOICE_ADDRESS` in
   [voice.rs](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/voice.rs),

@@ -211,11 +211,12 @@ that space.
 ## voice's models
 
 voice, the speech server Lys reads replies with, keeps its PocketTTS models in
-`~/.lys/voice/models`, outside the Lys home, because voice does not read
-`LYS_HOME`. It downloads them on its first start, about 780 MB, and an Lys
-home that never ran voice has no models directory. Deleting the directory
-while voice is stopped loses nothing else; the next start downloads the
-models again.
+`~/.lys/voice/models` whichever Lys home is in use, because voice does not read
+`LYS_HOME`: that is inside the default Lys home, `~/.lys`, and outside any
+other one. It downloads them on its first start, about 780 MB, so the
+directory exists once voice has started on this machine. Deleting it while
+voice is stopped loses nothing else; the next start downloads the models
+again.
 
 ## Lifecycle notes
 
@@ -231,8 +232,8 @@ models again.
   same Lys home directory, so user data and app settings currently share one
   root. Release builds also start their backend, vmo, voice, and the email
   MCP server from the `runtime/` directory there, and the backend keeps its
-  log in `logs/`. voice keeps its models at `~/.lys/voice/models`, outside
-  the Lys home.
+  log in `logs/`. voice keeps its models at `~/.lys/voice/models` whichever
+  Lys home is in use.
 
 ## WebView theme storage
 

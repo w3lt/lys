@@ -74,7 +74,7 @@ toolchain and installs; see [Packaging and releases](/operate/releases/).
 voice listens at `127.0.0.1:9090` for its health route and at `127.0.0.1:9091`
 for its speech WebSocket and needs:
 
-- macOS 26 on Apple silicon
+- macOS 15 or later, the platform `apps/voice/Package.swift` declares
 - network access to download its PocketTTS models on the first start, about
   780 MB, which it stores in `~/.lys/voice/models`; later starts need none
 - no Linux kernel, unlike vmo
@@ -143,7 +143,8 @@ The backend itself depends on:
   result
 - for Lys to read replies aloud, [voice](#voice) answering `GET /health` at
   `127.0.0.1:9090`, which the desktop checks at startup and the backend
-  checks before each speech socket upgrades. The reply is also read without
+  checks once each speech socket opens, before any audio. The reply is also
+  read without
   voice; voice only adds the sound.
 - for `read_page`, [vmo](#vmo) answering `GET /health` at
   `127.0.0.1:8080`. The backend asks it on every tool lookup, so while vmo is

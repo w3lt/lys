@@ -87,9 +87,11 @@ seconds. Quitting Lys stops vmo and the backend together.
    it calls `start_voice`, and the Tauri host runs `bash run.sh` in
    `apps/voice` for development builds, or `$LYS_HOME/runtime/voice/voice`
    for release builds.
-3. voice loads its PocketTTS models from `~/.lys/voice/models`, which it
-   downloads on the first start, then serves `GET /health` on
-   `127.0.0.1:9090` and its speech WebSocket on `127.0.0.1:9091`.
+3. voice starts serving `GET /health` on `127.0.0.1:9090` and its speech
+   WebSocket on `127.0.0.1:9091` at once, and loads its PocketTTS models from
+   `~/.lys/voice/models`, which it downloads on the first start. Until they
+   are loaded, `/health` answers `503` and the speech socket refuses
+   handshakes.
 4. Every second, for up to ten minutes, the store reads `get_voice_status`
    and, while voice runs, `get_voice_health`. voice becomes `running` once it
    answers, `stopped` when its process exits first, and `unresponsive` after
@@ -106,26 +108,33 @@ and the backend together.
    is focused with voice ready, it opens the reply's speech socket,
    `GET /api/v1/chat/:conversationId/replies/:assistantMessageId/speech?from=start`,
    with `from=start` for a reply the person asked for.
-2. The backend follows the reply's events as it does for the reply event
-   stream, cleans the markdown into sentences, and relays 24 kHz mono
-   16-bit little-endian PCM frames from voice to the UI. The UI decodes and
-   plays them back to back through a Web Audio context created on the first
+2. The backend asks voice whether it is ready, then reads the stored reply
+   and follows the reply's generation in one step, as the reply event stream
+   does. It cleans the markdown into sentences, hands each completed sentence
+   to voice, and relays 24 kHz mono 16-bit little-endian PCM frames from
+   voice to the UI. The UI decodes and plays them back to back through a Web
+   Audio context, created once voice is ready and resumed on every update and
    frame.
 3. When the window is not focused, the controller waits silently. When it
    regains focus mid-reply, or the conversation is opened while a reply is
    streaming, or voice becomes ready mid-reply, the controller opens the
    socket with `from=current`, which makes the backend skip the sentences
    already complete and join at the sentence being written.
-4. When the window loses focus before anything was said, nothing is said.
-   Losing focus while reading changes nothing: the reply is read to the end.
+4. When the window loses focus before anything was said, the controller
+   closes the socket and nothing is said until it joins again, as in step 3.
+   Losing focus while reading changes nothing: the reply is read to the end,
+   and a reply that ends with `done` while the window is focused is read to
+   the end too.
 5. When the reply ends with `done` before anything was said and the window is
    in the background, the controller opens the notification socket,
    `.../notification`, and plays the one line it speaks.
 6. The reply stopping or failing, a new message being sent, the conversation
-   being switched or closed, or voice stopping: the UI closes its socket and
-   drops queued audio at once. If voice is down, the speech socket closes
-   with `4503` and nothing is said; the text still arrives as usual.
-7. A socket that voice replaces (`4409`) or a reply that stopped
+   being switched or closed, or voice stopping: the UI closes its socket, and
+   any notification socket, and drops queued audio at once. If voice is down,
+   the speech socket closes with `4503` and nothing is said; the text still
+   arrives as usual, and the store reads voice's status again so the Voice
+   card shows why.
+7. A socket that a newer one replaces (`4409`) or a reply that stopped
    (`4410`) silences the audio; only `1000` keeps the queued frames playing
    to the end.
 

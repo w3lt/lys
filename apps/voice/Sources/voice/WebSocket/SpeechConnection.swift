@@ -104,23 +104,32 @@ final class SpeechConnection: Sendable {
     /// message over ``maximumMessageSize`` or a peer that went away without
     /// a close frame, is logged before the speech is torn down. So is a text
     /// message that is not UTF-8: Network.framework fails its receive and
-    /// closes the socket with `1002` itself. Any other message that breaks
+    /// closes the socket with `1002` itself. A connection that ends before
+    /// its first message is logged as such: a refused handshake ends that
+    /// way, and its refusal was already logged with its reason. Any other message that breaks
     /// the speech protocol, a binary one among them, is logged and answered
     /// with its close code.
     private func handleClientMessages() async {
         let deadline = startHandshakeDeadline()
         defer { deadline.cancel() }
+        var hasReceivedMessage = false
         while true {
             let message: Result<Message, any Error>
             do {
                 message = .success(try await readMessage())
+                hasReceivedMessage = true
             } catch {
                 message = .failure(error)
             }
             switch message {
             case .failure(let error):
-                if !isCloseSent {
+                if isCloseSent {
+                    return
+                }
+                if hasReceivedMessage {
                     print("voice: speech connection \(connection.endpoint) failed: \(error)")
+                } else {
+                    print("voice: speech connection \(connection.endpoint) ended before it sent a message: \(error)")
                 }
                 return
             case .success(.close):
@@ -338,6 +347,7 @@ final class SpeechConnection: Sendable {
     private var isCloseSent: Bool {
         state.withLock { state in state.closeSent }
     }
+
 
     /// Logs a client message that breaks the speech protocol, then closes the
     /// socket with the code that names the violation.

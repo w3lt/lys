@@ -204,7 +204,7 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
     try {
       await startReplyTask(context)
     } finally {
-      this.#markReplyTaskSettled(assistantMessageId)
+      this.#updateReplyTaskToSettled(assistantMessageId)
     }
   }
 
@@ -217,11 +217,12 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
    * for the reply, which the start order of {@link ReplyGeneration.start}
    * rules out for a task this registry admitted.
    */
-  #markReplyTaskSettled(assistantMessageId: string): void {
+  #updateReplyTaskToSettled(assistantMessageId: string): void {
     const registered = this.#generations.get(assistantMessageId)
     if (registered !== undefined)
       this.#generations.set(assistantMessageId, {
-        ...registered,
+        conversationId: registered.conversationId,
+        generation: registered.generation,
         replyTask: "settled"
       })
   }

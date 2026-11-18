@@ -417,15 +417,55 @@ describe("SpeechSentenceBuffer structure changes", () => {
   )
 
   it.each([
-    ["escapes", "\\[1\\]"],
-    ["character references", "&#91;1&#93;"]
+    ["two escaped brackets", "\\[1\\]"],
+    ["an escaped opening bracket", "\\[1]"],
+    ["an escaped closing bracket", "[1\\]"],
+    ["two character references", "&#91;1&#93;"],
+    ["a character reference and a bracket", "&#91;1]"]
   ])(
-    "drops a citation marker whose brackets %s write, as the renderer shows it as a citation",
+    "drops a citation marker written with %s, as the renderer shows it as a citation",
     (_writer, marker) => {
       const text = `See the docs ${marker} now. Bye.`
       const expected = ["See the docs now.", "Bye."]
       expect(listFinishedSentences(text)).toEqual(expected)
       expect(listStreamedSentences([...text])).toEqual(expected)
+    }
+  )
+
+  it.each([
+    ["written as syntax", "[docs [1]](https://x)"],
+    ["escaped", "[docs \\[1\\]](https://x)"]
+  ])(
+    "drops a citation marker %s in a link's text, as everywhere outside code",
+    (_written, link) => {
+      const text = `See ${link} now.`
+      expect(listFinishedSentences(text)).toEqual(["See docs now."])
+      expect(listStreamedSentences([...text])).toEqual(["See docs now."])
+    }
+  )
+
+  it.each([
+    {
+      bracket: "an escaped opening bracket",
+      fragments: [
+        "See [see \\[1] now.",
+        " More here.",
+        "\n\n[see \\[1]: https://x\n"
+      ],
+      words: ["See", "see", "1", "now", "More", "here"]
+    },
+    {
+      bracket: "an escaped closing bracket",
+      fragments: ["See [1\\]] now.", " More here.", "\n\n[1\\]]: https://x\n"],
+      words: ["See", "1", "now", "More", "here"]
+    }
+  ])(
+    "speaks a reference whose text holds a citation marker with $bracket once, before and after its definition arrives",
+    ({ fragments, words }) => {
+      expect(listSpokenWords(listStreamedSentences(fragments))).toEqual(words)
+      expect(
+        listSpokenWords(listFinishedSentences(fragments.join("")))
+      ).toEqual(words)
     }
   )
 

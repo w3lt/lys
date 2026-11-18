@@ -141,6 +141,18 @@ const IMAGE_MARK = "\uE004"
 const LITERAL_EXCLAMATION_MARK = "\uE005"
 
 /**
+ * Stands for the `[` of a shortcut link reference whose syntax was read, so
+ * that it is told from a `[` that opens no reference.
+ */
+const SHORTCUT_OPEN_BRACKET = "\uE006"
+
+/**
+ * Stands for the `]` of a shortcut link reference whose syntax was read, as
+ * {@link SHORTCUT_OPEN_BRACKET} stands for its `[`.
+ */
+const SHORTCUT_CLOSE_BRACKET = "\uE007"
+
+/**
  * The private-use characters that mark a block's text; the reply's own are
  * removed before it is parsed.
  */
@@ -151,17 +163,22 @@ const TEXT_MARKS = new RegExp(
     LITERAL_OPEN_BRACKET,
     LITERAL_CLOSE_BRACKET,
     IMAGE_MARK,
-    LITERAL_EXCLAMATION_MARK
+    LITERAL_EXCLAMATION_MARK,
+    SHORTCUT_OPEN_BRACKET,
+    SHORTCUT_CLOSE_BRACKET
   ].join("")}]`,
   "g"
 )
 
 /**
- * A citation marker in a text node's value with a bracket that an escape or
- * a character reference wrote, which is never reference syntax, built from
- * the renderer's own {@link CITATION_MARKER_PATTERN}. A marker whose brackets
- * are both syntax is reference syntax, which {@link formatReferenceSyntax}
- * reads.
+ * A citation marker left in a block's text once its reference syntax was
+ * read, with a bracket that an escape or a character reference wrote; its
+ * other bracket, when written as syntax, opens or closes no reference. A
+ * marker whose brackets are both syntax is a reference, which
+ * {@link formatReference} drops.
+ *
+ * @remarks Built from the renderer's own {@link CITATION_MARKER_PATTERN} by
+ * replacing its `\\[` and `\\]`, which that pattern's source writes so.
  */
 const LITERAL_CITATION_MARKER = new RegExp(
   [
@@ -250,22 +267,23 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * they become final.
  *
  * @remarks The text is what the renderer shows, spoken: code blocks, math,
- * tables, images, bare URLs, and citation markers like `[1]`, found by the
- * renderer's own pattern in each text node, are not words, so they are not
- * spoken; inline code is read as words; formatting is dropped; a link is spoken
- * by its text, and a bare URL, in a link's text or not, is not spoken; each
- * paragraph, heading, and list item ends a sentence. A reference reads the same
- * before its definition arrives as after: a link by its text; a citation
- * marker, an image, and a footnote reference not at all; a bracket or a `!` an
- * escape or a character reference writes is never reference syntax, though a
- * citation marker it writes is still dropped, as the renderer still shows one.
- * An unclosed code fence holds the rest of the text back until it closes. A
- * paragraph or heading still being written waits until it ends when it holds a
- * `|`, because its next line may turn it into a table header, or when it starts
- * with a label in brackets and a colon, because a closing title quote may turn
- * it into a link definition; and from its first `$` or `![` outside code on,
- * because a later `$` may turn that text into inline math and the `![` may
- * begin an image.
+ * tables, images, bare URLs, and citation markers like `[1]`, by the renderer's
+ * own pattern, are not words, so they are not spoken; inline code is read as
+ * words; formatting is dropped; a link is spoken by its text, and a bare URL,
+ * in a link's text or not, is not spoken; each paragraph, heading, and list
+ * item ends a sentence. A reference reads the same before its definition
+ * arrives as after: a link by its text; a citation marker, an image, and a
+ * footnote reference not at all; a bracket or a `!` an escape or a character
+ * reference writes is never reference syntax, though a citation marker it
+ * writes is still dropped, as the renderer still shows one. A citation marker
+ * is dropped wherever it stands outside code, a link's text included, where the
+ * renderer shows it as text. An unclosed code fence holds the rest of the text
+ * back until it closes. A paragraph or heading still being written waits until
+ * it ends when it holds a `|`, because its next line may turn it into a table
+ * header, or when it starts with a label in brackets and a colon, because a
+ * closing title quote may turn it into a link definition; and from its first
+ * `$` or `![` outside code on, because a later `$` may turn that text into
+ * inline math and the `![` may begin an image.
  *
  * A sentence is final once a later sentence holding a letter follows it, a
  * line break ends it, or its text part ends, so a period inside a number, a
@@ -658,8 +676,9 @@ function removeTextFromReparsableMark(node: Root | RootContent): boolean {
 
 /**
  * Cleans one block of inline text: reference syntax outside inline code read
- * as {@link formatReferenceSyntax} reads it, bare URLs outside inline code
- * dropped, every marked character turned back into the one it stands for,
+ * as {@link formatReferenceSyntax} reads it, bare URLs and the citation
+ * markers left outside inline code dropped, every marked character turned
+ * back into the one it stands for,
  * whitespace collapsed, and no space left before closing punctuation.
  * Inline code reads as written, so a citation-shaped index such as
  * `arr[1]`, or a URL, stays.
@@ -670,11 +689,13 @@ function removeTextFromReparsableMark(node: Root | RootContent): boolean {
  * @returns The cleaned text, possibly empty.
  */
 function formatBlockText(text: string): string {
-  return formatWithoutBareUrls(formatReferenceSyntax(text))
+  return formatTextOutsideCode(formatReferenceSyntax(text))
     .replaceAll(IMAGE_MARK, "!")
     .replaceAll(LITERAL_EXCLAMATION_MARK, "!")
     .replaceAll(LITERAL_OPEN_BRACKET, "[")
     .replaceAll(LITERAL_CLOSE_BRACKET, "]")
+    .replaceAll(SHORTCUT_OPEN_BRACKET, "[")
+    .replaceAll(SHORTCUT_CLOSE_BRACKET, "]")
     .replace(TEXT_MARKS, "")
     .replace(/\s+/g, " ")
     .replace(/ ([.,;:!?)\]])/g, "$1")
@@ -682,19 +703,24 @@ function formatBlockText(text: string): string {
 }
 
 /**
- * Drops the bare URLs of a block's text outside its inline code.
+ * Drops the bare URLs and the {@link LITERAL_CITATION_MARKER} citation
+ * markers of a block's text outside its inline code.
  *
- * @param text - A block's text, marked as {@link formatBlockText} receives
- * it; only its inline code marks matter here.
+ * @param text - A block's text once its reference syntax was read, marked as
+ * {@link formatBlockText} receives it.
  * @returns The text without them.
  * @remarks Links render by their text, so a block's text keeps every
  * character the reply shows, and a URL reads the same whether GFM linked it,
  * which it does not inside a link's text, or not.
  */
-function formatWithoutBareUrls(text: string): string {
+function formatTextOutsideCode(text: string): string {
   return text
     .split(CODE_SPAN)
-    .map((part, index) => (index % 2 === 0 ? part.replace(BARE_URL, "") : part))
+    .map((part, index) =>
+      index % 2 === 0
+        ? part.replace(LITERAL_CITATION_MARKER, "").replace(BARE_URL, "")
+        : part
+    )
     .join("")
 }
 
@@ -711,7 +737,7 @@ function formatWithoutBareUrls(text: string): string {
 function formatInlineText(node: Root | RootContent): string {
   switch (node.type) {
     case "text":
-      return formatTextValue(node.value)
+      return node.value.replaceAll("![", `${IMAGE_MARK}[`)
     case "inlineCode":
       return formatInlineCode(node.value)
     case "linkReference": {
@@ -729,22 +755,6 @@ function formatInlineText(node: Root | RootContent): string {
     default:
       return formatInlineChildren(node)
   }
-}
-
-/**
- * Renders a text node's value: each citation marker with a bracket that an
- * escape or a character reference wrote dropped, as the renderer finds it
- * in a text node's value, and each `!` right before a `[` written literally
- * marked as an {@link IMAGE_MARK}.
- *
- * @param value - The node's value, its literal brackets and `!` marked by
- * the parser.
- * @returns The value as a block's text reads it.
- */
-function formatTextValue(value: string): string {
-  return value
-    .replace(LITERAL_CITATION_MARKER, "")
-    .replaceAll("![", `${IMAGE_MARK}[`)
 }
 
 /**
@@ -841,9 +851,10 @@ function findClosingBracket(text: string, open: number): number | undefined {
  * Reads one reference as it reads once defined.
  *
  * @param reference - The syntax {@link findReference} found.
- * @returns Its enclosed text, read the same way, in brackets for a shortcut
- * link reference; nothing for a citation marker, an image, or a footnote
- * reference.
+ * @returns Its enclosed text, read the same way, in the brackets that
+ * {@link SHORTCUT_OPEN_BRACKET} and {@link SHORTCUT_CLOSE_BRACKET} stand for
+ * when it is a shortcut link reference; nothing for a citation marker, an
+ * image, or a footnote reference.
  */
 function formatReference(reference: ReferenceSyntax): string {
   if (
@@ -853,7 +864,9 @@ function formatReference(reference: ReferenceSyntax): string {
   )
     return ""
   const enclosed = formatReferenceSyntax(reference.enclosed)
-  return reference.hasLabel ? enclosed : `[${enclosed}]`
+  return reference.hasLabel
+    ? enclosed
+    : `${SHORTCUT_OPEN_BRACKET}${enclosed}${SHORTCUT_CLOSE_BRACKET}`
 }
 
 /**

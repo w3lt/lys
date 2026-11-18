@@ -1,6 +1,7 @@
 import type { StoreApi } from "zustand"
 
 import {
+  getVoiceHealth,
   getVoiceStatus,
   startVoice as startVoiceProcess,
   stopVoice as stopVoiceProcess
@@ -87,6 +88,16 @@ export type VoiceRuntimeSlice = {
    * failure is published as the problem.
    */
   readonly stopVoice: () => Promise<void>
+  /**
+   * Reads a running voice's status and health again, such as after a speech
+   * socket reported voice unavailable or failed.
+   *
+   * @returns Resolves after `stopped` or `unresponsive` is published for a
+   * voice that exited or stopped answering, or at once when voice is not
+   * shown as running; never rejects. Nothing is published when voice still
+   * answers, or when a start or stop took over meanwhile.
+   */
+  readonly checkVoice: () => Promise<void>
 }
 
 /** Published while a stop waits for voice. */
@@ -164,6 +175,24 @@ async function getVoiceServerStatusAfterFailure(): Promise<
 }
 
 /**
+ * Reads the state to show for a voice the store shows as running.
+ *
+ * @returns `running` while voice answers its health route, `stopped` once the
+ * host owns no running voice, and `unresponsive` otherwise, also when the
+ * host cannot be asked.
+ */
+async function readRunningVoiceServerInfo(): Promise<VoiceServerInfo> {
+  try {
+    if ((await getVoiceStatus()).status === "stopped") return STOPPED_VOICE
+    return (await getVoiceHealth()) === "ready"
+      ? RUNNING_VOICE
+      : UNRESPONSIVE_VOICE
+  } catch {
+    return UNRESPONSIVE_VOICE
+  }
+}
+
+/**
  * Registers voice lifecycle state and actions with one Zustand owner.
  *
  * @param set - Framework setter for atomic state updates.
@@ -172,7 +201,8 @@ async function getVoiceServerStatusAfterFailure(): Promise<
  * @remarks The Tauri host owns the voice process; this slice owns what the
  * renderer shows about it. A start publishes its outcome only while the
  * `starting` state it published is still current, so a stop or a newer start
- * that took over wins. Neither action rejects: the Runtime pane shows a
+ * that took over wins, and a check publishes only while the `running` state
+ * it read is still current. No action rejects: the Runtime pane shows a
  * failure as the problem.
  */
 export function createVoiceRuntimeSlice(
@@ -245,5 +275,14 @@ export function createVoiceRuntimeSlice(
     }
   }
 
-  return { voiceServerInfo: STOPPED_VOICE, startVoice, stopVoice }
+  /** Implements {@link VoiceRuntimeSlice.checkVoice}. */
+  async function checkVoice(): Promise<void> {
+    const shown = get().voiceServerInfo
+    if (shown.status !== "running") return
+    const info = await readRunningVoiceServerInfo()
+    if (info.status === "running" || get().voiceServerInfo !== shown) return
+    set({ voiceServerInfo: info })
+  }
+
+  return { voiceServerInfo: STOPPED_VOICE, startVoice, stopVoice, checkVoice }
 }

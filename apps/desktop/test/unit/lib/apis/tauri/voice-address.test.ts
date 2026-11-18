@@ -28,7 +28,7 @@ const VOICE_WEB_SERVER_ADDRESS_PATTERN =
 
 /** The default host and port of voice's speech socket server. */
 const VOICE_SOCKET_ADDRESS_PATTERN =
-  /init\(\s*engine: any SpeechEngine,\s*host: NWEndpoint\.Host = "(?<host>[^"]*)",\s*port: NWEndpoint\.Port = (?<port>\d+)\s*\)/g
+  /init\(\s*engine: any SpeechEngine,\s*host: NWEndpoint\.Host = "(?<host>[^"]*)",\s*port: NWEndpoint\.Port = (?<port>\d+)\s*[,)]/g
 
 /** Dotted addresses of the Rust `Ipv4Addr` constants the host may name. */
 const RUST_IPV4_CONSTANT_ADDRESSES: Readonly<Record<string, string>> =

@@ -20,19 +20,25 @@ import {
 } from "./speech-controller"
 import { createPcmPlayer } from "./pcm-player"
 
-/** Tauri `webviewWindow` focus events, with a DOM fallback for other shells. */
+/**
+ * Follows the window's focus: Tauri's window focus events, with a DOM
+ * fallback for other shells.
+ *
+ * @param onChange - Called with the window's focus once it is first read and
+ * on every change; never called after the cleanup ran.
+ * @returns The cleanup, which stops following.
+ */
 function trackFocus(onChange: (focused: boolean) => void): () => void {
   try {
     const currentWindow = getCurrentWindow()
-    let focused = true
     let unlisten: (() => void) | undefined
     let disposed = false
-    void currentWindow
+    const publish = (focused: boolean): void => {
+      if (!disposed) onChange(focused)
+    }
+    currentWindow
       .isFocused()
-      .then((value) => {
-        focused = value
-        onChange(value)
-      })
+      .then(publish)
       .catch(() => {
         // The window never reported; the default stands.
       })
@@ -40,10 +46,9 @@ function trackFocus(onChange: (focused: boolean) => void): () => void {
       if (disposed) unlistenFocus()
       else unlisten = unlistenFocus
     }
-    void currentWindow
+    currentWindow
       .onFocusChanged(({ payload }) => {
-        focused = payload
-        onChange(focused)
+        publish(payload)
       })
       .then(rememberUnlisten)
       .catch(() => {
@@ -69,12 +74,24 @@ function trackFocus(onChange: (focused: boolean) => void): () => void {
   }
 }
 
-/** Backend base as a WebSocket origin: `http` becomes `ws`. */
+/**
+ * Reads the backend's base as a WebSocket origin.
+ *
+ * @returns The backend URL with `http` replaced by `ws`.
+ */
 function webSocketOrigin(): string {
   return useLysStore.getState().backendUrl.replace(/^http/, "ws")
 }
 
-/** Fills one speech path parameter pair with the reply's identifiers. */
+/**
+ * Fills a speech route's path parameters with a reply's identifiers.
+ *
+ * @param template - Route path with `:conversationId` and
+ * `:assistantMessageId`.
+ * @param reply - The reply the socket speaks for.
+ * @param query - Query string without its `?`, if any.
+ * @returns The path, with the query appended.
+ */
 function speechPath(
   template: string,
   reply: SpeechReply,
@@ -92,6 +109,8 @@ function speechPath(
  * @param previousRequestStatus - The request status seen at the previous
  * call, which is what tells a reply the person asked for from one the view
  * joined; pass `undefined` for the first read.
+ * @returns `streaming` while the shown conversation's reply streams,
+ * `settled` once it reached a final state, and `none` otherwise.
  */
 function buildObservation(
   previousRequestStatus: string | undefined
@@ -147,13 +166,17 @@ function forwardBinaryFrame(
 /**
  * Starts the speech controller.
  *
- * @returns A cleanup that stops the controller and its subscriptions.
+ * @returns A cleanup that stops following the stores and the window's focus,
+ * and closes the controller with its sockets and audio context.
  * @remarks Idempotent within one call only: callers must call the returned
  * cleanup rather than start twice.
  */
 export function startSpeech(): () => void {
   const isVoiceReady = (): boolean =>
     useLysStore.getState().voiceServerInfo.status === "running"
+  const recheckVoice = (): void => {
+    void useLysStore.getState().checkVoice()
+  }
 
   let focused = true
   const controller = new SpeechController({
@@ -174,7 +197,8 @@ export function startSpeech(): () => void {
       // The error is followed by a close; nothing more to do here.
       return { close: () => socket.close() }
     },
-    createPlayer: () => createPcmPlayer()
+    createPlayer: () => createPcmPlayer(),
+    recheckVoice
   })
 
   const update = (previousRequestStatus?: string): void => {
@@ -205,6 +229,6 @@ export function startSpeech(): () => void {
     stopTrackingFocus()
     unsubscribeVoice()
     unsubscribeChat()
-    controller.stop()
+    controller.close()
   }
 }

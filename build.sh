@@ -167,9 +167,11 @@ codesign --force --sign - --entitlements apps/vmo/vmo.entitlements "$VMO_DIR/vmo
 
 # Step 8b-voice. Install voice to $LYS_HOME/runtime/voice, where the desktop
 # starts it. voice needs no entitlements, so the binary is installed as built.
+# Only the binary is replaced: a cloned voice placed next to it as
+# lys-voice.bin stays.
 VOICE_DIR="$LYS_HOME/runtime/voice"
-rm -rf "$VOICE_DIR"
 mkdir -p "$VOICE_DIR"
+rm -f "$VOICE_DIR/voice"
 cp "$VOICE_BUILD_DIR/voice" "$VOICE_DIR/voice"
 
 # Step 8c. Install the email MCP server to $LYS_HOME/runtime/email, where the

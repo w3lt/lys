@@ -112,11 +112,15 @@ const WHOLE_CITATION_MARKER = new RegExp(`^${CITATION_MARKER_PATTERN.source}$`)
  * image whose syntax is not complete yet, a backtick that a later one may
  * close into inline code, or a mark that may open emphasis, strong, or
  * struck text, which a closing mark would turn into formatting: a `*` or
- * `~` not before whitespace, or such a `_` not inside a word. A mark that
- * ends a text node counts, since the node after it may be the emphasis that
- * a second mark turns into strong text.
+ * `~` not before whitespace, or such a `_` not inside a word; or the start
+ * of a footnote reference, `[^`, or of inline HTML, a `<` before a letter,
+ * `/`, `!`, or `?`, that no `]` or `>` closes yet, whose letters are not
+ * spoken once it is complete. A mark that ends a text node counts, since
+ * the node after it may be the emphasis that a second mark turns into
+ * strong text.
  */
-const REPARSABLE_MARK = /\$|!\[|`|[*~]+(?!\s)|(?<![\p{L}\p{N}])_+(?!\s)/u
+const REPARSABLE_MARK =
+  /\$|!\[|`|[*~]+(?!\s)|(?<![\p{L}\p{N}])_+(?!\s)|\[\^(?![^\]]*\])|<[A-Za-z/!?](?![^>]*>)/u
 
 /**
  * A word ending the speech text of the blocks still being written that more
@@ -234,12 +238,12 @@ const BARE_URL = /\b(?:https?:\/\/|www\.)\S*[^\s.,:;!?"'’”)\]*_~]/giu
  * An emoji or other pictograph, which is not spoken: an emoji matched whole,
  * such as `🎉`, a flag, a keycap, an emoji-style character such as `❤️`, or
  * a sequence with skin tones or zero-width joiners; or a text-style
- * pictograph, such as `☀`, `❤`, `✔`, `©`, or `™`, other than an arrow. Other
- * symbols, such as `$`, `+`, `%`, `★`, `✓`, `→`, and `↔`, are spoken as
- * written.
+ * pictograph, such as `☀`, `❤`, `✔`, `©`, or `™`, other than an arrow or
+ * punctuation such as `‼`, which ends a sentence. Other symbols, such as `$`,
+ * `+`, `%`, `★`, `✓`, `→`, and `↔`, are spoken as written.
  */
-const EMOJI =
-  /\p{RGI_Emoji}|[\p{Extended_Pictographic}--[\u2190-\u21FF\u27A1\u2900-\u297F\u2B05-\u2B07]]/gv
+const PICTOGRAPH =
+  /\p{RGI_Emoji}|[\p{Extended_Pictographic}--\p{P}--[\u2190-\u21FF\u27A1\u2900-\u297F\u2B05-\u2B07]]/gv
 
 /**
  * Longest piece of text, in UTF-16 code units, sent to voice in one message.
@@ -324,11 +328,12 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * still being written waits until it ends when it holds a `|`, because its next
  * line may turn it into a table header, or when it starts with a label in
  * brackets and a colon, because a closing title quote may turn it into a link
- * definition; from its first `$`, `![`, unclosed backtick, or opening
- * emphasis mark outside code on, because a later `$` may turn that text
- * into inline math, the `![` may begin an image, and a closing backtick,
- * `*`, `_`, or `~` may turn the text into code or formatting, whose marks
- * are not spoken. The last word of the text being written waits too when
+ * definition; from its first `$`, `![`, unclosed backtick, opening
+ * emphasis mark, or unclosed `[^` or inline HTML start outside code on,
+ * because a later `$` may turn that text into inline math, the `![` may
+ * begin an image, a closing backtick, `*`, `_`, or `~` may turn the text
+ * into code or formatting, whose marks are not spoken, and a `]` or `>` may
+ * complete a footnote reference or a tag, whose letters are not spoken. The last word of the text being written waits too when
  * more letters may turn it into a bare URL, such as `htt`.
  *
  * Each round's text is a markdown document of its own, its text parts
@@ -385,8 +390,8 @@ export class SpeechSentenceBuffer {
   /**
    * Loads the stored reply text, before any text part or fragment.
    *
-   * @param snapshot - Stored text parts of the reply and whether the last
-   * one may still grow.
+   * @param snapshot - Stored text parts of the reply and whether its last
+   * round's text may still grow.
    * @returns The sentences ready to speak now: every final one for `start`,
    * none for `current`.
    */
@@ -458,8 +463,8 @@ export class SpeechSentenceBuffer {
   }
 
   /**
-   * Hands out the final sentences of the text part being written that were
-   * not handed out yet, then keeps only the text that may still change.
+   * Hands out the final sentences of the round's text being written that
+   * were not handed out yet, then keeps only the text that may still change.
    *
    * @param handling - `speak` returns the sentences; `skip` only marks them
    * handed out, reading held text as it reads now, so that a `current`
@@ -597,8 +602,8 @@ function hasTrailingLineBreak(segment: string): boolean {
   return segment.slice(segment.trimEnd().length).includes("\n")
 }
 
-/** A parsed text part, split before its blocks still being written. */
-type SplitTextPart = Readonly<{
+/** A parsed round's text, split before its blocks still being written. */
+type SplitRoundText = Readonly<{
   /** The blocks before them, which no later text can change. */
   settled: Root
   /** The blocks still being written, or the items of a list that are. */
@@ -611,18 +616,18 @@ type SplitTextPart = Readonly<{
 }>
 
 /**
- * Splits a parsed text part whose last block may still grow before the
+ * Splits a parsed round's text whose last block may still grow before the
  * blocks still being written: from the last block whose first line ended,
  * or, in the list that ends the text, from the last such item. No later
  * text changes how a block before it reads, since a reference reads the
  * same before its definition arrives as after.
  *
- * @param tree - The parsed text part; its nodes move into the result.
+ * @param tree - The parsed round's text; its nodes move into the result.
  * @param markdown - The text, which `tree` was parsed from.
  * @returns The settled blocks, the blocks still being written, and where
  * the line they start on starts.
  */
-function splitSettledBlocks(tree: Root, markdown: string): SplitTextPart {
+function splitSettledBlocks(tree: Root, markdown: string): SplitRoundText {
   const blocks = tree.children
   const last = blocks.at(-1)
   if (last?.type === "list") {
@@ -679,7 +684,7 @@ function findWritingIndex(
  * too: until that row ends, more text on it may turn the table back into
  * the lines of the paragraph it interrupted.
  *
- * @param node - A block of a parsed text part.
+ * @param node - A block of a parsed round's text.
  * @param markdown - The text it was parsed from.
  * @returns Whether a line break follows those lines; false for a node
  * without a position.
@@ -698,7 +703,7 @@ function hasFirstLineEnded(
 /**
  * Finds where the line a node starts on starts.
  *
- * @param node - A block of a parsed text part.
+ * @param node - A block of a parsed round's text.
  * @param markdown - The text it was parsed from.
  * @returns The index of the line's first character; `0` for the first line
  * or a node without a position.
@@ -871,7 +876,7 @@ function removeTextFromReparsableMark(node: Root | RootContent): boolean {
  * Cleans one block of inline text: reference syntax outside inline code read
  * as {@link formatReferenceSyntax} reads it, bare URLs and the citation
  * markers left outside inline code dropped, every marked character turned
- * back into the one it stands for, every {@link EMOJI} dropped,
+ * back into the one it stands for, every {@link PICTOGRAPH} dropped,
  * whitespace collapsed, and no space left before closing punctuation.
  * Inline code reads as written, so a citation-shaped index such as
  * `arr[1]`, or a URL, stays.
@@ -890,7 +895,7 @@ function formatBlockText(text: string): string {
     .replaceAll(SHORTCUT_OPEN_BRACKET, "[")
     .replaceAll(SHORTCUT_CLOSE_BRACKET, "]")
     .replace(TEXT_MARKS, "")
-    .replace(EMOJI, " ")
+    .replace(PICTOGRAPH, " ")
     .replace(/\s+/g, " ")
     .replace(/ ([.,;:!?)\]])/g, "$1")
     .trim()

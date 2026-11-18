@@ -226,23 +226,27 @@ async function sendUnmaskedTextFrame(
 ): Promise<void> {
   const url = new URL(`${baseUrl}${path}`)
   const connection = connect(Number(url.port), url.hostname)
-  await once(connection, "connect")
-  connection.write(
-    [
-      `GET ${url.pathname}${url.search} HTTP/1.1`,
-      `Host: ${url.host}`,
-      "Upgrade: websocket",
-      "Connection: Upgrade",
-      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
-      "Sec-WebSocket-Version: 13",
-      "",
-      ""
-    ].join("\r\n")
-  )
-  const [handshake] = (await once(connection, "data")) as [Buffer]
-  expect(handshake.toString("latin1")).toMatch(/^HTTP\/1\.1 101 /)
-  connection.write(Buffer.from([0x81, 0x01, 0x61]))
-  await once(connection, "close")
+  try {
+    await once(connection, "connect")
+    connection.write(
+      [
+        `GET ${url.pathname}${url.search} HTTP/1.1`,
+        `Host: ${url.host}`,
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+        "Sec-WebSocket-Version: 13",
+        "",
+        ""
+      ].join("\r\n")
+    )
+    const [handshake] = (await once(connection, "data")) as [Buffer]
+    expect(handshake.toString("latin1")).toMatch(/^HTTP\/1\.1 101 /)
+    connection.write(Buffer.from([0x81, 0x01, 0x61]))
+    await once(connection, "close")
+  } finally {
+    connection.destroy()
+  }
 }
 
 /** Options for the app under test. */
@@ -878,6 +882,69 @@ describe("speech sockets over their lifecycle", () => {
     replyTask.context.sendEvent({ type: "done", finishReason: "stop" })
     await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
     expect(fake.speeches[0]?.spoken).toEqual(["Hello the weather.", "Bye."])
+    socket.close()
+  })
+
+  /** A stored reply being written whose first round ended with a tool call. */
+  const TOOL_ROUND_CONVERSATION = Object.freeze({
+    ...STREAMING_CONVERSATION,
+    messages: [
+      USER_MESSAGE,
+      createAssistantMessage(
+        3,
+        [
+          createTextPart({ sequence: 4, round: 0, content: "One. Two" }),
+          LIST_FILES_CALL
+        ],
+        { status: "streaming" }
+      )
+    ]
+  } satisfies Conversation)
+
+  it("speaks a stored round's last sentence at once when a tool call ended the round", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: TOOL_ROUND_CONVERSATION,
+      openVoiceSpeech: fake.openVoiceSpeech
+    })
+    startFixtureGeneration(app.generations)
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() =>
+      expect(fake.speeches[0]?.spoken).toEqual(["One.", "Two."])
+    )
+    socket.close()
+  })
+
+  it("joins at the next round's text when a tool call ended the stored reply's last text", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: TOOL_ROUND_CONVERSATION,
+      openVoiceSpeech: fake.openVoiceSpeech
+    })
+    const { replyTask } = startFixtureGeneration(app.generations)
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "current")
+    )
+    await vi.waitFor(() => expect(fake.speeches[0]?.speakCalled).toBe(true))
+    replyTask.context.sendEvent({
+      type: "reply-part",
+      part: createReasoningPart(6, 1, "Reading the list.")
+    })
+    replyTask.context.sendEvent({
+      type: "reply-part",
+      part: createTextPart({
+        sequence: 7,
+        round: 1,
+        content: "There are three files here."
+      })
+    })
+    replyTask.context.sendEvent({ type: "done", finishReason: "stop" })
+    await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
+    expect(fake.speeches[0]?.spoken).toEqual(["There are three files here."])
     socket.close()
   })
 

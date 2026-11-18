@@ -30,8 +30,9 @@ export type ChatSpeechQuery = z.infer<typeof chatSpeechQuerySchema>
  * backend is shutting down, `1008` the client fell behind, `1011` voice
  * failed or the backend could not read the reply, `4404` no such
  * conversation or reply, `4409` a newer socket replaced this one, `4410` the
- * reply stopped or failed (or, for `current`, is no longer being written),
- * `4503` voice is not ready. Opening a socket closes every older one, for
+ * reply stopped or failed while the socket followed it (or, for `current`,
+ * is no longer being written), `4503` voice is not ready. A stored reply
+ * that already stopped or failed is spoken as stored and ends with `1000`. Opening a socket closes every older one, for
  * any reply and on either endpoint, because Lys speaks one speech at a time.
  * Changing the method, path, or schemas requires coordinated consumers.
  */

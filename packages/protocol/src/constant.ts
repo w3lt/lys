@@ -177,8 +177,10 @@ export const SPEECH_CLOSE_NO_SUCH_REPLY = 4404
  */
 export const SPEECH_CLOSE_SUPERSEDED = 4409
 /**
- * Close code of a speech socket whose reply stopped, failed, or, for a
- * `current` speech, is no longer being written.
+ * Close code of a speech socket whose reply stopped or failed while the
+ * socket followed it, or, for a `current` speech, is no longer being
+ * written. A stored reply that already stopped or failed is spoken as
+ * stored and ends with {@link SPEECH_CLOSE_COMPLETE}.
  */
 export const SPEECH_CLOSE_REPLY_ENDED = 4410
 /**

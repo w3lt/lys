@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Synchronization
 
 /// Thrown when an operation under test exceeds its allotted time.
 struct TimedOutError: Error {}
@@ -66,6 +67,24 @@ final class PortSignal: @unchecked Sendable {
     }
 }
 
+/// Whether a test server's task has ended.
+///
+/// Concurrency model: serialized under its `Mutex`.
+final class ServerEnd: Sendable {
+    /// Whether the server's task ended.
+    private let ended = Mutex(false)
+
+    /// Records that the server's task ended.
+    func markEnded() {
+        ended.withLock { $0 = true }
+    }
+
+    /// Whether the server's task ended.
+    var hasEnded: Bool {
+        ended.withLock { $0 }
+    }
+}
+
 /// Runs one loopback server on a port the system picks, for one test.
 ///
 /// Concurrency model: confined to the test's task; the server runs in a
@@ -75,6 +94,8 @@ final class LoopbackServer {
     private(set) var port: UInt16 = 0
     /// The task serving connections.
     private var task: Task<Void, Never>?
+    /// Whether the serving task ended.
+    private let end = ServerEnd()
 
     /// Starts a server, returning once its listener is ready.
     ///
@@ -84,6 +105,7 @@ final class LoopbackServer {
     ///   its listener is ready.
     func start(_ start: @escaping @Sendable (@escaping @Sendable (NWEndpoint.Port) -> Void) async throws -> Void) async throws {
         let ready = PortSignal()
+        let end = self.end
         task = Task {
             do {
                 try await start { ready.resolve(.success($0.rawValue)) }
@@ -91,6 +113,7 @@ final class LoopbackServer {
             } catch {
                 ready.resolve(.failure(error))
             }
+            end.markEnded()
         }
         port = try await ready.wait()
     }
@@ -98,6 +121,16 @@ final class LoopbackServer {
     /// Stops the server.
     func stop() {
         task?.cancel()
+    }
+
+    /// Stops the server and waits until its start call returned.
+    ///
+    /// - Parameter seconds: Longest wait for the server to end.
+    /// - Throws: ``TimedOutError`` when the server is still running at the
+    ///   deadline.
+    func stopAndWait(within seconds: Double = 2) async throws {
+        task?.cancel()
+        try await waitUntil(within: seconds) { end.hasEnded }
     }
 }
 

@@ -11,9 +11,28 @@ private let samplesPerFrame = 1_920
 /// Thrown when a synthesis fails inside the fake engine.
 private struct FakeSynthesisError: Error {}
 
+/// Thrown when the fake engine fails to start a session.
+private struct FakeSessionStartError: Error {}
+
+/// How a fake engine and its sessions behave; the default is a ready engine
+/// whose sessions speak and end normally.
+private struct FakeEngineBehavior {
+    /// Whether the models count as loaded from the start.
+    var isReady = true
+    /// Whether every session fails synthesis once its text closes.
+    var failsSynthesis = false
+    /// Whether every session start fails.
+    var failsSessionStart = false
+    /// Whether the first session start waits until the test releases it.
+    var holdsFirstSessionStart = false
+    /// Whether a session's frames end when its text closes; when not, they
+    /// end only when the session is cancelled.
+    var endsFramesOnFinish = true
+}
+
 /// Fake speech session: emits a fixed number of frames as soon as a
 /// sentence is added, and ends its frames on `closeText()`, or fails synthesis
-/// then when configured to.
+/// then, or keeps them open, when configured to.
 ///
 /// Concurrency model: serialized. The cancelled flag is read and written
 /// under ``lock``; the frame continuation is safe to use from any thread.
@@ -24,6 +43,8 @@ private final class FakeSpeechSession: SpeechSession, @unchecked Sendable {
     let frames: AsyncThrowingStream<[Float], any Error>
     /// Whether every sentence fails to synthesize.
     private let failSynthesis: Bool
+    /// Whether the frames end when the text closes.
+    private let endsFramesOnFinish: Bool
     /// Guards ``cancelled``.
     private let lock = NSLock()
     /// Whether ``cancel()`` ran.
@@ -31,10 +52,12 @@ private final class FakeSpeechSession: SpeechSession, @unchecked Sendable {
 
     /// Creates a session that has produced no frames.
     ///
-    /// - Parameter failSynthesis: Whether `closeText()` fails the frame stream
-    ///   instead of ending it, with no frame produced before.
-    init(failSynthesis: Bool) {
-        self.failSynthesis = failSynthesis
+    /// - Parameter behavior: The engine's behavior; its synthesis failure
+    ///   makes `closeText()` fail the frame stream, with no frame produced
+    ///   before.
+    init(behavior: FakeEngineBehavior) {
+        self.failSynthesis = behavior.failsSynthesis
+        self.endsFramesOnFinish = behavior.endsFramesOnFinish
         (frames, continuation) = AsyncThrowingStream.makeStream(of: [Float].self)
     }
 
@@ -53,11 +76,12 @@ private final class FakeSpeechSession: SpeechSession, @unchecked Sendable {
         }
     }
 
-    /// Ends the frame stream, or fails it when synthesis fails.
+    /// Ends the frame stream, fails it when synthesis fails, or keeps it open
+    /// when the frames do not end on finish.
     func closeText() {
         if failSynthesis {
             continuation.finish(throwing: FakeSynthesisError())
-        } else {
+        } else if endsFramesOnFinish {
             continuation.finish()
         }
     }
@@ -72,26 +96,30 @@ private final class FakeSpeechSession: SpeechSession, @unchecked Sendable {
 /// Fake engine the socket server under test talks to; it keeps every
 /// session it made.
 ///
-/// Concurrency model: serialized. Readiness and the made sessions are read
-/// and written under ``lock``.
+/// Concurrency model: serialized. Readiness, the session starts, and the
+/// made sessions are read and written under ``lock``.
 private final class FakeSpeechEngine: SpeechEngine, @unchecked Sendable {
-    /// Guards ``ready`` and ``sessions``.
+    /// Guards every property below ``behavior``.
     private let lock = NSLock()
+    /// How the engine and its sessions behave.
+    private let behavior: FakeEngineBehavior
     /// Whether the models count as loaded.
     private var ready: Bool
     /// Every session made, in order.
     private var sessions: [FakeSpeechSession] = []
-    /// Whether the sessions fail synthesis.
-    private let failSynthesis: Bool
+    /// How many session starts began.
+    private var startCount = 0
+    /// Whether the test released the held first start.
+    private var isFirstStartReleased = false
+    /// The held first start, while it waits.
+    private var heldStart: CheckedContinuation<Void, Never>?
 
     /// Creates an engine.
     ///
-    /// - Parameters:
-    ///   - ready: Whether the models count as loaded from the start.
-    ///   - failSynthesis: Whether every session fails synthesis.
-    init(ready: Bool = true, failSynthesis: Bool = false) {
-        self.ready = ready
-        self.failSynthesis = failSynthesis
+    /// - Parameter behavior: How the engine and its sessions behave.
+    init(_ behavior: FakeEngineBehavior = FakeEngineBehavior()) {
+        self.behavior = behavior
+        self.ready = behavior.isReady
     }
 
     /// Whether the models count as loaded.
@@ -109,13 +137,45 @@ private final class FakeSpeechEngine: SpeechEngine, @unchecked Sendable {
         lock.withLock { ready = true }
     }
 
-    /// Makes and keeps one fake session.
+    /// How many session starts began, held ones included.
+    var startedSessionCount: Int {
+        lock.withLock { startCount }
+    }
+
+    /// Makes and keeps one fake session, after the test released it when
+    /// it is the held first start.
     ///
     /// - Returns: The new session.
+    /// - Throws: ``FakeSessionStartError`` when session starts fail.
     func startSession() async throws -> any SpeechSession {
-        let session = FakeSpeechSession(failSynthesis: failSynthesis)
+        let isHeld = lock.withLock { () -> Bool in
+            startCount += 1
+            return behavior.holdsFirstSessionStart && startCount == 1 && !isFirstStartReleased
+        }
+        if isHeld {
+            await withCheckedContinuation { continuation in
+                let isReleased = lock.withLock { () -> Bool in
+                    if isFirstStartReleased { return true }
+                    heldStart = continuation
+                    return false
+                }
+                if isReleased { continuation.resume() }
+            }
+        }
+        guard !behavior.failsSessionStart else { throw FakeSessionStartError() }
+        let session = FakeSpeechSession(behavior: behavior)
         lock.withLock { sessions.append(session) }
         return session
+    }
+
+    /// Lets the held first session start go on.
+    func releaseFirstSessionStart() {
+        let held = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            isFirstStartReleased = true
+            defer { heldStart = nil }
+            return heldStart
+        }
+        held?.resume()
     }
 }
 
@@ -456,7 +516,7 @@ struct SpeechHandshakeTests {
 
     /// Verifies the listener refuses every handshake while the models load.
     @Test func refusesAHandshakeWhileTheModelsLoad() async throws {
-        let server = try await startSpeechServer(engine: FakeSpeechEngine(ready: false))
+        let server = try await startSpeechServer(engine: FakeSpeechEngine(FakeEngineBehavior(isReady: false)))
         defer { server.stop() }
 
         let client = TestSpeechClient(port: server.port)
@@ -689,7 +749,7 @@ struct SpeechSocketFlowTests {
 
     /// Verifies a synthesis failure ends the speech with the internal-error close.
     @Test func synthesisFailureClosesWithInternalError() async throws {
-        let server = try await startSpeechServer(engine: FakeSpeechEngine(failSynthesis: true))
+        let server = try await startSpeechServer(engine: FakeSpeechEngine(FakeEngineBehavior(failsSynthesis: true)))
         defer { server.stop() }
 
         let client = TestSpeechClient(port: server.port)
@@ -700,5 +760,117 @@ struct SpeechSocketFlowTests {
 
         let close = try await client.readMessage()
         #expect(close == .close(1011))
+    }
+}
+
+/// Checks the speech protocol's other paths over loopback.
+@Suite("Speech protocol paths", .timeLimit(.minutes(1)))
+struct SpeechProtocolPathTests {
+    /// Verifies text after `finish` is answered with a protocol-error close,
+    /// while the speech is still speaking.
+    @Test func textAfterFinishIsAProtocolError() async throws {
+        let server = try await startSpeechServer(engine: FakeSpeechEngine(FakeEngineBehavior(endsFramesOnFinish: false)))
+        defer { server.stop() }
+
+        let client = TestSpeechClient(port: server.port)
+        defer { client.cancel() }
+        client.sendText(#"{"type":"speak"}"#)
+        client.sendText(#"{"type":"finish"}"#)
+        client.sendText(#"{"type":"text","text":"One."}"#)
+
+        #expect(try await client.readClose() == .close(1002))
+    }
+
+    /// Verifies `finish` before `speak` is answered with a protocol-error
+    /// close.
+    @Test func finishBeforeSpeakIsAProtocolError() async throws {
+        let server = try await startSpeechServer(engine: FakeSpeechEngine())
+        defer { server.stop() }
+
+        let client = TestSpeechClient(port: server.port)
+        defer { client.cancel() }
+        client.sendText(#"{"type":"finish"}"#)
+
+        #expect(try await client.readMessage() == .close(1002))
+    }
+
+    /// Verifies a second `speak` on one connection cancels the connection's
+    /// own speech and speaks the new one to its end.
+    @Test func aSecondSpeakReplacesTheConnectionsOwnSpeech() async throws {
+        let engine = FakeSpeechEngine()
+        let server = try await startSpeechServer(engine: engine)
+        defer { server.stop() }
+
+        let client = TestSpeechClient(port: server.port)
+        defer { client.cancel() }
+        client.sendText(#"{"type":"speak"}"#)
+        client.sendText(#"{"type":"text","text":"One."}"#)
+        guard case .binary = try await client.readMessage() else {
+            Issue.record("Expected the first speech to start speaking")
+            return
+        }
+        client.sendText(#"{"type":"speak"}"#)
+        client.sendText(#"{"type":"text","text":"Two."}"#)
+        client.sendText(#"{"type":"finish"}"#)
+
+        #expect(try await client.readClose() == .close(1000))
+        #expect(engine.madeSessions.count == 2)
+        #expect(engine.madeSessions.first?.isCancelled == true)
+    }
+
+    /// Verifies a session that cannot start ends the speech with the
+    /// internal-error close.
+    @Test func failedSessionStartClosesWithInternalError() async throws {
+        let server = try await startSpeechServer(engine: FakeSpeechEngine(FakeEngineBehavior(failsSessionStart: true)))
+        defer { server.stop() }
+
+        let client = TestSpeechClient(port: server.port)
+        defer { client.cancel() }
+        client.sendText(#"{"type":"speak"}"#)
+
+        #expect(try await client.readClose() == .close(1011))
+    }
+
+    /// Verifies a message over the size limit closes the socket with `1009`,
+    /// which Network.framework sends itself, and cancels the speech.
+    @Test func messageOverTheLimitClosesWithMessageTooBig() async throws {
+        let engine = FakeSpeechEngine()
+        let server = try await startSpeechServer(engine: engine)
+        defer { server.stop() }
+
+        let client = TestSpeechClient(port: server.port)
+        defer { client.cancel() }
+        client.sendText(#"{"type":"speak"}"#)
+        try await waitUntil { engine.madeSessions.first != nil }
+        let sentence = String(repeating: "a", count: SpeechConnection.maximumMessageSize)
+        client.sendText(#"{"type":"text","text":"\#(sentence)"}"#)
+
+        #expect(try await client.readMessage() == .close(1009))
+        try await waitUntil { engine.madeSessions.first?.isCancelled == true }
+    }
+
+    /// Verifies stopping the server ends an open speech: the server's start
+    /// call returns, the connection ends, and the session is cancelled.
+    @Test func stoppingTheServerEndsAnOpenSpeech() async throws {
+        let engine = FakeSpeechEngine()
+        let server = try await startSpeechServer(engine: engine)
+        defer { server.stop() }
+
+        let client = TestSpeechClient(port: server.port)
+        defer { client.cancel() }
+        client.sendText(#"{"type":"speak"}"#)
+        client.sendText(#"{"type":"text","text":"One."}"#)
+        guard case .binary = try await client.readMessage() else {
+            Issue.record("Expected the speech to start speaking")
+            return
+        }
+
+        try await server.stopAndWait()
+        do {
+            _ = try await client.readClose()
+        } catch is ConnectionEndedError {
+            // A cancelled connection ends without a close frame.
+        }
+        #expect(engine.madeSessions.first?.isCancelled == true)
     }
 }

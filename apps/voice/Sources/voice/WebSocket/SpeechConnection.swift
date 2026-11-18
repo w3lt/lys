@@ -13,7 +13,8 @@ import Synchronization
 /// newer speech superseded this one, `1002` for a protocol violation,
 /// `1003` for a binary message from the client, and `1011` when synthesis
 /// failed. A client message may carry at most ``maximumMessageSize`` bytes;
-/// a longer one fails the connection, so the client splits longer text.
+/// a longer one fails the receive, and Network.framework closes the socket
+/// with `1009` itself, so the client splits longer text.
 /// A connection that completes no handshake within its handshake timeout is
 /// cancelled, and a close waits at most ``pumpStopTimeout`` for audio still
 /// being sent before it cancels the connection. Every failure is logged with

@@ -64,4 +64,26 @@ struct WebServerTests {
         let response = try await first.readToEnd()
         #expect(String(decoding: response, as: UTF8.self).hasPrefix("HTTP/1.1 200 OK\r\n"))
     }
+
+    /// Verifies stopping the server cancels a connection still waiting for
+    /// its request head, and the server's start call returns.
+    @Test func stoppingTheServerEndsAnOpenConnection() async throws {
+        let server = try await startWebServer(maxConnections: 4, headTimeout: .seconds(30))
+        defer { server.stop() }
+
+        let client = TestTCPClient(port: server.port)
+        defer { client.cancel() }
+        try await waitUntil { client.states.isReady }
+
+        try await server.stopAndWait()
+        do {
+            let received = try await client.readToEnd()
+            #expect(received.isEmpty)
+        } catch is TimedOutError {
+            Issue.record("The open connection outlived the server")
+        } catch {
+            // A reset also shows the cancel.
+            #expect(error is NWError)
+        }
+    }
 }

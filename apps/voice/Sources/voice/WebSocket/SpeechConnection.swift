@@ -24,9 +24,9 @@ private struct ConnectionBox: @unchecked Sendable {
 /// being sent before it cancels the connection. Every failure is logged with
 /// its cause.
 ///
-/// Concurrency model: one task runs ``run()`` per connection; the receive
-/// loop and the frame pump communicate through a lock-protected state, and
-/// every wait on the connection happens outside it.
+/// Concurrency model: one task runs ``handleConnection()`` per connection;
+/// the receive loop and the frame pump communicate through a lock-protected
+/// state, and every wait on the connection happens outside it.
 final class SpeechConnection: @unchecked Sendable {
     /// Result of routing a `text` message to the active session.
     private enum EnqueueOutcome {
@@ -96,7 +96,7 @@ final class SpeechConnection: @unchecked Sendable {
     func handleConnection() async {
         await withTaskCancellationHandler {
             self.box.connection.start(queue: DispatchQueue(label: "voice.WebSocket"))
-            await self.readClientMessages()
+            await self.handleClientMessages()
             await self.cancelConnection()
         } onCancel: {
             self.box.connection.cancel()
@@ -113,7 +113,7 @@ final class SpeechConnection: @unchecked Sendable {
     /// closes the socket with `1002` itself. Any other message that breaks
     /// the speech protocol, a binary one among them, is logged and answered
     /// with its close code.
-    private func readClientMessages() async {
+    private func handleClientMessages() async {
         let deadline = startHandshakeDeadline()
         defer { deadline.cancel() }
         while true {
@@ -145,8 +145,8 @@ final class SpeechConnection: @unchecked Sendable {
     /// ``handshakeTimeout``, so an idle client cannot hold a place under the
     /// server's connection cap.
     ///
-    /// - Returns: The deadline's task, which ``readClientMessages()`` owns and cancels
-    ///   once the connection ended.
+    /// - Returns: The deadline's task, which ``handleClientMessages()`` owns
+    ///   and cancels once the connection ended.
     private func startHandshakeDeadline() -> Task<Void, Never> {
         let box = self.box
         let timeout = handshakeTimeout

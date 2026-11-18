@@ -715,7 +715,17 @@ describe("buildDelegationTools", () => {
           agentCode: "lysiptera"
         }),
         buildFailedResult(
-          `The agent "lysiptera" is a leader and does not take work. Give the work to a member. find_agents shows each agent's role.`
+          `The agent "lysiptera" does not take work; only members do. Give the work to a member. find_agents shows each agent's role.`
+        )
+      ],
+      [
+        "Armitage, the tool keeper",
+        buildRefusedOutcome({
+          kind: "agent-cannot-take-work",
+          agentCode: "armitage"
+        }),
+        buildFailedResult(
+          `The agent "armitage" does not take work; only members do. Give the work to a member. find_agents shows each agent's role.`
         )
       ],
       [

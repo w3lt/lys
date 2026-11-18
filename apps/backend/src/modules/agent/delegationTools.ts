@@ -264,7 +264,7 @@ function formatJobMessageRefusal(refusal: JobMessageRefusal): string {
     case "agent-deleted":
       return `The agent "${refusal.agentCode}" was deleted and cannot take work.`
     case "agent-cannot-take-work":
-      return `The agent "${refusal.agentCode}" is a leader and does not take work. Give the work to a member. ${FIND_AGENTS_TOOL_NAME} shows each agent's role.`
+      return `The agent "${refusal.agentCode}" does not take work; only members do. Give the work to a member. ${FIND_AGENTS_TOOL_NAME} shows each agent's role.`
     case "job-not-found":
       return formatMissingJob(refusal.jobNumber)
     case "job-has-another-agent":

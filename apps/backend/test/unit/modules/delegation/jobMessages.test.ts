@@ -1,4 +1,8 @@
-import { CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE } from "@lys/share"
+import {
+  ARMITAGE_AGENT_CODE,
+  CALIGINIA_AGENT_CODE,
+  LYSIPTERA_AGENT_CODE
+} from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { JobMessageRefusal } from "../../../../src/modules/agent/turnDelegation"
 import { ReplyGenerationRegistryClosedError } from "../../../../src/modules/chat/replyGenerationRegistry"
@@ -300,6 +304,12 @@ describe("createJobMessage", () => {
       CALIGINIA_AGENT_CODE,
       undefined,
       { kind: "agent-cannot-take-work", agentCode: CALIGINIA_AGENT_CODE }
+    ],
+    [
+      "Armitage, the tool keeper",
+      ARMITAGE_AGENT_CODE,
+      undefined,
+      { kind: "agent-cannot-take-work", agentCode: ARMITAGE_AGENT_CODE }
     ],
     [
       "a job number the conversation does not have",

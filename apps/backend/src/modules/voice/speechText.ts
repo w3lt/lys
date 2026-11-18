@@ -183,9 +183,12 @@ const TEXT_MARKS = new RegExp(
 const LITERAL_CITATION_MARKER = new RegExp(
   [
     CITATION_MARKER_PATTERN.source
-      .replace("\\[", LITERAL_OPEN_BRACKET)
-      .replace("\\]", `[\\]${LITERAL_CLOSE_BRACKET}]`),
-    CITATION_MARKER_PATTERN.source.replace("\\]", LITERAL_CLOSE_BRACKET)
+      .replace(String.raw`\[`, LITERAL_OPEN_BRACKET)
+      .replace(String.raw`\]`, String.raw`[\]${LITERAL_CLOSE_BRACKET}]`),
+    CITATION_MARKER_PATTERN.source.replace(
+      String.raw`\]`,
+      LITERAL_CLOSE_BRACKET
+    )
   ].join("|"),
   "g"
 )

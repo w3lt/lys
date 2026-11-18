@@ -2125,6 +2125,45 @@ describe("Composer", () => {
       expect(onOpenConversation.mock.calls).toEqual([[FIXTURE_CONVERSATION_ID]])
     })
 
+    it("lets the job notice stand in for the deleted-agent notice when the job's member was deleted", async () => {
+      /**
+       * Job 1 of the fixture conversation, worked on by
+       * {@link DELETED_AGENT_CODE}, which {@link BUILT_IN_AGENT_PAGE} does not
+       * list.
+       */
+      const deletedMemberJob = buildJobConversation(
+        conversationSchema.parse({
+          ...buildConversation(FIXTURE_JOB_ID, "Research", [
+            buildDelegatorMessage(68, "Find the news.")
+          ]),
+          agentCode: DELETED_AGENT_CODE
+        })
+      )
+
+      const { useChatViewStore, Composer } = await loadFreshComposer()
+      useChatViewStore.setState({
+        conversation: createStoredChatViewConversation(deletedMemberJob)
+      })
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+
+      const statusTexts = listStatusTexts()
+      expect(statusTexts).toContain(
+        "This is a job from Caliginia. You can read it and stop it."
+      )
+      expect(statusTexts).not.toContain(DELETED_CONVERSATION_AGENT_MESSAGE)
+      // Only the session controls' New conversation remains.
+      expect(
+        screen.getAllByRole("button", { name: "New conversation" })
+      ).toHaveLength(1)
+    })
+
     it("answers a job's own prompt by its buttons, without a reason, and keeps the draft", async () => {
       const jobCall = buildToolCall(70, "read_text_file")
       const approvalRoute = `POST /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/tool-approvals/${jobCall.id}`

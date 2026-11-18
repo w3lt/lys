@@ -12,12 +12,20 @@ export type ReplyTarget = Readonly<{
   assistantMessageId: string
 }>
 
-/** A running generation and the conversation its reply belongs to. */
+/**
+ * A running generation, the conversation its reply belongs to, and whether
+ * its reply task still runs.
+ */
 type RegisteredReplyGeneration = Readonly<{
   /** Conversation that must match a lookup before the generation is returned. */
   conversationId: string
   /** Running generation owned by the registry until it settles. */
   generation: ReplyGeneration
+  /**
+   * `running` from registration until the reply task settles; `settled`
+   * afterwards, while the generation can still run its title task.
+   */
+  replyTask: "running" | "settled"
 }>
 
 /**
@@ -53,13 +61,11 @@ export class ReplyGenerationRegistryClosedError extends Error {
  * Concurrency model: single-owner, on the backend's event loop.
  */
 export default class ReplyGenerationRegistry implements AsyncDisposable {
-  /** Running generations keyed by assistant message identifier. */
-  readonly #generations = new Map<string, RegisteredReplyGeneration>()
   /**
-   * Assistant message identifiers of the registered generations whose reply
-   * task runs, from admission until that task settles.
+   * Running generations keyed by assistant message identifier, each with the
+   * state of its reply task.
    */
-  readonly #runningReplyIds = new Set<string>()
+  readonly #generations = new Map<string, RegisteredReplyGeneration>()
   /** Conversations with a running title task, from admission to settlement. */
   readonly #conversationIdsGeneratingTitle = new Set<string>()
   /** Shared disposal completion; its presence means the registry is closed. */
@@ -89,10 +95,12 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
       throw new Error("A generation for this reply is already running")
 
     const generation = ReplyGeneration.start({
-      startReplyTask: this.#startReplyTracking(
-        target.assistantMessageId,
-        options.startReplyTask
-      ),
+      startReplyTask: (context) =>
+        this.#startTrackedReplyTask(
+          target.assistantMessageId,
+          options.startReplyTask,
+          context
+        ),
       startTitleTask: this.#startTitleTracking(
         target.conversationId,
         options.startTitleTask
@@ -101,7 +109,8 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
     })
     this.#generations.set(target.assistantMessageId, {
       conversationId: target.conversationId,
-      generation
+      generation,
+      replyTask: "running"
     })
     void generation.settled.then(() => {
       this.#removeSettledGeneration(target.assistantMessageId, generation)
@@ -148,7 +157,7 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
     for (const [assistantMessageId, registered] of this.#generations) {
       if (
         registered.conversationId === conversationId &&
-        this.#runningReplyIds.has(assistantMessageId)
+        registered.replyTask === "running"
       )
         replies.push(Object.freeze({ conversationId, assistantMessageId }))
     }
@@ -171,37 +180,21 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
   }
 
   /**
-   * Starts tracking a reply as running until its reply task settles.
-   *
-   * @param assistantMessageId - Reply of the generation being admitted.
-   * @param startReplyTask - Requested reply launcher.
-   * @returns A launcher that starts the requested task and ends the tracking
-   * once that task settles, whatever its outcome.
-   * @remarks Tracking begins in the admission step, so the reply is listed
-   * as running before its task starts. The caller hands the launcher to
-   * {@link ReplyGeneration.start}, which always runs the reply launcher, so
-   * the tracking always ends.
-   */
-  #startReplyTracking(
-    assistantMessageId: string,
-    startReplyTask: StartReplyGenerationOptions["startReplyTask"]
-  ): StartReplyGenerationOptions["startReplyTask"] {
-    this.#runningReplyIds.add(assistantMessageId)
-    return (context) =>
-      this.#startTrackedReplyTask(assistantMessageId, startReplyTask, context)
-  }
-
-  /**
-   * Starts an admitted reply task and ends its reply's tracking once the
-   * task settles.
+   * Starts an admitted reply task and marks its registered generation's
+   * reply task as settled once the task settles, whatever its outcome.
    *
    * @param assistantMessageId - Reply whose task is tracked.
    * @param startReplyTask - Reply launcher admitted for that reply.
    * @param context - Generation-owned cancellation, event sender, and tool
    * call senders.
-   * @returns Settlement after the reply task settles and tracking ended.
-   * @throws The reply task's failure, after tracking ended; the generation
-   * reports it.
+   * @returns Settlement after the reply task settles and its state was
+   * marked settled.
+   * @throws The reply task's failure, after its state was marked settled;
+   * the generation reports it.
+   * @remarks {@link ReplyGeneration.start} begins its tasks after the
+   * synchronous step that registers the generation, and the generation
+   * settles only after this task settles, so its registered entry exists
+   * whenever this task runs.
    */
   async #startTrackedReplyTask(
     assistantMessageId: string,
@@ -211,8 +204,26 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
     try {
       await startReplyTask(context)
     } finally {
-      this.#runningReplyIds.delete(assistantMessageId)
+      this.#markReplyTaskSettled(assistantMessageId)
     }
+  }
+
+  /**
+   * Records that a registered generation's reply task settled, so its reply
+   * is no longer listed as running.
+   *
+   * @param assistantMessageId - Reply whose task settled.
+   * @remarks Leaves the registry unchanged when no generation is registered
+   * for the reply, which the start order of {@link ReplyGeneration.start}
+   * rules out for a task this registry admitted.
+   */
+  #markReplyTaskSettled(assistantMessageId: string): void {
+    const registered = this.#generations.get(assistantMessageId)
+    if (registered !== undefined)
+      this.#generations.set(assistantMessageId, {
+        ...registered,
+        replyTask: "settled"
+      })
   }
 
   /**

@@ -300,7 +300,11 @@ the origin refusal, names the reply in `conversationId` and
 voice prints its refusals, drops, and failures to its standard output and
 standard error, and never a reply's text: FluidAudio, which logs each
 sentence it speaks at the info level, logs only its notices, warnings, and
-errors in voice. vmo's and voice's output is not kept in a release build
+errors in voice. The WebSocket plugin logs a socket's error once more, at level `error`, with
+the error's message as `msg`, before it ends the socket, and does the same
+for a failure the speech handler throws.
+
+vmo's and voice's output is not kept in a release build
 ([#229](https://github.com/w3lt/lys/issues/229)).
 
 ## Desktop runtime status

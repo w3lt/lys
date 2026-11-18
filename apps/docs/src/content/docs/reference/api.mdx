@@ -411,16 +411,16 @@ signal.
 Lys speaks one speech at a time: opening a socket closes every older one,
 for this reply or another, on either endpoint. The socket closes with:
 
-| Code   | Meaning                                                                                                                                  |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `1000` | Everything to say was spoken and its whole audio was sent.                                                                               |
-| `1001` | The backend is shutting down.                                                                                                            |
-| `1008` | The client fell more than about 1 MB of audio behind, and the speech was cut off.                                                        |
-| `1011` | The voice service failed during the speech, or the backend could not read the reply.                                                     |
-| `4404` | The conversation or reply does not exist.                                                                                                |
-| `4409` | A newer socket opened, for this reply or another.                                                                                        |
-| `4410` | The reply was interrupted or failed, or stopped being written without an end; or `from=current` names a reply that is not being written. |
-| `4503` | Voice is not ready, or refused or did not answer the speech within two seconds; nothing was sent.                                        |
+| Code   | Meaning                                                                                                                                                                                                                                                        |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1000` | Everything to say was spoken and its whole audio was sent.                                                                                                                                                                                                     |
+| `1001` | The backend is shutting down.                                                                                                                                                                                                                                  |
+| `1008` | The client fell more than about 1 MB of audio behind, and the speech was cut off.                                                                                                                                                                              |
+| `1011` | The voice service failed during the speech, or the backend could not read the reply.                                                                                                                                                                           |
+| `4404` | The conversation or reply does not exist.                                                                                                                                                                                                                      |
+| `4409` | A newer socket opened, for this reply or another.                                                                                                                                                                                                              |
+| `4410` | While the socket followed the reply, it was interrupted or failed, or stopped being written without an end; or `from=current` names a reply that is not being written. A stored reply that already stopped or failed is spoken as stored and ends with `1000`. |
+| `4503` | Voice is not ready, or refused or did not answer the speech within two seconds; nothing was sent.                                                                                                                                                              |
 
 `GET /api/v1/chat/:conversationId/replies/:assistantMessageId/notification`
 is the same socket without the `from` query, and speaks one short line chosen

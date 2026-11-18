@@ -455,21 +455,30 @@ unless its other bracket opens or closes a reference, as in `[see \[1]`, where
 it reads as that reference's text, the same before the definition arrives as
 after. Any other citation marker is dropped wherever it stands outside code, a
 link's text included, where the renderer shows it as text. Sentences are cut
-with `Intl.Segmenter`. While the reply streams, a sentence is sent to
-voice once a line break ends it or the next sentence has begun with a
-letter, so `$3.50`, `2.5`, and `Fig. 3` are never cut at their period; a
-text part's last sentence is sent once a part of another kind follows it,
-and the rest at `done`. A sentence longer than 2,000 characters is sent in
-pieces, cut at a space, because voice refuses a message over 16 KiB. An
-unterminated code fence holds speech back until it closes. A paragraph or
-heading being written waits until it ends when it holds a `|`, because its
-next line may make it a table header, or when it starts with `[label]:`,
-because a closing title quote may make it a link definition; and from its
-first `$` or `![` outside code on, because a later `$` may make that text
-inline math and the `![` may begin an image. When more text changes how earlier text reads, speech
+with `Intl.Segmenter`. Each text part is read as a markdown document of its
+own, so a code fence or another block that one part leaves open ends with
+it and never silences the parts after it. While the reply streams, a
+sentence is sent to voice once a line break ends it, another block follows
+its block, or a later sentence holding a letter follows it, so `$3.50`,
+`2.5`, and `Fig. 3` are never cut at their period; a text part's last
+sentence is sent once a part of another kind follows it, and the rest at
+`done`. A sentence longer than 2,000 characters is sent in pieces, cut at a
+space, because voice refuses a message over 16 KiB. An unterminated code
+fence holds the text after it back until it closes. A paragraph or heading
+being written waits until it ends when it holds a `|`, because its next
+line may make it a table header, or when it starts with `[label]:`, because
+a closing title quote may make it a link definition; and from its first
+`$`, `![`, unclosed backtick, or opening `*`, `_`, or `~` outside code on,
+because a later `$` may make that text inline math, the `![` may begin an
+image, and a closing mark may make it inline code or formatting, whose
+marks are not read. When more text changes how earlier text reads, speech
 resumes after the last sentence sent that is still there, so no sentence is
-skipped or spoken twice. Reasoning, tool calls, and their results are never
-spoken.
+skipped or spoken twice. Once a block's next block, or a list item's next
+item, has a whole first line, no later text changes how the block reads,
+so each fragment parses only the text from the block still being written
+on: the speech costs the same per fragment however long the reply grows,
+and never slows the chat it follows. Reasoning, tool calls, and their
+results are never spoken.
 
 Audio arrives from voice as binary frames of 24 kHz mono 16-bit little-endian
 PCM and is relayed to the socket unchanged. A UI that falls more than 1 MB of

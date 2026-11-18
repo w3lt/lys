@@ -190,9 +190,24 @@ final class SpeechConnection: Sendable {
 
     /// Starts a new speech, superseding any speech this connection owns and,
     /// through the hub, any speech another connection owns.
+    ///
+    /// The speech takes the hub when `speak` arrives, before its session
+    /// starts, so the latest `speak` speaks however long each session takes
+    /// to start. A session that starts after its speech was superseded or
+    /// closed is cancelled.
     private func startSpeech() async {
         // Close out any speech this connection already owned.
         await cancelSpeech()
+        let id = UUID()
+        state.withLock { state in
+            state.speechID = id
+            state.finishReceived = false
+        }
+        hub.register(id: id) { [weak self] in
+            // Superseded by a newer speech anywhere: close this socket with
+            // the going-away close code and stop synthesizing.
+            Task { await self?.handleSuperseded() }
+        }
         let session: any SpeechSession
         do {
             session = try await engine.startSession()
@@ -201,16 +216,14 @@ final class SpeechConnection: Sendable {
             await startClose(.protocolCode(.internalServerError))
             return
         }
-        let id = UUID()
-        hub.register(id: id) { [weak self] in
-            // Superseded by a newer speech anywhere: close this socket with
-            // the going-away close code and stop synthesizing.
-            Task { await self?.handleSuperseded() }
-        }
-        state.withLock { state in
+        let isCurrent = state.withLock { state -> Bool in
+            guard state.speechID == id, !state.closeSent else { return false }
             state.session = session
-            state.speechID = id
-            state.finishReceived = false
+            return true
+        }
+        guard isCurrent else {
+            await session.cancel()
+            return
         }
         startPump(session: session, id: id)
     }

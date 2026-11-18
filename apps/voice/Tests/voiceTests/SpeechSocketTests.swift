@@ -849,6 +849,42 @@ struct SpeechProtocolPathTests {
         try await waitUntil { engine.madeSessions.first?.isCancelled == true }
     }
 
+    /// Verifies the speech whose `speak` arrived last is the one that speaks,
+    /// even when an older speech's session starts after it.
+    @Test func aSessionThatStartsLateDoesNotSupersedeANewerSpeech() async throws {
+        let engine = FakeSpeechEngine(FakeEngineBehavior(holdsFirstSessionStart: true))
+        let server = try await startSpeechServer(engine: engine)
+        defer {
+            engine.releaseFirstSessionStart()
+            server.stop()
+        }
+
+        let older = TestSpeechClient(port: server.port)
+        let newer = TestSpeechClient(port: server.port)
+        defer {
+            older.cancel()
+            newer.cancel()
+        }
+        older.sendText(#"{"type":"speak"}"#)
+        try await waitUntil { engine.startedSessionCount == 1 }
+        newer.sendText(#"{"type":"speak"}"#)
+        newer.sendText(#"{"type":"text","text":"One."}"#)
+        guard case .binary = try await newer.readMessage() else {
+            Issue.record("Expected the newer speech to start speaking")
+            return
+        }
+        #expect(try await older.readClose() == .close(1001))
+
+        engine.releaseFirstSessionStart()
+        try await waitUntil { engine.madeSessions.count == 2 }
+        // Gives a late registration the time to supersede the newer speech.
+        try await Task.sleep(for: .milliseconds(200))
+        newer.sendText(#"{"type":"finish"}"#)
+
+        #expect(try await newer.readClose() == .close(1000))
+        try await waitUntil { engine.madeSessions.last?.isCancelled == true }
+    }
+
     /// Verifies stopping the server ends an open speech: the server's start
     /// call returns, the connection ends, and the session is cancelled.
     @Test func stoppingTheServerEndsAnOpenSpeech() async throws {

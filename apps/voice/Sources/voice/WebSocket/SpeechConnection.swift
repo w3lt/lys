@@ -2,7 +2,7 @@ import Foundation
 import Network
 import Synchronization
 
-/// One speech WebSocket connection accepted by ``SpeechSocketServer``.
+/// One speech WebSocket connection, from its first message until it closes.
 ///
 /// The client sends JSON text messages: `{ "type": "speak" }` to start a
 /// speech (closing any older speech), `{ "type": "text", "text": "…" }` to
@@ -15,14 +15,13 @@ import Synchronization
 /// failed. A client message may carry at most ``maximumMessageSize`` bytes;
 /// a longer one fails the receive, and Network.framework closes the socket
 /// with `1009` itself, so the client splits longer text.
-/// A connection that completes no handshake within its handshake timeout is
-/// cancelled, and a close waits at most ``pumpStopTimeout`` for audio still
-/// being sent before it cancels the connection. Every failure is logged with
-/// its cause.
+/// A close waits at most ``pumpStopTimeout`` for audio still being sent
+/// before it cancels the connection. Every failure is logged with its cause.
 ///
-/// Concurrency model: one task runs ``handleConnection()`` per connection;
-/// the receive loop and the frame pump communicate through the state under
-/// its `Mutex`, and every wait on the connection happens outside it.
+/// Concurrency model: one task runs ``handleMessages(startingWith:)`` per
+/// connection; the receive loop and the frame pump communicate through the
+/// state under its `Mutex`, and every wait on the connection happens
+/// outside it.
 final class SpeechConnection: Sendable {
     /// Result of routing a `text` message to the active session.
     private enum EnqueueOutcome {
@@ -60,120 +59,66 @@ final class SpeechConnection: Sendable {
     /// Engine that makes this connection's speech sessions.
     private let engine: any SpeechEngine
     /// The one active speech across every connection.
-    private let hub: SpeechHub
-    /// Longest wait for the client's WebSocket handshake.
-    private let handshakeTimeout: Duration
+    private let hub: JobHub
     /// The speech this connection drives and its close state.
     private let state = Mutex(State())
 
-    /// Wraps an accepted connection that has not been started.
+    /// Wraps a started connection whose first message was read.
     ///
     /// - Parameters:
-    ///   - connection: Accepted WebSocket connection.
+    ///   - connection: Accepted WebSocket connection, already started.
     ///   - engine: Engine that makes the speech sessions.
     ///   - hub: The server's hub, which keeps one speech active at a time.
-    ///   - handshakeTimeout: Longest wait for the client's WebSocket
-    ///     handshake before the connection is cancelled.
-    init(connection: NWConnection, engine: any SpeechEngine, hub: SpeechHub, handshakeTimeout: Duration) {
+    init(connection: NWConnection, engine: any SpeechEngine, hub: JobHub) {
         self.connection = connection
         self.engine = engine
         self.hub = hub
-        self.handshakeTimeout = handshakeTimeout
     }
 
-    /// Handles an accepted connection from its start until it closes:
-    /// starts it, reads the client's messages, and cancels it once the peer
-    /// closed or a receive failed. Returns when it has closed.
+    /// Handles the client's messages, from the connection's first one until
+    /// the peer closes or a receive fails, then cancels the connection.
+    /// Returns when it has closed.
     ///
-    /// Cancelling the calling task cancels the socket, which ends a pending
-    /// receive with an error.
-    func handleConnection() async {
-        await withTaskCancellationHandler {
-            self.connection.start(queue: DispatchQueue(label: "voice.WebSocket"))
-            await self.handleClientMessages()
-            await self.cancelConnection()
-        } onCancel: {
-            self.connection.cancel()
-        }
-    }
-
-    /// Reads and handles the client's messages until the peer closes or a
-    /// receive fails.
+    /// A message that breaks the speech protocol, a binary one among them,
+    /// is logged and answered with its close code.
     ///
-    /// A receive failure before this side sent its close frame, such as a
-    /// message over ``maximumMessageSize`` or a peer that went away without
-    /// a close frame, is logged before the speech is torn down. So is a text
-    /// message that is not UTF-8: Network.framework fails its receive and
-    /// closes the socket with `1002` itself. A connection that ends before
-    /// its first message is logged as such: a refused handshake ends that
-    /// way, and its refusal was already logged with its reason. Any other message that breaks
-    /// the speech protocol, a binary one among them, is logged and answered
-    /// with its close code.
-    private func handleClientMessages() async {
-        let deadline = startHandshakeDeadline()
-        defer { deadline.cancel() }
-        var hasReceivedMessage = false
-        while true {
-            let message: Result<Message, any Error>
-            do {
-                message = .success(try await readMessage())
-                hasReceivedMessage = true
-            } catch {
-                message = .failure(error)
-            }
+    /// - Parameter first: The connection's first message, already read.
+    func handleMessages(startingWith first: SocketMessage) async {
+        var next: SocketMessage? = first
+        while let message = next {
             switch message {
-            case .failure(let error):
-                if isCloseSent {
-                    return
-                }
-                if hasReceivedMessage {
-                    print("voice: speech connection \(connection.endpoint) failed: \(error)")
-                } else {
-                    print("voice: speech connection \(connection.endpoint) ended before it sent a message: \(error)")
-                }
-                return
-            case .success(.close):
-                return
-            case .success(.text(let body)):
+            case .close:
+                next = nil
+            case .text(let body):
                 if !isCloseSent { await handleText(body) }
-            case .success(.binary):
+                next = await readNextMessage()
+            case .binary:
                 if !isCloseSent {
                     await closeForProtocolViolation("sent a binary message", code: .unsupportedData)
                 }
+                next = await readNextMessage()
             }
         }
+        await cancelConnection()
     }
 
-    /// Cancels the connection when its handshake has not completed within
-    /// ``handshakeTimeout``, so an idle client cannot hold a place under the
-    /// server's connection cap.
+    /// Reads the next message.
     ///
-    /// - Returns: The deadline's task, which ``handleClientMessages()`` owns
-    ///   and cancels once the connection ended.
-    private func startHandshakeDeadline() -> Task<Void, Never> {
-        let connection = self.connection
-        let timeout = handshakeTimeout
-        return Task {
-            try? await Task.sleep(for: timeout)
-            guard !Task.isCancelled else { return }
-            switch connection.state {
-            case .setup, .waiting, .preparing:
-                print("voice: speech connection \(connection.endpoint) completed no handshake within \(timeout)")
-                connection.cancel()
-            default:
-                return
+    /// - Returns: The message, or `nil` once a receive failed. A failure
+    ///   before this side sent its close frame, such as a message over
+    ///   ``maximumMessageSize`` or a peer that went away without a close
+    ///   frame, is logged before the speech is torn down. So is a text
+    ///   message that is not UTF-8: Network.framework fails its receive and
+    ///   closes the socket with `1002` itself.
+    private func readNextMessage() async -> SocketMessage? {
+        do {
+            return try await connection.readSocketMessage()
+        } catch {
+            if !isCloseSent {
+                print("voice: speech connection \(connection.endpoint) failed: \(error)")
             }
+            return nil
         }
-    }
-
-    /// One decoded message, before protocol validation.
-    private enum Message {
-        /// A UTF-8 text message with its payload.
-        case text(String)
-        /// A binary message; the client never sends those.
-        case binary
-        /// The peer sent a close frame.
-        case close
     }
 
     // MARK: - Message handling
@@ -313,7 +258,7 @@ final class SpeechConnection: Sendable {
                 for try await frame in session.frames {
                     if Task.isCancelled { return }
                     if self.isCloseSent { return }
-                    try await self.send(PCMConversion.buildLittleEndianPCM16(from: frame), opcode: .binary)
+                    try await self.connection.sendSocketMessage(PCMConversion.buildLittleEndianPCM16(from: frame), opcode: .binary)
                 }
                 // A cancelled pump ends its frames early; the close that
                 // cancelled it decides the close code.
@@ -348,7 +293,6 @@ final class SpeechConnection: Sendable {
         state.withLock { state in state.closeSent }
     }
 
-
     /// Logs a client message that breaks the speech protocol, then closes the
     /// socket with the code that names the violation.
     ///
@@ -369,7 +313,7 @@ final class SpeechConnection: Sendable {
     /// frame already being sent finishes, and only then is the close frame
     /// sent. The socket stays open briefly so the peer can observe the close
     /// code: the receive loop returns on the peer's close or error, and a
-    /// watchdog cancels the socket a grace period later if the peer never
+    /// timer cancels the socket a grace period later if the peer never
     /// answers.
     ///
     /// - Parameter code: Close code the peer receives.
@@ -383,46 +327,13 @@ final class SpeechConnection: Sendable {
         }
         if let pump {
             pump.cancel()
-            await waitForPump(pump)
+            await connection.waitForSender(pump, within: Self.pumpStopTimeout)
         }
         if sends {
-            try? await send(nil, opcode: .close, closeCode: code)
+            try? await connection.sendSocketMessage(nil, opcode: .close, closeCode: code)
         }
         await cancelSpeech()
-        startSocketCancelTimer()
-    }
-
-    /// Waits for a cancelled frame pump to end, cancelling the connection
-    /// when it has not ended within ``pumpStopTimeout``.
-    ///
-    /// Cancelling the pump ends its wait for frames but not a send already
-    /// pending towards a peer that stopped reading; cancelling the connection
-    /// fails that send, so the pump ends and the close can proceed.
-    ///
-    /// - Parameter pump: The frame pump, already cancelled.
-    private func waitForPump(_ pump: Task<Void, Never>) async {
-        let connection = self.connection
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await pump.value }
-            group.addTask {
-                try? await Task.sleep(for: Self.pumpStopTimeout)
-                guard !Task.isCancelled else { return }
-                print("voice: speech connection \(connection.endpoint) took no audio for \(Self.pumpStopTimeout); cancelling it")
-                connection.cancel()
-            }
-            await group.next()
-            group.cancelAll()
-        }
-    }
-
-    /// Cancels the socket after a grace period, so a peer that never answers
-    /// the close frame does not hold the connection open forever.
-    private func startSocketCancelTimer() {
-        let connection = self.connection
-        Task {
-            try? await Task.sleep(for: .seconds(1))
-            connection.cancel()
-        }
+        connection.startCancelTimer()
     }
 
     /// Ends the speech and cancels the pump and the socket.
@@ -452,65 +363,4 @@ final class SpeechConnection: Sendable {
             hub.remove(id)
         }
     }
-
-    // MARK: - Wire helpers
-
-    /// Sends one frame; `nil` data with the close opcode sends a close frame.
-    private func send(
-        _ data: Data?,
-        opcode: NWProtocolWebSocket.Opcode,
-        closeCode: NWProtocolWebSocket.CloseCode? = nil
-    ) async throws {
-        let metadata = NWProtocolWebSocket.Metadata(opcode: opcode)
-        if let closeCode {
-            metadata.closeCode = closeCode
-        }
-        let context = NWConnection.ContentContext(identifier: "speech", metadata: [metadata])
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-            connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
-            })
-        }
-    }
-
-    /// Reads the next message.
-    ///
-    /// - Returns: The message. A text message is valid UTF-8, because
-    ///   Network.framework fails the receive of one that is not.
-    /// - Throws: The connection's `NWError` when receiving fails, a text
-    ///   message that is not UTF-8 included, or ``ConnectionClosedError``
-    ///   when the peer ended the connection without a close frame or sent an
-    ///   empty message.
-    private func readMessage() async throws -> Message {
-        try await withCheckedThrowingContinuation { continuation in
-            connection.receiveMessage { content, context, _, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                let metadata = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata
-                if metadata?.opcode == .close {
-                    continuation.resume(returning: .close)
-                    return
-                }
-                guard let content, !content.isEmpty else {
-                    continuation.resume(throwing: ConnectionClosedError())
-                    return
-                }
-                if metadata?.opcode == .binary {
-                    continuation.resume(returning: .binary)
-                    return
-                }
-                continuation.resume(returning: .text(String(decoding: content, as: UTF8.self)))
-            }
-        }
-    }
 }
-
-/// The peer closed the connection without a close frame, or sent an empty
-/// message where a message was expected.
-private struct ConnectionClosedError: Error {}

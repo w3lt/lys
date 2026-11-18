@@ -2,13 +2,13 @@ import Foundation
 import Network
 import Synchronization
 
-/// Serves the speech WebSockets, one speech per connection.
+/// Serves voice's WebSockets, one speech or one dictation per connection.
 ///
 /// Two guards run before any connection is accepted: a handshake that
 /// carries an `Origin` header — every browser request does, the backend's
-/// does not — is refused, so no web page can make voice speak; and a
-/// handshake while the models are still loading is refused, because the
-/// backend reports the refusal to the desktop as “voice is not ready”.
+/// does not — is refused, so no web page can make voice speak or listen;
+/// and a handshake while the models are still loading is refused, because
+/// the backend reports the refusal to the desktop as “voice is not ready”.
 /// Refused handshakes get HTTP 400, which the browser surfaces as a failed
 /// connection, never as a readable error. Every refusal is logged.
 ///
@@ -18,10 +18,10 @@ import Synchronization
 /// ``handshakeTimeout`` is cancelled, so idle clients cannot hold every place.
 ///
 /// Concurrency model: serialized. The only mutable state, the count of live
-/// connections, is guarded by its `Mutex`; the speech hub serializes the
-/// one active speech the same way.
+/// connections, is guarded by its `Mutex`; each job hub serializes the one
+/// active job of its kind the same way.
 final class SpeechSocketServer: Sendable {
-    /// Default most speech connections served at once.
+    /// Default most connections served at once.
     static let defaultMaxConnections = 16
     /// Default longest wait for a client's WebSocket handshake.
     static let defaultHandshakeTimeout: Duration = .seconds(10)
@@ -29,10 +29,8 @@ final class SpeechSocketServer: Sendable {
     /// Live accepted connections; the server stops accepting beyond its cap.
     private let liveConnections = Mutex(0)
 
-    /// Speech engine backing the accepted connections.
-    private let engine: any SpeechEngine
-    /// The one active speech across every connection.
-    private let hub = SpeechHub()
+    /// The engines and hubs the accepted connections' jobs work with.
+    private let jobs: VoiceJobs
     /// Local address the listener binds.
     private let host: NWEndpoint.Host
     /// Local TCP port the listener binds.
@@ -45,9 +43,11 @@ final class SpeechSocketServer: Sendable {
     /// Creates a server that is not listening yet.
     ///
     /// - Parameters:
-    ///   - engine: Speech engine backing the accepted connections.
+    ///   - engine: Speech engine backing the connections that speak.
     ///   - host: Local address to bind; loopback by default.
     ///   - port: TCP port to bind; 9091 by default.
+    ///   - dictationEngine: Dictation engine backing the connections that
+    ///     listen.
     ///   - maxConnections: Most connections served at once; a connection
     ///     accepted beyond the cap is dropped without a handshake response.
     ///   - handshakeTimeout: Longest wait for a client's WebSocket handshake
@@ -56,10 +56,16 @@ final class SpeechSocketServer: Sendable {
         engine: any SpeechEngine,
         host: NWEndpoint.Host = "127.0.0.1",
         port: NWEndpoint.Port = 9091,
+        dictationEngine: DictationEngine,
         maxConnections: Int = SpeechSocketServer.defaultMaxConnections,
         handshakeTimeout: Duration = SpeechSocketServer.defaultHandshakeTimeout
     ) {
-        self.engine = engine
+        self.jobs = VoiceJobs(
+            speechEngine: engine,
+            speechHub: JobHub(),
+            dictationEngine: dictationEngine,
+            dictationHub: JobHub()
+        )
         self.host = host
         self.port = port
         self.maxConnections = maxConnections
@@ -107,12 +113,13 @@ final class SpeechSocketServer: Sendable {
         case failed(NWError)
     }
 
-    /// Decides whether a speech socket handshake is accepted.
+    /// Decides whether a socket handshake is accepted.
     ///
     /// A handshake carrying an `Origin` header — every browser sends one; the
     /// backend's client does not — is refused so no web page can ask voice to
-    /// speak. A handshake while the models are not loaded is refused; the
-    /// backend reports the refusal to the desktop as voice not ready.
+    /// speak or to listen. A handshake while the models are not loaded is
+    /// refused; the backend reports the refusal to the desktop as voice not
+    /// ready.
     static func canAcceptHandshake(headers: [(name: String, value: String)], isReady: Bool) -> Bool {
         guard isReady else { return false }
         return !headers.contains(where: { $0.name.lowercased() == "origin" })
@@ -130,13 +137,13 @@ final class SpeechSocketServer: Sendable {
         let websocket = NWProtocolWebSocket.Options()
         websocket.autoReplyPing = true
         websocket.maximumMessageSize = SpeechConnection.maximumMessageSize
-        let engine = self.engine
+        let jobs = self.jobs
         websocket.setClientRequestHandler(DispatchQueue(label: "voice.WebSocketHandshake")) { _, headers in
-            let isReady = engine.isReady
+            let isReady = jobs.speechEngine.isReady && jobs.dictationEngine.isReady
             let accept = Self.canAcceptHandshake(headers: headers, isReady: isReady)
             if !accept {
                 let reason = isReady ? "it carries an Origin header" : "the models are not loaded"
-                print("voice: refused a speech handshake: \(reason)")
+                print("voice: refused a socket handshake: \(reason)")
             }
             return NWProtocolWebSocket.Response(status: accept ? .accept : .reject, subprotocol: nil)
         }
@@ -160,16 +167,16 @@ final class SpeechSocketServer: Sendable {
         case .setup:
             break
         case .ready:
-            print("WebSocket speech listener ready")
+            print("WebSocket listener ready")
         case .waiting(let error):
-            print("WebSocket speech listener waiting: \(error)")
+            print("WebSocket listener waiting: \(error)")
         case .failed(let error):
             continuation.yield(.failed(error))
             continuation.finish()
         case .cancelled:
             continuation.finish()
         @unknown default:
-            print("WebSocket speech listener entered unknown state \(state)")
+            print("WebSocket listener entered unknown state \(state)")
         }
     }
 
@@ -193,19 +200,18 @@ final class SpeechSocketServer: Sendable {
                     return false
                 }
                 if atCapacity {
-                    print("voice: dropped a speech connection: \(maxConnections) connections are already open")
+                    print("voice: dropped a connection: \(maxConnections) connections are already open")
                     connection.cancel()
                     continue
                 }
                 group.addTask {
                     defer { self.liveConnections.withLock { $0 -= 1 } }
-                    let speech = SpeechConnection(
+                    let accepted = JobConnection(
                         connection: connection,
-                        engine: self.engine,
-                        hub: self.hub,
+                        jobs: self.jobs,
                         handshakeTimeout: self.handshakeTimeout
                     )
-                    await speech.handleConnection()
+                    await accepted.handleConnection()
                 }
             case .failed(let error):
                 throw error

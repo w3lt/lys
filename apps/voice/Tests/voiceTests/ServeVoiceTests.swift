@@ -1,3 +1,4 @@
+import FluidAudio
 import Foundation
 import Testing
 @testable import voice
@@ -96,5 +97,16 @@ struct ServeVoiceTests {
             )
         }
         #expect(await log.entries == ["server cancelled"])
+    }
+}
+
+/// Checks what voice lets FluidAudio log.
+@Suite("Speech engine logging")
+struct SpeechEngineLoggingTests {
+    /// Verifies FluidAudio's info level, at which it quotes each sentence it
+    /// speaks, is not logged.
+    @Test func dropsTheLevelThatQuotesSpokenText() {
+        configureSpeechEngineLogging()
+        #expect(AppLogger.minimumLevel > .info)
     }
 }

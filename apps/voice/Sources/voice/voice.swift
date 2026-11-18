@@ -1,3 +1,4 @@
+import FluidAudio
 import Foundation
 
 /// Which child of voice's main task group ended.
@@ -32,6 +33,7 @@ struct voice {
     /// stops. It prints the error and exits with status 1 when startup or a
     /// server fails, or when the models cannot be loaded.
     static func main() async {
+        configureSpeechEngineLogging()
         let modelsDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".lys", isDirectory: true)
             .appendingPathComponent("voice", isDirectory: true)
@@ -72,6 +74,17 @@ struct voice {
         let candidate = executable.deletingLastPathComponent().appendingPathComponent("lys-voice.bin")
         return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
     }
+}
+
+/// Keeps the logs in which FluidAudio quotes the text it speaks out of
+/// voice's output.
+///
+/// FluidAudio logs every sentence a session receives at the info level, and
+/// a debug build, such as the one `run.sh` and `pnpm dev` start, copies every
+/// level to standard error. Its notices, warnings, and errors, such as a
+/// download retry, still reach the log.
+func configureSpeechEngineLogging() {
+    AppLogger.minimumLevel = .notice
 }
 
 /// Runs voice's services while the models load, until a service ends.

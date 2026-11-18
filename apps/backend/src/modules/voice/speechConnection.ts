@@ -348,6 +348,11 @@ class SpeechSession {
   #hasText: boolean
   /** Whether the reply's end was seen, so the following is expected to end. */
   #hasReplyEnded = false
+  /**
+   * Whether the following ended before voice answered; `start` decides what
+   * that means once the events received meanwhile are applied.
+   */
+  #hasFollowingEndedEarly = false
 
   /**
    * Creates a session that has not followed anything or connected yet.
@@ -384,7 +389,8 @@ class SpeechSession {
   public async start(): Promise<void> {
     this.#socket.on("close", this.#endSpeech)
     void this.#subscription.closed.then(this.#endFollowing)
-    this.#generation?.openSubscription(this.#subscription)
+    if (this.#request.kind === "reply")
+      this.#generation?.openSubscription(this.#subscription)
 
     const voice = await this.#connectVoice()
     if (voice === undefined) return
@@ -407,6 +413,7 @@ class SpeechSession {
     }
     this.#isLive = true
     for (const event of this.#pending.splice(0)) this.#handleEvent(event)
+    if (this.#hasFollowingEndedEarly) this.#endFollowing()
   }
 
   /**
@@ -427,8 +434,16 @@ class SpeechSession {
     this.#subscription.close()
   }
 
-  /** Cuts the speech when the following ends before the reply's end was seen. */
+  /**
+   * Cuts the speech when the following ends before the reply's end was
+   * seen; before voice answered, only records that it ended, because the
+   * end event may still wait among the pending ones.
+   */
   readonly #endFollowing = (): void => {
+    if (!this.#isLive) {
+      this.#hasFollowingEndedEarly = true
+      return
+    }
     if (this.#hasReplyEnded || !isOpen(this.#socket)) return
     this.#hasReplyEnded = true
     this.#voice?.cancel()
@@ -515,7 +530,10 @@ class SpeechSession {
     switch (event.type) {
       case "reply-part": {
         const part = event.part
-        if (part.kind !== "text") return
+        if (part.kind !== "text") {
+          this.#speak(this.#buffer.endTextPart())
+          return
+        }
         this.#textPartIds.add(part.id)
         const separator = this.#hasText ? "\n\n" : ""
         this.#hasText = true

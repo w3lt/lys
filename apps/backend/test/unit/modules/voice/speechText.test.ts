@@ -167,6 +167,43 @@ describe("SpeechSentenceBuffer", () => {
   })
 })
 
+describe("SpeechSentenceBuffer structure changes", () => {
+  it("speaks a streamed table's surroundings as it does the whole text", () => {
+    const fragments = [
+      "Here is the table:",
+      "\n\n| No",
+      ". | Item |",
+      "\n|---",
+      "|---|",
+      "\n| 1 | Apple |",
+      "\n\nThat's the list",
+      ". Anything else?"
+    ]
+    expect(speakStreamed(fragments)).toEqual(speakFinished(fragments.join("")))
+    expect(speakStreamed(fragments)).toEqual([
+      "Here is the table:.",
+      "That's the list.",
+      "Anything else?"
+    ])
+  })
+
+  it("speaks prose with a pipe once its paragraph ends", () => {
+    const buffer = new SpeechSentenceBuffer("start")
+    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
+    expect(buffer.push("Run a | b first. Then c")).toEqual([])
+    expect(buffer.push("\n\nDone")).toEqual(["Run a | b first.", "Then c."])
+  })
+
+  it("hands out a text part's last sentence once the part ends", () => {
+    const buffer = new SpeechSentenceBuffer("start")
+    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
+    expect(buffer.push("Let me check the weather.")).toEqual([])
+    expect(buffer.endTextPart()).toEqual(["Let me check the weather."])
+    expect(buffer.push("\n\nIt is sunny")).toEqual([])
+    expect(buffer.finish()).toEqual(["It is sunny."])
+  })
+})
+
 describe("splitForVoice", () => {
   it("keeps a sentence that fits in one voice message", () => {
     expect(splitForVoice("Short.")).toEqual(["Short."])

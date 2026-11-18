@@ -31,6 +31,7 @@ import {
 import {
   createAssistantMessage,
   createFixtureUuidV7,
+  createReasoningPart,
   createTextPart,
   createUserMessage,
   FIXTURE_TIMESTAMP
@@ -590,6 +591,56 @@ describe("speech sockets over their lifecycle", () => {
     const speech = voice.answer()
     await vi.waitFor(() => expect(speech.cancelled).toBe(true))
     expect(speech.speakCalled).toBe(false)
+  })
+
+  it("speaks a reply that ended while voice's handshake was pending", async () => {
+    const voice = createPendingVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: STREAMING_CONVERSATION,
+      connect: voice.connect
+    })
+    const { replyTask, titleTask } = startFixtureGeneration(app.generations)
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(voice.isDialed()).toBe(true))
+    replyTask.context.sendEvent(createTextDelta(" world. Bye now."))
+    replyTask.context.sendEvent({ type: "done", finishReason: "stop" })
+    replyTask.resolve()
+    titleTask.resolve()
+    await vi.waitFor(() =>
+      expect(app.generations.findReplyGeneration(REPLY_TARGET)).toBeUndefined()
+    )
+    const speech = voice.answer()
+    await vi.waitFor(() => expect(speech.finishCalled).toBe(true))
+    expect(speech.spoken).toEqual(["Hello the world.", "Bye now."])
+    expect(speech.cancelled).toBe(false)
+    speech.closeFromVoice(1000)
+    await expect(socket.closed).resolves.toBe(1000)
+  })
+
+  it("speaks the sentence before a reasoning part without waiting for more text", async () => {
+    const { fake } = createFakeVoice()
+    const app = await createVoiceRoutesApp({
+      conversation: STREAMING_CONVERSATION,
+      connect: fake.connect
+    })
+    const { replyTask } = startFixtureGeneration(app.generations)
+    const socket = openTestSocket(
+      app.baseUrl,
+      buildSpeechUrl(chatSpeechApi.path, "start")
+    )
+    await vi.waitFor(() => expect(fake.speeches[0]?.speakCalled).toBe(true))
+    replyTask.context.sendEvent(createTextDelta(" weather."))
+    replyTask.context.sendEvent({
+      type: "reply-part",
+      part: createReasoningPart(7, 0, "Checking.")
+    })
+    await vi.waitFor(() =>
+      expect(fake.speeches[0]?.spoken).toEqual(["Hello the weather."])
+    )
+    socket.close()
   })
 
   it("supersedes the socket of another reply and cancels its speech", async () => {

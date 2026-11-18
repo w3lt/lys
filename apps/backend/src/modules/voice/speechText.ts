@@ -1,5 +1,5 @@
 import { CITATION_MARKER_PATTERN } from "@lys/share"
-import type { ListItem, Root, RootContent } from "mdast"
+import type { Blockquote, List, ListItem, Root, RootContent } from "mdast"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import remarkParse from "remark-parse"
@@ -7,6 +7,9 @@ import { unified } from "unified"
 
 /** Definitions of link references, keyed by their lower-cased label. */
 type Definitions = Map<string, string>
+
+/** A block whose last child may be the block still being written. */
+type BlockContainer = Root | Blockquote | List | ListItem
 
 /**
  * Whether the last block of a text may still grow: `open` while its text
@@ -118,13 +121,18 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * words, so they are not spoken; inline code is read as words; formatting
  * is dropped; a link is spoken by its text, unless the text is the URL
  * itself; each paragraph, heading, and list item ends a sentence. An
- * unclosed code fence holds the rest of the text back until it closes.
+ * unclosed code fence holds the rest of the text back until it closes, and
+ * a paragraph or heading still being written that holds a `|` waits until it
+ * ends, because its next line may turn it into a table header.
  *
  * A sentence is final once a later sentence holding a letter follows it, a
  * line break ends it, or its text part ends, so a period inside a number, a
  * version, or an abbreviation, such as `$3.50`, never ends a sentence
  * early; `finish()` hands out the rest, however short. A sentence is handed
- * out at most once and never taken back.
+ * out at most once and never taken back. When more text changes how earlier
+ * text reads, such as a line that turns into a table header, the buffer
+ * resumes after the last handed-out sentence still present, so no later
+ * sentence is skipped.
  *
  * Feed the buffer the reply's text: the snapshot at the start, then every
  * fragment as it arrives. `start` hands out every sentence; `current`
@@ -133,8 +141,8 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * part already ended. Concurrency model: single-owner.
  */
 export class SpeechSentenceBuffer {
-  /** Number of leading sentences handed out so far; it never decreases. */
-  #handedOut = 0
+  /** The sentences handed out or skipped so far, in order. */
+  readonly #handedOut: HandedSentence[] = []
   /** Raw markdown received so far. */
   #markdown = ""
   /** Whether the text's last block may still grow. */
@@ -164,7 +172,8 @@ export class SpeechSentenceBuffer {
     this.#markdown = snapshot.text
     this.#lastBlock = snapshot.lastTextPart
     if (this.#start === "start") return this.#drain()
-    this.#handedOut = this.#finalCount(this.#segments())
+    const segments = this.#segments()
+    this.#take(segments, this.#finalCount(segments))
     return []
   }
 
@@ -182,6 +191,17 @@ export class SpeechSentenceBuffer {
   }
 
   /**
+   * Ends the text part being written, because a part of another kind
+   * follows it; the next fragment opens a new text part.
+   *
+   * @returns The sentences the part's end made final, in order.
+   */
+  public endTextPart(): string[] {
+    this.#lastBlock = "closed"
+    return this.#drain()
+  }
+
+  /**
    * Ends the text and hands out what is left, however short.
    *
    * @returns The rest of the text as zero or one sentences; empty on a later
@@ -190,12 +210,7 @@ export class SpeechSentenceBuffer {
   public finish(): string[] {
     this.#lastBlock = "closed"
     const segments = this.#segments()
-    const rest = segments
-      .slice(this.#handedOut)
-      .map((segment) => segment.text)
-      .filter((text) => text !== "")
-      .join(" ")
-    this.#handedOut = Math.max(this.#handedOut, segments.length)
+    const rest = this.#take(segments, segments.length).join(" ")
     return rest === "" ? [] : [rest]
   }
 
@@ -237,14 +252,69 @@ export class SpeechSentenceBuffer {
    */
   #drain(): string[] {
     const segments = this.#segments()
-    const finalCount = this.#finalCount(segments)
-    const fresh = segments
-      .slice(this.#handedOut, finalCount)
-      .map((segment) => segment.text)
-      .filter((text) => text !== "")
-    this.#handedOut = Math.max(this.#handedOut, finalCount)
+    return this.#take(segments, this.#finalCount(segments))
+  }
+
+  /**
+   * Hands out the sentences not handed out yet that come before `end`.
+   *
+   * @param segments - The sentences of the current text.
+   * @param end - Index of the first sentence not to hand out.
+   * @returns The sentences handed out, in order; empty ones are skipped.
+   */
+  #take(segments: readonly SentenceSegment[], end: number): string[] {
+    const start = this.#findResumeIndex(segments)
+    const fresh: string[] = []
+    for (const [offset, segment] of segments.slice(start, end).entries()) {
+      if (segment.text === "") continue
+      fresh.push(segment.text)
+      this.#handedOut.push({
+        index: start + offset,
+        key: toSentenceKey(segment.text)
+      })
+    }
     return fresh
   }
+
+  /**
+   * Finds where the sentences not handed out yet start.
+   *
+   * @param segments - The sentences of the current text.
+   * @returns The index after the last handed-out sentence still present,
+   * looking for each at or before where it stood; `0` when none is.
+   */
+  #findResumeIndex(segments: readonly SentenceSegment[]): number {
+    for (let rank = this.#handedOut.length - 1; rank >= 0; rank -= 1) {
+      const handed = this.#handedOut.at(rank)
+      if (handed === undefined) break
+      const found = segments.findLastIndex(
+        (segment, index) =>
+          index <= handed.index && toSentenceKey(segment.text) === handed.key
+      )
+      if (found !== -1) return found + 1
+    }
+    return 0
+  }
+}
+
+/** One sentence handed out, by where it stood and what it says. */
+type HandedSentence = Readonly<{
+  /** Its index among the sentences of the text when it was handed out. */
+  index: number
+  /** Its letters and digits, which formatting closed later cannot change. */
+  key: string
+}>
+
+/**
+ * Reduces a sentence to what identifies it across readings of the text.
+ *
+ * @param text - A non-empty sentence.
+ * @returns Its letters and digits in lower case, or the sentence itself
+ * when it has none.
+ */
+function toSentenceKey(text: string): string {
+  const key = text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")
+  return key === "" ? text : key
 }
 
 /** One sentence of the plain text. */
@@ -267,6 +337,7 @@ type SentenceSegment = Readonly<{
 function toPlainText(markdown: string, lastBlock: LastBlock): string {
   const tree = markdownParser.parse(markdown)
   const definitions = collectDefinitions(tree)
+  if (lastBlock === "open") holdPossibleTableHeader(tree, definitions)
   const blocks: string[] = []
   for (const child of tree.children) collectBlock(child, definitions, blocks)
   return blocks
@@ -277,6 +348,37 @@ function toPlainText(markdown: string, lastBlock: LastBlock): string {
         : block
     )
     .join("\n")
+}
+
+/**
+ * Leaves out the paragraph or heading still being written when it holds a
+ * `|`: the next line may turn it into a table header, which is never
+ * spoken, so its sentences wait until the block ends. Handing them out
+ * earlier would let the table take them back, after which the count of
+ * handed-out sentences would skip a later one.
+ *
+ * @param root - Parsed reply whose last block may still grow; changed in
+ * place.
+ * @param definitions - Link definitions of the reply.
+ */
+function holdPossibleTableHeader(root: Root, definitions: Definitions): void {
+  let container: BlockContainer = root
+  for (;;) {
+    const last: RootContent | undefined = container.children.at(-1)
+    if (last === undefined) return
+    if (last.type === "paragraph" || last.type === "heading") {
+      if (inlineChildren(last, definitions).includes("|"))
+        container.children.pop()
+      return
+    }
+    if (
+      last.type !== "blockquote" &&
+      last.type !== "list" &&
+      last.type !== "listItem"
+    )
+      return
+    container = last
+  }
 }
 
 /**

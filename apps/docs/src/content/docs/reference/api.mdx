@@ -1119,7 +1119,9 @@ it streams, `replied` once it completed, `failed` once it failed, `stopped`
 once the person or the delegator stopped it, and `interrupted` once the
 backend stopped, or restarted, while it was working. A job that
 waits for the person's approval reads as `working`. `latestNote` is the
-newest progress note of that reply, or `null`. `jobCallIds` holds the
+newest progress note of that reply, or `null`. Its citation markers use the
+job's source numbers until the note is delivered to the parent conversation,
+and the parent's source numbers afterwards. `jobCallIds` holds the
 `delegate_work` calls, in the parent conversation, that sent the job's
 messages, oldest first; the first one started the job.
 

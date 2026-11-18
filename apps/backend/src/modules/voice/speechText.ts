@@ -362,30 +362,30 @@ const SPOKEN_SILENCED: ReadonlySet<RootContent["type"]> = new Set<
  * whose letters are not spoken. The last word of the text being written waits
  * too when more letters may turn it into a bare URL, such as `htt`, and so does
  * inline code whose closing run ends the text, since one more backtick would
- * turn it back into text, and the text before a block of a kind never spoken,
- * such as a code fence, or a block with no content, such as an empty heading,
- * or a quote or list holding only such blocks, while that block is on its first
- * line.
+ * turn it back into text, and the text before a block still on its first line
+ * that more text there may turn into that text's next line: a block never
+ * spoken, such as a code fence; a heading or list item with no content, such as
+ * `#`; or a list holding only such list items.
  *
  * Each round's text is a markdown document of its own, its text parts joined as
  * the renderer joins them, so whatever one round leaves open, such as a code
  * fence, ends with it. A sentence is final once a later sentence holding a
- * letter follows it, a line break ends it, another block follows its block, or
- * its round's text ends, so a period inside a number, a version, or an
- * abbreviation, such as `$3.50`, never ends a sentence early;
- * `closeRoundText()` hands out the rest, however short. A sentence is handed
- * out at most once and never taken back. When more text changes how earlier
- * text reads, such as a line that turns into a table header, the buffer resumes
- * after the last handed-out sentence still present in its order, so no later
- * sentence is skipped and no earlier one that reads the same is spoken again.
- * No later text changes how a block reads once the first line of the block
- * after it ended, and for a table its delimiter row, or how an item reads once
- * the first line of the item after it ended, so the buffer keeps only the text
- * from the block or the item still being written on, unless that text parses
- * into other blocks alone, as `- 42.` right after a paragraph does. A fragment
- * parses only that text: its cost grows with the block being written, such as a
- * long table or blockquote, but not with the blocks before it.
- *
+ * letter follows it, a later sentence of any kind follows it after a line
+ * break, the first line of the block after its block ends, or its round's text
+ * ends, so a period inside a number, a version, or an abbreviation, such as
+ * `$3.50`, never ends a sentence early; `closeRoundText()` hands out the rest,
+ * however short. A sentence is handed out at most once and never taken back.
+ * When more text changes how earlier text reads, such as a line that turns into
+ * a table header, the buffer resumes after the last handed-out sentence still
+ * present in its order, so no later sentence is skipped and no earlier one that
+ * reads the same is spoken again. No later text changes how a block reads once
+ * the first line of the block after it ended, and for a table its delimiter
+ * row, or how an item reads once the first line of the item after it ended, so
+ * the buffer keeps only the text from the block or the item still being written
+ * on, unless that text parses into other blocks alone, as `- 42.` right after a
+ * paragraph does. A fragment parses only that text: its cost grows with the
+ * block being written, such as a long table or blockquote, but not with the
+ * blocks before it.
  * Feed the buffer the reply's text: the snapshot at the start, then every
  * text part and fragment as it arrives, and `closeRoundText()` when a tool
  * call ends a round or the reply ends. `start` hands out every sentence;
@@ -886,8 +886,8 @@ function removeReparsableText(root: Root, markdown: string): void {
  * Whether a block that is silent or empty is still on its first line: more
  * text on that line may turn it back into the next line of the block before
  * it, as a backtick turns ```` ```a ```` into ```` ```a` ````, which is no
- * code fence, and a letter turns an empty heading `#` into `#x`, so nothing
- * before it is final yet.
+ * code fence, and a letter turns an empty heading `#` into `#x` and an empty
+ * list item `-` into `-x`, so nothing before it is final yet.
  *
  * @param node - The last block of its container.
  * @param markdown - The reply's text, which `node` was parsed from.
@@ -903,21 +903,24 @@ function isSilentOrEmptyBlockOnFirstLine(
 
 /**
  * Whether a block is silent or empty: silent when it is one of
- * {@link SPOKEN_SILENCED}, which are never spoken; empty when it is a paragraph
- * or heading with no content, such as `#`, or a quote, list, or list item whose
- * blocks, if it has any, are all silent or empty. Content of any kind makes a
- * paragraph or heading neither, even an image or inline HTML, which are not
- * spoken: once a line holds content after its marker, no more text on it turns
- * the block back into the block before it.
+ * {@link SPOKEN_SILENCED}, which are never spoken; empty when it is a heading
+ * or list item with no content, such as `#`, or a list holding only such items.
+ * A block with content after its marker is neither, even when that content is
+ * not spoken, such as an image or inline HTML in a heading or a code fence in a
+ * quote or list item: no more text on its line can turn the block back into the
+ * block before it.
  *
  * @param node - A block of the parsed text.
  * @returns Whether the block is silent or empty.
  */
 function isSilentOrEmptyBlock(node: RootContent): boolean {
   if (SPOKEN_SILENCED.has(node.type)) return true
-  if (!("children" in node)) return false
-  if (INLINE_PARENT_TYPES.has(node.type)) return node.children.length === 0
-  return node.children.every((child) => isSilentOrEmptyBlock(child))
+  if (node.type === "list")
+    return node.children.every((item) => item.children.length === 0)
+  return (
+    (node.type === "heading" || node.type === "listItem") &&
+    node.children.length === 0
+  )
 }
 
 /**

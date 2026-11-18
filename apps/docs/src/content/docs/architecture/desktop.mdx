@@ -590,9 +590,11 @@ readiness, and applies these rules:
 - A reply that finishes with `done` while the window is focused is read to
   its end: the socket stays open until the backend closes it with `1000`,
   also after the chat request that streamed it has ended.
-- A reply that finishes with `done` before anything was said, with the window
-  in the background, earns one spoken line through the notification socket.
-  If anything was said, it does not.
+- A reply that finishes with `done` before anything of it was said, with the
+  window in the background and voice ready, earns one spoken line through
+  the notification socket. If anything of it was said, also on a socket that
+  closed early or before voice stopped, it does not, and while voice is
+  stopped, starting, or down, nothing is opened.
 - A stopped or failed reply, a new message, a switched or closed conversation,
   or voice stopping all stop the playback, and any notification, at once and
   drop the unplayed frames, also frames still queued after a `1000`.

@@ -476,25 +476,28 @@ the `![` may begin an image, a closing mark may make it inline code or
 formatting, whose marks are not read, and a `]` may complete a footnote
 reference and a `>` a tag or a comment, whose letters are not read. The last
 word being written waits too while more letters may make it a bare URL, such as
-`htt`, and so does inline code or math whose closing run ends the text, since
-one more backtick or `$` would make it text again. Such a hold delays the
-sentences it covers, not only its marks: in "It takes ~5 minutes. Then do X.",
-nothing from the `~` on is read until the paragraph ends or a closing `~`
-arrives. Likewise, in `a<b` written without spaces, nothing from the `<` on is
-read until the paragraph ends or the text after it becomes a tag. When more text
-changes how earlier text reads, speech resumes after the last sentence sent that
-is still there, matched in order, so no sentence is skipped or spoken twice.
-Once a block's next block, or a list item's next item, has a whole first line,
-and a table its delimiter row, no later text changes how the block reads, so
-each fragment parses only the text from the block or item still being written
-on, unless that text parses into other blocks alone, as `- 42.` does right after
-a paragraph, where `42.` is text but alone an empty numbered list; then nothing
-settles until a later block's first line ends. A fragment's cost grows with that
-block, not with the reply: a reply of paragraphs and flat list items costs the
-same per fragment however long it grows, about 0.3 s of parsing in all for
-20 KB, while one long block costs more per fragment the longer it grows, such as
-a 5 KB table about 1.3 s in all and a 20 KB table about 20 s, spread over its
-streaming. Reasoning, tool calls, and their results are never spoken.
+`htt`, and so does inline code whose closing run ends the text, since one more
+backtick would make it text again. A block that carries no words, such as a code
+fence, holds the block before it while it is on its first line, since more text
+there, such as the backtick of `` ```a` ``, may make it that block's next
+line. Such a hold delays the sentences it covers, not only its marks: in "It
+takes ~5 minutes. Then do X.", nothing from the `~` on is read until the
+paragraph ends or a closing `~` arrives. Likewise, in `a<b` written without
+spaces, nothing from the `<` on is read until the paragraph ends or the text
+after it becomes a tag. When more text changes how earlier text reads, speech
+resumes after the last sentence sent that is still there, matched in order, so
+no sentence is skipped or spoken twice. Once a block's next block, or a list
+item's next item, has a whole first line, and a table its delimiter row, no
+later text changes how the block reads, so each fragment parses only the text
+from the block or item still being written on, unless that text parses into
+other blocks alone, as `- 42.` does right after a paragraph, where `42.` is text
+but alone an empty numbered list; then nothing settles until a later block's
+first line ends. A fragment's cost grows with that block, not with the reply: a
+reply of paragraphs and flat list items costs the same per fragment however long
+it grows, about 0.3 s of parsing in all for 20 KB, while one long block costs
+more per fragment the longer it grows, such as a 5 KB table about 1.3 s in all
+and a 20 KB table about 20 s, spread over its streaming. Reasoning, tool calls,
+and their results are never spoken.
 
 Audio arrives from voice as binary frames of 24 kHz mono 16-bit little-endian
 PCM and is relayed to the socket unchanged. A UI that falls more than 1 MB of

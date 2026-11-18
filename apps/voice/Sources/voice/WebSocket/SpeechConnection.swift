@@ -103,7 +103,11 @@ final class SpeechConnection: @unchecked Sendable {
     ///
     /// A receive failure before this side sent its close frame, such as a
     /// message over ``maximumMessageSize`` or a peer that went away without
-    /// a close frame, is logged before the speech is torn down.
+    /// a close frame, is logged before the speech is torn down. So is a text
+    /// message that is not UTF-8: Network.framework fails its receive and
+    /// closes the socket with `1002` itself. Any other message that breaks
+    /// the speech protocol, a binary one among them, is logged and answered
+    /// with its close code.
     private func serve() async {
         box.connection.start(queue: DispatchQueue(label: "voice.WebSocket"))
         let deadline = startHandshakeDeadline()
@@ -128,7 +132,9 @@ final class SpeechConnection: @unchecked Sendable {
             case .success(.text(let body)):
                 if !isCloseSent { await handleText(body) }
             case .success(.binary):
-                if !isCloseSent { await initiateClose(.protocolCode(.unsupportedData)) }
+                if !isCloseSent {
+                    await closeForProtocolViolation("sent a binary message", code: .unsupportedData)
+                }
             }
         }
     }
@@ -173,7 +179,7 @@ final class SpeechConnection: @unchecked Sendable {
     /// - Parameter body: The message's UTF-8 text.
     private func handleText(_ body: String) async {
         guard let message = decodeSpeechMessage(body) else {
-            await initiateClose(.protocolCode(.protocolError))
+            await closeForProtocolViolation("sent a message that is not a speech message", code: .protocolError)
             return
         }
         switch message {
@@ -224,8 +230,10 @@ final class SpeechConnection: @unchecked Sendable {
         switch outcome {
         case .enqueued(let session):
             session.enqueue(sentence)
-        case .noSpeech, .afterFinish:
-            await initiateClose(.protocolCode(.protocolError))
+        case .noSpeech:
+            await closeForProtocolViolation("sent text before speak", code: .protocolError)
+        case .afterFinish:
+            await closeForProtocolViolation("sent text after finish", code: .protocolError)
         }
     }
 
@@ -237,7 +245,7 @@ final class SpeechConnection: @unchecked Sendable {
             return session
         }
         guard let session else {
-            await initiateClose(.protocolCode(.protocolError))
+            await closeForProtocolViolation("sent finish before speak", code: .protocolError)
             return
         }
         session.finish()
@@ -320,6 +328,20 @@ final class SpeechConnection: @unchecked Sendable {
     /// Whether a close frame was sent; the pump stops when it was.
     private var isCloseSent: Bool {
         lock.withLock { state.closeSent }
+    }
+
+    /// Logs a client message that breaks the speech protocol, then closes the
+    /// socket with the code that names the violation.
+    ///
+    /// - Parameters:
+    ///   - violation: What the client did, completing "speech connection …".
+    ///   - code: Close code the client receives.
+    private func closeForProtocolViolation(
+        _ violation: String,
+        code: NWProtocolWebSocket.CloseCode.Defined
+    ) async {
+        print("voice: speech connection \(box.connection.endpoint) \(violation); closing with \(code)")
+        await initiateClose(.protocolCode(code))
     }
 
     /// Sends a close frame and tears the speech down.
@@ -437,7 +459,14 @@ final class SpeechConnection: @unchecked Sendable {
         }
     }
 
-    /// Reads the next message; throws when the connection fails.
+    /// Reads the next message.
+    ///
+    /// - Returns: The message. A text message is valid UTF-8, because
+    ///   Network.framework fails the receive of one that is not.
+    /// - Throws: The connection's `NWError` when receiving fails, a text
+    ///   message that is not UTF-8 included, or ``ConnectionClosedError``
+    ///   when the peer ended the connection without a close frame or sent an
+    ///   empty message.
     private func receiveMessage() async throws -> Message {
         try await withCheckedThrowingContinuation { continuation in
             box.connection.receiveMessage { content, context, _, error in
@@ -451,18 +480,14 @@ final class SpeechConnection: @unchecked Sendable {
                     return
                 }
                 guard let content, !content.isEmpty else {
-                    continuation.resume(throwing: ConnectionClosed())
+                    continuation.resume(throwing: ConnectionClosedError())
                     return
                 }
                 if metadata?.opcode == .binary {
                     continuation.resume(returning: .binary)
                     return
                 }
-                guard let text = String(data: content, encoding: .utf8) else {
-                    continuation.resume(throwing: TextNotUTF8())
-                    return
-                }
-                continuation.resume(returning: .text(text))
+                continuation.resume(returning: .text(String(decoding: content, as: UTF8.self)))
             }
         }
     }
@@ -470,7 +495,4 @@ final class SpeechConnection: @unchecked Sendable {
 
 /// The peer closed the connection without a close frame, or sent an empty
 /// message where a message was expected.
-private struct ConnectionClosed: Error {}
-
-/// The peer sent a text message that is not valid UTF-8.
-private struct TextNotUTF8: Error {}
+private struct ConnectionClosedError: Error {}

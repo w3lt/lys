@@ -222,6 +222,12 @@ private final class TestSpeechClient: @unchecked Sendable {
         sendFrame(opcode: 0x2, payload: Data([0x00, 0x01]))
     }
 
+    /// Sends one text message whose payload is not UTF-8; the server must
+    /// refuse it.
+    func sendInvalidText() {
+        sendFrame(opcode: 0x1, payload: Data([0xFF]))
+    }
+
     /// Returns the next message the server sent, waiting for it.
     ///
     /// - Parameter seconds: Longest wait for the message.
@@ -652,6 +658,20 @@ struct SpeechSocketFlowTests {
 
         let close = try await client.receive()
         #expect(close == .close(1003))
+    }
+
+    /// Verifies a text message that is not UTF-8 ends the connection with a
+    /// protocol-error close, which Network.framework sends itself.
+    @Test func textThatIsNotUTF8IsAProtocolError() async throws {
+        let server = try await startSpeechServer(engine: FakeSpeechEngine())
+        defer { server.stop() }
+
+        let client = TestSpeechClient(port: server.port)
+        defer { client.cancel() }
+        client.sendInvalidText()
+
+        let close = try await client.receive()
+        #expect(close == .close(1002))
     }
 
     /// Verifies an unknown message type is a protocol-error close.

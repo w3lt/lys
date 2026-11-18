@@ -14,7 +14,8 @@ import Synchronization
 ///
 /// The server owns at most ``maxConnections`` connections; connections
 /// accepted beyond the cap are dropped without a handshake response, and
-/// each drop is logged.
+/// each drop is logged. A connection that completes no handshake within
+/// ``handshakeTimeout`` is cancelled, so idle clients cannot hold every place.
 ///
 /// Concurrency model: serialized. The only mutable state, the count of live
 /// connections, is guarded by its `Mutex`; the speech hub serializes the
@@ -22,6 +23,8 @@ import Synchronization
 final class SpeechSocketServer: Sendable {
     /// Default most speech connections served at once.
     static let defaultMaxConnections = 16
+    /// Default longest wait for a client's WebSocket handshake.
+    static let defaultHandshakeTimeout: Duration = .seconds(10)
 
     /// Live accepted connections; the server stops accepting beyond its cap.
     private let liveConnections = Mutex(0)
@@ -36,6 +39,8 @@ final class SpeechSocketServer: Sendable {
     private let port: NWEndpoint.Port
     /// Most connections served at once.
     private let maxConnections: Int
+    /// Longest wait for a client's WebSocket handshake.
+    private let handshakeTimeout: Duration
 
     /// Creates a server that is not listening yet.
     ///
@@ -45,16 +50,20 @@ final class SpeechSocketServer: Sendable {
     ///   - port: TCP port to bind; 9091 by default.
     ///   - maxConnections: Most connections served at once; a connection
     ///     accepted beyond the cap is dropped without a handshake response.
+    ///   - handshakeTimeout: Longest wait for a client's WebSocket handshake
+    ///     before its connection is cancelled.
     init(
         engine: any SpeechEngine,
         host: NWEndpoint.Host = "127.0.0.1",
         port: NWEndpoint.Port = 9091,
-        maxConnections: Int = SpeechSocketServer.defaultMaxConnections
+        maxConnections: Int = SpeechSocketServer.defaultMaxConnections,
+        handshakeTimeout: Duration = SpeechSocketServer.defaultHandshakeTimeout
     ) {
         self.engine = engine
         self.host = host
         self.port = port
         self.maxConnections = maxConnections
+        self.handshakeTimeout = handshakeTimeout
     }
 
     /// Listens and serves connections until the calling task is cancelled or
@@ -190,7 +199,12 @@ final class SpeechSocketServer: Sendable {
                 }
                 group.addTask {
                     defer { self.liveConnections.withLock { $0 -= 1 } }
-                    let speech = SpeechConnection(connection: connection, engine: self.engine, hub: self.hub)
+                    let speech = SpeechConnection(
+                        connection: connection,
+                        engine: self.engine,
+                        hub: self.hub,
+                        handshakeTimeout: self.handshakeTimeout
+                    )
                     await speech.run()
                 }
             case .failed(let error):

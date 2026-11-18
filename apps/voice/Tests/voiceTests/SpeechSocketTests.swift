@@ -170,6 +170,8 @@ private final class TestSpeechClient: @unchecked Sendable {
     private var handedOut = 0
     /// Whether the server ended the connection or receiving failed.
     private var ended = false
+    /// Whether the test stopped reading, so the server's sends back up.
+    private var isReadingPaused = false
 
     /// Connects to the speech server on `port` and sends the upgrade request.
     ///
@@ -248,6 +250,12 @@ private final class TestSpeechClient: @unchecked Sendable {
         }
     }
 
+    /// Stops reading once the receive already pending completes, so the
+    /// server's sends back up as they do towards a peer that stopped reading.
+    func pauseReading() {
+        lock.withLock { isReadingPaused = true }
+    }
+
     /// Ends the TCP connection without a close frame.
     func cancel() {
         connection.cancel()
@@ -263,14 +271,14 @@ private final class TestSpeechClient: @unchecked Sendable {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] content, _, isComplete, error in
             guard let self else { return }
             let isEnd = isComplete || error != nil
-            let replies = self.lock.withLock { () -> [Data] in
+            let (replies, isPaused) = self.lock.withLock { () -> ([Data], Bool) in
                 if let content { unparsed.append(content) }
                 let replies = parseReceivedBytes()
                 if isEnd { ended = true }
-                return replies
+                return (replies, isReadingPaused)
             }
             replies.forEach(sendBytes)
-            if !isEnd { self.receiveNext() }
+            if !isEnd && !isPaused { self.receiveNext() }
         }
     }
 
@@ -379,13 +387,20 @@ private final class TestSpeechClient: @unchecked Sendable {
 /// - Parameters:
 ///   - engine: Engine the server speaks with.
 ///   - maxConnections: The server's connection cap.
+///   - handshakeTimeout: The server's longest wait for a handshake.
 /// - Returns: The running server; the test stops it.
 /// - Throws: The listener's error when it fails before becoming ready.
 private func startSpeechServer(
     engine: FakeSpeechEngine,
-    maxConnections: Int = SpeechSocketServer.defaultMaxConnections
+    maxConnections: Int = SpeechSocketServer.defaultMaxConnections,
+    handshakeTimeout: Duration = SpeechSocketServer.defaultHandshakeTimeout
 ) async throws -> LoopbackServer {
-    let server = SpeechSocketServer(engine: engine, port: .any, maxConnections: maxConnections)
+    let server = SpeechSocketServer(
+        engine: engine,
+        port: .any,
+        maxConnections: maxConnections,
+        handshakeTimeout: handshakeTimeout
+    )
     let loopback = LoopbackServer()
     try await loopback.start { onReady in try await server.start(onReady: onReady) }
     return loopback
@@ -468,6 +483,55 @@ struct SpeechHandshakeTests {
     }
 }
 
+extension SpeechHandshakeTests {
+    /// Verifies a connection that completes no handshake is cancelled at the
+    /// deadline, which frees its place under the cap.
+    @Test func dropsAConnectionThatCompletesNoHandshake() async throws {
+        let server = try await startSpeechServer(
+            engine: FakeSpeechEngine(),
+            maxConnections: 1,
+            handshakeTimeout: .milliseconds(200)
+        )
+        defer { server.stop() }
+
+        let idle = TestTCPClient(port: server.port)
+        defer { idle.cancel() }
+        do {
+            _ = try await idle.readToEnd(within: 2)
+        } catch is TimedOut {
+            Issue.record("Expected the server to cancel the idle connection")
+            return
+        } catch {
+            // A reset also shows the drop.
+            #expect(error is NWError)
+        }
+        let client = TestSpeechClient(port: server.port)
+        defer { client.cancel() }
+        try await waitUntil { client.isOpen }
+    }
+
+    /// Verifies the deadline covers the handshake only: an open socket that
+    /// stays quiet past it still speaks.
+    @Test func keepsAQuietOpenSocketPastTheHandshakeDeadline() async throws {
+        let server = try await startSpeechServer(
+            engine: FakeSpeechEngine(),
+            handshakeTimeout: .milliseconds(200)
+        )
+        defer { server.stop() }
+
+        let client = TestSpeechClient(port: server.port)
+        defer { client.cancel() }
+        try await waitUntil { client.isOpen }
+        try await Task.sleep(for: .milliseconds(500))
+        client.sendText(#"{"type":"speak"}"#)
+        client.sendText(#"{"type":"text","text":"One."}"#)
+        guard case .binary = try await client.receive() else {
+            Issue.record("Expected the quiet socket to keep speaking")
+            return
+        }
+    }
+}
+
 /// Checks one speech flow end to end over loopback.
 @Suite("Speech over loopback", .timeLimit(.minutes(1)))
 struct SpeechSocketFlowTests {
@@ -539,6 +603,29 @@ struct SpeechSocketFlowTests {
         client.cancel()
 
         try await waitUntil { engine.madeSessions.first?.isCancelled == true }
+    }
+
+    /// Verifies a close does not wait without bound for audio a peer stopped
+    /// reading: past the bound, the connection and the speech are cancelled.
+    @Test func closingTowardsAPeerThatStoppedReadingCancelsTheSpeech() async throws {
+        let engine = FakeSpeechEngine()
+        let server = try await startSpeechServer(engine: engine)
+        defer { server.stop() }
+
+        let client = TestSpeechClient(port: server.port)
+        defer { client.cancel() }
+        try await waitUntil { client.isOpen }
+        client.pauseReading()
+        client.sendText(#"{"type":"speak"}"#)
+        for _ in 0..<200 {
+            client.sendText(#"{"type":"text","text":"One."}"#)
+        }
+        try await waitUntil { engine.madeSessions.first != nil }
+        // Gives the server time to fill the connection's buffers.
+        try await Task.sleep(for: .milliseconds(300))
+        client.sendBinary()
+
+        try await waitUntil(within: 5) { engine.madeSessions.first?.isCancelled == true }
     }
 
     /// Verifies text before `speak` is answered with a protocol-error close.

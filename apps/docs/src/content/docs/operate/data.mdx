@@ -208,6 +208,16 @@ built on Containerization can share. vmo no longer uses that directory and
 does not delete what it left there. If no other tool uses it, deleting it frees
 that space.
 
+## voice's models
+
+voice, the speech server Lys reads replies with, keeps its PocketTTS models in
+`~/.lys/voice/models` whichever Lys home is in use, because voice does not read
+`LYS_HOME`: that is inside the default Lys home, `~/.lys`, and outside any
+other one. It downloads them on its first start, about 780 MB, so the
+directory exists once voice has started on this machine. Deleting it while
+voice is stopped loses nothing else; the next start downloads the models
+again.
+
 ## Lifecycle notes
 
 - The settings file is created by the Tauri host on first settings load.
@@ -220,9 +230,10 @@ that space.
   [Running Lys locally](/develop/running/).
 - The settings file, the database, and the attachments directory live in the
   same Lys home directory, so user data and app settings currently share one
-  root. Release builds also start their backend, vmo, and the email MCP
-  server from the `runtime/` directory there, and the backend keeps its log
-  in `logs/`.
+  root. Release builds also start their backend, vmo, voice, and the email
+  MCP server from the `runtime/` directory there, and the backend keeps its
+  log in `logs/`. voice keeps its models at `~/.lys/voice/models` whichever
+  Lys home is in use.
 
 ## WebView theme storage
 

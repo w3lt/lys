@@ -110,7 +110,7 @@ export type SettingsGroupSaves = {
     password: EmailPassword | null
   ) => Promise<void>
   /**
-   * Saves the two startup switches of the runtime group after every save
+   * Saves the startup switches of the runtime group after every save
    * sent earlier has settled.
    *
    * @param autoStart - Startup switches to persist. The rest of the runtime

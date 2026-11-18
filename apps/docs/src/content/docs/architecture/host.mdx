@@ -1,14 +1,15 @@
 ---
 title: Tauri host and lifecycle
-description: Window bootstrap, backend and vmo process ownership, file-backed settings commands, and client tools.
+description: Window bootstrap, backend, vmo, and voice process ownership, file-backed settings commands, and client tools.
 docType: architecture
 sidebar:
   order: 3
 ---
 
 The Tauri layer is a small native host. It does not implement the backend API
-itself; it starts the backend and vmo, the page reader `read_page` uses, and
-exposes a few native commands to the React UI.
+itself; it starts the backend, vmo, the page reader `read_page` uses, and voice, the
+speech server Lys reads replies with, and exposes a few native commands to
+the React UI.
 
 ## Registered commands
 
@@ -21,6 +22,10 @@ exposes a few native commands to the React UI.
 | `stop_vmo`           | Sends vmo `SIGTERM`, waits up to 60 seconds for it to exit, then kills it, and reports which.                                                                   |
 | `get_vmo_status`     | Reports whether the owned vmo is stopped, running, or stopping.                                                                                                 |
 | `get_vmo_health`     | Asks vmo's `GET /health` at `127.0.0.1:8080` whether it can read pages, within one second.                                                                      |
+| `start_voice`        | Starts voice for the current build mode unless the owned voice runs, and reports its status.                                                                    |
+| `stop_voice`         | Sends voice `SIGTERM`, waits up to 5 seconds for it to exit, then kills it, and reports which.                                                                  |
+| `get_voice_status`   | Reports whether the owned voice is stopped, running, or stopping.                                                                                               |
+| `get_voice_health`   | Asks voice's `GET /health` at `127.0.0.1:9090` whether its models are loaded, within one second.                                                                |
 | `load_settings`      | Reads `$LYS_HOME/settings.json`, creating a default file if needed.                                                                                             |
 | `save_settings`      | Replaces `$LYS_HOME/settings.json` atomically, owner-only, with a new settings JSON document.                                                                   |
 | `read_text_file`     | Returns the complete text of one UTF-8 file of at most 1 MiB, unless it is a credential file or the settings file.                                              |
@@ -300,6 +305,49 @@ app dies without running its exit handler, after a crash, Force Quit, or
 ([#202](https://github.com/w3lt/lys/issues/202)); see
 [troubleshooting](/operate/troubleshooting/#a-vmo-or-backend-keeps-running-after-lys-died).
 
+## voice process ownership
+
+The host owns one `Voice` state object (`src/voice.rs`), like `Vmo`'s. voice
+starts when the desktop's initialization or the Runtime pane asks for it,
+never on its own; `runtime.autoStartVoice` is off by default because a first
+start downloads about 780 MB of models. The child depends on the build mode:
+
+- Development builds run `bash run.sh` in `apps/voice` of the checkout
+  recorded at compile time. `run.sh` builds voice and replaces itself with it
+  through `exec`, so the child the host owns is voice itself.
+- Release builds run `$LYS_HOME/runtime/voice/voice`, which `build.sh`
+  installs.
+
+voice runs in a process group of its own. The host does not set `LYS_HOME`
+for voice; voice reads and writes its models under `~/.lys/voice` regardless.
+`start_voice` checks and spawns under one lock, so two starts never spawn
+two children; it leaves a running voice alone and refuses while a stop still
+waits for the previous one, which holds voice's port. A spawn failure names
+the program it tried to run.
+
+A stop sends `SIGTERM` to voice's process group once and checks every 100 ms
+whether voice has exited. A stop that arrives meanwhile joins it and gets the
+same result, without another signal. When voice still runs after 5 seconds,
+the stop sends `SIGKILL` and reports `killed`. When `SIGTERM` or a check
+fails, the stop sends `SIGKILL` at once and reports the failure. It sends
+`SIGKILL` at most once and does not repeat a failed one. `stop_voice` and
+`get_voice_health` run off the main thread, so a stop never blocks the
+window. voice holds no state a signal can lose, so there is no cleanup to
+wait for beyond the process exiting.
+
+`get_voice_health` sends `GET /health` over a plain TCP connection to
+`127.0.0.1:9090` and answers `ready` only for a `HTTP/1.1 200` status line
+within one second. It runs in the host because voice sends no CORS headers.
+It asks whatever listens on voice's port, so the renderer reads
+`get_voice_status` first, which keeps a voice that has exited from counting
+as ready.
+
+On app exit, the host stops voice, vmo, and the backend together and waits
+for them. A failure or a killed voice is written to standard error and does
+not stop the exit. When the app dies without running its exit handler, after
+a crash, Force Quit, or `kill -9`, voice and the rest keep running, like
+vmo ([#202](https://github.com/w3lt/lys/issues/202)).
+
 ## Settings file
 
 The host creates the following defaults when the settings file is missing:
@@ -309,6 +357,7 @@ The host creates the following defaults when the settings file is missing:
   "runtime": {
     "autoStartBackend": true,
     "autoStartVmo": true,
+    "autoStartVoice": false,
     "defaultModel": null,
     "backendAddress": "http://127.0.0.1:12345"
   },
@@ -468,9 +517,11 @@ person flips it there or, for Lys's mailbox, in the Lys pane, and an email
 account with its password, in one write of both groups that keeps the other
 account and its password, when the person saves or removes it on its card,
 or, for Lys's, with the Lys pane's Server keeps a copy of sent mail switch or
-Remove mailbox. A change of either startup switch in the Runtime pane saves
-`autoStartBackend` and `autoStartVmo` and keeps the rest of the `runtime`
-group as stored; a file without `autoStartVmo` loads it as `true`. The other
+Remove mailbox. A change of any of the three startup switches in the Runtime
+pane saves `autoStartBackend`, `autoStartVmo`, and `autoStartVoice` and keeps
+the rest of the `runtime` group as stored; a file without `autoStartVmo`
+loads it as `true`, and one without `autoStartVoice` loads it as `false`.
+The other
 runtime edits in the UI remain session-only; the automatic saves preserve
 those values as already stored on disk. An older file's `model` group, which
 held a local context-size estimate, is ignored when loading and left out of

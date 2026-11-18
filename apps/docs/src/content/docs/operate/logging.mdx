@@ -278,7 +278,33 @@ of a report.
   reply ends is logged as `Conversation task failed` at level `error`, with
   what was thrown in `err`.
 
-vmo's output is not kept in a release build
+### Speech socket entries
+
+The backend logs what happens on the
+[speech sockets](/architecture/backend/#speech-sockets). Each entry, except
+the origin refusal, names the reply in `conversationId` and
+`assistantMessageId`. No entry holds the reply's text or its audio.
+
+| Message                                  | Level   | Other fields                   | When                                                                                                                 |
+| ---------------------------------------- | ------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `Speech socket opened`                   | `info`  | `speech`, `from`               | A client opened the speech socket (`speech` is `reply`, with `from`) or the notification socket (`notification`)     |
+| `Speech socket closed`                   | `info`  | `code`                         | The socket closed; `code` is its close code, such as `1000`, `4409`, or `4503`                                       |
+| `Speech socket failed`                   | `warn`  | `err`                          | The socket reported an error                                                                                         |
+| `Speech socket refused a foreign origin` | `warn`  | the request's fields, `origin` | An upgrade with an `Origin` that is not a desktop origin was refused with `403`                                      |
+| `Speech could not read the reply`        | `error` | `err`                          | The conversation store threw; the socket closes with `1011`                                                          |
+| `Voice refused a speech`                 | `warn`  | `err`                          | Voice refused or closed the speech handshake, or did not answer it within two seconds; the socket closes with `4503` |
+| `Speech could not reach voice`           | `error` | `err`                          | The handshake failed for another reason; the socket closes with `1011`                                               |
+| `Voice ended a speech that failed`       | `warn`  | `voiceCloseCode`               | Voice closed the speech with a code other than `1000`; the socket closes with `1011`                                 |
+| `Speech socket fell behind its audio`    | `warn`  | `bufferedBytes`                | More than 1 MB of audio waited for the client; the speech is cancelled and the socket closes with `1008`             |
+
+voice prints its refusals, drops, and failures to its standard output and
+standard error, and never a reply's text: FluidAudio, which logs each
+sentence it speaks at the info level, logs only its notices, warnings, and
+errors in voice. The WebSocket plugin logs a socket's error once more, at level `error`, with
+the error's message as `msg`, before it ends the socket, and does the same
+for a failure the speech handler throws.
+
+vmo's and voice's output is not kept in a release build
 ([#229](https://github.com/w3lt/lys/issues/229)).
 
 ## Desktop runtime status

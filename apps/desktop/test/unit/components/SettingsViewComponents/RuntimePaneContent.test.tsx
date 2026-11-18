@@ -392,6 +392,111 @@ describe("RuntimePaneContent", () => {
     })
   })
 
+  describe("voice", () => {
+    it("shows voice under vmo and above the provider connections", async () => {
+      await startRuntimePane()
+
+      const voiceCard = screen.getByRole("region", {
+        name: "voice speech server"
+      })
+      const vmoCard = screen.getByRole("region", { name: "vmo page reader" })
+      const lmStudioCard = screen.getByRole("region", {
+        name: "Provider connections"
+      })
+      expect(
+        vmoCard.compareDocumentPosition(voiceCard) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(
+        voiceCard.compareDocumentPosition(lmStudioCard) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(
+        screen.getByRole("heading", { name: "voice stopped" })
+      ).toBeInTheDocument()
+      expect(
+        screen.getByText(
+          /\d{2,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:9090 · not running/
+        )
+      ).toBeInTheDocument()
+    })
+
+    it("starts a stopped voice and stops it again", async () => {
+      let isRunning = false
+      const host = startNativeHostFake({
+        get_voice_status: () =>
+          isRunning ? { status: "running", pid: 4344 } : { status: "stopped" },
+        start_voice: () => {
+          isRunning = true
+          return { status: "running", pid: 4344 }
+        },
+        get_voice_health: () => "ready",
+        stop_voice: () => {
+          isRunning = false
+          return { status: "stopped" }
+        }
+      })
+      await startRuntimePane()
+      const user = userEvent.setup()
+
+      await user.click(screen.getByRole("button", { name: "Start voice" }))
+      await waitForRenderedWork()
+      const afterStart = screen.getByRole("heading", { name: "voice running" })
+      await user.click(screen.getByRole("button", { name: "Stop voice" }))
+      await waitForRenderedWork()
+
+      expect(afterStart).toBeInTheDocument()
+      expect(
+        screen.getByRole("heading", { name: "voice stopped" })
+      ).toBeInTheDocument()
+      expect(host.commands.map((invoked) => invoked.command)).toEqual([
+        "get_voice_status",
+        "start_voice",
+        "get_voice_status",
+        "get_voice_health",
+        "get_voice_status",
+        "stop_voice"
+      ])
+    })
+
+    it("leaves voice off by default and keeps the choice for the next time Lys opens", async () => {
+      const saves: unknown[] = []
+      startNativeHostFake({
+        load_settings: () => FIRST_RUN_SETTINGS_DOCUMENT,
+        save_settings: (args) => {
+          saves.push(args)
+        }
+      })
+      const { useLysStore } = await startRuntimePane()
+      const user = userEvent.setup()
+      const autoStart = screen.getByRole("switch", {
+        name: "Start voice when Lys opens"
+      })
+      expect(autoStart).not.toBeChecked()
+
+      await user.click(autoStart)
+      await waitForRenderedWork()
+
+      expect(autoStart).toBeChecked()
+      expect(useLysStore.getState().settings.runtime.autoStartVoice).toBe(true)
+      const savedRuntime = expect.objectContaining({
+        autoStartBackend: true,
+        autoStartVmo: true,
+        autoStartVoice: true
+      })
+      const savedSettings = expect.objectContaining({ runtime: savedRuntime })
+      expect(saves).toContainEqual({ newSettings: savedSettings })
+    })
+
+    it("warns that the first start downloads the models", async () => {
+      await startRuntimePane()
+
+      expect(
+        screen.getByText(/first start downloads about 780 MB of models/)
+      ).toBeInTheDocument()
+    })
+  })
+
   describe("LM Studio", () => {
     it("asks the backend to reconnect and shows the result", async () => {
       const runtime = buildUnreachableRuntime("running", "unreachable")

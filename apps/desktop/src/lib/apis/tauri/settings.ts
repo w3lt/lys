@@ -47,6 +47,8 @@ type SettingsDocumentRuntime = {
   readonly autoStartBackend: boolean
   /** Whether desktop initialization starts vmo, Lys's page reader. */
   readonly autoStartVmo: boolean
+  /** Whether desktop initialization starts voice, Lys's speech server. */
+  readonly autoStartVoice: boolean
   /** Key of the model a new conversation uses, or null. */
   readonly defaultModel: string | null
   /** Backend origin shown in runtime settings. */
@@ -312,6 +314,7 @@ function buildRuntimeSettings(
   return {
     autoStartBackend: runtime.autoStartBackend,
     autoStartVmo: runtime.autoStartVmo,
+    autoStartVoice: runtime.autoStartVoice,
     defaultModel: buildDefaultModel(runtime.defaultModel, providers),
     backendAddress: runtime.backendAddress
   }
@@ -638,7 +641,7 @@ export async function saveLocationSettings(
 }
 
 /**
- * Persists the two startup switches while preserving everything else already
+ * Persists the three startup switches while preserving everything else already
  * on disk.
  * @param autoStart - Startup switches sampled by the application autosave
  * owner.
@@ -658,7 +661,8 @@ export async function saveRuntimeAutoStartSettings(
   const runtime: SettingsDocumentRuntime = {
     ...persistedDocument.runtime,
     autoStartBackend: autoStart.autoStartBackend,
-    autoStartVmo: autoStart.autoStartVmo
+    autoStartVmo: autoStart.autoStartVmo,
+    autoStartVoice: autoStart.autoStartVoice
   }
   await writeSettingsDocument({ ...persistedDocument, runtime })
 }

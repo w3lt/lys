@@ -301,7 +301,8 @@ describe("createSettingsGroupSaves", () => {
     })
     const runtimeSave = saves.saveRuntimeAutoStartSettings({
       autoStartBackend: true,
-      autoStartVmo: true
+      autoStartVmo: true,
+      autoStartVoice: true
     })
     await waitForMicrotasks()
     const writesDuringFirst = writes.length
@@ -314,7 +315,8 @@ describe("createSettingsGroupSaves", () => {
     const runtime: SettingsDocument["runtime"] = {
       ...STORED_SETTINGS_DOCUMENT.runtime,
       autoStartBackend: true,
-      autoStartVmo: true
+      autoStartVmo: true,
+      autoStartVoice: true
     }
     const tools: SettingsDocument["tools"] = {
       justRun: ["find_files"],

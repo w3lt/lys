@@ -641,6 +641,46 @@ and question Q3 of its
   removes the Rust copy. vmo's default stays under this exception, guarded by
   the same test.
 
+## voice address copy exception
+
+voice's address has an approved exception to
+[CONST-005](https://github.com/w3lt/lys/blob/main/docs/code_standards/CONSTANT.md),
+like the vmo exception above: `VOICE_HOST` and `VOICE_PORT` in
+`@lys/protocol` define voice's HTTP address, and `VOICE_SOCKET_PORT` defines
+its WebSocket port, but the Tauri host and voice declare `127.0.0.1:9090`
+and `127.0.0.1:9091` again, because Rust and Swift cannot import a
+TypeScript constant. The exception was approved by the maintainer on
+2026-11-18 for [PR #392](https://github.com/w3lt/lys/pull/392), and the
+same kind of test as for the vmo exception guards it.
+
+- **Scope:** `VOICE_ADDRESS` in
+  [voice.rs](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/voice.rs),
+  where the host checks voice's health, the default `host` and `port` of
+  `WebServer.init` in
+  [WebServer.swift](https://github.com/w3lt/lys/blob/main/apps/voice/Sources/voice/WebServer/WebServer.swift),
+  where voice answers its health route, and the default `host` and `port` of
+  `SpeechSocketServer.init` in
+  [SpeechSocketServer.swift](https://github.com/w3lt/lys/blob/main/apps/voice/Sources/voice/WebSocket/SpeechSocketServer.swift),
+  where voice serves speech sockets. The backend and the renderer import the
+  protocol constants.
+- **Constraint:** the host's health check and voice's listeners are Rust and
+  Swift, which cannot read `@lys/protocol`, and voice run on its own, through
+  `run.sh` or `swift run`, needs addresses to listen on.
+- **Alternatives considered:**
+  - Passing the addresses to voice when the host starts it was not taken: the
+    host would still declare them to pass them, and voice run on its own
+    would still need defaults.
+- **Risk and control:** a changed protocol constant would leave the host
+  checking, or voice listening on, the old address, so speech would stay
+  unavailable. The desktop unit test
+  [voice-address.test.ts](https://github.com/w3lt/lys/blob/main/apps/desktop/test/unit/lib/apis/tauri/voice-address.test.ts),
+  which CI runs on every pull request, fails when either copy differs from
+  `VOICE_HOST`, `VOICE_PORT`, or `VOICE_SOCKET_PORT`, when it does not find
+  exactly one of each declaration, or when any of the three files moves.
+- **Removal condition:** if the host ever asks a different component to check
+  voice's health, or voice grows configuration for its listeners, the copies
+  go and this exception with them.
+
 ## Reader VM lifecycle contract exception
 
 vmo's reader VM lifecycle has an approved exception to

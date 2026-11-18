@@ -1,0 +1,1 @@
+export { startSpeech } from "./speech"

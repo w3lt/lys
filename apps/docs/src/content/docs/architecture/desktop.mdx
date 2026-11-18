@@ -85,7 +85,9 @@ The desktop keeps no replay log and does not reconnect a dropped stream on its
 own. Showing a conversation whose reply is still generating, after an open or a
 failed open, follows that reply again from a stored `reply-snapshot`. Quitting
 the app also ends the backend; a reply still generating then keeps its
-persisted parts and is marked interrupted when the backend next starts.
+persisted parts and is marked interrupted when the backend next starts. The
+audio a reply is read with travels on its own WebSocket, described in
+[Speech playback](#speech-playback).
 
 ## Context meter
 
@@ -560,12 +562,60 @@ without polling. The composer banner names the first missing prerequisite
 of the conversation's model and offers the action that fixes it; see
 [The conversation's model](#the-conversations-model).
 
-`initialize` shows the shell as soon as settings load; the backend and vmo
-then start in the background, together and without waiting for each other,
-each when its startup switch is on or the host already owns its process. A
-vmo the host is still stopping, as after a window reload during Stop, is
-joined instead: the card shows the stop, and vmo stays stopped whatever its
-switch says.
+`initialize` shows the shell as soon as settings load; the backend, vmo, and
+voice then start in the background, together and without waiting for each
+other, each when its startup switch is on or the host already owns its
+process. A vmo or voice the host is still stopping, as after a window reload
+during Stop, is joined instead: the card shows the stop, and the process
+stays stopped whatever its switch says.
+
+## Speech playback
+
+Lys reads a reply aloud while it streams, as long as voice is running. A
+speech controller (`lib/speech/speech-controller.ts`) owns when, a Web Audio
+player (`lib/speech/pcm-player.ts`) owns how, and neither owns any reply
+text: the backend turns the reply into speech-ready sentences and relays the
+audio, so a broken or slow reply costs audio, never text.
+
+The controller follows the chat store, the window's focus, and voice's
+readiness, and applies these rules:
+
+- A reply that starts streaming while the window is focused and voice is
+  ready is read from its first word. One the view joined that was already
+  running is read from the sentence being written.
+- A blur before the first word is spoken closes the speech socket and waits
+  silently; the read resumes at the sentence being written when the window
+  regains focus, when voice becomes ready, or when the conversation is
+  opened. Losing focus while she is reading changes nothing.
+- A reply that finishes with `done` while the window is focused is read to
+  its end: the socket stays open until the backend closes it with `1000`,
+  also after the chat request that streamed it has ended.
+- A reply that finishes with `done` before anything of it was said, with the
+  window in the background and voice ready, earns one spoken line through
+  the notification socket. If anything of it was said, also on a socket that
+  closed early or before voice stopped, it does not, and while voice is
+  stopped, starting, or down, nothing is opened.
+- A stopped or failed reply, a new message, a switched or closed conversation,
+  or voice stopping all stop the playback, and any notification, at once and
+  drop the unplayed frames, also frames still queued after a `1000`.
+- Only `1000` keeps the queued audio playing out; any other close stops it.
+  After such a close the reply is joined again only when the window regains
+  focus, voice becomes ready, or the conversation is opened, never on an
+  ordinary chat update. A `4503` or `1011` close also makes the store read
+  voice's status again, so a voice that died shows as stopped or not
+  responding on its card.
+
+The player decodes the 24 kHz mono 16-bit little-endian PCM the backend
+relays, decoding every whole sample and dropping a trailing odd byte, and
+schedules it back to back on a Web Audio context. The context is created on
+the first update that finds voice ready, and resumed on every update and
+every frame, since WebKit keeps a context suspended until a user gesture.
+One WebSocket per speech goes to
+`GET /api/v1/chat/:conversationId/replies/:assistantMessageId/speech?from=start|current`;
+the notification line goes to the sibling `notification` socket, and at most
+one of the two is open at a time. Nothing is retried or buffered across a
+reconnect. The application shell's cleanup closes both sockets and the audio
+context, and the controller then ignores every later change.
 
 ## vmo status
 
@@ -603,16 +653,30 @@ progress; otherwise it shows **vmo stopped** with it.
 Once vmo is `running`, the card stops checking, as the backend card does: a
 vmo that stops answering later is noticed when a turn offers `read_page`.
 
-The switches "Start it when Lys opens" and "Start vmo when Lys opens" change
-the settings at once and save both to the `runtime` group of `settings.json`,
-serialized with the other group saves; the latest switches win. A status line
-under the two cards says "Lys couldn't save the startup switches. The next
+The switches "Start it when Lys opens", "Start vmo when Lys opens", and
+"Start voice when Lys opens" change the settings at once and save the three
+to the `runtime` group of `settings.json`, serialized with the other group
+saves; the latest switches win. A status line
+under the cards says "Lys couldn't save the startup switches. The next
 launch follows the switches last saved; changing a switch tries again." when
 the save fails. The line is a polite status region that stays mounted and
 empties when a later save starts. Under each switch's heading, the line saying
 what off means is the switch's accessible description. The switches are read
 from disk at each launch and each window reload, so an unsaved switch applies
 to no later session.
+
+## voice status
+
+voice, the speech server Lys reads her replies with, has its own card in the
+Runtime pane, under the vmo card. The Tauri host owns the process; the
+store's voice slice owns what the card shows: `starting`, `running`,
+`stopping`, `stopped`, or `unresponsive` (**voice not responding**), the same
+lifecycle, readiness, and stop semantics as vmo, including joining a stop in
+progress. voice downloads about 780 MB of models on its first start, which
+is why the switch that starts it with Lys, "Start voice when Lys opens", is
+off by default. The card warns about the download in its switch's
+description. Speech playback itself is described in
+[Speech playback](#speech-playback).
 
 ## Model settings
 

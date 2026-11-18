@@ -60,6 +60,25 @@ vmo listens at `127.0.0.1:8080` and needs:
   so vmo does not boot its VMs on a Mac without it
   ([#200](https://github.com/w3lt/lys/issues/200))
 
+## voice
+
+voice, in `apps/voice`, is the speech server Lys reads her replies with. It
+is off by default; the desktop host owns it like vmo: it starts voice when
+Lys opens if "Start voice when Lys opens" is on, starts and stops it from
+Settings → Runtime, and stops it when Lys quits. Development builds run
+`bash run.sh` in `apps/voice` of the checkout recorded at host compile time;
+`run.sh` builds voice and replaces itself with it. Release builds run
+`$LYS_HOME/runtime/voice/voice`, which `build.sh` builds with the Swift
+toolchain and installs; see [Packaging and releases](/operate/releases/).
+
+voice listens at `127.0.0.1:9090` for its health route and at `127.0.0.1:9091`
+for its speech WebSocket and needs:
+
+- macOS 15 or later, the platform `apps/voice/Package.swift` declares
+- network access to download its PocketTTS models on the first start, about
+  780 MB, which it stores in `~/.lys/voice/models`; later starts need none
+- no Linux kernel, unlike vmo
+
 ## Email MCP server
 
 The email MCP server Lys ships, in `mcps/email`, is a Rust program the backend
@@ -122,6 +141,11 @@ The backend itself depends on:
   `read_page` reads. Apart from the MCP servers below, nothing else needs the
   network, and a read or search that cannot connect becomes the tool call's
   result
+- for Lys to read replies aloud, [voice](#voice) answering `GET /health` at
+  `127.0.0.1:9090`, which the desktop checks at startup and the backend
+  checks once each speech socket opens, before any audio. The reply is also
+  read without
+  voice; voice only adds the sound.
 - for `read_page`, [vmo](#vmo) answering `GET /health` at
   `127.0.0.1:8080`. The backend asks it on every tool lookup, so while vmo is
   not ready `read_page` is unavailable and never offered; nothing else needs

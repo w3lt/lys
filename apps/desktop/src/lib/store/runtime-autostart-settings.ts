@@ -17,7 +17,7 @@ export type RuntimeAutoStartSaveState =
   | { readonly status: "saved" }
   | { readonly status: "failed" }
 
-/** The autosave of the runtime group's two startup switches. */
+/** The autosave of the runtime group's startup switches. */
 export type RuntimeAutoStartSettingsSlice = {
   /** Latest save outcome, retained across settings-pane unmounts. */
   readonly runtimeAutoStartSave: RuntimeAutoStartSaveState
@@ -40,9 +40,9 @@ type RuntimeAutoStartSettingsStore = RuntimeAutoStartSettingsSlice & {
 /**
  * Compares the startup switches of two runtime values.
  *
- * @param first - One value holding both switches, such as a runtime group.
+ * @param first - One value holding all three switches, such as a runtime group.
  * @param second - The other value.
- * @returns Whether both switches are equal; every other field is ignored.
+ * @returns Whether all three switches are equal; every other field is ignored.
  */
 export function isRuntimeAutoStartSettingsEqual(
   first: RuntimeAutoStartSettings,
@@ -50,7 +50,8 @@ export function isRuntimeAutoStartSettingsEqual(
 ): boolean {
   return (
     first.autoStartBackend === second.autoStartBackend &&
-    first.autoStartVmo === second.autoStartVmo
+    first.autoStartVmo === second.autoStartVmo &&
+    first.autoStartVoice === second.autoStartVoice
   )
 }
 
@@ -78,11 +79,12 @@ export function createRuntimeAutoStartSettingsSlice(
 ): RuntimeAutoStartSettingsSlice {
   /**
    * Gets the startup switches the store holds now.
-   * @returns A new frozen value holding only the two switches.
+   * @returns A new frozen value holding only the three switches.
    */
   function getRuntimeAutoStartSettings(): RuntimeAutoStartSettings {
-    const { autoStartBackend, autoStartVmo } = get().settings.runtime
-    return Object.freeze({ autoStartBackend, autoStartVmo })
+    const { autoStartBackend, autoStartVmo, autoStartVoice } =
+      get().settings.runtime
+    return Object.freeze({ autoStartBackend, autoStartVmo, autoStartVoice })
   }
 
   /**

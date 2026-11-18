@@ -8,6 +8,7 @@ import updateFastifyWithLlmRoutes from "./modules/llm/routes"
 import registerMcpRoutes from "./modules/mcp/routes"
 import registerChatRoutes from "./modules/chat/routes"
 import registerToolRoutes from "./modules/tool/routes"
+import registerVoiceRoutes from "./modules/voice/routes"
 import { backendConfigSchema, type BackendConfig } from "./config"
 import singletonServicesPlugin from "./di/fastify"
 import { updateFastifyWithHttpTransport } from "./http"
@@ -63,6 +64,7 @@ export async function buildApp(
   await app.register(registerChatRoutes)
   await app.register(registerDelegationRoutes)
   await app.register(registerActivityRoutes)
+  await app.register(registerVoiceRoutes)
   await app.register(updateFastifyWithConversationRoutes)
   await app.register(updateFastifyWithAgentRoutes)
   await app.register(registerToolRoutes)

@@ -9,14 +9,14 @@
 const MAXIMUM_QUEUED_SUBSCRIPTION_EVENTS = 4096
 
 /**
- * Delivers one stream's events to one SSE connection in order, without making
- * the producer wait for that connection.
+ * Delivers one stream's events to one follower in order, such as an SSE
+ * connection or a speech socket, without making the producer wait for it.
  *
- * @typeParam TStreamEvent - Event type written to the connection; the
- * producer and the connection's writer agree on it.
- * @remarks Owns the queue of events accepted for one borrowed connection to
+ * @typeParam TStreamEvent - Event type written to the follower; the
+ * producer and the follower's writer agree on it.
+ * @remarks Owns the queue of events accepted for one borrowed follower to
  * deliver them in acceptance order while bounding how many wait. The route
- * keeps ownership of the connection itself. Concurrency model: single-owner,
+ * keeps ownership of the follower's connection itself. Concurrency model: single-owner,
  * on the backend's event loop. `handleStreamEvent` and `close` are
  * synchronous and never wait for a write; writes run one at a time. A failed
  * write, a full queue, or `close` ends the subscription, and `closed` settles
@@ -37,10 +37,10 @@ export default class ReplyEventSubscription<TStreamEvent> {
   /**
    * Creates an open subscription with an empty queue.
    *
-   * @param sendEvent - Borrowed writer for one SSE connection. It resolves
-   * after the transport accepts the event and rejects when the connection has
-   * already closed; a write pending when the connection closes may never
-   * settle.
+   * @param sendEvent - Borrowed writer for one follower, such as an SSE
+   * connection. It resolves after the follower accepts the event and rejects
+   * when its connection has already closed; a write pending when the
+   * connection closes may never settle.
    */
   public constructor(sendEvent: (event: TStreamEvent) => Promise<void>) {
     this.#sendEvent = sendEvent

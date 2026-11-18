@@ -34,7 +34,8 @@ import {
 const MANUAL_START_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
   ...initialSettingsState.runtime,
   autoStartBackend: false,
-  autoStartVmo: false
+  autoStartVmo: false,
+  autoStartVoice: false
 })
 
 /** Saved settings that leave the backend and vmo stopped when Lys opens. */
@@ -76,7 +77,8 @@ function startStoppedDesktopHost(
   return startNativeHostFake({
     load_settings: loadSettings,
     get_backend_status: () => ({ running: false }),
-    get_vmo_status: () => ({ status: "stopped" })
+    get_vmo_status: () => ({ status: "stopped" }),
+    get_voice_status: () => ({ status: "stopped" })
   })
 }
 
@@ -120,7 +122,8 @@ describe("App", () => {
     expect(host.commands.map((invoked) => invoked.command)).toEqual([
       "load_settings",
       "get_backend_status",
-      "get_vmo_status"
+      "get_vmo_status",
+      "get_voice_status"
     ])
   })
 
@@ -129,6 +132,7 @@ describe("App", () => {
       load_settings: () => MANUAL_START_SETTINGS,
       get_backend_status: () => ({ running: false }),
       get_vmo_status: () => ({ status: "stopped" }),
+      get_voice_status: () => ({ status: "stopped" }),
       list_tools: () => []
     })
     const backend = startBackendFake({

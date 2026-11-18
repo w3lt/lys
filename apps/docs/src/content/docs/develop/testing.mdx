@@ -90,6 +90,10 @@ contracts, schemas, or behavior that crosses package boundaries.
   failures that name the defect and fail the run once it is fixed. Its
   [coverage inventory](https://github.com/w3lt/lys/blob/main/apps/desktop/test/unit/COVERAGE.md)
   lists what each test file covers and what it cannot prove.
+- `apps/voice/Tests/voiceTests` contains a Swift Testing suite for voice. Run
+  it with `swift test --package-path apps/voice`. It boots no model: the
+  speech engine is exercised behind the `SpeechEngine` protocol, and voice's
+  main group behind `serveVoice`. No workflow runs it.
 - `apps/vmo/Tests/vmoTests` contains a Swift Testing suite for vmo. Run it
   with `swift test --package-path apps/vmo`. It boots no VM: reads run
   against `InMemoryReaderVmLifecycle`, and

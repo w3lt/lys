@@ -16,7 +16,7 @@ import ReplyEventSubscription from "../chat/replyEventSubscription"
 import type ReplyGenerationRegistry from "../chat/replyGenerationRegistry"
 import { ReplyGenerationRegistryClosedError } from "../chat/replyGenerationRegistry"
 import type { ConversationReader } from "../conversation/capabilities"
-import type { SpeechSocketRegistry } from "./speechSocketRegistry"
+import type { SingleSocketRegistry } from "./singleSocketRegistry"
 import {
   VoiceUnavailableError,
   type openVoiceSpeech,
@@ -70,7 +70,7 @@ export type SpeechConnectionDependencies = Readonly<{
   /** Finds a running generation for the reply. */
   generations: ReplyGenerationRegistry
   /** Holds the one socket that may speak and supersedes older ones. */
-  registry: SpeechSocketRegistry
+  registry: SingleSocketRegistry
   /**
    * Asks voice whether it can speak; resolves `false` for a stopped,
    * starting, or broken voice and never rejects.

@@ -73,8 +73,9 @@ export type DictationServerMessage = z.infer<
  * the same way after `DICTATION_MAX_DURATION_MS`. The backend relays to voice
  * and keeps nothing. The close code says why the socket closed: `1000` the
  * final text was sent, `1001` the backend is shutting down, `1002` the client
- * sent a text message that is not a dictation message, `1009` a client
- * message was longer than `SOCKET_MAX_CLIENT_MESSAGE_BYTES`, `1011` voice
+ * sent a text message that is not a dictation message or audio that is not
+ * whole samples, `1009` a client message was longer than
+ * `SOCKET_MAX_CLIENT_MESSAGE_BYTES`, `1011` voice
  * failed, fell behind, or sent no final text in time, `4409` a newer
  * dictation socket replaced this one, `4503` voice is not ready. Closing the
  * socket from the client at any time cancels the dictation. Changing the

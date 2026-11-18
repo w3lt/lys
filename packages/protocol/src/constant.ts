@@ -241,11 +241,15 @@ export const DICTATION_CLOSE_COMPLETE = 1000
 /**
  * Close code of a dictation socket whose backend is shutting down; no final
  * text follows.
+ *
+ * @remarks The backend closes every open WebSocket with one code when it
+ * shuts down, so this is {@link SPEECH_CLOSE_SHUTDOWN} under the dictation's
+ * name.
  */
-export const DICTATION_CLOSE_SHUTDOWN = 1001
+export const DICTATION_CLOSE_SHUTDOWN = SPEECH_CLOSE_SHUTDOWN
 /**
  * Close code of a dictation socket whose client sent a text message that is
- * not a dictation message.
+ * not a dictation message, or audio that is not whole samples.
  */
 export const DICTATION_CLOSE_PROTOCOL_ERROR = 1002
 /**

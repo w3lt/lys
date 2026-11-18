@@ -96,11 +96,9 @@ export const VMO_PORT = 8080
  * desktop names it on the voice card. It is not persisted. voice's
  * `WebServer` in `apps/voice` declares it again as its default host, and
  * `VOICE_ADDRESS` in the desktop's Tauri host, which checks voice's health,
- * as its host. Those copies are kept under the voice address copy exception
- * to CONST-005, which mirrors the approved one of {@link VMO_HOST}, is
- * proposed with the voice pull request and is pending the maintainer's
- * approval; the same kind of test guards it, so changing the host requires
- * changing all three together.
+ * as its host. Those copies are kept under the approved voice address copy
+ * exception to CONST-005, like the one of {@link VMO_HOST}; the same kind of
+ * test guards it, so changing the host requires changing all three together.
  */
 export const VOICE_HOST = "127.0.0.1"
 /**

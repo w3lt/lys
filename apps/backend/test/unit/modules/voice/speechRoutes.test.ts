@@ -74,10 +74,15 @@ const STREAMING_CONVERSATION = Object.freeze({
   id: CONVERSATION_ID,
   title: "Trip plan",
   agentCode: "lys",
+  kind: "main",
+  parentConversationId: null,
+  jobNumber: null,
+  delegatorAgentCode: null,
   createdAt: FIXTURE_TIMESTAMP,
   updatedAt: FIXTURE_TIMESTAMP,
   messages: [USER_MESSAGE, ASSISTANT_MESSAGE],
-  sources: []
+  sources: [],
+  jobs: []
 } satisfies Conversation)
 
 /** Stored completed conversation fixture. */
@@ -224,11 +229,12 @@ async function createVoiceRoutesApp(options: VoiceRoutesAppOptions) {
     .mockImplementation(() => options.conversation)
   await updateFastifyWithHttpTransport(testFastify.app)
   testFastify.app.decorate("conversationHistoryReader", history)
+  testFastify.app.decorate("replyGenerations", generations)
   const voiceOptions = {
     isReady: options.isReady ?? (async () => true),
     ...(options.connect === undefined ? {} : { connect: options.connect })
   }
-  updateFastifyWithVoiceRoutes(testFastify.app, generations, voiceOptions)
+  updateFastifyWithVoiceRoutes(testFastify.app, voiceOptions)
   const baseUrl = await listen(testFastify.app)
   return { ...testFastify, generations, getConversation, baseUrl }
 }

@@ -14,20 +14,21 @@ presentation state, not durable conversation storage.
 | Area                | Current implementation                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                                                                                                                                                                                                                                                                                                                         |
-| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                                                                                                                                                                                                                                                                                                                 |
+| Chat UI             | `ChatView` renders the transcript with its job cards and report rows, the composer with its jobs bar and job notice, jump-to-latest controls, and the past-conversations dialog; see [jobs and reports](#jobs-and-reports).                                                                                                                                                                                              |
 | Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.                                                                                                                                                                                                                                                                                                           |
-| Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, and error presentation.                                                                                                                                                                                                                                                               |
+| Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, reading the shown conversation again for an activity event, stopping jobs, and error presentation.                                                                                                                                                                                    |
 | History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                                                                                                                                                                                                                                                                              |
 | Agent state         | `src/lib/store/agents` owns the list of built-in and stored agents, the Agents pane's editor and draft, and the agent create, update, and delete calls.                                                                                                                                                                                                                                                                  |
 | Settings view       | `src/views/SettingsView` shows the settings rail and the selected pane, and owns which sections of the Lys and Profile panes are open; see [Settings view](#settings-view).                                                                                                                                                                                                                                              |
 | Local profile       | `src/lib/store/local-profile.ts` holds the values of the Lys and Profile panes that are neither saved nor sent; see [Current limitations](#current-limitations).                                                                                                                                                                                                                                                         |
 | Tool state          | `src/lib/store/tools.ts` owns the list of every tool, the app's and the backend's, that the Tools and MCP panes show, the session-only Tool calls switch, and the offer each request makes from them.                                                                                                                                                                                                                    |
-| Tool calls          | `src/lib/store/tool-calls` follows each running reply, shows the backend's approval prompts, runs the client tools' calls the backend sends, and sends every answer.                                                                                                                                                                                                                                                     |
+| Tool calls          | `src/lib/store/tool-calls` follows each running reply, takes the prompts and calls of the replies the backend starts itself from the activity stream, shows the backend's approval prompts, runs the client tools' calls the backend sends, and sends every answer.                                                                                                                                                      |
+| Activity            | `src/lib/store/activity.ts` follows the backend's activity stream while the backend runs and hands each event to the tool-call store, then to the chat store.                                                                                                                                                                                                                                                            |
 | Tool approvals      | `src/lib/store/tool-settings.ts` owns each tool's switch and its Ask me or Just run, saved as the `tools` group of `settings.json`, and their automatic save.                                                                                                                                                                                                                                                            |
 | MCP servers         | `src/lib/store/mcp-servers.ts` owns the backend's states of the MCP servers, their sync and reconnect, and the polling while one connects; the application store's `mcp-settings.ts` slice saves the `mcp` group, the added servers and every switch, and its `email-settings.ts` slice checks, saves, and removes the email accounts the built-in email server works with, the person's and Lys's own, each on its own. |
 | Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend and vmo run, and settings loaded from Tauri; `vmo-runtime.ts` owns vmo's state and its start and stop, and `runtime-autostart-settings.ts` saves the two startup switches.                                                                                                                                                                       |
 | Model lifecycle     | `src/lib/store/model-actions.ts` owns each provider's inventory, load, unload, and health requests, shared by settings and the composer; `provider-status.ts` reads and reconnects each provider's connection, `provider-settings.ts` saves which providers are on, their addresses, and their keys, and `src/lib/hooks/conversationModel.ts` finds the model a conversation uses.                                       |
-| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops, approval answers, and tool results.                                                                                                                                                                                                                                                               |
+| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops, jobs stops, approval answers, and tool results; `activity.ts` opens the activity stream.                                                                                                                                                                                                          |
 | Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                                                                                                                                                                                                                                                                                            |
 
 ## Chat state split
@@ -44,6 +45,9 @@ The desktop currently has eight separate state systems:
 | MCP server Zustand store | The backend's list of applied MCP servers and their states, and why the latest sync or reconnect failed                                                                                                                                                                                                  |
 | Local profile store      | About Lys with its portrait and when it last changed, About you, the writing preferences, and the notes for Lys, all in memory only                                                                                                                                                                      |
 | Shell Zustand store      | Active top-level view, loaded settings (each tool's saved approval, the saved MCP servers with their switches, and the email accounts included) and the latest save of the servers and of each account, backend process status, startup progress, and each model provider's status, models, and requests |
+
+The activity follow is not a store: it holds no state, and hands each
+activity event to the tool-call store and then to the chat store.
 
 The transcript shown in the window is built from backend events for the current
 request, or from the stored transcript read when a past conversation is opened.
@@ -161,6 +165,70 @@ files alone do not make it sendable. A long paste stays in the draft and is
 sent as text; nothing turns it into a file. The transcript lists a message's
 attachments under its text, by kind and name, from the turn-start event and
 when the conversation is reopened.
+
+## Jobs and reports
+
+The desktop shows [delegation](/architecture/backend/#delegation) in the main
+conversation and opens each job for reading.
+
+`registerActivityFollow` (`src/lib/store/activity.ts`), which the app shell
+registers once, follows `GET /api/v1/activity/events` while the backend's
+status is `running`, and opens it again one second after each read ends,
+without backoff, message, or log entry: when the backend closes the stream,
+refuses to open it, or the connection fails. An event that is not JSON or
+does not match the contract, or a store that fails to handle an event, is a
+defect instead: the follow ends, the failure goes to the platform's
+`reportError` as an uncaught one does, and no follow runs until the
+backend's status leaves `running` and returns. Each event goes first to the
+tool-call store, so it knows the replies the event announced and opens no
+connection of its own for their calls, and then to the chat store. A
+snapshot, and a reply the backend starts or ends in the shown conversation,
+make the chat store read that conversation again, keeping the composer's
+draft, the tray, and the error; it waits until no conversation opens and the
+desktop's own request has ended, and follows a reply still generating, as
+opening does. A job update replaces that job in the shown conversation, or
+adds it in number order. Approval prompts and calls are left to the
+tool-call store.
+
+In the main conversation:
+
+- A reply shows one card for each job its `delegate_work` calls started,
+  between its steps and its answer, in a list named `Jobs`. A card shows the
+  job's title as a button named `<title>, job <n>` that opens the job, the
+  agent's name, the state (`Working`, `Needs your approval` while a call of
+  the job waits for the person, `Replied`, `Stopped`, `Failed`, or
+  `Interrupted`), the latest progress note, and, while the job works, Stop,
+  named `Stop job <n>`. A reply that only sent more work to a job shows the
+  link `Continued job <n> with <agent>` to the card of the reply that started
+  it. A `delegate_work` call the desktop knows no job for stays an ordinary
+  step.
+- The message of a wake-up turn shows only a `Reports · <n>` row that opens
+  to the reports it delivered, each headed `<agent> · <title> · <kind>` with
+  its text as plain text. A person's message that delivered reports shows a
+  line such as `2 reports delivered with this message` that opens the same
+  way. The answers that follow may cite the reports' sources as `[n]`.
+- While jobs work and no reply streams, Send stays available, and a bar above
+  the composer says `1 job is working` or `<n> jobs are working`, with Stop
+  all, named `Stop all jobs`, which sends the
+  [jobs-stop route](/reference/api/#jobs). Stop on a card stops that job's
+  reply. Stop in the composer stops the reply and, in the backend, every job
+  below it.
+- A job's approval prompt shows above the main conversation's composer, with
+  a line `From <agent>'s job: <title>`, or `From a job of this conversation`
+  while the shown conversation does not list the job yet. It also shows while
+  the job itself is shown.
+
+A job opens read-only. A notice says `This is a job from <delegator>. You can
+read it and stop it.`, with Back to the conversation; the message field, the
+attach menu, and dropping files are off, and the placeholder says
+`This conversation is read-only.` A job message shows under the delegator's
+name. Stop works as in any conversation. `useDelegatorName`
+(`src/lib/hooks/delegatorName.ts`) names the delegator from the agent list.
+When a card's Stop, the notice's Back, or Stop all leaves while it has
+focus, focus moves in the same commit to the control its owner names, the
+card's title, the message field, or New conversation while the field is off,
+through `useFocusedRemovalReport` and
+`useFocusSuccessor` in `src/components/focus-target.ts`.
 
 ## Assistant message rendering
 
@@ -957,12 +1025,13 @@ of every connected MCP server, after the backend's own, which the Tools pane
 leaves out. Both lists are read when the pane
 first appears, client tools first; a failed read of either list, or a name both
 lists share, shows the failure above the pane with Retry. Lys's tools are grouped by
-their `group` (`files`, `web`, `time & place`). Each group says how many of
-its tools are on.
+their `group` (`files`, `web`, `time & place`, `agents`). Each group says
+how many of its tools are on.
 
-Each row shows the tool's name, what it does with the machine (`reads` or
-`network`), where it runs (`in Lys` for a client tool, `in backend` for a
-backend tool), its description, an estimate of the tokens it adds to each
+Each row shows the tool's name, what it does with the machine (`reads`,
+`network`, or `gives work` for `delegate_work`), where it runs (`in Lys` for
+a client tool, `in backend` for a backend tool), its description, an
+estimate of the tokens it adds to each
 request, and a switch. The estimate measures the function tool a model receives, built
 by `buildToolFunctionFormat` from `@lys/share`, with the composer's text
 estimator, so it varies with the model's tokenizer. Expanding a row, one at a
@@ -991,7 +1060,10 @@ Tool calls on or off and each tool's switch apply to the next chat request,
 because they decide only which tools a request offers; switching a tool off
 while a reply runs does not stop that reply's calls. A tool that only reads
 this machine starts on; a tool that sends requests off the machine (`network`)
-starts off. Switching a tool saves its choice in the `tools.switches` object
+starts off. `delegate_work`, which gives work to another agent inside Lys,
+starts on, because every call asks first on Ask me. Switching it off reaches
+work already delegated only with the person's next message in that
+conversation. Switching a tool saves its choice in the `tools.switches` object
 of `settings.json`, alongside its approval, so it holds after a restart; a
 tool the person never switched has no entry and stays at its default, also
 when a later build adds it. The Tool calls switch lasts for the session
@@ -1001,8 +1073,11 @@ Every tool, network tools included, offers both approvals and starts on Ask
 me. The note under "Before it runs" says what each does: on Ask me, "Each call
 waits for you with its arguments. Nothing runs until you allow it."; on Just
 run, a tool that only reads this machine "Runs the moment the model asks,
-without showing you the call.", and a `network` tool "Sends its request off
-this machine the moment the model asks, without showing you what it sends."
+without showing you the call.", a `network` tool "Sends its request off
+this machine the moment the model asks, without showing you what it sends.",
+and `delegate_work` "Starts the job the moment the model asks, without
+showing you its instructions. The tools the other agent uses still follow
+their own settings."
 Choosing Just run saves the tool's name in the `tools.justRun` list of
 `settings.json`, and choosing Ask me removes it, so the approval holds after a
 restart. The application store owns that list and the switches: a change
@@ -1560,23 +1635,28 @@ list is read again so the next request leaves the tool out.
 The backend's tool approval service decides which calls need the person: every
 call the [tool call policy](/architecture/backend/#tool-call-policy) allows of
 a tool that is not saved as Just run, client, backend, and MCP tools alike,
-except `read_attachment`, the agent state tools, and `find_tools`, which run
-without approval, and every call of an MCP tool its server marks as
-destructive or as an open-world write, and of `web_search` from a reply's
-sixth call on, even on Just run (see the
+except `read_attachment`, the agent state tools, `find_tools`,
+`report_progress`, and `stop_job`, which run without approval, and every call
+of an MCP tool its server marks as destructive or as an open-world write, and
+of `web_search` from a reply's sixth call on, even on Just run (see the
 [backend's tool approval](/architecture/backend/#tool-approval)). The desktop
 does not decide; it reads neither the switches nor the saved Just run list
 when a call arrives.
 
 The tool-call store follows every reply the chat store starts or follows on
 its own reply-events connection, so tool calls keep moving while another
-conversation is shown. It takes each prompt, with its approval token, from a
-`tool-approval` event or the snapshot's `pendingToolApprovals`, and each call
-to run from a `tool-call` event or the snapshot's `pendingToolCalls`, once. A
-held call keeps its step, approval or run, so a client tool's prompt and its
-later run request share one identifier, and an answered call stays held while
-the store follows its reply, so a snapshot built before the answer arrived
-does not bring it back:
+conversation is shown. A reply the backend started, a job's or a wake-up
+turn's, comes from the activity stream instead, which announces it and
+carries its prompts, the end of each prompt, and its calls; its calls are
+dropped when the stream says the reply ended, or when a new snapshot no
+longer lists it, and a prompt the new snapshot no longer lists as waiting
+for a reply it still lists has ended and is no longer shown. It takes each
+prompt, with its approval token, from a `tool-approval` event or the
+snapshot's `pendingToolApprovals`, and each call to run from a `tool-call`
+event or the snapshot's `pendingToolCalls`, once. A held call keeps its step,
+approval or run, so a client tool's prompt and its later run request share one
+identifier, and an answered call stays held while the store follows its reply,
+so a snapshot built before the answer arrived does not bring it back:
 
 1. A prompt the desktop cannot show (a tool it does not list, or arguments it
    cannot describe) is answered `showFailed` at once. A backend tool's call is
@@ -1587,13 +1667,17 @@ does not bring it back:
    argument as it is.
 2. Every other prompt waits for the person, for at most five minutes. When
    the call arrives stored as `failed` while its prompt still waits, in a
-   `reply-part` event or a later snapshot's parts, the backend ended the prompt
-   at its time limit, and the card becomes a "Prompt expired" notice. A call
-   that arrives as `running` or `rejected` first was answered, so its later
-   failure is not taken for an expiry. When the backend refuses an answer
-   because the prompt no longer waits, the card is hidden until the call's
-   stored state arrives, so an answer sent just after the limit still ends in
-   the notice.
+   `reply-part` event or a later snapshot's parts, or in a
+   `tool-approval-ended` event for a reply of the activity stream, the
+   backend ended the prompt at its time limit: the card becomes a "Prompt
+   expired" notice, and a job's card no longer says it needs the person. A
+   call that arrives as `running` or `rejected` first was answered, here or
+   by another caller, so its card is hidden and its later failure is not
+   taken for an expiry. An activity snapshot carries no parts, so a prompt
+   that ended while the activity stream was down is hidden rather than shown
+   as expired. When the backend refuses an answer because the prompt no
+   longer waits, the card is hidden until the call's stored state arrives, so
+   an answer sent just after the limit still ends in the notice.
 3. A call to run is run at once and its result sent; a call the desktop
    cannot run is answered `runFailed`. Nothing is shown. The desktop does not
    check that the person allowed the call, so a call that another local
@@ -1610,7 +1694,11 @@ or "Search the web for “latest Node.js release”. Sends the query to Tavily
 (api.tavily.com).", with the full query, and its arguments on request. An
 MCP call asks "Run read_file on the MCP server files?", by the name the
 server calls the tool, and shows its arguments from the start, because what
-the tool does depends on the server. The arguments show text as it is and
+the tool does depends on the server. A `delegate_work` call says
+"Give news-reader the job “News”. It gets only these instructions: …", or,
+for more work on an earlier job, "Send news-reader more work on job 1, now
+titled “News, part 2”. …", with the whole instructions, because they are all
+the other agent gets. The arguments show text as it is and
 any other value, an object or an array included, as compact JSON. Reject sends the composer's text as the reason;
 Allow once answers `allowed`, after which the backend runs its tool or sends a
 client tool's call back to run; Allow anyway does the same while keeping the
@@ -1636,13 +1724,14 @@ and results to the [tool-result route](/reference/api/#tool-results). When an
 answer cannot be sent, the card says so and Try again sends the same answer
 without running the tool again. An allowed answer still in flight when the
 call's run request arrives does not hold the run back. When the reply ends, by
-finishing, Stop, or backend shutdown, its waiting calls disappear; a notice of
-an expired prompt stays until it is dismissed or a later reply of its
-conversation is followed. A newer
-turn in the conversation or deleting the conversation does not end a waiting
-reply yet ([#137](https://github.com/w3lt/lys/issues/137)). After a renderer
-reload, a call still waiting is found again through the reply's snapshot when
-its conversation is shown. Quitting the app stops the backend, so its waiting
+finishing, Stop, deleting its conversation, or backend shutdown, its waiting
+calls disappear; a notice of an expired prompt stays until it is dismissed or
+a later reply of its conversation is followed, except that the notice of a
+reply the activity stream announced goes when the stream says that reply
+ended. A newer turn in the conversation does not end a waiting reply yet
+([#137](https://github.com/w3lt/lys/issues/137)). After a renderer reload, a
+call still waiting is found again through the reply's snapshot when its
+conversation is shown. Quitting the app stops the backend, so its waiting
 calls are gone and the reply is marked interrupted when the backend next
 starts.
 
@@ -1764,7 +1853,13 @@ sizes in a browser on every pane.
   again. Each tool's switch and approval are saved.
 - There is no "Allow for this chat": each call on Ask me is asked about.
 - Switching a tool or tool calls off does not stop a reply already running;
-  it applies from the next message.
+  it applies from the next message. Work already delegated keeps the
+  settings of the person's latest message in its main conversation until
+  their next one there.
+- Activity stream failures are not shown or logged: the desktop has no log
+  of its own. A failed read opens the stream again one second later; an
+  event the desktop cannot take ends the follow until the backend restarts,
+  and reaches only the web inspector's console.
 - The reply's steps show each call's result as plain text only; no tool has
   a view of its own. The reasoning summary shows `Thinking` without a running
   count of seconds, and a citation's hover shows the source's title and site,

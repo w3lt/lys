@@ -14,7 +14,7 @@ images vmo runs its page-reading VMs from.
 
 | Artifact         | Owner           | Location                                                      | Purpose                                                                                                                                                                                                                                                   |
 | ---------------- | --------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`                                     | Stores conversations, their messages and reply parts, attachment records, sources, and agents.                                                                                                                                                            |
+| Backend database | Fastify backend | `$LYS_HOME/lys_db.sqlite`                                     | Stores conversations and their jobs, their messages and reply parts, attachment records, sources, job reports, and agents.                                                                                                                                |
 | Attachment files | Fastify backend | `$LYS_HOME/attachments/<conversation id>/<message id>/<name>` | Stores each file sent with a user message under its own name; written before the turn is stored and removed with the conversation. See [attachments](/architecture/backend/#attachments).                                                                 |
 | Settings JSON    | Tauri host      | `$LYS_HOME/settings.json`                                     | Stores the runtime, model, generation, load, secrets, tools, and MCP groups.                                                                                                                                                                              |
 | Theme preference | Desktop UI      | WebView `localStorage`, key `lys.theme`                       | Stores `dark` or `light`; invalid or unavailable storage falls back to `dark`.                                                                                                                                                                            |
@@ -31,7 +31,9 @@ runtime service.
 Stores borrow read and write transactions that cannot close the connection or
 end a transaction early. The conversation records in
 `src/infrastructure/database/conversations/` own every query on the
-conversation tables, and the agent records in
+conversation tables, the delegation records in
+`src/infrastructure/database/delegation/` own the queries that read jobs and
+store their reports, and the agent records in
 `src/infrastructure/database/agents/` own every query on the `agents` table; the
 shared migration list in `migrations.ts` owns every
 table's schema. The database
@@ -42,13 +44,14 @@ transaction the connection refuses every change
 (`PRAGMA query_only`), so a read cannot write and a statement kept beyond its
 operation cannot change data.
 
-| Table                      | Owned by                    | Notes                                                                                                                                                                                                              |
-| -------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `conversations`            | SQLite conversation records | One row per conversation, including `title`, `agent_code`, `created_at`, and `updated_at`.                                                                                                                         |
-| `conversation_messages`    | SQLite conversation records | Ordered user messages and replies, with each reply's `status`, `finish_reason`, `model`, and `provider`, and each reply's reasoning, text, and tool-call parts as rows under it.                                   |
-| `conversation_sources`     | SQLite conversation records | One row per numbered web source of a conversation: `number`, `url`, and `title`, each number and URL once.                                                                                                         |
-| `conversation_attachments` | SQLite conversation records | One row per attachment of a user message: `number`, `name`, `kind`, `size_bytes`, and an image's `media_type`, `width`, and `height`; each number once per conversation, each name once per message ignoring case. |
-| `agents`                   | SQLite agent records        | One row per agent definition, keyed by its `code`, with `name`, `bio`, `system_prompt`, `created_at`, `updated_at`, and `deleted_at`, the time a deleted agent was deleted; a deleted agent's row stays.           |
+| Table                      | Owned by                    | Notes                                                                                                                                                                                                                                                                                         |
+| -------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `conversations`            | SQLite conversation records | One row per conversation, including `title`, `agent_code`, `created_at`, and `updated_at`. A job also has its `parent_conversation_id` and `job_number`; a main conversation has neither.                                                                                                     |
+| `conversation_messages`    | SQLite conversation records | Ordered user messages and replies, with each reply's `status`, `finish_reason`, `model`, and `provider`, and each reply's reasoning, text, and tool-call parts as rows under it. A user message's `origin` says who wrote it: the person, a delegator, or the backend for a wake-up turn.     |
+| `conversation_sources`     | SQLite conversation records | One row per numbered web source of a conversation: `number`, `url`, and `title`, each number and URL once.                                                                                                                                                                                    |
+| `conversation_attachments` | SQLite conversation records | One row per attachment of a user message: `number`, `name`, `kind`, `size_bytes`, and an image's `media_type`, `width`, and `height`; each number once per conversation, each name once per message ignoring case.                                                                            |
+| `job_reports`              | SQLite delegation records   | One row per report a job sent its delegator: a progress note, or how one of the job's replies ended, with the title of the job message it answers and, once delivered, the parent's message that delivered it. Storing a turn and startup recovery write it through the conversation records. |
+| `agents`                   | SQLite agent records        | One row per agent definition, keyed by its `code`, with `name`, `bio`, `system_prompt`, `created_at`, `updated_at`, and `deleted_at`, the time a deleted agent was deleted; a deleted agent's row stays.                                                                                      |
 
 The desktop does not query SQLite directly and the Tauri host does not proxy
 conversation SQL. The backend creates four SQLite record providers over the
@@ -83,6 +86,12 @@ decorated as `app.agentService`; the agent routes in
 keeps the [live agents](/architecture/backend/#live-agents), the requests
 they work on, and their request slots in memory only; nothing of them is
 stored.
+The delegation module reads jobs and stores their reports through three
+interfaces it declares in `src/modules/delegation/records.ts`, `JobReader`,
+`JobActivityReader`, and `JobReportWriter`, each with its SQLite class. What
+storing a turn changes about jobs, a job's new title and the delivery of its
+reports with their sources, runs inside the turn's write transaction through
+`JobTurnTransaction`, which `src/modules/conversation/records.ts` declares.
 Every borrowed operation fails once the database closes,
 and the database remains open until every reply generation has stored its final
 state.
@@ -95,7 +104,7 @@ On startup the database owner:
 1. Opens the SQLite file with foreign keys enabled.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
-4. Records the latest version, 18, and commits; a migration failure rolls back
+4. Records the latest version, 19, and commits; a migration failure rolls back
    all pending work.
 5. Switches to write-ahead logging with `synchronous = NORMAL`. A database from
    a newer version was refused in step 3, before anything changed its file.
@@ -107,7 +116,9 @@ The conversation services are then created over SQLite records on the open
 database. Turn persistence comes first: in one write transaction it changes
 remaining streaming assistants to interrupted with a fresh timestamp, and
 their waiting and running tool calls to interrupted with their own
-timestamps kept, without changing conversation activity time. The record reader then registers
+timestamps kept, and stores an `interrupted` report for each such reply of a
+job, without changing conversation activity time. Nothing starts afterwards:
+no reply resumes and no wake-up turn runs. The record reader then registers
 its search function, and the agent service is created over its records.
 
 The current migrations create the three conversation tables, add two
@@ -138,7 +149,11 @@ set and the policy's usage, budget, open-world, and paid-tool reasons.
 Version 18 adds `conversation_messages.provider`, the provider of the model
 that wrote each reply, because the same model key on two providers names two
 models; replies stored before it have none (`NULL`), since which provider
-wrote them was never stored.
+wrote them was never stored. Version 19 adds jobs: the parent and job
+number columns of `conversations`, the `origin` and `job_call_id` columns of
+`conversation_messages`, and the `job_reports` table. It only adds, and
+`NULL` in a new column keeps every existing row's meaning: a main
+conversation, and a message the person wrote.
 Turn creation is atomic and first interrupts a reply still streaming in the same
 conversation: the turn service runs it as one callback inside one write
 transaction of the turn records, which refuse every call once the callback
@@ -158,7 +173,9 @@ see [`tool_search_call_decisions`](/reference/schema/#tool_search_call_decisions
 `UPDATE`, like every statement, is compiled on its first use and reused; each
 write runs in one write transaction, guarded by the reply still streaming.
 Finalizing a reply marks its waiting and running tool calls interrupted in
-the same transaction.
+the same transaction. A turn that delivers job reports stores them as
+delivered by its user message, and adds the sources they cite to the
+conversation, in the transaction that stores the turn.
 
 ## Settings ownership
 

@@ -20,11 +20,13 @@ import {
   buildChatViewToolCallPart,
   buildCompletedChatViewReply,
   buildEndedChatViewReply,
+  buildJobReport,
   buildReasoningPart,
   buildStreamingChatViewReply,
   buildTextPart,
   buildToolCallPart,
   buildUserMessage,
+  buildUserMessageWithReports,
   FIXTURE_TIMESTAMP
 } from "../../support/conversationFixtures"
 
@@ -439,6 +441,30 @@ describe("source scope of each reply", () => {
 
     expect([...(citable.get(failed.id) ?? [])].sort()).toEqual([1, 2])
     expect([...(citable.get(later.id) ?? [])]).toEqual([3])
+  })
+
+  it("lets the replies after a delivered report cite its sources", () => {
+    const before = buildCompletedChatViewReply(2, "Moths?")
+    const after = buildCompletedChatViewReply(4, "Wool [3].")
+    const later = buildCompletedChatViewReply(6, "Silk [4].")
+
+    const citable = calculateReplyCitableSourceNumbers([
+      buildUserMessage(1, "Find out what moths eat."),
+      before,
+      buildUserMessageWithReports(buildUserMessage(3, "Any news?"), [
+        buildJobReport({
+          content: "Wool [3] and silk [4].",
+          sourceNumbers: [3, 4]
+        })
+      ]),
+      after,
+      buildUserMessage(5, "And silk?"),
+      later
+    ])
+
+    expect([...(citable.get(before.id) ?? [])]).toEqual([])
+    expect([...(citable.get(after.id) ?? [])]).toEqual([3, 4])
+    expect([...(citable.get(later.id) ?? [])]).toEqual([3, 4])
   })
 
   it("lists the sources whose numbers a reply may cite, keeping each source object", () => {

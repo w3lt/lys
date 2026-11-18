@@ -94,9 +94,10 @@ const sendChatToolApprovalApiResponseSchemas = Object.freeze({
  * problem with HTTP 409 and change nothing, so a repeated request is harmless
  * and a wrong token tells the caller nothing about which calls wait. A prompt
  * waits for this request until `TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES`
- * minutes after it was sent, Stop, or backend shutdown; at the limit the
- * backend stores the call as failed without running it. A newer turn in the
- * conversation or deleting the conversation does not end the wait yet.
+ * minutes after it was sent, Stop, the deletion of the reply's conversation
+ * or of the main conversation its job belongs to, or backend shutdown; at the
+ * limit the backend stores the call as failed without running it. A newer
+ * turn in the conversation does not end the wait yet.
  * Changing the method, path, or schemas requires coordinated consumers.
  */
 export const sendChatToolApprovalApi = Object.freeze({

@@ -4,9 +4,10 @@
  * @remarks The subclass preserves the
  * native `Error` contract while giving callers a stable domain
  * discriminator. It owns no mutable state and is safe to construct per
- * failure. Turn creation raises it for a continued conversation that is not
- * stored. The chat route answers a missing conversation before it creates
- * the turn, so this failure reaching the route is unexpected there.
+ * failure. Turn creation raises it for a continued conversation, and for
+ * the parent of a new job, that is not stored. The chat route answers a
+ * missing conversation before it creates the turn, so this failure reaching
+ * the route is unexpected there.
  */
 export class ConversationNotFoundError extends Error {
   /**

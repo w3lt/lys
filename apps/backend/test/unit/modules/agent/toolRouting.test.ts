@@ -18,10 +18,7 @@ import {
   type ReplyToolsTurn,
   type ToolRouting
 } from "../../../../src/modules/agent/toolRouting"
-import {
-  NO_UNOFFERED_TOOLS,
-  TOOL_CALLS_OFF
-} from "../../../../src/modules/agent/unofferedTools"
+import { TOOL_CALLS_OFF } from "../../../../src/modules/agent/unofferedTools"
 import type { TurnMcpTool } from "../../../../src/modules/mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../../../../src/modules/tool/builtIn/builtInTool"
 import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
@@ -160,14 +157,20 @@ describe("calculateToolRouting", () => {
 
 describe("formatRoutedSystemPrompt", () => {
   it("formats the prompt as a turn without routing does", () => {
-    expect(
-      formatRoutedSystemPrompt("You are Lys.", TOOL_CALLS_OFF, DIRECT_ROUTING)
-    ).toBe(formatSystemPrompt("You are Lys.", TOOL_CALLS_OFF))
+    const systemPrompt = formatSystemPrompt(
+      "You are Lys.",
+      TOOL_CALLS_OFF,
+      undefined
+    )
+
+    expect(formatRoutedSystemPrompt(systemPrompt, DIRECT_ROUTING)).toBe(
+      systemPrompt
+    )
   })
 
   it("ends a routed prompt with the routing note after a blank line", () => {
     expect(
-      formatRoutedSystemPrompt("You are Lys.", NO_UNOFFERED_TOOLS, {
+      formatRoutedSystemPrompt("You are Lys.", {
         status: "routed",
         toolCount: 4
       })

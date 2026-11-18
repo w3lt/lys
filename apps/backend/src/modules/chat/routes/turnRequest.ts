@@ -3,9 +3,10 @@ import type {
   ChatApiRequestBody,
   ChatToolOffer,
   ConversationAgentMissingProblem,
+  ConversationIsJobProblem,
   ConversationNotFoundProblem
 } from "@lys/protocol"
-import { MCP_TOOL_NAME_PREFIX } from "@lys/share"
+import { DELEGATE_WORK_TOOL_NAME, MCP_TOOL_NAME_PREFIX } from "@lys/share"
 import type { FastifyReply } from "fastify"
 import type Agent from "../../agent/agent"
 import {
@@ -17,6 +18,7 @@ import {
   TOOL_CALLS_OFF,
   type UnofferedTools
 } from "../../agent/unofferedTools"
+import { createConversationIsJobProblem } from "../../conversation/routes/jobProblem"
 import { createConversationNotFoundProblem } from "../../conversation/routes/notFound"
 import type {
   McpTurnToolLookup,
@@ -101,11 +103,35 @@ export type RequestedAgentOutcome =
       agentCode: string
     }>
 
-/** Outcome in which no agent answers the requested turn. */
-export type UnansweredTurnOutcome = Exclude<
+/**
+ * Outcome of looking up the agent that answers a requested turn when the
+ * lookup found none.
+ */
+export type MissingRequestedAgentOutcome = Exclude<
   RequestedAgentOutcome,
   Readonly<{ status: "found" }>
 >
+
+/**
+ * Outcome of the person's message to a job: the chat route refuses it before
+ * it looks up an agent.
+ */
+type ConversationIsJobOutcome = Readonly<{
+  /**
+   * The continued conversation is a job, which the person reads and stops
+   * and does not write into.
+   */
+  status: "conversation-is-job"
+  /** Identifier the request names. */
+  conversationId: string
+}>
+
+/**
+ * Outcome in which no agent answers the requested turn: the agent lookup
+ * found none, or the person's message continues a job.
+ */
+type UnansweredTurnOutcome =
+  MissingRequestedAgentOutcome | ConversationIsJobOutcome
 
 /** The backend tools a request offers, by kind, in offer order. */
 export type RequestedBackendTools = Readonly<{
@@ -118,21 +144,29 @@ export type RequestedBackendTools = Readonly<{
    * connected now; undefined when there is none.
    */
   notConnectedMcpToolName: string | undefined
+  /**
+   * Whether the request offers `delegate_work`. The tool is in neither list:
+   * the agent adds it itself to a turn that may delegate.
+   */
+  offersDelegateWork: boolean
 }>
 
 /**
  * Finds the backend tools a request offers: the built-in tools, and the
- * tools of the MCP servers, whose names start with `mcp__`.
+ * tools of the MCP servers, whose names start with `mcp__`; and whether it
+ * offers `delegate_work`.
  *
  * @param builtInTools - Every built-in tool.
  * @param findMcpTool - Looks up one MCP tool in the servers as they are
  * now.
  * @param tools - Validated tool offer of the request; absence offers none.
- * @returns The offered tools by kind, each list in offer order, and the
- * first offered MCP tool whose server is not connected.
- * @throws An {@link UnknownBackendToolError} naming every offered name, in
- * offer order, that belongs to no built-in tool and to no applied server's
- * listed tool.
+ * @returns The offered tools by kind, each list in offer order, the first
+ * offered MCP tool whose server is not connected, and whether the offer
+ * names `delegate_work`. That name is taken out before the lookups, so it is
+ * looked up among neither the built-in tools nor the servers' tools.
+ * @throws An {@link UnknownBackendToolError} naming every other offered
+ * name, in offer order, that belongs to no built-in tool and to no applied
+ * server's listed tool.
  */
 export function findRequestedBackendTools(
   builtInTools: readonly BuiltInToolEntry[],
@@ -142,9 +176,13 @@ export function findRequestedBackendTools(
   const builtInByName = new Map(
     builtInTools.map((entry) => [entry.definition.name, entry])
   )
+  const offeredNames = tools?.backendToolNames ?? []
+  const lookedUpNames = offeredNames.filter(
+    (name) => name !== DELEGATE_WORK_TOOL_NAME
+  )
   const offeredBuiltInTools: BuiltInToolEntry[] = []
   const otherNames: string[] = []
-  for (const name of tools?.backendToolNames ?? []) {
+  for (const name of lookedUpNames) {
     const builtInTool = builtInByName.get(name)
     if (builtInTool === undefined) otherNames.push(name)
     else offeredBuiltInTools.push(builtInTool)
@@ -155,7 +193,8 @@ export function findRequestedBackendTools(
   return Object.freeze({
     builtInTools: Object.freeze(offeredBuiltInTools),
     mcpTools: offeredMcpTools.tools,
-    notConnectedMcpToolName: offeredMcpTools.notConnectedToolName
+    notConnectedMcpToolName: offeredMcpTools.notConnectedToolName,
+    offersDelegateWork: offeredNames.includes(DELEGATE_WORK_TOOL_NAME)
   })
 }
 
@@ -270,6 +309,9 @@ export function findUnofferedTools(
  * or Armitage's, which answers no chat; a continued conversation is not
  * stored; or its agent no longer exists. Nothing is stored or sent.
  * @throws Any persistence failure of a lookup.
+ * @remarks A job's agent is found like any other conversation's, so the
+ * context of a job can be measured. The chat route refuses the person's
+ * message to a job itself, before it asks here.
  */
 export function loadRequestedAgent(
   conversation: ChatApiRequestBody["conversation"],
@@ -294,12 +336,14 @@ export function loadRequestedAgent(
 /**
  * Builds the problem that says why no agent answers a requested turn.
  *
- * @param outcome - Lookup outcome without an agent.
+ * @param outcome - Outcome without an agent: of the agent lookup, or of the
+ * person's message to a job.
  * @param instance - Request path identifying this occurrence.
  * @returns The missing-agent problem for a new conversation whose code no
  * agent that answers chats has, the missing-conversation problem for a
- * conversation that is not stored, and the conversation agent missing
- * problem for one whose agent no longer exists.
+ * conversation that is not stored, the conversation agent missing problem
+ * for one whose agent no longer exists, and the conversation-is-job problem
+ * for a job.
  */
 function buildUnansweredTurnProblem(
   outcome: UnansweredTurnOutcome,
@@ -307,7 +351,8 @@ function buildUnansweredTurnProblem(
 ):
   | AgentNotFoundProblem
   | ConversationNotFoundProblem
-  | ConversationAgentMissingProblem {
+  | ConversationAgentMissingProblem
+  | ConversationIsJobProblem {
   switch (outcome.status) {
     case "agent-not-found":
       return createAgentNotFoundProblem(outcome.agentCode, instance)
@@ -315,6 +360,8 @@ function buildUnansweredTurnProblem(
       return createConversationNotFoundProblem(outcome.conversationId, instance)
     case "conversation-agent-missing":
       return createConversationAgentMissingProblem(outcome.agentCode, instance)
+    case "conversation-is-job":
+      return createConversationIsJobProblem(outcome.conversationId, instance)
   }
 }
 
@@ -322,7 +369,8 @@ function buildUnansweredTurnProblem(
  * Sends the problem response for a requested turn no agent answers.
  *
  * @param reply - Response owner; the response has not started.
- * @param outcome - Lookup outcome without an agent.
+ * @param outcome - Outcome without an agent: of the agent lookup, or of the
+ * person's message to a job.
  * @param instance - Request path identifying this occurrence.
  */
 export function sendUnansweredTurnProblem(

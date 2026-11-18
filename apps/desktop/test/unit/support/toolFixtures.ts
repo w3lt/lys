@@ -1,6 +1,7 @@
 import { chatReplyEventSchema, type ChatToolCall } from "@lys/protocol"
 import {
   buildMcpToolNamePrefix,
+  DELEGATE_WORK_TOOL_NAME,
   toolDefinitionSchema,
   type LysToolDefinition,
   type McpToolDefinition,
@@ -70,6 +71,41 @@ export function buildBackendToolDefinition(name: string): LysToolDefinition {
     arguments: [
       { type: "string", name: "url", description: "Address of the page." }
     ]
+  })
+}
+
+/**
+ * Builds the definition of `delegate_work` as the backend lists it: a tool
+ * that gives work to another agent inside Lys.
+ *
+ * @returns A frozen definition validated by the shared schema, in the
+ * `agents` group with `agents` access, run by the backend, with the required
+ * string arguments `agent`, `title`, and `instructions` and the optional
+ * integer `job`.
+ */
+export function buildDelegateWorkToolDefinition(): LysToolDefinition {
+  const delegateWorkArguments: readonly ToolArgumentDefinitionCandidate[] = [
+    { type: "string", name: "agent", description: "Code of the agent." },
+    { type: "string", name: "title", description: "Title of the work." },
+    {
+      type: "string",
+      name: "instructions",
+      description: "Everything the agent needs."
+    },
+    {
+      type: "integer",
+      name: "job",
+      description: "Number of the job to continue.",
+      required: false
+    }
+  ]
+  return parseLysToolDefinition({
+    name: DELEGATE_WORK_TOOL_NAME,
+    description: "Gives work to another agent in Lys.",
+    group: "agents",
+    access: "agents",
+    runner: "backend",
+    arguments: delegateWorkArguments
   })
 }
 

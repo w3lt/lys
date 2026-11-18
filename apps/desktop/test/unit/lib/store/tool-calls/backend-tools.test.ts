@@ -1,6 +1,17 @@
+import type { ChatToolCall } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
 import { parseBackendToolInput } from "@/lib/store/tool-calls/backend-tools"
 import { buildToolCall } from "../../../support/toolFixtures"
+
+/**
+ * Arguments of a `delegate_work` call that starts a job, with the spaces
+ * around the title and the instructions that a model may send.
+ */
+const NEW_JOB_ARGUMENTS: ChatToolCall["arguments"] = Object.freeze({
+  agent: "nyx",
+  title: " News ",
+  instructions: " Find this week's hologram news. "
+})
 
 describe("parseBackendToolInput", () => {
   it("parses a read-page call into the page's URL", () => {
@@ -93,6 +104,121 @@ describe("parseBackendToolInput", () => {
         "The arguments do not match web_search: query: expected text that is not blank and holds no character hidden on screen."
     })
   })
+
+  it("describes a call that starts a job", () => {
+    const call = buildToolCall(65, "delegate_work", NEW_JOB_ARGUMENTS)
+
+    expect(parseBackendToolInput(call)).toEqual({
+      status: "parsed",
+      input: {
+        runner: "backend",
+        toolName: "delegate_work",
+        agentCode: "nyx",
+        title: "News",
+        instructions: "Find this week's hologram news.",
+        jobNumber: undefined
+      }
+    })
+  })
+
+  it("describes a call that continues a job", () => {
+    const call = buildToolCall(65, "delegate_work", {
+      ...NEW_JOB_ARGUMENTS,
+      job: 2
+    })
+
+    expect(parseBackendToolInput(call)).toEqual({
+      status: "parsed",
+      input: {
+        runner: "backend",
+        toolName: "delegate_work",
+        agentCode: "nyx",
+        title: "News",
+        instructions: "Find this week's hologram news.",
+        jobNumber: 2
+      }
+    })
+  })
+
+  it("takes a title of 80 characters once it is trimmed", () => {
+    const title = "n".repeat(80)
+    const call = buildToolCall(65, "delegate_work", {
+      ...NEW_JOB_ARGUMENTS,
+      title: ` ${title} `
+    })
+
+    expect(parseBackendToolInput(call)).toEqual({
+      status: "parsed",
+      input: {
+        runner: "backend",
+        toolName: "delegate_work",
+        agentCode: "nyx",
+        title,
+        instructions: "Find this week's hologram news.",
+        jobNumber: undefined
+      }
+    })
+  })
+
+  // Each is a call the backend refuses before it asks the person, so the
+  // card must never describe it.
+  it.each([
+    [
+      "no agent",
+      { title: "News", instructions: "Find this week's hologram news." },
+      "agent: expected an agent code."
+    ],
+    [
+      "an agent that is no agent code",
+      { ...NEW_JOB_ARGUMENTS, agent: "Nyx Prime" },
+      "agent: expected an agent code."
+    ],
+    [
+      "a blank title",
+      { ...NEW_JOB_ARGUMENTS, title: " \n " },
+      "title: expected 1 to 80 characters on one line after trimming."
+    ],
+    [
+      "a title of 81 characters",
+      { ...NEW_JOB_ARGUMENTS, title: "n".repeat(81) },
+      "title: expected 1 to 80 characters on one line after trimming."
+    ],
+    [
+      "a title of two lines",
+      { ...NEW_JOB_ARGUMENTS, title: "News\nToday" },
+      "title: expected 1 to 80 characters on one line after trimming."
+    ],
+    [
+      "a title split by a line separator",
+      { ...NEW_JOB_ARGUMENTS, title: "News\u2028Today" },
+      "title: expected 1 to 80 characters on one line after trimming."
+    ],
+    [
+      "blank instructions",
+      { ...NEW_JOB_ARGUMENTS, instructions: " \t " },
+      "instructions: expected text that is not blank."
+    ],
+    [
+      "job 0",
+      { ...NEW_JOB_ARGUMENTS, job: 0 },
+      "job: expected a whole number of 1 or more."
+    ],
+    [
+      "job 1.5",
+      { ...NEW_JOB_ARGUMENTS, job: 1.5 },
+      "job: expected a whole number of 1 or more."
+    ]
+  ])(
+    "rejects a delegate_work call with %s",
+    (_label, callArguments, detail) => {
+      const call = buildToolCall(65, "delegate_work", callArguments)
+
+      expect(parseBackendToolInput(call)).toEqual({
+        status: "rejected",
+        content: `The arguments do not match delegate_work: ${detail}`
+      })
+    }
+  )
 
   it("rejects a backend tool it has no description for, so the tool is not allowed", () => {
     const call = buildToolCall(1, "read_feed", { url: "https://example.com/" })

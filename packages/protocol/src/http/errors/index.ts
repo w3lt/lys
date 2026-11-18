@@ -6,8 +6,10 @@ export {
 } from "./llmServiceBusy"
 export {
   conversationAgentMissingProblemSchema,
+  conversationIsJobProblemSchema,
   conversationNotFoundProblemSchema,
   type ConversationAgentMissingProblem,
+  type ConversationIsJobProblem,
   type ConversationNotFoundProblem
 } from "./conversation"
 export {

@@ -128,7 +128,9 @@ export default class AgentTool {
    *
    * @returns `reads` for a tool that only reads this machine; `network` for a
    * tool that reaches past it, whose results carry what remote servers sent;
-   * or `unknown` for an MCP tool, whose server decides what it reaches.
+   * `agents` for a tool that gives work to another agent in Lys or acts on
+   * such work, and sends nothing off this machine itself; or `unknown` for
+   * an MCP tool, whose server decides what it reaches.
    */
   public get access(): ToolAccess {
     return this.#definition.access

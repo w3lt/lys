@@ -1,4 +1,5 @@
 import {
+  BACKEND_INTERNAL_TOOL_NAMES,
   isEveryToolRunBy,
   toolDefinitionSchema,
   type ToolDefinitionCandidate
@@ -9,7 +10,7 @@ import * as z from "zod"
 import AgentTool from "../../../../src/modules/tool/tool"
 
 describe("AgentTool", () => {
-  it.each(["reads", "network"] as const)(
+  it.each(["reads", "network", "agents"] as const)(
     "reports that a tool with %s access has that access",
     (access) => {
       const tool = new AgentTool({
@@ -725,6 +726,19 @@ describe("toolDefinitionSchema", () => {
     expect(definition.arguments[0]?.name).toBe(name)
   })
 
+  it("accepts a backend tool of the agents group with agents access", () => {
+    expect(
+      toolDefinitionSchema.parse({
+        name: "delegate_work",
+        description: "Gives work.",
+        group: "agents",
+        access: "agents",
+        runner: "backend",
+        arguments: []
+      }).access
+    ).toBe("agents")
+  })
+
   it.each<{
     readonly problem: string
     readonly input: unknown
@@ -839,5 +853,14 @@ describe("isEveryToolRunBy", () => {
   it("accepts an empty list for either side", () => {
     expect(isEveryToolRunBy([], "client")).toBe(true)
     expect(isEveryToolRunBy([], "backend")).toBe(true)
+  })
+})
+
+describe("BACKEND_INTERNAL_TOOL_NAMES", () => {
+  it("lists report_progress and stop_job as backend-internal and leaves delegate_work out", () => {
+    expect(BACKEND_INTERNAL_TOOL_NAMES).toEqual(
+      expect.arrayContaining(["report_progress", "stop_job"])
+    )
+    expect(BACKEND_INTERNAL_TOOL_NAMES).not.toContain("delegate_work")
   })
 })

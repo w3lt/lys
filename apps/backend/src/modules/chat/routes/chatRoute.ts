@@ -5,37 +5,23 @@ import {
   type ChatApiStreamEvent,
   type ChatAttachmentUnsupportedProblem,
   type ChatBackendToolUnavailableProblem,
-  type ChatImageNeedsVisionProblem,
-  type MessageGenerationOptions
+  type ChatImageNeedsVisionProblem
 } from "@lys/protocol"
 import type {
   Conversation,
-  ConversationAssistantMessageStatus,
-  LlmModelReference,
+  ConversationMetadata,
+  ConversationSource,
   ToolDefinition
 } from "@lys/share"
-import type { FastifyBaseLogger, FastifyInstance } from "fastify"
+import type { FastifyInstance } from "fastify"
 import { v7 as uuidv7 } from "uuid"
-import type { BackendConfig } from "../../../config"
 import type Agent from "../../agent/agent"
-import type { AgentTurn } from "../../agent/agent"
-import { AgentRequestLimitError } from "../../agent/agentActivity"
-import type { FindAttachmentImage } from "../../agent/agentContext"
-import { listAgentMcpTools } from "../../agent/builtInAgents"
 import type { UnofferedTools } from "../../agent/unofferedTools"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
-import { buildAttachmentImageReader } from "../../attachment/attachmentImageReader"
 import {
   parseChatAttachments,
   type ParsedChatAttachment
 } from "../../attachment/chatAttachments"
-import ReadAttachmentTool, {
-  buildReadAttachmentDefinition,
-  hasReadableTextAttachment,
-  listReadableAttachments,
-  type ReadableAttachment,
-  type ReadAttachmentFile
-} from "../../attachment/readAttachmentTool"
 import handleLlmServiceRequestFailure from "../../llm/routes/handleLlmServiceRequestFailure"
 import type {
   McpTurnToolLookup,
@@ -46,24 +32,15 @@ import type {
   TurnBuiltInTool
 } from "../../tool/builtIn/builtInTool"
 import { findTurnBuiltInTools } from "../../tool/builtIn/builtInTools"
-import type ToolApprovalService from "../../toolApproval/toolApprovalService"
-import type { ToolCallPolicy } from "../../toolApproval/toolCallPolicy"
-import type { TitleGenerationOptions } from "../chatService"
 import type {
   ConversationTurn,
+  ConversationTurnTarget,
+  ConversationTurnUserMessage,
   ConversationTurnWriter,
-  CreateConversationTurnOptions,
-  GeneratedConversationTitleWriter,
-  ReplyPartWriter
+  CreateConversationTurnOptions
 } from "../persistence"
 import ReplyEventSubscription from "../replyEventSubscription"
-import type ReplyGeneration from "../replyGeneration"
-import type {
-  ReplyGenerationTaskContext,
-  ReplyTaskContext
-} from "../replyGeneration"
-import type ReplyGenerationRegistry from "../replyGenerationRegistry"
-import createTitleGenerationTask from "../titleGenerationTask"
+import type { StartTurn, StartTurnOptions, TurnSettings } from "../turnStart"
 import {
   findListedModelCapabilities,
   type FindLlmModelCapabilities,
@@ -85,39 +62,9 @@ import {
   findRequestedBackendTools,
   findUnofferedTools,
   sendUnansweredTurnProblem,
-  type TurnAgentLookups,
-  type UnansweredTurnOutcome
+  type MissingRequestedAgentOutcome,
+  type TurnAgentLookups
 } from "./turnRequest"
-
-/** Backend settings the chat route applies to every request. */
-export type ChatRouteOptions = Pick<
-  BackendConfig,
-  "titleGenerationMaxAttempts"
-> &
-  Readonly<{
-    /**
-     * What the tool call rules know about this machine, and the reader of
-     * the folders the person lets tools use; every tool call of every turn
-     * the route starts is decided by them.
-     */
-    toolCallPolicy: ToolCallPolicy
-  }>
-
-/**
- * Settings, the generation registry, and the capability lookup the chat
- * route is installed with.
- */
-export type ChatRouteRegistration = ChatRouteOptions &
-  Readonly<{
-    /** Registry owning every generation this route starts; not disposed here. */
-    generations: ReplyGenerationRegistry
-    /**
-     * Capabilities of the model a request names, read from its provider's
-     * inventory and remembered by the lookup while that provider stays
-     * connected; shared with the chat-context route.
-     */
-    findModelCapabilities: FindLlmModelCapabilities
-  }>
 
 /** What the chat route does with attachment files. */
 type AttachmentFiles = Pick<
@@ -125,21 +72,16 @@ type AttachmentFiles = Pick<
   | "saveMessageAttachments"
   | "deleteMessageAttachments"
   | "deleteConversationAttachments"
-  | "readAttachment"
 >
 
 /**
- * Capabilities and settings borrowed for the lifetime of a registered chat
- * route, including the agent lookup.
+ * Capabilities borrowed for the lifetime of a registered chat route,
+ * including the agent lookup.
  */
 type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
   Readonly<{
-    /** Turn persistence whose lifetime outlives all active generations. */
-    turns: ConversationTurnWriter
-    /** Reply-part persistence whose lifetime outlives all active generations. */
-    replyParts: ReplyPartWriter
-    /** Conditional generated-title persistence borrowed for the route lifetime. */
-    titleWriter: GeneratedConversationTitleWriter
+    /** Turn persistence that stores each request's turn. */
+    turns: Pick<ConversationTurnWriter, "createConversationTurn">
     /**
      * Stored conversation with its messages and their attachments; undefined
      * means it is not stored.
@@ -151,24 +93,10 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findModelCapabilities: FindLlmModelCapabilities
     /**
-     * Saves each turn's attachment files, deletes them when the turn is not
-     * stored, and reads stored ones.
+     * Saves each turn's attachment files, and deletes them when the turn is
+     * not stored.
      */
     attachmentFiles: AttachmentFiles
-    /** Bound title operation retained separately from chat completion. */
-    generateTitle: (options: TitleGenerationOptions) => Promise<string>
-    /**
-     * Context length a model is loaded with on its provider, observed
-     * through that provider's model-operation queue without loading it;
-     * undefined when it is not loaded.
-     */
-    findLoadedContextLength: (
-      model: LlmModelReference
-    ) => Promise<number | undefined>
-    /** Inclusive maximum number of title requests permitted for one turn. */
-    titleGenerationMaxAttempts: number
-    /** Registry that owns every generation this route starts. */
-    generations: ReplyGenerationRegistry
     /** Every built-in tool, which a request may offer by name. */
     builtInTools: readonly BuiltInToolEntry[]
     /**
@@ -177,16 +105,19 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findMcpTool: (toolName: string) => McpTurnToolLookup
     /**
-     * What the tool call rules know about this machine, and the reader of
-     * the folders the person lets tools use; every checked call is decided
-     * by them before its approval, and again once the person allows it.
+     * Starts the generation of each stored turn, in the registry that owns
+     * every running generation.
      */
-    toolCallPolicy: ToolCallPolicy
+    startTurn: StartTurn
     /**
-     * Approval gate every tool call the policy does not deny passes, except
-     * an allowed call of a backend tool that runs without approval.
+     * Hook through which each person's turn takes part in delegation, told
+     * that the turn starts.
      */
-    toolApprovals: ToolApprovalService
+    handleTurnStarted: StartTurnOptions["handleTurnStarted"]
+    /** Hook that creates each person's turn's part in delegation. */
+    createTurnDelegation: StartTurnOptions["createTurnDelegation"]
+    /** Hook told that the reply of each person's turn ended. */
+    handleReplyEnded: StartTurnOptions["handleReplyEnded"]
   }>
 
 /** Problems the chat route sends before the stream starts. */
@@ -206,6 +137,8 @@ type AcceptedTurnRequest = Readonly<{
   builtInTools: readonly TurnBuiltInTool[]
   /** MCP tools the request offered, each of a connected server. */
   mcpTools: readonly TurnMcpTool[]
+  /** Whether the request offered `delegate_work`. */
+  offersDelegateWork: boolean
   /** What the request names about the tools the turn does not offer. */
   unofferedTools: UnofferedTools
   /**
@@ -221,6 +154,11 @@ type OfferedBackendTools = Readonly<{
   builtInTools: readonly TurnBuiltInTool[]
   /** Offered MCP tools, each of a connected server, in offer order. */
   mcpTools: readonly TurnMcpTool[]
+  /**
+   * Whether the request offers `delegate_work`, which is in neither list:
+   * the agent adds it itself to a turn that may delegate.
+   */
+  offersDelegateWork: boolean
 }>
 
 /**
@@ -243,85 +181,19 @@ type SavedTurn = Readonly<{
 }>
 
 /** Outcome of storing a turn: the stored turn, or why no agent answers it. */
-type SavedTurnOutcome = SavedTurn | UnansweredTurnOutcome
-
-/** What the generation input of a stored turn is built from. */
-type TurnGenerationSource = Readonly<{
-  /** Validated chat input and request logger. */
-  request: ChatRouteRequest
-  /** What the request parsed and looked up before the turn was stored. */
-  accepted: AcceptedTurnRequest
-  /** The stored turn and the agent that answers it. */
-  saved: SavedTurn
-}>
-
-/** Warning logged when a round's calls all ask because the choices are unreadable. */
-const UNREADABLE_JUST_RUN_CHOICES_MESSAGE =
-  "The saved Just run choices could not be read from settings.json; every tool call of this round asks the person"
-
-/** Warning logged when a read of the approved folders finds them unreadable. */
-const UNREADABLE_APPROVED_FOLDERS_MESSAGE =
-  "The folders tools may use could not be read from settings.json; every tool call of this round that names a file or folder is denied"
-
-/** Client tools of a request that offered none. */
-const NO_REQUESTED_TOOLS: readonly ToolDefinition[] = Object.freeze([])
-
-/** Direct tools of a turn that offers none. */
-const NO_DIRECT_TOOLS: readonly TurnBuiltInTool[] = Object.freeze([])
-
-/** Values one turn's tasks keep after the request that started them ended. */
-type TurnGenerationInput = Readonly<{
-  /** Stored turn and prior transcript snapshot. */
-  turn: ConversationTurn
-  /** Agent that answers the turn. */
-  agent: Agent
-  /** Model selected by the request, and its provider. */
-  model: LlmModelReference
-  /** Sampling and reply length controls sent with the request. */
-  generationOptions: MessageGenerationOptions
-  /** Client tools the request offered, each name once; empty when it offered none. */
-  clientTools: readonly ToolDefinition[]
-  /**
-   * Backend tools offered in every round, never routed through
-   * `find_tools`: the attachment reader when the turn offers it; empty
-   * otherwise.
-   */
-  directTools: readonly TurnBuiltInTool[]
-  /**
-   * Backend tools the request offered, each name once; empty when it
-   * offered none.
-   */
-  builtInTools: readonly TurnBuiltInTool[]
-  /**
-   * MCP tools the request offered, each name once; each call runs on its
-   * server as connected when the call runs. Empty when none.
-   */
-  mcpTools: readonly TurnMcpTool[]
-  /** What the request names about the tools the turn does not offer. */
-  unofferedTools: UnofferedTools
-  /** Whether the model sees images. */
-  canSeeImages: boolean
-  /**
-   * Whether the model is trained for tool use, so the agent adds its state
-   * tools to the turn and routes its other tools through `find_tools`.
-   */
-  trainedForToolUse: boolean
-  /** Reads the bytes of one stored image attachment of the conversation. */
-  findAttachmentImage: FindAttachmentImage
-  /** Logger of the request that started the turn. */
-  logger: FastifyBaseLogger
-  /** Route capabilities borrowed for the route lifetime. */
-  dependencies: ChatRouteDependencies
-}>
+type SavedTurnOutcome = SavedTurn | MissingRequestedAgentOutcome
 
 /**
  * Installs the chat endpoint, which stores a turn, starts its generation, and
  * follows that generation on the response stream.
  *
- * @param app - Backend with SSE, validation, and singleton services installed.
- * @param registration - Title attempt limit, the tool call policy, the
- * registry that owns the started generations, and the model capability
- * lookup.
+ * @param app - Backend with SSE, validation, and singleton services
+ * installed, whose turn start starts each stored turn's generation, with the
+ * delegation hooks every turn the route starts takes part in delegation
+ * through.
+ * @param findModelCapabilities - Capabilities of the model a request names,
+ * read from its provider's inventory and remembered by the lookup while that
+ * provider stays connected; shared with the chat-context route.
  * @throws If route registration fails.
  * @remarks The route accepts bodies up to the chat contract's limit, so a
  * message can carry its attachments. A full model-operation queue and a
@@ -330,39 +202,23 @@ type TurnGenerationInput = Readonly<{
  */
 export default function updateFastifyWithChatRoute(
   app: FastifyInstance,
-  {
-    titleGenerationMaxAttempts,
-    toolCallPolicy,
-    generations,
-    findModelCapabilities
-  }: ChatRouteRegistration
+  findModelCapabilities: FindLlmModelCapabilities
 ): void {
-  const turns = app.conversationTurns
   const dependencies = {
-    turns,
-    replyParts: app.replyParts,
-    titleWriter: turns,
+    turns: app.conversationTurns,
     loadChatAgent: (code: string) =>
       app.agentRuntimeService.loadChatAgent(code),
     findConversation: (conversationId: string) =>
       app.conversationHistoryReader.getConversation(conversationId),
     findModelCapabilities,
     attachmentFiles: app.attachmentFileStore,
-    generateTitle: (options: TitleGenerationOptions) =>
-      app.chatService.generateTitle(options),
-    findLoadedContextLength: async (model: LlmModelReference) =>
-      (
-        await app.llmProviderServices[
-          model.provider
-        ].llmService.findLlmContextMeasurement(model.modelKey, [])
-      )?.contextLength,
-    titleGenerationMaxAttempts,
-    generations,
     builtInTools: app.builtInTools,
     findMcpTool: (toolName: string) =>
       app.mcpServerRegistry.findTurnTool(toolName),
-    toolCallPolicy,
-    toolApprovals: app.toolApprovalService
+    startTurn: app.startTurn,
+    handleTurnStarted: app.handleTurnStarted,
+    createTurnDelegation: app.createTurnDelegation,
+    handleReplyEnded: app.handleReplyEnded
   }
   app.route<ChatApiRoute>({
     method: chatApi.method,
@@ -382,7 +238,7 @@ export default function updateFastifyWithChatRoute(
  *
  * @param request - Validated chat input and request logger.
  * @param reply - SSE or pre-stream error response owner.
- * @param dependencies - Borrowed persistence, agents, files, and registry.
+ * @param dependencies - Borrowed persistence, agents, files, and turn start.
  * @returns Settlement after the stream ends, or after a problem response.
  * @throws An `UnknownBackendToolError`, before anything is stored, when the
  * request offers a backend tool the backend does not run, such as a tool no
@@ -405,7 +261,11 @@ export default function updateFastifyWithChatRoute(
  * key saved or removed while it runs applies from the next request. An MCP
  * tool's call runs on its server as connected when the call runs, and fails
  * for the model when the server is no longer connected or no longer lists
- * the tool.
+ * the tool. The turn is started with the application's delegation hooks,
+ * so it takes part in delegation: for a model trained for tool use, its
+ * agent is offered `delegate_work` when the request offers it in a main
+ * conversation and the agent's role may delegate, and `stop_job` with
+ * `delegate_work` or once the conversation has a job.
  */
 async function handleChatRequest(
   request: ChatRouteRequest,
@@ -419,9 +279,16 @@ async function handleChatRequest(
     sendUnansweredTurnProblem(reply, saved, request.url)
     return
   }
-  const generation = startTurnGeneration(
-    buildTurnGenerationInput({ request, accepted, saved }, dependencies)
-  )
+  const generation = dependencies.startTurn({
+    turn: saved.turn,
+    agent: saved.agent,
+    settings: buildTurnSettings(request.body, accepted),
+    startedBy: "person",
+    handleTurnStarted: dependencies.handleTurnStarted,
+    createTurnDelegation: dependencies.createTurnDelegation,
+    handleReplyEnded: dependencies.handleReplyEnded,
+    logger: request.log
+  })
   const subscription = new ReplyEventSubscription<ChatApiStreamEvent>(
     createEventSender<ChatApiStreamEvent>(reply.sse)
   )
@@ -452,7 +319,9 @@ async function handleChatRequest(
  * failure of a lookup.
  * @remarks The attachments are decoded first, then the tools named as
  * unable to run are checked and every offered backend tool is looked up:
- * the built-in tools' availability first, then the MCP tools' servers;
+ * the built-in tools' availability first, then the MCP tools' servers,
+ * while `delegate_work` is only noted as offered, because the agent adds
+ * that tool itself;
  * then the conversation is read once and an agent is
  * looked up for the request, so a request no agent answers is refused
  * before the inventory is read; the conversation's stored attachments come
@@ -507,6 +376,7 @@ async function parseTurnRequest(
     attachments: attachments.attachments,
     builtInTools: backendTools.builtInTools,
     mcpTools: backendTools.mcpTools,
+    offersDelegateWork: backendTools.offersDelegateWork,
     unofferedTools,
     capabilities
   }
@@ -522,11 +392,14 @@ async function parseTurnRequest(
  * @param dependencies - Borrowed agent and conversation lookups.
  * @returns The continued conversation as stored now, undefined inside for a
  * new one; or undefined once the problem that says why no agent answers was
- * sent.
+ * sent: for a job, the conversation-is-job problem.
  * @throws Any persistence failure of a lookup.
  * @remarks The conversation is read once, here; the agent lookup uses that
  * read, and the caller takes the stored attachments from it. The agent is
- * not returned, because it is looked up again when the turn is stored.
+ * not returned, because it is looked up again when the turn is stored. A
+ * job is refused here, before its agent is looked up. It is not asked again
+ * when the turn is stored: a conversation is a job from its creation on, so
+ * one that passed here is still a main conversation then.
  */
 function findTurnConversation(
   request: ChatRouteRequest,
@@ -541,6 +414,14 @@ function findTurnConversation(
     conversation.kind === "existing"
       ? dependencies.findConversation(conversation.id)
       : undefined
+  if (storedConversation?.kind === "job") {
+    sendUnansweredTurnProblem(
+      reply,
+      { status: "conversation-is-job", conversationId: storedConversation.id },
+      request.url
+    )
+    return undefined
+  }
   const requestedAgent = loadRequestedAgent(conversation, {
     loadChatAgent: dependencies.loadChatAgent,
     findConversationAgentCode: () => storedConversation?.agentCode
@@ -560,9 +441,10 @@ function findTurnConversation(
  * @param reply - Response owner; the response has not started.
  * @param dependencies - Every built-in tool and the MCP tool lookup.
  * @returns The offered built-in and MCP tools found for the turn, each in
- * offer order; or undefined once the backend-tool-unavailable problem was
- * sent for an offered built-in tool that cannot run now or, after those, an
- * offered MCP tool whose server is not connected.
+ * offer order, and whether the request offers `delegate_work`; or undefined
+ * once the backend-tool-unavailable problem was sent for an offered built-in
+ * tool that cannot run now or, after those, an offered MCP tool whose server
+ * is not connected.
  * @throws An `UnknownBackendToolError` for an offered backend tool the
  * backend does not run.
  */
@@ -599,7 +481,11 @@ async function findOfferedBackendTools(
     )
     return undefined
   }
-  return { builtInTools: found.tools, mcpTools: requested.mcpTools }
+  return {
+    builtInTools: found.tools,
+    mcpTools: requested.mcpTools,
+    offersDelegateWork: requested.offersDelegateWork
+  }
 }
 
 /**
@@ -696,24 +582,23 @@ async function saveTurn(
  * @param attachments - The request's decoded attachments in request order.
  * @returns The turn with the identities of a new conversation and of the
  * user message, made here so the attachment files can be saved under them
- * before the turn commits, and the attachments' drafts in request order.
+ * before the turn commits, and the attachments' drafts in request order. The
+ * person is the author of the message.
  */
 function buildTurnOptions(
   body: ChatApiRequestBody,
   attachments: readonly ParsedChatAttachment[]
 ): CreateConversationTurnOptions {
-  return {
-    conversation:
-      body.conversation.kind === "new"
-        ? { kind: "new", id: uuidv7(), agentCode: body.conversation.agentCode }
-        : body.conversation,
-    userMessage: {
-      id: uuidv7(),
-      content: body.message,
-      attachments: attachments.map((attachment) => attachment.draft)
-    },
-    model: body.model
+  const conversation: ConversationTurnTarget =
+    body.conversation.kind === "new"
+      ? { kind: "new", id: uuidv7(), agentCode: body.conversation.agentCode }
+      : body.conversation
+  const userMessage: ConversationTurnUserMessage = {
+    id: uuidv7(),
+    content: body.message,
+    attachments: attachments.map((attachment) => attachment.draft)
   }
+  return { conversation, userMessage, model: body.model }
 }
 
 /**
@@ -823,386 +708,88 @@ async function deleteAttachmentsAfterFailure(
 }
 
 /**
- * Builds the values a stored turn's tasks keep.
+ * Builds the settings a stored turn's reply is written with.
  *
- * @param source - The request, what it parsed and looked up, and the stored
- * turn with its agent.
- * @param dependencies - Route capabilities borrowed for the route lifetime.
- * @returns The turn with its agent, request values, the offered tools,
- * without the MCP tools only Lys may use unless the agent is Caliginia or
- * Lysiptera, the direct tools {@link buildTurnDirectTools} builds for a
- * model trained for tool use, whether the model sees images, and the reader
- * of the conversation's stored images.
+ * @param body - Validated chat input.
+ * @param accepted - What the request parsed and looked up before the turn
+ * was stored.
+ * @returns The request's model, generation options, and client tools, none
+ * when it offered none; the backend tools found for the turn, without the
+ * attachment reader, which the turn start offers among its direct tools;
+ * whether the request offered `delegate_work`; what the request names about
+ * the tools the turn does not offer; and whether the model sees images and
+ * is trained for tool use.
  */
-function buildTurnGenerationInput(
-  source: TurnGenerationSource,
-  dependencies: ChatRouteDependencies
-): TurnGenerationInput {
-  const { request, accepted, saved } = source
-  const { body } = request
-  const { turn } = saved
-  const { attachmentFiles } = dependencies
-  const conversationId = turn.conversation.id
+function buildTurnSettings(
+  body: ChatApiRequestBody,
+  accepted: AcceptedTurnRequest
+): TurnSettings {
+  /** Client tools of a request that offered none. */
+  const noRequestedTools: readonly ToolDefinition[] = Object.freeze([])
+
   return {
-    turn,
-    agent: saved.agent,
     model: body.model,
     generationOptions: body.generationOptions,
-    clientTools: body.tools?.definitions ?? NO_REQUESTED_TOOLS,
-    directTools: accepted.capabilities.trainedForToolUse
-      ? buildTurnDirectTools(
-          listReadableAttachments(conversationId, [
-            ...turn.conversation.messages,
-            turn.userMessage
-          ]),
-          (location) => attachmentFiles.readAttachment(location)
-        )
-      : NO_DIRECT_TOOLS,
+    clientTools: body.tools?.definitions ?? noRequestedTools,
     builtInTools: accepted.builtInTools,
-    mcpTools: listAgentMcpTools(saved.agent.code, accepted.mcpTools),
+    mcpTools: accepted.mcpTools,
+    offersDelegateWork: accepted.offersDelegateWork,
     unofferedTools: accepted.unofferedTools,
     canSeeImages: accepted.capabilities.vision,
-    trainedForToolUse: accepted.capabilities.trainedForToolUse,
-    findAttachmentImage: buildAttachmentImageReader(
-      conversationId,
-      attachmentFiles
-    ),
-    logger: request.log,
-    dependencies
+    trainedForToolUse: accepted.capabilities.trainedForToolUse
   }
 }
 
 /**
- * Builds the direct tools of a turn whose model is trained for tool use.
+ * Builds the metadata of a stored conversation: the conversation without its
+ * messages, sources, and jobs, of the same kind.
  *
- * @param attachments - Every attachment of the conversation, the new
- * message's included.
- * @param readAttachmentFile - Reads an attachment's file; lent for the turn.
- * @returns The attachment reader when an attachment is a text file, offered
- * in every round, as it reads only what the person attached to this
- * conversation, and its calls run without approval; none otherwise. A model
- * that is not trained for tool use gets no direct tool, without a call
- * here.
+ * @param conversation - Stored conversation snapshot.
+ * @returns Its identity, title, agent, times, and kind, with its parent, job
+ * number, and delegator, which a main conversation has none of.
  */
-function buildTurnDirectTools(
-  attachments: readonly ReadableAttachment[],
-  readAttachmentFile: ReadAttachmentFile
-): readonly TurnBuiltInTool[] {
-  if (!hasReadableTextAttachment(attachments)) return NO_DIRECT_TOOLS
-  const reader: TurnBuiltInTool = Object.freeze({
-    definition: buildReadAttachmentDefinition(),
-    tool: new ReadAttachmentTool(attachments, readAttachmentFile),
-    runsWithoutApproval: true
-  })
-  return Object.freeze([reader])
-}
-
-/**
- * Starts the generation that writes one stored turn's reply and, for an
- * untitled conversation, its title unless another turn of that conversation
- * is already generating one.
- *
- * @param input - Stored turn and the request values its tasks keep.
- * @returns The registered generation.
- * @throws If the registry no longer admits generations; the stored reply is
- * finalized as interrupted first, so no reply stays streaming.
- */
-function startTurnGeneration(input: TurnGenerationInput): ReplyGeneration {
-  const { turn, dependencies, logger } = input
-  const target = {
-    conversationId: turn.conversation.id,
-    assistantMessageId: turn.assistantMessage.id
-  }
-  try {
-    return dependencies.generations.startReplyGeneration(target, {
-      startReplyTask: (context) => createTurnReplyTask(input, context),
-      startTitleTask:
-        turn.conversation.title === null
-          ? (context) => createTurnTitleTask(input, context)
-          : undefined,
-      reportTaskFailure: (error) => {
-        logger.error({ err: error }, "Conversation task failed")
-      }
-    })
-  } catch (error) {
-    dependencies.turns.updateAssistantMessageState(turn.assistantMessage.id, {
-      status: "interrupted"
-    })
-    throw error
-  }
-}
-
-/**
- * Has the turn's agent write its reply, then finalizes a reply it left
- * streaming.
- *
- * @param input - Stored turn, its agent, and the request values the reply
- * keeps.
- * @param context - Generation-owned cancellation, event sender, tool call
- * sender, and approval prompt sender.
- * @returns Settlement after the reply is final.
- * @throws The agent's failure after the fallback finalization; an
- * `AggregateError` of the agent's failure and the fallback's failure when the
- * fallback also fails; or the fallback's failure after an agent that
- * succeeded. The generation reports it.
- * @remarks The fallback stores `interrupted` after cancellation and `failed`
- * otherwise; it changes nothing when the agent already finalized the reply.
- */
-async function createTurnReplyTask(
-  input: TurnGenerationInput,
-  context: ReplyTaskContext
-): Promise<void> {
-  const { turn, dependencies } = input
-  const { abortSignal } = context
-  const assistantMessageId = turn.assistantMessage.id
-  try {
-    await input.agent.createReply(buildAgentTurn(input, context))
-  } catch (taskError) {
-    try {
-      updateUnfinishedReplyState(
-        dependencies.turns,
-        assistantMessageId,
-        abortSignal
-      )
-    } catch (finalizationError) {
-      throw new AggregateError(
-        [taskError, finalizationError],
-        "Reply failure could not be finalized",
-        { cause: finalizationError }
-      )
+function buildConversationMetadata(
+  conversation: Conversation
+): ConversationMetadata {
+  const { id, title, agentCode, createdAt, updatedAt } = conversation
+  const fields = { id, title, agentCode, createdAt, updatedAt }
+  if (conversation.kind === "main")
+    return {
+      ...fields,
+      kind: "main",
+      parentConversationId: null,
+      jobNumber: null,
+      delegatorAgentCode: null
     }
-    throw taskError
-  }
-  updateUnfinishedReplyState(
-    dependencies.turns,
-    assistantMessageId,
-    abortSignal
-  )
-}
-
-/**
- * Builds the turn the agent answers for one stored turn.
- *
- * @param input - Stored turn, its tools, and the request values the reply
- * keeps.
- * @param context - Generation-owned cancellation, event sender, tool call
- * sender, and approval prompt sender.
- * @returns The agent turn, whose parts and final state go to the stored
- * reply and whose reply state is read back from the stored conversation,
- * which numbers new sources after the conversation's stored ones, whose tool
- * calls pass the tool call policy and then the approval gate, and whose
- * images are read from the conversation's attachment files. With the
- * request's logger, an unreadable settings file, a reply refused because its
- * agent's request slots and line were full, and a tool search Armitage could
- * not finish are logged as warnings; a cancelled reply, and a round that was
- * not sent because it did not fit or its model was not loaded, at debug
- * level; and any other reply failure as an error.
- */
-function buildAgentTurn(
-  input: TurnGenerationInput,
-  {
-    abortSignal,
-    sendEvent,
-    sendClientToolCall,
-    sendToolApprovalPrompt
-  }: ReplyTaskContext
-): AgentTurn {
-  const { turn, dependencies } = input
-  const { replyParts } = dependencies
-  const assistantMessageId = turn.assistantMessage.id
+  const { kind, parentConversationId, jobNumber, delegatorAgentCode } =
+    conversation
   return {
-    conversationId: turn.conversation.id,
-    requestId: assistantMessageId,
-    history: turn.conversation.messages,
-    sources: turn.conversation.sources,
-    userMessage: turn.userMessage,
-    canSeeImages: input.canSeeImages,
-    findAttachmentImage: input.findAttachmentImage,
-    model: input.model,
-    trainedForToolUse: input.trainedForToolUse,
-    generationOptions: input.generationOptions,
-    directTools: input.directTools,
-    clientTools: input.clientTools,
-    builtInTools: input.builtInTools,
-    mcpTools: input.mcpTools,
-    unofferedTools: input.unofferedTools,
-    abortSignal,
-    createReplyPart: (draft) =>
-      replyParts.createReplyPart(assistantMessageId, draft),
-    updateReplyPartContent: (partId, content) =>
-      replyParts.updateReplyPartContent(assistantMessageId, partId, content),
-    updateReplyToolCall: (toolCallId, change) =>
-      replyParts.updateReplyToolCall(assistantMessageId, toolCallId, change),
-    updateAssistantMessageState: (completion) =>
-      dependencies.turns.updateAssistantMessageState(
-        assistantMessageId,
-        completion
-      ),
-    findReplyStatus: () =>
-      findStoredReplyStatus(
-        dependencies.findConversation(turn.conversation.id),
-        assistantMessageId
-      ),
-    sendEvent,
-    sendClientToolCall,
-    toolCallPolicy: reportUnreadableApprovedFolders(
-      dependencies.toolCallPolicy,
-      () => {
-        input.logger.warn(UNREADABLE_APPROVED_FOLDERS_MESSAGE)
-      }
-    ),
-    createToolCallGate: () =>
-      dependencies.toolApprovals.createToolCallGate(
-        sendToolApprovalPrompt,
-        () => {
-          input.logger.warn(UNREADABLE_JUST_RUN_CHOICES_MESSAGE)
-        }
-      ),
-    ...buildReplyFailureReporters(input.logger)
+    ...fields,
+    kind,
+    parentConversationId,
+    jobNumber,
+    delegatorAgentCode
   }
 }
 
 /**
- * Wraps a tool call policy so that each read of the approved folders that
- * finds them unreadable is reported.
+ * Lists the sources the reports a turn's user message delivers cite.
  *
- * @param toolCallPolicy - The backend's policy, left unchanged.
- * @param reportApprovedFoldersUnreadable - Called once per such read, before
- * the read settles; must not throw.
- * @returns A frozen policy with the same paths, whose reads settle as the
- * policy's do.
- * @remarks The policy denies every call that names a path while the folders
- * cannot be read, so the report is what tells an operator why, as the Just
- * run read reports the same file.
+ * @param turn - Stored pair and conversation snapshot, whose sources hold
+ * those the delivered reports added.
+ * @returns Every source of the conversation whose number a delivered report
+ * lists, in number order; empty when the message delivers no report or its
+ * reports cite nothing.
  */
-function reportUnreadableApprovedFolders(
-  toolCallPolicy: ToolCallPolicy,
-  reportApprovedFoldersUnreadable: () => void
-): ToolCallPolicy {
-  return Object.freeze({
-    ...toolCallPolicy,
-    readApprovedFolders: async () => {
-      const approvedFolders = await toolCallPolicy.readApprovedFolders()
-      if (approvedFolders.kind === "unreadable")
-        reportApprovedFoldersUnreadable()
-      return approvedFolders
-    }
-  })
-}
-
-/**
- * Finds the status one reply of a conversation has as stored.
- *
- * @param conversation - The stored conversation; undefined when it is not
- * stored.
- * @param assistantMessageId - UUIDv7 of the reply.
- * @returns The reply's status; undefined when the conversation or the reply
- * is not stored.
- */
-function findStoredReplyStatus(
-  conversation: Conversation | undefined,
-  assistantMessageId: string
-): ConversationAssistantMessageStatus | undefined {
-  const message = conversation?.messages.find(
-    (stored) => stored.id === assistantMessageId
+function listDeliveredReportSources(
+  turn: ConversationTurn
+): readonly ConversationSource[] {
+  const citedNumbers = new Set(
+    turn.userMessage.reports.flatMap((report) => report.sourceNumbers)
   )
-  return message?.role === "assistant" ? message.status : undefined
-}
-
-/**
- * Builds the reporters that log how a reply, or one of its tool searches,
- * ended without finishing.
- *
- * @param logger - Request logger, borrowed for the reply.
- * @returns Reporters that log a reply refused because its agent's request
- * slots and line were full as a warning, a cancellation and a round that was
- * not sent because it did not fit or its model was not loaded as debug
- * entries, a failed stream as an error, and a tool search Armitage could not
- * finish as a warning.
- */
-function buildReplyFailureReporters(
-  logger: FastifyBaseLogger
-): Pick<
-  AgentTurn,
-  | "reportReplyCancellation"
-  | "reportReplyRefusal"
-  | "reportReplyFailure"
-  | "reportToolSearchFailure"
-> {
-  return {
-    reportReplyCancellation: (failure) => {
-      logger.debug({ err: failure }, "Chat completion was cancelled")
-    },
-    reportReplyRefusal: (failure) => {
-      if (failure instanceof AgentRequestLimitError)
-        logger.warn(
-          { err: failure },
-          "Chat reply was refused because its agent was too busy"
-        )
-      else
-        logger.debug({ err: failure }, "Chat round was not sent to the model")
-    },
-    reportReplyFailure: (failure) => {
-      logger.error({ err: failure }, "Chat completion stream failed")
-    },
-    reportToolSearchFailure: (failure) => {
-      logger.warn(
-        { err: failure },
-        "Armitage could not finish a tool search, so the reply went on without its tools"
-      )
-    }
-  }
-}
-
-/**
- * Stores a final state for a reply its task left streaming.
- *
- * @param turns - Turn persistence borrowed for the route lifetime.
- * @param assistantMessageId - UUIDv7 of the reply.
- * @param abortSignal - The reply task's cancellation; aborted means the reply
- * was stopped or shut down.
- * @throws If the state cannot be stored.
- * @remarks Stores `interrupted` after cancellation and `failed` otherwise. A
- * reply that is already final, superseded, or deleted is left unchanged.
- */
-function updateUnfinishedReplyState(
-  turns: ConversationTurnWriter,
-  assistantMessageId: string,
-  abortSignal: AbortSignal
-): void {
-  turns.updateAssistantMessageState(assistantMessageId, {
-    status: abortSignal.aborted ? "interrupted" : "failed"
-  })
-}
-
-/**
- * Runs one turn's title task for a conversation without a stored title.
- *
- * @param input - Stored turn and the request values the task keeps.
- * @param context - Generation-owned cancellation and event sender.
- * @returns Settlement after the title is sent or its outcome is logged; it
- * does not reject.
- */
-function createTurnTitleTask(
-  input: TurnGenerationInput,
-  { abortSignal, sendEvent }: ReplyGenerationTaskContext
-): Promise<void> {
-  const { turn, dependencies } = input
-  return createTitleGenerationTask({
-    generateTitle: dependencies.generateTitle,
-    findLoadedContextLength: dependencies.findLoadedContextLength,
-    userMessageContent: turn.userMessage.content,
-    model: input.model,
-    abortSignal,
-    sendEvent,
-    logger: input.logger,
-    titleGenerationMaxAttempts: dependencies.titleGenerationMaxAttempts,
-    updateConversationTitle: (title) =>
-      dependencies.titleWriter.updateGeneratedConversationTitle(
-        turn.conversation.id,
-        title
-      )
-  })
+  return turn.conversation.sources.filter((source) =>
+    citedNumbers.has(source.number)
+  )
 }
 
 /**
@@ -1210,19 +797,20 @@ function createTurnTitleTask(
  *
  * @param turn - Stored pair and conversation snapshot.
  * @returns The turn-start event, followed by the stored title of an existing
- * titled conversation.
+ * titled conversation, then the sources the turn's delivered reports cite.
  * @remarks The stored title lets a client that missed an earlier title event
  * reconcile its metadata. New and untitled conversations get no title here.
+ * The start event carries no sources, so the `sources` event lets a client
+ * link a delivered report's citations; it is left out when the reports cite
+ * nothing. A new conversation has no jobs, so it never delivers reports.
  */
 function buildTurnStartEvents(turn: ConversationTurn): ChatApiStreamEvent[] {
   const { userMessage, assistantMessage } = turn
   if (turn.isNewConversation) {
-    const { id, title, agentCode, createdAt, updatedAt } = turn.conversation
-    const conversation = { id, title, agentCode, createdAt, updatedAt }
     return [
       {
         type: "start-new-conversation-turn",
-        conversation,
+        conversation: buildConversationMetadata(turn.conversation),
         userMessage,
         assistantMessage
       }
@@ -1234,8 +822,10 @@ function buildTurnStartEvents(turn: ConversationTurn): ChatApiStreamEvent[] {
     userMessage,
     assistantMessage
   }
+  const events: ChatApiStreamEvent[] = [start]
   const { title } = turn.conversation
-  if (title === null) return [start]
-  const storedTitle: ChatApiStreamEvent = { type: "title", title }
-  return [start, storedTitle]
+  if (title !== null) events.push({ type: "title", title })
+  const sources = listDeliveredReportSources(turn)
+  if (sources.length > 0) events.push({ type: "sources", sources })
+  return events
 }

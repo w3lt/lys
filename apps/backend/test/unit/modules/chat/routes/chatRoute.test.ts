@@ -6,14 +6,17 @@ import {
   chatApiStreamEventSchema,
   chatImageNeedsVisionProblemSchema,
   conversationAgentMissingProblemSchema,
+  conversationIsJobProblemSchema,
   conversationNotFoundProblemSchema,
-  MAXIMUM_OFFERED_BACKEND_TOOL_COUNT
+  MAXIMUM_OFFERED_BACKEND_TOOL_COUNT,
+  type ChatToolCall
 } from "@lys/protocol"
 import {
   CALIGINIA_AGENT_CODE,
   MAXIMUM_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
   mcpSettingsSchema,
+  type Job,
   type LlmModelReference,
   type McpServerSettings,
   type ReplyPart
@@ -21,11 +24,17 @@ import {
 import type { LightMyRequestResponse } from "fastify"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, it, vi, type MockResult } from "vitest"
+import {
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+  type MockResult
+} from "vitest"
 import type ReplyGeneration from "../../../../../src/modules/chat/replyGeneration"
-import updateFastifyWithChatRoute, {
-  type ChatRouteOptions
-} from "../../../../../src/modules/chat/routes/chatRoute"
+import type ReplyGenerationRegistry from "../../../../../src/modules/chat/replyGenerationRegistry"
+import updateFastifyWithChatRoute from "../../../../../src/modules/chat/routes/chatRoute"
 import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRuntimeTypes"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
@@ -49,7 +58,20 @@ import {
   type McpServerUpdateTestApp
 } from "../../../support/chatRouteTestApp"
 import { parseSseEvents } from "../../../support/chatSseRoute"
+import {
+  createJobSeedingHarness,
+  saveJobReportRow,
+  saveSourceRow
+} from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
+import { waitForFirstJobReplyEnd } from "../../../support/delegationTestServices"
+import {
+  createFixtureTimestamp,
+  createJobFixture,
+  saveJob,
+  saveMainConversation,
+  saveReport
+} from "../../../support/conversationRecordsContract"
 import {
   createDownloadedLlmModel,
   LM_STUDIO_QWEN3_8B
@@ -64,12 +86,6 @@ import {
   TOOL_CALL_POLICY
 } from "../../../support/toolFixtures"
 
-/** Settings applied by the chat route in every case. */
-const CHAT_ROUTE_OPTIONS = Object.freeze({
-  titleGenerationMaxAttempts: 2,
-  toolCallPolicy: TOOL_CALL_POLICY
-} satisfies ChatRouteOptions)
-
 /** Valid request body starting a new conversation that Caliginia answers. */
 const NEW_CONVERSATION_REQUEST = Object.freeze({
   conversation: { kind: "new", agentCode: "caliginia" },
@@ -80,14 +96,7 @@ const NEW_CONVERSATION_REQUEST = Object.freeze({
 
 /** Refusal of a request that offers a tool the backend adds itself. */
 const RESERVED_OFFERED_TOOL_MESSAGE =
-  "A request does not offer read_attachment, read_my_state, find_agents, read_agent_state, or find_tools; the backend adds them to a turn itself."
-
-/**
- * Refusal of a request that names a tool the backend adds itself as switched
- * off or unable to run.
- */
-const RESERVED_UNOFFERED_TOOL_MESSAGE =
-  "A request does not name read_attachment, read_my_state, find_agents, read_agent_state, or find_tools as switched off or unable to run; they have no switch and the backend adds them to a turn itself."
+  "A request does not offer read_attachment, read_my_state, find_agents, read_agent_state, find_tools, report_progress, or stop_job; the backend adds them to a turn itself."
 
 /**
  * Builds the request form of a text attachment.
@@ -150,11 +159,7 @@ function registerStoringChatRoute(testApp: ChatRouteTestApp): void {
     })()
   )
   testApp.generateTitle.mockResolvedValue("Trip plan")
-  updateFastifyWithChatRoute(testApp.app, {
-    ...CHAT_ROUTE_OPTIONS,
-    generations: testApp.generations,
-    findModelCapabilities: testApp.findModelCapabilities
-  })
+  updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 }
 
 /**
@@ -171,6 +176,24 @@ async function startWebResearcherConversation(
   testApp.app.agentService.createAgent(WEB_RESEARCHER_DEFINITION)
   const response = await sendChatRequest(testApp.app, WEB_RESEARCHER_REQUEST)
   return findStartedConversationId(response.body)
+}
+
+/**
+ * Stores a main conversation that Caliginia answers and one job of it, with
+ * the job's first message and a completed reply, and creates the stored
+ * agent `researcher` that works on the job.
+ *
+ * @param testApp - Test application.
+ * @returns UUIDv7 of the stored job.
+ */
+function saveResearcherJob(testApp: ChatRouteTestApp): string {
+  const harness = createJobSeedingHarness(testApp.database)
+  testApp.app.agentService.createAgent({
+    ...WEB_RESEARCHER_DEFINITION,
+    code: "researcher"
+  })
+  const mainId = saveMainConversation(harness, 1)
+  return saveJob(harness, createJobFixture(mainId, 1, "completed")).id
 }
 
 /**
@@ -200,6 +223,127 @@ async function* createChunkStream(
   yield* chunks
 }
 
+/** The request model as the inventory lists a model trained for tool use. */
+const TOOL_MODEL_INFO: DownloadedLlmModel = Object.freeze({
+  ...createDownloadedLlmModel({
+    modelKey: NEW_CONVERSATION_REQUEST.model.modelKey
+  }),
+  trainedForToolUse: true
+})
+
+/**
+ * Registers the chat route on a test application whose turns are stored for
+ * real and whose request model is trained for tool use.
+ *
+ * @returns The test application.
+ */
+async function createStateToolApp(): Promise<ChatRouteTestApp> {
+  const testApp = await createChatRouteTestApp()
+  registerStoringChatRoute(testApp)
+  testApp.listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
+  return testApp
+}
+
+/**
+ * One request that names a tool the backend adds itself: the tool, where the
+ * request names it, the request fields that name it, and the refusal.
+ */
+type ReservedToolCase = [
+  name: string,
+  position: string,
+  fields: Readonly<Record<string, unknown>>,
+  message: string
+]
+
+/** What came of a request whose model gave the web researcher work. */
+type DelegatedRequest = Readonly<{
+  /**
+   * Call the approval prompt asked about: the `delegate_work` call, which
+   * the person allowed.
+   */
+  prompt: ChatToolCall
+  /** UUIDv7 of the main conversation the request started. */
+  conversationId: string
+  /** The web researcher's job, as stored once its reply ended. */
+  job: Job
+}>
+
+/**
+ * Creates the stream of a model that makes one tool call and stops for its
+ * result.
+ *
+ * @param toolName - Name of the called tool.
+ * @param argumentText - Arguments of the call, as JSON text.
+ * @returns An iterator that yields the call, identified as `call_0`, then
+ * the finish for tool calls, and ends.
+ */
+function createToolCallStream(
+  toolName: string,
+  argumentText: string
+): AsyncGenerator<ReturnType<typeof createChatCompletionChunk>> {
+  return createChunkStream(
+    createChatCompletionChunk({
+      toolCalls: [
+        {
+          index: 0,
+          id: "call_0",
+          type: "function",
+          function: { name: toolName, arguments: argumentText }
+        }
+      ]
+    }),
+    createChatCompletionChunk({ finishReason: "tool_calls" })
+  )
+}
+
+/**
+ * Gets the generation of the first reply a test application's registry
+ * started.
+ *
+ * @param startReplyGeneration - Spy on the registry's
+ * `startReplyGeneration`.
+ * @returns The generation.
+ * @throws If the registry has not started one yet.
+ */
+function getFirstGeneration(
+  startReplyGeneration: MockInstance<
+    ReplyGenerationRegistry["startReplyGeneration"]
+  >
+): ReplyGeneration {
+  const result = startReplyGeneration.mock.results[0]
+  if (result?.type !== "return") throw new Error("No generation started.")
+  return result.value
+}
+
+/**
+ * Waits until the first reply a test application's registry started asks
+ * the person about one call, then resolves the call as allowed.
+ *
+ * @param startReplyGeneration - Spy on the registry's
+ * `startReplyGeneration`, created before the request was sent.
+ * @returns The call the approval prompt asked about.
+ * @throws If no reply asks about one call before `vi.waitFor` times out.
+ */
+async function resolveFirstToolApproval(
+  startReplyGeneration: MockInstance<
+    ReplyGenerationRegistry["startReplyGeneration"]
+  >
+): Promise<ChatToolCall> {
+  await vi.waitFor(() => {
+    expect(
+      getFirstGeneration(startReplyGeneration).pendingToolCalls.toolApprovals
+    ).toHaveLength(1)
+  })
+  const generation = getFirstGeneration(startReplyGeneration)
+  const [prompt] = generation.pendingToolCalls.toolApprovals
+  if (prompt === undefined) throw new Error("No prompt was sent.")
+  generation.resolveToolCall(prompt.call.id, {
+    status: "allowed",
+    approvalToken: prompt.approvalToken
+  })
+  return prompt.call
+}
+
 /**
  * Lists the names of the tools a chat completion call offered.
  *
@@ -219,11 +363,7 @@ function listOfferedToolNames(
 describe("updateFastifyWithChatRoute", () => {
   it("responds with the missing-conversation problem before storing a turn or contacting the model", async () => {
     const testApp = await createChatRouteTestApp()
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
     const conversationId = createFixtureUuidV7(404)
 
     const response = await sendChatRequest(testApp.app, {
@@ -251,11 +391,7 @@ describe("updateFastifyWithChatRoute", () => {
     testApp.createConversationTurn.mockImplementation(() => {
       throw storageFailure
     })
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(
       testApp.app,
@@ -496,11 +632,7 @@ describe("updateFastifyWithChatRoute", () => {
     ]
   ])("rejects %s before storing a turn", async (_label, payload) => {
     const testApp = await createChatRouteTestApp()
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, payload)
 
@@ -514,11 +646,7 @@ describe("updateFastifyWithChatRoute", () => {
     "responds with the missing-agent problem before storing a turn when a new conversation names the code %s, which no agent that answers chats has",
     async (agentCode) => {
       const testApp = await createChatRouteTestApp()
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -540,7 +668,7 @@ describe("updateFastifyWithChatRoute", () => {
   )
 
   it.each(["caliginia", "lysiptera"] as const)(
-    "has the built-in agent %s answer with her own system prompt and streams the stored reply",
+    "has the built-in agent %s answer a new main conversation with her own system prompt and streams the stored reply",
     async (agentCode) => {
       const testApp = await createChatRouteTestApp()
       registerStoringChatRoute(testApp)
@@ -551,9 +679,19 @@ describe("updateFastifyWithChatRoute", () => {
       })
 
       expect(response.statusCode).toBe(200)
-      expect(parseSseEvents(response.body)[0]).toMatchObject({
-        event: "start-new-conversation-turn",
-        data: { conversation: { agentCode } }
+      const [startEvent] = parseSseEvents(response.body)
+      expect(startEvent?.event).toBe("start-new-conversation-turn")
+      expect(
+        chatApi.response.eventSchema.parse(startEvent?.data)
+      ).toMatchObject({
+        type: "start-new-conversation-turn",
+        conversation: {
+          agentCode,
+          kind: "main",
+          parentConversationId: null,
+          jobNumber: null,
+          delegatorAgentCode: null
+        }
       })
       expect(testApp.completeChatStream).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -755,13 +893,39 @@ describe("updateFastifyWithChatRoute", () => {
     expect(testApp.completeChatStream).not.toHaveBeenCalled()
   })
 
+  it("answers 409 with the is-job problem when a message is sent into a job, and stores nothing", async () => {
+    const testApp = await createChatRouteTestApp()
+    registerStoringChatRoute(testApp)
+    const jobId = saveResearcherJob(testApp)
+    const history = testApp.app.conversationHistoryReader
+    const storedJob = history.getConversation(jobId)
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      conversation: { kind: "existing", id: jobId },
+      message: "And what do they drink?"
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
+    expect(conversationIsJobProblemSchema.parse(response.json())).toMatchObject(
+      {
+        type: "urn:lys:problem:conversation:is-job",
+        detail: `Conversation ${jobId} is a job. A job can be read and stopped, and nothing else.`,
+        instance: chatApi.path
+      }
+    )
+    expect(storedJob?.messages).toHaveLength(2)
+    expect(history.getConversation(jobId)).toEqual(storedJob)
+    expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    expect(testApp.generateTitle).not.toHaveBeenCalled()
+  })
+
   it("rejects a backend tool the backend does not run before storing a turn, naming it", async () => {
     const testApp = await createChatRouteTestApp()
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -782,11 +946,7 @@ describe("updateFastifyWithChatRoute", () => {
 
   it("rejects more backend tool names than one request offers before looking any up", async () => {
     const testApp = await createChatRouteTestApp()
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
     const backendToolNames = Array.from(
       { length: MAXIMUM_OFFERED_BACKEND_TOOL_COUNT + 1 },
       (_, index) => `tool_${index}`
@@ -806,11 +966,7 @@ describe("updateFastifyWithChatRoute", () => {
 
   it("refuses a backend tool that cannot run now before storing a turn, naming it and why", async () => {
     const testApp = await createChatRouteTestApp()
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -842,11 +998,7 @@ describe("updateFastifyWithChatRoute", () => {
 
   it("still refuses an unknown backend tool before looking any up", async () => {
     const testApp = await createChatRouteTestApp()
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -868,11 +1020,7 @@ describe("updateFastifyWithChatRoute", () => {
       })()
     )
     testApp.generateTitle.mockResolvedValue("Trip plan")
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -900,11 +1048,7 @@ describe("updateFastifyWithChatRoute", () => {
       })()
     )
     testApp.generateTitle.mockResolvedValue("Trip plan")
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -932,11 +1076,7 @@ describe("updateFastifyWithChatRoute", () => {
       })()
     )
     testApp.generateTitle.mockResolvedValue("Trip plan")
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -1011,11 +1151,7 @@ describe("updateFastifyWithChatRoute", () => {
     "rejects a request with %s before storing a turn",
     async (_label, fields, message) => {
       const testApp = await createChatRouteTestApp()
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -1031,14 +1167,21 @@ describe("updateFastifyWithChatRoute", () => {
     }
   )
 
-  it.each(
-    [
-      "read_attachment",
-      "read_my_state",
-      "find_agents",
-      "read_agent_state",
-      "find_tools"
-    ].flatMap((name) => [
+  /**
+   * Lists the requests that name a tool the backend adds itself, once for
+   * each place a request can name a tool.
+   *
+   * @param name - Name of the backend's own tool.
+   * @returns One case for each place, with the refusal the request gets.
+   */
+  function listReservedToolCases(name: string): ReservedToolCase[] {
+    /**
+     * Refusal of a request that names a tool the backend adds itself as
+     * switched off or unable to run.
+     */
+    const reservedUnofferedToolMessage =
+      "A request does not name read_attachment, read_my_state, find_agents, read_agent_state, find_tools, report_progress, or stop_job as switched off or unable to run; they have no switch and the backend adds them to a turn itself."
+    return [
       [
         name,
         "offered as a client tool",
@@ -1055,24 +1198,32 @@ describe("updateFastifyWithChatRoute", () => {
         name,
         "named as switched off",
         { switchedOffToolNames: [name] },
-        RESERVED_UNOFFERED_TOOL_MESSAGE
+        reservedUnofferedToolMessage
       ],
       [
         name,
         "named as unable to run",
         { unavailableTools: [{ name, reason: "page-reader-not-ready" }] },
-        RESERVED_UNOFFERED_TOOL_MESSAGE
+        reservedUnofferedToolMessage
       ]
-    ])
+    ]
+  }
+
+  it.for(
+    [
+      "read_attachment",
+      "read_my_state",
+      "find_agents",
+      "read_agent_state",
+      "find_tools",
+      "report_progress",
+      "stop_job"
+    ].flatMap((name) => listReservedToolCases(name))
   )(
     "rejects a request with the backend's own tool %s %s before storing a turn",
-    async (_name, _position, fields, message) => {
+    async ([, , fields, message]) => {
       const testApp = await createChatRouteTestApp()
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -1117,11 +1268,7 @@ describe("updateFastifyWithChatRoute", () => {
       })()
     )
     testApp.generateTitle.mockResolvedValue("Trip plan")
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     await sendChatRequest(
       testApp.app,
@@ -1135,7 +1282,7 @@ describe("updateFastifyWithChatRoute", () => {
     )
   })
 
-  it.each([
+  it.for([
     [
       "an error-level failure",
       new Error("model not loaded"),
@@ -1148,19 +1295,15 @@ describe("updateFastifyWithChatRoute", () => {
       "debug",
       "Chat completion was cancelled"
     ]
-  ])(
+  ] as const)(
     "logs a reply ended by the model's rejection as %s with the request's logger",
-    async (_label, rejection, level, msg) => {
+    async ([, rejection, level, msg]) => {
       const testApp = await createChatRouteTestApp()
       // Store the turn for real, so the reply's writes reach a stored message.
       testApp.createConversationTurn.mockRestore()
       testApp.completeChatStream.mockRejectedValue(rejection)
       testApp.generateTitle.mockResolvedValue("Trip plan")
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(
         testApp.app,
@@ -1412,7 +1555,7 @@ describe("updateFastifyWithChatRoute", () => {
      * `look_up_word` in its first round and answers `Done` in its second.
      *
      * @param argumentText - Arguments of the call; `moth` by default.
-     * @param toolCallPolicy - Policy the route decides calls by; the
+     * @param toolCallPolicy - Policy the turn start decides calls by; the
      * fixture's, which lists no folder, by default.
      * @returns The application and the generation the route starts, once
      * started.
@@ -1421,7 +1564,7 @@ describe("updateFastifyWithChatRoute", () => {
       argumentText = '{"word":"moth"}',
       toolCallPolicy: ToolCallPolicy = TOOL_CALL_POLICY
     ) {
-      const testApp = await createChatRouteTestApp()
+      const testApp = await createChatRouteTestApp([], toolCallPolicy)
       testApp.createConversationTurn.mockRestore()
       testApp.completeChatStream
         .mockImplementationOnce(async () =>
@@ -1452,12 +1595,7 @@ describe("updateFastifyWithChatRoute", () => {
         testApp.generations,
         "startReplyGeneration"
       )
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        toolCallPolicy,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       /**
        * Gets the generation the route started.
@@ -1693,11 +1831,7 @@ describe("updateFastifyWithChatRoute", () => {
         testApp.generations,
         "startReplyGeneration"
       )
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       /**
        * Gets the generation the route started.
@@ -1776,11 +1910,7 @@ describe("updateFastifyWithChatRoute", () => {
         buildFakeStdioServerSettings("files", { exitOnStart: 1 }),
         "failed"
       )
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -1816,11 +1946,7 @@ describe("updateFastifyWithChatRoute", () => {
         buildFakeStdioServerSettings("files", { exitOnStart: 1 }),
         "failed"
       )
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -1847,11 +1973,7 @@ describe("updateFastifyWithChatRoute", () => {
         buildFakeStdioServerSettings("files"),
         "connected"
       )
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -2047,11 +2169,7 @@ describe("updateFastifyWithChatRoute", () => {
         status: "read",
         toolNames: new Set(["look_up_word"])
       })
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
       return testApp
     }
 
@@ -2788,11 +2906,7 @@ describe("updateFastifyWithChatRoute", () => {
         throw storageFailure
       })
       testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, NOTES_REQUEST)
 
@@ -2848,11 +2962,7 @@ describe("updateFastifyWithChatRoute", () => {
         "deleteConversationAttachments"
       ).mockRejectedValue(deletionFailure)
       testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, NOTES_REQUEST)
 
@@ -2878,27 +2988,6 @@ describe("updateFastifyWithChatRoute", () => {
     })
   })
   describe("agent state tools", () => {
-    /** The request model as the inventory lists a model trained for tool use. */
-    const TOOL_MODEL_INFO: DownloadedLlmModel = Object.freeze({
-      ...createDownloadedLlmModel({
-        modelKey: NEW_CONVERSATION_REQUEST.model.modelKey
-      }),
-      trainedForToolUse: true
-    })
-
-    /**
-     * Registers the chat route on a test application whose turns are stored
-     * for real and whose request model is trained for tool use.
-     *
-     * @returns The test application.
-     */
-    async function createStateToolApp(): Promise<ChatRouteTestApp> {
-      const testApp = await createChatRouteTestApp()
-      registerStoringChatRoute(testApp)
-      testApp.listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
-      return testApp
-    }
-
     /**
      * Builds a model round that calls one tool.
      *
@@ -3369,6 +3458,280 @@ describe("updateFastifyWithChatRoute", () => {
           CALIGINIA_AGENT_CODE
         )
       ).toMatchObject({ status: "found", state: { requests: [] } })
+    })
+  })
+
+  describe("delegation tools", () => {
+    /** A request of the person's that offers `delegate_work`. */
+    const DELEGATING_REQUEST = Object.freeze({
+      ...NEW_CONVERSATION_REQUEST,
+      tools: { definitions: [], backendToolNames: ["delegate_work"] }
+    })
+
+    /**
+     * Sends {@link DELEGATING_REQUEST} to a test application whose model
+     * first calls `delegate_work` for the web researcher, allows the call
+     * once the person is asked, and waits until the researcher's reply
+     * ended.
+     *
+     * @param testApp - Test application from {@link createStateToolApp},
+     * which does not store the web researcher yet; no tool is saved as Just
+     * run.
+     * @returns The allowed prompt, the main conversation, and the job.
+     */
+    async function sendDelegatingRequest(
+      testApp: ChatRouteTestApp
+    ): Promise<DelegatedRequest> {
+      /**
+       * Arguments of a `delegate_work` call that gives the web researcher a
+       * new job.
+       */
+      const researcherJobArguments = JSON.stringify({
+        agent: WEB_RESEARCHER_DEFINITION.code,
+        title: "Moths",
+        instructions: "Find what moths eat"
+      })
+
+      const toolNames: ReadonlySet<string> = new Set()
+      testApp.app.agentService.createAgent(WEB_RESEARCHER_DEFINITION)
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames
+      })
+      testApp.completeChatStream.mockImplementationOnce(async () =>
+        createToolCallStream("delegate_work", researcherJobArguments)
+      )
+      const startReplyGeneration = vi.spyOn(
+        testApp.generations,
+        "startReplyGeneration"
+      )
+      const responsePromise = sendChatRequest(testApp.app, DELEGATING_REQUEST)
+      const prompt = await resolveFirstToolApproval(startReplyGeneration)
+      const response = await responsePromise
+      const conversationId = findStartedConversationId(response.body)
+      const job = await waitForFirstJobReplyEnd(testApp.app, conversationId)
+      return Object.freeze({ prompt, conversationId, job })
+    }
+
+    it("offers Caliginia's model delegate_work and stop_job after the leader's state tools when the request offers delegate_work in a new conversation", async () => {
+      const testApp = await createStateToolApp()
+
+      const response = await sendChatRequest(testApp.app, DELEGATING_REQUEST)
+
+      expect(response.statusCode).toBe(200)
+      expect(listOfferedToolNames(testApp, 0)).toEqual([
+        ...LEADER_STATE_TOOL_NAMES,
+        "delegate_work",
+        "stop_job"
+      ])
+    })
+
+    it.each([
+      [
+        "to a member",
+        {
+          ...WEB_RESEARCHER_REQUEST,
+          tools: { definitions: [], backendToolNames: ["delegate_work"] }
+        }
+      ],
+      [
+        "while tool calls are switched off",
+        { ...NEW_CONVERSATION_REQUEST, areToolCallsSwitchedOff: true }
+      ]
+    ])("does not offer delegate_work %s", async (_label, request) => {
+      const testApp = await createStateToolApp()
+      testApp.app.agentService.createAgent(WEB_RESEARCHER_DEFINITION)
+
+      const response = await sendChatRequest(testApp.app, request)
+
+      expect(response.statusCode).toBe(200)
+      expect(listOfferedToolNames(testApp, 0)).not.toContain("delegate_work")
+    })
+
+    it("gives a member work once the person allows Caliginia's call: job 1 is stored with the call and answered by the member, whose model is offered report_progress", async () => {
+      const testApp = await createStateToolApp()
+
+      const { prompt, conversationId, job } =
+        await sendDelegatingRequest(testApp)
+
+      expect(prompt.toolName).toBe("delegate_work")
+      expect(
+        testApp.app.conversationHistoryReader.getConversation(conversationId)
+          ?.messages[1]
+      ).toMatchObject({
+        parts: [
+          {
+            id: prompt.id,
+            kind: "tool-call",
+            status: "succeeded",
+            result:
+              'Job 1 started: Web Researcher is working on "Moths". Its result arrives later in a message that starts with reports. End your reply when you have nothing else to do.'
+          },
+          { kind: "text", content: "Hi" }
+        ]
+      })
+      expect(job).toMatchObject({
+        number: 1,
+        state: "replied",
+        agentCode: WEB_RESEARCHER_DEFINITION.code,
+        title: "Moths",
+        jobCallIds: [prompt.id]
+      })
+      expect(
+        testApp.app.conversationHistoryReader.getConversation(job.id)
+      ).toMatchObject({
+        kind: "job",
+        parentConversationId: conversationId,
+        jobNumber: 1,
+        messages: [
+          {
+            role: "user",
+            content: "Find what moths eat",
+            origin: "delegator"
+          },
+          {
+            id: job.replyId,
+            status: "completed",
+            parts: [{ kind: "text", content: "Hi" }]
+          }
+        ]
+      })
+      expect(
+        testApp.completeChatStream.mock.calls.map(([request]) =>
+          (request.tools ?? []).map((tool) => tool.function.name)
+        )
+      ).toContainEqual(["read_my_state", "report_progress"])
+    })
+  })
+
+  describe("sources of delivered reports", () => {
+    /** First source of the main conversation, which a job also read. */
+    const MOTHS_PAGE = Object.freeze({
+      number: 1,
+      url: "https://example.com/moths",
+      title: "Moths"
+    })
+
+    /** Address of a page about what moths eat, which only the job read. */
+    const DIET_URL = "https://example.com/moths/diet"
+
+    /**
+     * Stores a main conversation titled `Moths` that Caliginia answers, with
+     * {@link MOTHS_PAGE} and a page about lamps, which no report cites, as
+     * its sources 1 and 2, and one completed job of the stored agent
+     * `researcher`, whose result report waits to be delivered.
+     *
+     * @param testApp - Test application registered by
+     * {@link registerStoringChatRoute}.
+     * @param content - Text of the report, citing the job's own sources: 1
+     * is a page at {@link DIET_URL}, which the main conversation lacks, and
+     * 2 is the page at {@link MOTHS_PAGE}'s address.
+     * @returns UUIDv7 of the main conversation.
+     */
+    function saveReportingJob(
+      testApp: ChatRouteTestApp,
+      content: string
+    ): string {
+      /** Second source of the main conversation. */
+      const lampsPage = Object.freeze({
+        number: 2,
+        url: "https://example.com/lamps",
+        title: "Lamps"
+      })
+
+      const harness = createJobSeedingHarness(testApp.database)
+      testApp.app.agentService.createAgent({
+        ...WEB_RESEARCHER_DEFINITION,
+        code: "researcher"
+      })
+      const mainId = saveMainConversation(harness, 1)
+      testApp.app.conversationHistoryEditor.updateConversationTitle(
+        mainId,
+        "Moths"
+      )
+      saveSourceRow(testApp.database, mainId, MOTHS_PAGE)
+      saveSourceRow(testApp.database, mainId, lampsPage)
+      const job = saveJob(harness, createJobFixture(mainId, 1, "completed"))
+      saveSourceRow(testApp.database, job.id, {
+        number: 1,
+        url: DIET_URL,
+        title: "Moth diet"
+      })
+      saveSourceRow(testApp.database, job.id, { ...MOTHS_PAGE, number: 2 })
+      saveReport(
+        { saveJobReport: (row) => saveJobReportRow(testApp.database, row) },
+        job,
+        {
+          sequence: 200,
+          kind: "result",
+          title: "Find what moths eat",
+          content,
+          createdAt: createFixtureTimestamp(30)
+        }
+      )
+      return mainId
+    }
+
+    it("sends the sources a delivered report cites right after the start event and the stored title, numbered as the conversation stores them", async () => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      const mainId = saveReportingJob(
+        testApp,
+        "They eat wool [1], as moth pages say [2]."
+      )
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "existing", id: mainId },
+        message: "Any news?"
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(parseSseEvents(response.body).slice(0, 3)).toMatchObject([
+        {
+          event: "start-existing-conversation-turn",
+          data: {
+            userMessage: {
+              reports: [
+                {
+                  content: "They eat wool [3], as moth pages say [1].",
+                  sourceNumbers: [1, 3]
+                }
+              ]
+            }
+          }
+        },
+        { event: "title", data: { type: "title", title: "Moths" } },
+        {
+          event: "sources",
+          data: {
+            type: "sources",
+            sources: [
+              MOTHS_PAGE,
+              { number: 3, url: DIET_URL, title: "Moth diet" }
+            ]
+          }
+        }
+      ])
+    })
+
+    it("sends no sources event when the delivered reports cite nothing", async () => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      const mainId = saveReportingJob(testApp, "They eat wool.")
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        conversation: { kind: "existing", id: mainId },
+        message: "Any news?"
+      })
+
+      const events = parseSseEvents(response.body)
+      expect(events[0]).toMatchObject({
+        event: "start-existing-conversation-turn",
+        data: { userMessage: { reports: [{ sourceNumbers: [] }] } }
+      })
+      expect(events.map((event) => event.event)).not.toContain("sources")
     })
   })
 })

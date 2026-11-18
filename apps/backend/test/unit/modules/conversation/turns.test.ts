@@ -5,10 +5,12 @@ import StoredConversationTurns from "../../../../src/modules/conversation/turns"
 import SqliteConversationRecordReader from "../../../../src/infrastructure/database/conversations/sqliteConversationRecordReader"
 import SqliteConversationTurnRecordWriter from "../../../../src/infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
 import SqliteDatabase from "../../../../src/infrastructure/database/sqliteDatabase"
+import type { ConversationTurnTarget } from "../../../../src/modules/chat/persistence"
 import { parseConversationListOptions } from "../../../../src/modules/conversation/listOptions"
 import { ConversationNotFoundError } from "../../../../src/utils/errors"
 import {
   openConversationTestServices,
+  openSqliteConversationRecords,
   openTestDatabase,
   readToolCallDecisionRows,
   saveAssistantMessageRow,
@@ -23,6 +25,16 @@ import {
   createToolCallPart,
   createTurnUserMessage
 } from "../../support/conversationFixtures"
+import {
+  buildExpectedInterruptedReportRow,
+  buildExpectedReport,
+  createFixtureTimestamp,
+  createJobFixture,
+  listUserMessageReports,
+  saveJob,
+  saveMainConversation,
+  saveReport
+} from "../../support/conversationRecordsContract"
 import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 
 /** Wall-clock time observed by every case until it advances the clock. */
@@ -180,6 +192,48 @@ describe("StoredConversationTurns", () => {
       })
     })
 
+    it("gives each job reply found streaming at startup an interrupted report with the job's title, and marks it interrupted", () => {
+      const records = openSqliteConversationRecords()
+      const mainId = saveMainConversation(records, 1)
+      const job = saveJob(records, createJobFixture(mainId, 1, "streaming"))
+
+      createTurns(records.database)
+
+      expect(records.listJobReports()).toEqual([
+        buildExpectedInterruptedReportRow(job, 1, NOW)
+      ])
+      expect(
+        records.recordReader.findConversation(job.id)?.messages.at(-1)
+      ).toMatchObject({
+        id: job.replyId,
+        status: "interrupted",
+        updatedAt: NOW
+      })
+    })
+
+    it("gives a main conversation's streaming reply no report", () => {
+      const records = openSqliteConversationRecords()
+      saveConversationWithReply(records.database, { status: "streaming" })
+
+      createTurns(records.database)
+
+      expect(records.listJobReports()).toEqual([])
+    })
+
+    it("inserts no second report when recovery runs again", () => {
+      const records = openSqliteConversationRecords()
+      const mainId = saveMainConversation(records, 1)
+      const job = saveJob(records, createJobFixture(mainId, 1, "streaming"))
+      createTurns(records.database)
+      vi.setSystemTime(new Date(LATER))
+
+      createTurns(records.database)
+
+      expect(records.listJobReports()).toEqual([
+        buildExpectedInterruptedReportRow(job, 1, NOW)
+      ])
+    })
+
     it("refuses a closed database", () => {
       const database = SqliteDatabase.open(":memory:")
       database[Symbol.dispose]()
@@ -204,10 +258,15 @@ describe("StoredConversationTurns", () => {
         id: turn.conversation.id,
         title: null,
         agentCode: "lys",
+        kind: "main",
+        parentConversationId: null,
+        jobNumber: null,
+        delegatorAgentCode: null,
         createdAt: NOW,
         updatedAt: expect.any(String),
         messages: [turn.userMessage, turn.assistantMessage],
-        sources: []
+        sources: [],
+        jobs: []
       })
     })
 
@@ -246,6 +305,44 @@ describe("StoredConversationTurns", () => {
       expect(
         history.listConversations(parseConversationListOptions()).conversations
       ).toEqual([expect.objectContaining({ id: turn.conversation.id })])
+    })
+
+    it("delivers a waiting report with the person's next message, and only once", () => {
+      const records = openSqliteConversationRecords()
+      const turns = createTurns(records.database)
+      const mainId = saveMainConversation(records, 1)
+      const job = saveJob(records, createJobFixture(mainId, 1, "completed"))
+      const row = saveReport(records, job, {
+        sequence: 200,
+        kind: "result",
+        title: "Find what moths eat",
+        content: "They eat wool.",
+        createdAt: createFixtureTimestamp(30)
+      })
+      const conversation: ConversationTurnTarget = {
+        kind: "existing",
+        id: mainId
+      }
+
+      const first = turns.createConversationTurn({
+        conversation,
+        userMessage: createTurnUserMessage("Any news?"),
+        model: LM_STUDIO_QWEN3_8B
+      })
+      vi.setSystemTime(new Date(LATER))
+      const second = turns.createConversationTurn({
+        conversation,
+        userMessage: createTurnUserMessage("And now?"),
+        model: LM_STUDIO_QWEN3_8B
+      })
+
+      expect(first.userMessage.reports).toEqual([buildExpectedReport(row, 1)])
+      expect(second.userMessage.reports).toEqual([])
+      expect(listUserMessageReports(records, mainId)).toEqual([
+        [],
+        [buildExpectedReport(row, 1)],
+        []
+      ])
     })
   })
 

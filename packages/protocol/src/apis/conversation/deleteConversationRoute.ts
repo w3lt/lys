@@ -1,5 +1,7 @@
 import {
+  conversationIsJobProblemSchema,
   conversationNotFoundProblemSchema,
+  type ConversationIsJobProblem,
   type ConversationNotFoundProblem
 } from "../../http/errors/conversation"
 import {
@@ -10,7 +12,8 @@ import { apiConversationRoute } from "./routes"
 
 /** Selects the delete-conversation failure validator by HTTP status. */
 const deleteConversationApiResponseSchemas = Object.freeze({
-  404: conversationNotFoundProblemSchema
+  404: conversationNotFoundProblemSchema,
+  409: conversationIsJobProblemSchema
 })
 
 /**
@@ -18,10 +21,18 @@ const deleteConversationApiResponseSchemas = Object.freeze({
  * conversation and its transcript.
  *
  * @remarks Success is a bodyless 204 sent after the conversation and every
- * message have been removed. Deletion cannot be undone. A missing conversation
- * returns the conversation-not-found problem with HTTP 404; clients may treat
- * that problem as confirmation that the conversation no longer exists.
- * Changing the method, path, or schemas requires coordinated consumers.
+ * message have been removed, with its jobs and their reports, and after the
+ * work that was running in the conversation and in its jobs was cancelled
+ * and has ended: the model request of each reply still running there, a
+ * reply a newer turn superseded included, the tool calls and approval
+ * prompts it waited on, and its title request. A delete that fails
+ * or finds no conversation cancels nothing. Deletion cannot be undone. A
+ * missing conversation returns the conversation-not-found problem with HTTP
+ * 404; clients may treat that problem as confirmation that the conversation
+ * no longer exists. A job returns the conversation-is-job problem with HTTP
+ * 409 and stays stored, because the person reads and stops a job, nothing
+ * else. Changing the method, path, or schemas requires coordinated
+ * consumers.
  */
 export const deleteConversationApi = Object.freeze({
   method: "DELETE",
@@ -36,6 +47,8 @@ export type DeleteConversationApiReply = {
   readonly 204: undefined
   /** No conversation is stored under the addressed identifier. */
   readonly 404: ConversationNotFoundProblem
+  /** The addressed conversation is a job, which the person cannot delete. */
+  readonly 409: ConversationIsJobProblem
 }
 
 /** Fastify route type for the delete-conversation endpoint. */

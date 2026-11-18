@@ -110,6 +110,78 @@ export const READ_AGENT_STATE_TOOL_NAME = "read_agent_state"
 export const FIND_TOOLS_TOOL_NAME = "find_tools"
 
 /**
+ * Name the model calls the tool by that a leader gives work to another agent
+ * with.
+ *
+ * @remarks The backend offers it only to an agent that may delegate, in a
+ * main conversation, when the chat request offers it: the tool has a switch,
+ * so a request names it among its backend tools. Transmitted in the tool
+ * list, chat requests, and tool-call events, and saved by name with the
+ * person's tool choices; changing it requires coordinated consumers.
+ */
+export const DELEGATE_WORK_TOOL_NAME = "delegate_work"
+
+/**
+ * Name the model calls the tool by that a member sends a progress note to
+ * its delegator with.
+ *
+ * @remarks Backend-internal: the backend adds it to a turn itself and it has
+ * no switch, so a chat request may not offer or name a tool of this name.
+ */
+export const REPORT_PROGRESS_TOOL_NAME = "report_progress"
+
+/**
+ * Name the model calls the tool by that a delegator stops one of its jobs
+ * with.
+ *
+ * @remarks Backend-internal: the backend adds it to a turn itself and it has
+ * no switch, so a chat request may not offer or name a tool of this name.
+ */
+export const STOP_JOB_TOOL_NAME = "stop_job"
+
+/**
+ * Inclusive maximum length of a trimmed job title, in UTF-16 code units.
+ *
+ * @remarks Checked when a `delegate_work` call is parsed: a longer title is
+ * refused, never cut. Stored titles are not checked against it, so changing
+ * it only changes which new calls are refused.
+ */
+export const MAXIMUM_JOB_TITLE_LENGTH = 80
+
+/**
+ * Parses an argument value as the title of a job, as a `delegate_work` call
+ * gives it.
+ *
+ * @param value - Untrusted argument value.
+ * @returns The trimmed title, or undefined when the value is not text, is
+ * blank, is longer than {@link MAXIMUM_JOB_TITLE_LENGTH}, or holds a line
+ * break.
+ * @remarks The backend refuses a call whose title this rejects, and the
+ * desktop describes a call on its approval card by the same rule.
+ */
+export function parseJobTitle(value: unknown): string | undefined {
+  /** Matches a line break: a title that holds one is not on one line. */
+  const lineBreakPattern = /[\n\r\u2028\u2029]/
+
+  if (typeof value !== "string") return undefined
+  const title = value.trim()
+  const isOneBoundedLine =
+    title !== "" &&
+    title.length <= MAXIMUM_JOB_TITLE_LENGTH &&
+    !lineBreakPattern.test(title)
+  return isOneBoundedLine ? title : undefined
+}
+
+/**
+ * Inclusive maximum length of a trimmed progress note, in UTF-16 code units.
+ *
+ * @remarks Checked when a `report_progress` call is parsed: a longer note is
+ * refused, never cut. Stored notes are not checked against it, so changing
+ * it only changes which new calls are refused.
+ */
+export const MAXIMUM_PROGRESS_NOTE_LENGTH = 2000
+
+/**
  * Lowercase ASCII letters and digits in hyphen-separated groups, with no
  * leading, trailing, or doubled hyphen.
  */

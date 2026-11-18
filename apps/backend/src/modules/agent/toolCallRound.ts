@@ -97,8 +97,8 @@ export type AgentToolsetInput = Readonly<{
   /** MCP tools found for the turn, in offer order. */
   mcpTools: readonly TurnMcpTool[]
   /**
-   * The agent's state tools for the turn, in offer order; empty when the
-   * turn offers none.
+   * The agent's state tools for the turn, followed by its delegation tools,
+   * in offer order; empty when the turn offers none.
    */
   agentStateTools: readonly TurnBuiltInTool[]
 }>
@@ -528,9 +528,10 @@ export function buildDefinedToolOffer(
  * call's handling runs synchronously up to its first send. Nothing runs
  * before its call is allowed; a call the person allowed is decided again,
  * with the folders read again, and one the rules now deny is stored as
- * failed and never runs. Every result the model reads is stored with its
- * call first; the result of a tool that does more than read this machine, a
- * network or MCP tool, is cleaned of invisible characters before that,
+ * failed and never runs. A backend tool's run is given the identity of its
+ * call. Every result the model reads is stored with its call first; the
+ * result of a tool that does more than read this machine, a network,
+ * delegation, or MCP tool, is cleaned of invisible characters before that,
  * whichever side answered and however the call ended.
  */
 export async function handleToolCallRound(
@@ -1132,7 +1133,8 @@ async function updateAllowedToolCall(
  * client sent it, and its reason, stored with the call's decision.
  * @param replyParts - The reply's part sequence.
  * @returns `rejected` with the message once stored; `ended` when the reply
- * refused it. A network or MCP tool's rejection is cleaned first.
+ * refused it. A network, delegation, or MCP tool's rejection is cleaned
+ * first.
  */
 function updateRejectedToolCall(
   toolCall: CheckedToolCall,
@@ -1182,8 +1184,8 @@ function updateExpiredToolCall(
  * @param outcome - How the run ended.
  * @param replyParts - The reply's part sequence.
  * @returns The message carrying the text the model reads, once stored; or
- * undefined when the reply refused it. A network or MCP tool's result is
- * cleaned first.
+ * undefined when the reply refused it. A network, delegation, or MCP tool's
+ * result is cleaned first.
  */
 function updateFinishedToolCall(
   toolCall: CheckedToolCall,
@@ -1209,8 +1211,8 @@ function updateFinishedToolCall(
  * checks failed it, or the policy's denial.
  * @param handling - The round's index and the reply's part sequence.
  * @returns The message carrying the explanation, once stored; or undefined
- * when the reply refused it. A network or MCP tool's explanation is cleaned
- * first.
+ * when the reply refused it. A network, delegation, or MCP tool's
+ * explanation is cleaned first.
  */
 function createFailedToolCall(
   toolCall: HandledToolCall,
@@ -1238,8 +1240,10 @@ function createFailedToolCall(
  * @param tool - Offered tool the call names, or undefined.
  * @param content - Text the tool, the client, or Lys gave.
  * @returns The text cleaned of invisible characters when the tool does more
- * than read this machine: it reaches the network, or it is an MCP tool,
- * whose server decides what it reaches. Otherwise the text unchanged.
+ * than read this machine: it reaches the network; it is a delegation tool,
+ * whose `agents` access marks a result that repeats text the model wrote,
+ * such as a job's title; or it is an MCP tool, whose server decides what it
+ * reaches. Otherwise the text unchanged.
  */
 function formatToolCallResult(
   tool: OfferedTool | undefined,

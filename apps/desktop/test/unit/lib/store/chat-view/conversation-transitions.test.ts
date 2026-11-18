@@ -1,6 +1,9 @@
 import {
   conversationAssistantMessageSchema,
-  conversationSchema
+  conversationSchema,
+  conversationUserMessageSchema,
+  jobReportSchema,
+  jobSchema
 } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
@@ -32,7 +35,8 @@ import {
   buildToolCallPart,
   buildUserMessage,
   createFixtureUuidV7,
-  FIXTURE_CONVERSATION_ID
+  FIXTURE_CONVERSATION_ID,
+  FIXTURE_TIMESTAMP
 } from "../../../support/conversationFixtures"
 
 /** Time a transition stamps on the message it changes. */
@@ -72,21 +76,44 @@ const STORED_SOURCE = Object.freeze({
   title: "Moths"
 })
 
+/** Job the fixture conversation started, still working. */
+const STORED_JOB = Object.freeze(
+  jobSchema.parse({
+    id: createFixtureUuidV7(20),
+    number: 1,
+    agentCode: "nyx",
+    title: "News",
+    state: "working",
+    latestNote: null,
+    replyId: createFixtureUuidV7(21),
+    jobCallIds: [createFixtureUuidV7(30)],
+    createdAt: FIXTURE_TIMESTAMP,
+    updatedAt: FIXTURE_TIMESTAMP
+  })
+)
+
 /**
  * Builds a frozen chat-view conversation as the store publishes it.
  *
  * @param messages - Transcript in order.
  * @param sources - The conversation's sources; none by default.
- * @returns The conversation with the fixture identity and no title.
+ * @param jobs - The conversation's jobs; none by default.
+ * @returns The main conversation with the fixture identity and no title.
  */
 function buildChatViewConversation(
   messages: readonly ReadonlyConversationMessage[],
-  sources: ChatViewConversation["sources"] = []
+  sources: ChatViewConversation["sources"] = [],
+  jobs: ChatViewConversation["jobs"] = []
 ): ChatViewConversation {
   return Object.freeze({
     ...buildConversationMetadata(FIXTURE_CONVERSATION_ID, null),
+    kind: "main",
+    parentConversationId: null,
+    jobNumber: null,
+    delegatorAgentCode: null,
     messages: Object.freeze([...messages]),
-    sources: Object.freeze([...sources])
+    sources: Object.freeze([...sources]),
+    jobs: Object.freeze([...jobs])
   })
 }
 
@@ -108,7 +135,8 @@ function parseStoredConversation(messages: readonly unknown[]) {
   return conversationSchema.parse({
     ...buildConversationMetadata(FIXTURE_CONVERSATION_ID, "Stored"),
     messages,
-    sources: []
+    sources: [],
+    jobs: []
   })
 }
 
@@ -139,8 +167,12 @@ describe("isCompletedConversationMessage", () => {
 })
 
 describe("startConversationTurn", () => {
-  it("appends the new turn after the history of the same conversation and keeps its sources", () => {
-    const previous = buildChatViewConversation(EARLIER_TURN, [STORED_SOURCE])
+  it("appends the new turn after the history of the same conversation and keeps its sources and jobs", () => {
+    const previous = buildChatViewConversation(
+      EARLIER_TURN,
+      [STORED_SOURCE],
+      [STORED_JOB]
+    )
     const metadata = buildConversationMetadata(
       FIXTURE_CONVERSATION_ID,
       "Greeting"
@@ -160,7 +192,8 @@ describe("startConversationTurn", () => {
         buildUserMessage(4, "Tell me more"),
         STREAMING_REPLY
       ],
-      sources: [STORED_SOURCE]
+      sources: [STORED_SOURCE],
+      jobs: [STORED_JOB]
     })
     expect(Object.isFrozen(conversation)).toBe(true)
     expect(Object.isFrozen(conversation.messages)).toBe(true)
@@ -185,8 +218,12 @@ describe("startConversationTurn", () => {
     expect(conversation.messages.at(-2)).toEqual(userMessage)
   })
 
-  it("starts a fresh transcript without sources for a different conversation", () => {
-    const previous = buildChatViewConversation(EARLIER_TURN, [STORED_SOURCE])
+  it("starts a fresh transcript without sources or jobs for a different conversation", () => {
+    const previous = buildChatViewConversation(
+      EARLIER_TURN,
+      [STORED_SOURCE],
+      [STORED_JOB]
+    )
 
     const conversation = startConversationTurn({
       conversationMetadata: buildConversationMetadata(
@@ -203,6 +240,7 @@ describe("startConversationTurn", () => {
       STREAMING_REPLY.id
     ])
     expect(conversation.sources).toEqual([])
+    expect(conversation.jobs).toEqual([])
   })
 })
 
@@ -565,6 +603,58 @@ describe("createStoredChatViewConversation", () => {
       conversation.messages.every((message) => Object.isFrozen(message))
     ).toBe(true)
     expect(Object.isFrozen(conversation.sources)).toBe(true)
+  })
+
+  it("presents a main conversation's jobs, and a wake-up message with the report it delivered, as stored, the jobs frozen", () => {
+    const wakeUpMessage = conversationUserMessageSchema.parse({
+      ...buildUserMessage(4, "A report arrived. No job is still working."),
+      origin: "wake-up",
+      reports: [
+        jobReportSchema.parse({
+          id: createFixtureUuidV7(40),
+          jobId: STORED_JOB.id,
+          jobNumber: 1,
+          agentCode: "nyx",
+          title: "News",
+          kind: "result",
+          content: "Done.",
+          sourceNumbers: [],
+          createdAt: FIXTURE_TIMESTAMP
+        })
+      ]
+    })
+    const stored = conversationSchema.parse({
+      ...buildConversation(FIXTURE_CONVERSATION_ID, "Stored", [
+        EARLIER_TURN[0],
+        STORED_EARLIER_REPLY,
+        wakeUpMessage
+      ]),
+      jobs: [STORED_JOB]
+    })
+
+    const conversation = createStoredChatViewConversation(stored)
+
+    expect(conversation.jobs).toEqual([STORED_JOB])
+    expect(conversation.messages.at(-1)).toEqual(wakeUpMessage)
+    expect(Object.isFrozen(conversation.jobs)).toBe(true)
+    expect(conversation.jobs.every((job) => Object.isFrozen(job))).toBe(true)
+  })
+
+  it("presents a stored job with its parent, number, and delegator, and its job message as the delegator's", () => {
+    const jobMessage = conversationUserMessageSchema.parse({
+      ...buildUserMessage(22, "Find this week's hologram news."),
+      origin: "delegator"
+    })
+    const stored = conversationSchema.parse({
+      ...buildConversation(STORED_JOB.id, "News", [jobMessage]),
+      agentCode: "nyx",
+      kind: "job",
+      parentConversationId: FIXTURE_CONVERSATION_ID,
+      jobNumber: 1,
+      delegatorAgentCode: "caliginia"
+    })
+
+    expect(createStoredChatViewConversation(stored)).toEqual(stored)
   })
 
   it("keeps a streaming reply that ends the transcript streaming so it can be followed", () => {

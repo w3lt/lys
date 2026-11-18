@@ -1,6 +1,7 @@
 import { describe, expect, it, onTestFinished, vi, type Mock } from "vitest"
 import type { StartReplyGenerationOptions } from "../../../../src/modules/chat/replyGeneration"
 import ReplyGenerationRegistry, {
+  ReplyGenerationRegistryClosedError,
   type ReplyTarget
 } from "../../../../src/modules/chat/replyGenerationRegistry"
 import ControlledReplyTask from "../../support/controlledReplyTask"
@@ -193,6 +194,58 @@ describe("ReplyGenerationRegistry", () => {
     })
   })
 
+  describe("listRunningReplies", () => {
+    it("lists the replies of one conversation whose reply task runs, in start order, from the step that starts them", () => {
+      const { registry, createTask, createLaunchers } = createRegistryHarness()
+      registry.startReplyGeneration(
+        FIRST_REPLY_OF_X,
+        createLaunchers(createTask())
+      )
+      registry.startReplyGeneration(REPLY_OF_Y, createLaunchers(createTask()))
+      registry.startReplyGeneration(
+        SECOND_REPLY_OF_X,
+        createLaunchers(createTask())
+      )
+
+      const replies = registry.listRunningReplies(CONVERSATION_X_ID)
+
+      expect(replies).toEqual([FIRST_REPLY_OF_X, SECOND_REPLY_OF_X])
+      expect(Object.isFrozen(replies)).toBe(true)
+      expect(registry.listRunningReplies(CONVERSATION_Y_ID)).toEqual([
+        REPLY_OF_Y
+      ])
+    })
+
+    it.each(["resolves", "rejects"] as const)(
+      "stops listing a reply once its reply task %s, while its generation still runs its title task",
+      async (outcome) => {
+        const { registry, createTask, createLaunchers } =
+          createRegistryHarness()
+        const replyTask = createTask()
+        const generation = registry.startReplyGeneration(
+          FIRST_REPLY_OF_X,
+          createLaunchers(replyTask, createTask())
+        )
+        registry.startReplyGeneration(
+          SECOND_REPLY_OF_X,
+          createLaunchers(createTask())
+        )
+        await waitForMicrotasks()
+        const settlement = createSettlementReader(generation.settled)
+
+        if (outcome === "resolves") replyTask.resolve()
+        else replyTask.reject(new Error("Reply could not be stored"))
+        await waitForMicrotasks()
+
+        expect(registry.listRunningReplies(CONVERSATION_X_ID)).toEqual([
+          SECOND_REPLY_OF_X
+        ])
+        expect(registry.findReplyGeneration(FIRST_REPLY_OF_X)).toBe(generation)
+        expect(settlement()).toBe("pending")
+      }
+    )
+  })
+
   describe("title tasks", () => {
     it("drops the title of a second generation while its conversation's title is running", async () => {
       const { registry, createTask, createLaunchers } = createRegistryHarness()
@@ -373,7 +426,7 @@ describe("ReplyGenerationRegistry", () => {
       await expect(registry[Symbol.asyncDispose]()).resolves.toBeUndefined()
     })
 
-    it("rejects starting and finding generations once disposal began", async () => {
+    it("rejects starting, finding, and listing generations once disposal began", async () => {
       const { registry, createTask, createLaunchers } = createRegistryHarness()
       const runningReply = createTask()
       const running = registry.startReplyGeneration(
@@ -391,9 +444,12 @@ describe("ReplyGenerationRegistry", () => {
           REPLY_OF_Y,
           createLaunchers(lateReply, lateTitle)
         )
-      ).toThrow(Error)
+      ).toThrow(ReplyGenerationRegistryClosedError)
       expect(() => registry.findReplyGeneration(FIRST_REPLY_OF_X)).toThrow(
-        Error
+        ReplyGenerationRegistryClosedError
+      )
+      expect(() => registry.listRunningReplies(CONVERSATION_X_ID)).toThrow(
+        ReplyGenerationRegistryClosedError
       )
       runningReply.resolve()
       await disposal
@@ -402,7 +458,7 @@ describe("ReplyGenerationRegistry", () => {
       expect(lateReply.hasStarted).toBe(false)
       expect(lateTitle.hasStarted).toBe(false)
       expect(() => registry.findReplyGeneration(FIRST_REPLY_OF_X)).toThrow(
-        Error
+        ReplyGenerationRegistryClosedError
       )
     })
   })

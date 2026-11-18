@@ -50,6 +50,11 @@ export {
   type StopChatReplyApiRoute
 } from "./stopReplyRoute"
 export {
+  stopConversationJobsApi,
+  type StopConversationJobsApiReply,
+  type StopConversationJobsApiRoute
+} from "./stopJobsRoute"
+export {
   chatToolApprovalAnswerSchema,
   chatToolApprovalApiRequestBodySchema,
   sendChatToolApprovalApi,

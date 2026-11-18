@@ -88,16 +88,22 @@ export const chatReplyPartDeltaEventSchema = z.strictObject({
 })
 
 /**
- * Validates the event reporting the numbered sources stored with one tool
- * call.
+ * Validates the event reporting numbered sources of the conversation: those
+ * stored with one tool call, or those the reports a turn delivers cite.
  *
- * @remarks Sent right before the `reply-part` event of the call whose result
- * shows them. A number the client already has keeps the same source, so
- * merging by number is safe.
+ * @remarks A tool call's sources are sent right before the `reply-part`
+ * event of the call whose result shows them. The chat route also sends one
+ * after the start event, and after the stored title when there is one, for
+ * the sources the reports delivered with the turn's user message cite. A
+ * number the client already has keeps the same source, so merging by number
+ * is safe.
  */
 export const chatSourcesEventSchema = z.strictObject({
   type: z.literal("sources"),
-  /** Sources the call's result shows, in the order it shows them. */
+  /**
+   * Sources the call's result shows, in the order it shows them, or the
+   * sources the delivered reports cite, in number order.
+   */
   sources: z.array(conversationSourceSchema).readonly()
 })
 

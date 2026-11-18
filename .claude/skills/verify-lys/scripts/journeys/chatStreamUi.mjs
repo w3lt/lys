@@ -7,9 +7,12 @@
 import { rejectUnless } from "../lib/journey.mjs"
 import { ESCAPE_KEY } from "../lib/rendererPage.mjs"
 import {
-  COMPOSER_TEXTAREA,
   LAST_ASSISTANT_TEXT,
+  PAST_CONVERSATIONS_BUTTON,
+  PAST_CONVERSATIONS_DIALOG,
+  REPLY_FINISHED,
   SEND_BUTTON,
+  sendComposerMessage,
   waitForComposerReady
 } from "../lib/rendererSteps.mjs"
 import {
@@ -22,14 +25,41 @@ import { VERIFICATION_MESSAGE } from "./chatStreamApi.mjs"
 /** Expression that is truthy while the reply streams. */
 const STREAMING_CARET_PRESENT = `document.querySelector('[data-testid="streaming-caret"]') !== null`
 
-/** Expression that is truthy once the reply finished. */
-const REPLY_FINISHED = `document.querySelector('[data-testid="streaming-caret"]') === null && ${SEND_BUTTON}?.textContent.trim() === "Send"`
-
 /** Opening words of the reply, expected in the mid-stream text. */
 const REPLY_OPENING = "Lys verification reply:"
 
-/** Closing words of the reply, expected only in the finished text. */
-const REPLY_CLOSING = "all at once."
+/**
+ * Closing words of the verification reply, expected only in the finished
+ * text; the delegation journey waits for them too.
+ */
+export const REPLY_CLOSING = "all at once."
+
+/**
+ * Opens Past conversations and waits until it lists the conversation under
+ * its generated title, then closes it with Escape.
+ *
+ * @param {import("../lib/rendererPage.mjs").RendererPage} page - The page,
+ * with the reply finished.
+ * @param {import("../lib/journey.mjs").EvidenceRecorder} evidence - The
+ * step's recorder.
+ * @returns {Promise<{title: string}>} The title the dialog lists.
+ * @throws If the dialog does not list the title within 15 seconds.
+ */
+async function findTitledConversation(page, evidence) {
+  await page.click(PAST_CONVERSATIONS_BUTTON)
+  await page.waitForPageCondition({
+    description:
+      "the Past conversations dialog to list the titled conversation",
+    expression: `(() => {
+      const dialog = ${PAST_CONVERSATIONS_DIALOG};
+      return dialog !== null && dialog.textContent.includes(${JSON.stringify(VERIFICATION_TITLE)});
+    })()`,
+    timeoutMs: 15_000
+  })
+  await page.captureScreenshot(evidence.buildPath("history.png"))
+  await page.pressKey(ESCAPE_KEY)
+  return { title: VERIFICATION_TITLE }
+}
 
 export default Object.freeze({
   id: "chat-stream-ui",
@@ -49,17 +79,9 @@ export default Object.freeze({
           return { placeholder }
         }
       )
-      await steps.step("type the message and press Send", async () => {
-        await page.click(COMPOSER_TEXTAREA)
-        await page.typeText(VERIFICATION_MESSAGE)
-        await page.waitForPageCondition({
-          description: "the Send button to enable",
-          expression: `${SEND_BUTTON} !== null && !${SEND_BUTTON}.disabled && ${SEND_BUTTON}.textContent.trim() === "Send"`,
-          timeoutMs: 5000
-        })
-        await page.click(SEND_BUTTON)
-        return { message: VERIFICATION_MESSAGE }
-      })
+      await steps.step("type the message and press Send", () =>
+        sendComposerMessage(page, VERIFICATION_MESSAGE)
+      )
       const midStream = await steps.step(
         "the reply streams: caret shown, Stop offered, text partial",
         async (evidence) => {
@@ -125,23 +147,7 @@ export default Object.freeze({
       )
       await steps.step(
         "Past conversations lists the conversation under its generated title",
-        async (evidence) => {
-          await page.click(
-            `document.querySelector('button[title="Past conversations (⌘K)"]')`
-          )
-          await page.waitForPageCondition({
-            description:
-              "the Past conversations dialog to list the titled conversation",
-            expression: `(() => {
-            const dialog = document.querySelector('[aria-label="Past conversations"]');
-            return dialog !== null && dialog.textContent.includes(${JSON.stringify(VERIFICATION_TITLE)});
-          })()`,
-            timeoutMs: 15_000
-          })
-          await page.captureScreenshot(evidence.buildPath("history.png"))
-          await page.pressKey(ESCAPE_KEY)
-          return { title: VERIFICATION_TITLE }
-        }
+        (evidence) => findTitledConversation(page, evidence)
       )
     } finally {
       await page.close()

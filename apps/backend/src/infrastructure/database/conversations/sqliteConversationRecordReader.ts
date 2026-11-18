@@ -8,8 +8,8 @@ import type {
   DatabaseReader
 } from "../databaseTransactions"
 import { registerSearchFunctions } from "../searchFunctions"
-import type { Conversation } from "@lys/share"
-import { findConversation } from "./findConversation"
+import type { Conversation, ConversationMetadata } from "@lys/share"
+import { findConversation, findConversationMetadata } from "./findConversation"
 import { listConversations } from "./listConversations"
 
 /**
@@ -63,6 +63,21 @@ export default class SqliteConversationRecordReader implements ConversationRecor
   public findConversation(conversationId: string): Conversation | undefined {
     return this.#databaseReader.handleDatabaseReadRequest((statements) =>
       findConversation(statements, conversationId)
+    )
+  }
+
+  /**
+   * Implements {@link ConversationRecordReader.findConversationMetadata} in
+   * one read snapshot.
+   * @param conversationId - Interface-defined identity.
+   * @returns The interface-defined metadata or absence.
+   * @throws The interface-defined closed and validation failures.
+   */
+  public findConversationMetadata(
+    conversationId: string
+  ): ConversationMetadata | undefined {
+    return this.#databaseReader.handleDatabaseReadRequest((statements) =>
+      findConversationMetadata(statements, conversationId)
     )
   }
 

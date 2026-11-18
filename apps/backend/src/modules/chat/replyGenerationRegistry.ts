@@ -1,5 +1,6 @@
 import ReplyGeneration, {
   type ReplyGenerationTaskContext,
+  type ReplyTaskContext,
   type StartReplyGenerationOptions
 } from "./replyGeneration"
 
@@ -11,33 +12,59 @@ export type ReplyTarget = Readonly<{
   assistantMessageId: string
 }>
 
-/** A running generation and the conversation its reply belongs to. */
+/**
+ * A running generation, the conversation its reply belongs to, and whether
+ * its reply task still runs.
+ */
 type RegisteredReplyGeneration = Readonly<{
   /** Conversation that must match a lookup before the generation is returned. */
   conversationId: string
   /** Running generation owned by the registry until it settles. */
   generation: ReplyGeneration
+  /**
+   * `running` from registration until the reply task settles; `settled`
+   * afterwards, while the generation can still run its title task.
+   */
+  replyTask: "running" | "settled"
 }>
 
-/** Canonical failure for any registry operation after disposal began. */
-const CLOSED_REGISTRY_MESSAGE = "Reply generation registry is closed"
+/**
+ * Failure of starting, finding, or listing generations once the registry's
+ * disposal began, which ends every generation it holds.
+ *
+ * @remarks Passive failure value constructed once per refused call. It
+ * preserves the native `Error` contract and owns no mutable state, so a
+ * caller can tell a closed registry from any other failure by its class.
+ */
+export class ReplyGenerationRegistryClosedError extends Error {
+  /** Creates the failure of one call made after disposal began. */
+  public constructor() {
+    super("Reply generation registry is closed")
+  }
+}
 
 /**
  * Owns every running reply generation: admits new ones, finds one for a
- * follower or a stop request, and ends them all at shutdown.
+ * follower or a stop request, lists the replies of a conversation that still
+ * run, and ends them all at shutdown.
  *
  * @remarks The invariants are that at most one registered generation exists
  * per assistant reply, a generation stays registered from
- * `startReplyGeneration` until it settles, and at most one title task runs per
- * conversation. The registry holds no reply text.
+ * `startReplyGeneration` until it settles, its reply counts as running from
+ * that admission until its reply task settles, and at most one title task
+ * runs per conversation. The registry holds no reply text.
  * Lifecycle: ready until disposal begins; disposal permanently closes the
  * registry, cancels every generation, and settles after all of them settle,
- * and repeated calls share that completion. After disposal begins, starting
- * or finding a generation throws the closed-registry failure. Concurrency
- * model: single-owner, on the backend's event loop.
+ * and repeated calls share that completion. After disposal begins, starting,
+ * finding, or listing generations throws
+ * {@link ReplyGenerationRegistryClosedError}.
+ * Concurrency model: single-owner, on the backend's event loop.
  */
 export default class ReplyGenerationRegistry implements AsyncDisposable {
-  /** Running generations keyed by assistant message identifier. */
+  /**
+   * Running generations keyed by assistant message identifier, each with the
+   * state of its reply task.
+   */
   readonly #generations = new Map<string, RegisteredReplyGeneration>()
   /** Conversations with a running title task, from admission to settlement. */
   readonly #conversationIdsGeneratingTitle = new Set<string>()
@@ -50,8 +77,9 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
    * @param target - Stored reply the generation writes, with its conversation.
    * @param options - Task launchers and the task-failure reporter.
    * @returns The running generation, registered until it settles.
-   * @throws If the registry is closed or a generation for the reply is already
-   * running; nothing is started in either case.
+   * @throws {ReplyGenerationRegistryClosedError} If the registry is closed.
+   * @throws If a generation for the reply is already running; nothing is
+   * started in either case.
    * @remarks A title launcher is dropped while another generation of the same
    * conversation is running a title task, so the new generation runs only its
    * reply and settles without waiting for that title. A later generation can
@@ -61,12 +89,18 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
     target: ReplyTarget,
     options: StartReplyGenerationOptions
   ): ReplyGeneration {
-    if (this.#disposal !== undefined) throw new Error(CLOSED_REGISTRY_MESSAGE)
+    if (this.#disposal !== undefined)
+      throw new ReplyGenerationRegistryClosedError()
     if (this.#generations.has(target.assistantMessageId))
       throw new Error("A generation for this reply is already running")
 
     const generation = ReplyGeneration.start({
-      startReplyTask: options.startReplyTask,
+      startReplyTask: (context) =>
+        this.#startTrackedReplyTask(
+          target.assistantMessageId,
+          options.startReplyTask,
+          context
+        ),
       startTitleTask: this.#startTitleTracking(
         target.conversationId,
         options.startTitleTask
@@ -75,7 +109,8 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
     })
     this.#generations.set(target.assistantMessageId, {
       conversationId: target.conversationId,
-      generation
+      generation,
+      replyTask: "running"
     })
     void generation.settled.then(() => {
       this.#removeSettledGeneration(target.assistantMessageId, generation)
@@ -89,15 +124,44 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
    * @param target - Reply and the conversation expected to hold it.
    * @returns The generation, or undefined when none is running for that
    * reply in that conversation.
-   * @throws If the registry is closed.
+   * @throws {ReplyGenerationRegistryClosedError} If the registry is closed.
    */
   public findReplyGeneration(target: ReplyTarget): ReplyGeneration | undefined {
-    if (this.#disposal !== undefined) throw new Error(CLOSED_REGISTRY_MESSAGE)
+    if (this.#disposal !== undefined)
+      throw new ReplyGenerationRegistryClosedError()
 
     const registered = this.#generations.get(target.assistantMessageId)
     return registered?.conversationId === target.conversationId
       ? registered.generation
       : undefined
+  }
+
+  /**
+   * Lists the replies of one conversation whose reply task still runs.
+   *
+   * @param conversationId - UUIDv7 of the conversation; the replies of its
+   * jobs, which are conversations of their own, are not listed.
+   * @returns A frozen list of frozen targets, in the order their generations
+   * started. A reply is listed from the step that admits its generation
+   * until its reply task settles, also after a newer reply of the
+   * conversation started; a generation whose reply task settled while its
+   * title task runs is left out. Empty when no reply of the conversation
+   * runs.
+   * @throws {ReplyGenerationRegistryClosedError} If the registry is closed.
+   */
+  public listRunningReplies(conversationId: string): readonly ReplyTarget[] {
+    if (this.#disposal !== undefined)
+      throw new ReplyGenerationRegistryClosedError()
+
+    const replies: ReplyTarget[] = []
+    for (const [assistantMessageId, registered] of this.#generations) {
+      if (
+        registered.conversationId === conversationId &&
+        registered.replyTask === "running"
+      )
+        replies.push(Object.freeze({ conversationId, assistantMessageId }))
+    }
+    return Object.freeze(replies)
   }
 
   /**
@@ -113,6 +177,54 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
       )
     ).then(() => undefined)
     return this.#disposal
+  }
+
+  /**
+   * Starts an admitted reply task and marks its registered generation's
+   * reply task as settled once the task settles, whatever its outcome.
+   *
+   * @param assistantMessageId - Reply whose task is tracked.
+   * @param startReplyTask - Reply launcher admitted for that reply.
+   * @param context - Generation-owned cancellation, event sender, and tool
+   * call senders.
+   * @returns Settlement after the reply task settles and its state was
+   * marked settled.
+   * @throws The reply task's failure, after its state was marked settled;
+   * the generation reports it.
+   * @remarks {@link ReplyGeneration.start} begins its tasks after the
+   * synchronous step that registers the generation, and the generation
+   * settles only after this task settles, so its registered entry exists
+   * whenever this task runs.
+   */
+  async #startTrackedReplyTask(
+    assistantMessageId: string,
+    startReplyTask: StartReplyGenerationOptions["startReplyTask"],
+    context: ReplyTaskContext
+  ): Promise<void> {
+    try {
+      await startReplyTask(context)
+    } finally {
+      this.#updateReplyTaskToSettled(assistantMessageId)
+    }
+  }
+
+  /**
+   * Records that a registered generation's reply task settled, so its reply
+   * is no longer listed as running.
+   *
+   * @param assistantMessageId - Reply whose task settled.
+   * @remarks Leaves the registry unchanged when no generation is registered
+   * for the reply, which the start order of {@link ReplyGeneration.start}
+   * rules out for a task this registry admitted.
+   */
+  #updateReplyTaskToSettled(assistantMessageId: string): void {
+    const registered = this.#generations.get(assistantMessageId)
+    if (registered !== undefined)
+      this.#generations.set(assistantMessageId, {
+        conversationId: registered.conversationId,
+        generation: registered.generation,
+        replyTask: "settled"
+      })
   }
 
   /**

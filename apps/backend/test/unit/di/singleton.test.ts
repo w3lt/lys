@@ -1,25 +1,42 @@
 import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
-import type { MessageGenerationOptions } from "@lys/protocol"
+import type { ActivityEvent, MessageGenerationOptions } from "@lys/protocol"
 import {
   ARMITAGE_AGENT_CODE,
+  DELEGATE_WORK_TOOL_NAME,
   LLM_PROVIDERS,
+  type ConversationAttachmentDraft,
   type LlmModelReference,
   type LlmProvider
 } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
+import ActivityHub from "../../../src/modules/activity/activityHub"
 import type { AgentTurn } from "../../../src/modules/agent/agent"
 import AgentRuntimeService from "../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../src/modules/agent/agentService"
+import type { JobMessageDraft } from "../../../src/modules/agent/turnDelegation"
 import { NO_UNOFFERED_TOOLS } from "../../../src/modules/agent/unofferedTools"
 import ChatService from "../../../src/modules/chat/chatService"
+import type {
+  ConversationTurn,
+  ConversationTurnUserMessage
+} from "../../../src/modules/chat/persistence"
+import type ReplyGeneration from "../../../src/modules/chat/replyGeneration"
+import ReplyGenerationRegistry, {
+  type ReplyTarget
+} from "../../../src/modules/chat/replyGenerationRegistry"
+import type {
+  TurnDelegationContext,
+  TurnSettings
+} from "../../../src/modules/chat/turnStart"
 import StoredConversationHistoryEditor from "../../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../../src/modules/conversation/historyReader"
 import AttachmentFileStore from "../../../src/modules/attachment/attachmentFileStore"
 import StoredReplyParts from "../../../src/modules/conversation/replyParts"
 import StoredConversationTurns from "../../../src/modules/conversation/turns"
+import ConversationWakeSettings from "../../../src/modules/delegation/conversationWakeSettings"
 import { buildLlmChatEndpoint } from "../../../src/modules/llm/llmProviderAccess"
 import {
   buildLlmProviderRecord,
@@ -38,7 +55,10 @@ import {
   type SingletonServices
 } from "../../../src/di/singleton"
 import SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
+import { createBackendLogger } from "../../../src/log"
+import { TitleGenerationOutputError } from "../../../src/utils/errors"
 import { TEST_BACKEND_CONFIG } from "../support/backendConfig"
+import ControlledReplyTask from "../support/controlledReplyTask"
 import {
   createFixtureUuidV7,
   createNewConversationTarget,
@@ -46,20 +66,35 @@ import {
   createUserMessage
 } from "../support/conversationFixtures"
 import {
+  createJobMessageDraft,
+  createPersonTurn,
+  FIRST_MEMBER_DEFINITION,
+  MOTHS_REQUEST,
+  waitForFirstJobReplyEnd
+} from "../support/delegationTestServices"
+import {
   createAcquiredFakeLlmRuntime,
   createConnectedFakeLlmEngine,
   createFakeLlmRuntime
 } from "../support/fakeLlmRuntime"
+import { CapturedLogDestination } from "../support/fastifyTestApp"
+import { waitForMicrotasks } from "../support/microtasks"
+import { createChatCompletionChunk } from "../support/openAiEndpointFake"
 import {
   LM_STUDIO_QWEN3_8B,
   TEST_LLM_PROVIDER_ACCESSES
 } from "../support/llmFixtures"
 import { writeSettingsFile } from "../support/settingsFile"
+import { createSettlementReader } from "../support/settlement"
 import {
   READ_TEXT_FILE_TOOL,
   SEARCH_CALL_ID,
   TOOL_CALL_POLICY
 } from "../support/toolFixtures"
+import {
+  NO_TURN_DELEGATION,
+  NO_TURN_DELEGATION_HOOKS
+} from "../support/turnDelegationFakes"
 import { answerWithBody, startVmoServer } from "../support/vmoServer"
 
 // The bundle imports the LM Studio SDK through its runtime adapter. No case
@@ -89,17 +124,63 @@ const LLM_RUNTIME_ACQUISITION_NAMES: readonly AcquisitionName[] =
 const LLM_RUNTIME_RELEASE_NAMES: readonly AcquisitionName[] =
   LLM_RUNTIME_ACQUISITION_NAMES.toReversed()
 
+/** Model that every turn a case starts through a bundle names. */
+const TURN_MODEL = LM_STUDIO_QWEN3_8B
+
+/** Sampling of the turn a case starts through a bundle. */
+const PLAIN_GENERATION_OPTIONS: TurnSettings["generationOptions"] =
+  Object.freeze({ temperature: 0.4 })
+
+/**
+ * Settings of a turn that offers no tools, for a model that sees no images
+ * and is not trained for tool use.
+ */
+const PLAIN_TURN_SETTINGS: TurnSettings = Object.freeze({
+  model: TURN_MODEL,
+  generationOptions: PLAIN_GENERATION_OPTIONS,
+  clientTools: Object.freeze([]),
+  builtInTools: Object.freeze([]),
+  mcpTools: Object.freeze([]),
+  offersDelegateWork: false,
+  unofferedTools: NO_UNOFFERED_TOOLS,
+  canSeeImages: false,
+  trainedForToolUse: false
+})
+
+/** Attachments of a turn whose message carries none. */
+const NO_ATTACHMENTS: readonly ConversationAttachmentDraft[] = Object.freeze([])
+
+/** Reply a case registers a generation for; no conversation stores it. */
+const UNSTORED_REPLY_TARGET: ReplyTarget = Object.freeze({
+  conversationId: createFixtureUuidV7(1),
+  assistantMessageId: createFixtureUuidV7(2)
+})
+
+/** A turn a case started through a bundle's turn start. */
+type StartedTurn = Readonly<{
+  /** The stored turn. */
+  turn: ConversationTurn
+  /** Generation the turn start returned for the turn. */
+  generation: ReplyGeneration
+}>
+
 /**
  * Name of each service whose close the cleanup log records: the
- * acquisitions, and the two tool services that own resources.
+ * acquisitions, the two tool services that own resources, the activity
+ * hub, and delegation's wake settings.
  */
 type ClosedServiceName =
-  AcquisitionName | "email-account-checker" | "mcp-server-registry"
+  | AcquisitionName
+  | "activity-hub"
+  | "wake-settings"
+  | "email-account-checker"
+  | "mcp-server-registry"
 
 /**
  * Creates log reporters that record what they receive.
  *
- * @returns Reporters whose calls each case can inspect.
+ * @returns Reporters whose calls each case can inspect, and a logger of the
+ * backend's own turns that writes to a destination no case reads.
  */
 function createLogReporters() {
   const llmRuntime = buildLlmProviderRecord(
@@ -122,7 +203,9 @@ function createLogReporters() {
     lmStudioSdk,
     reportMcpServerEvent: vi.fn(),
     reportMcpProcessGroupsSaveFailure: vi.fn(),
-    sendEmailAccountCheckEvent: vi.fn()
+    sendEmailAccountCheckEvent: vi.fn(),
+    reportDelegationEvent: vi.fn(),
+    backendTurnLogger: createBackendLogger(new CapturedLogDestination())
   } satisfies SingletonLogReporters
 }
 
@@ -148,15 +231,16 @@ function createAcquisition<Service>(
 }
 
 /**
- * Updates a tool service the bundle created so that each of its closes is
- * logged under `name` before the close goes on.
+ * Updates a service the bundle created so that each of its closes is logged
+ * under `name` before the close goes on.
  *
- * @param service - Service whose close is recorded.
+ * @param service - Service whose close is recorded; its close completes at
+ * once or returns its completion.
  * @param name - Name recorded when the close starts.
  * @param closeLog - Shared log of cleanup calls in call order.
  */
 function updateServiceClose(
-  service: Readonly<{ close: () => Promise<void> }>,
+  service: Readonly<{ close: () => void | Promise<void> }>,
   name: ClosedServiceName,
   closeLog: ClosedServiceName[]
 ): void {
@@ -165,6 +249,31 @@ function updateServiceClose(
     closeLog.push(name)
     await close()
   })
+}
+
+/**
+ * Starts a generation for {@link UNSTORED_REPLY_TARGET} whose reply task stays
+ * pending until the case settles it, without a title task.
+ *
+ * @param generations - Registry that admits the generation.
+ * @returns The reply task. It begins after the current synchronous step, so
+ * the case reads its context after a barrier such as `waitForMicrotasks`.
+ * @remarks The reply task is resolved when the test finishes, so a case that
+ * fails early does not leave the bundle's close waiting.
+ */
+function startControlledGeneration(
+  generations: ReplyGenerationRegistry
+): ControlledReplyTask {
+  const replyTask = new ControlledReplyTask()
+  generations.startReplyGeneration(UNSTORED_REPLY_TARGET, {
+    startReplyTask: (context) => replyTask.start(context),
+    startTitleTask: undefined,
+    reportTaskFailure: vi.fn()
+  })
+  onTestFinished(() => {
+    replyTask.resolve()
+  })
+  return replyTask
 }
 
 /**
@@ -200,6 +309,7 @@ function buildHelloAgentTurn(
     builtInTools: [],
     mcpTools: [],
     unofferedTools: NO_UNOFFERED_TOOLS,
+    delegation: NO_TURN_DELEGATION,
     abortSignal: new AbortController().signal,
     updateAssistantMessageState: () => true,
     findReplyStatus: () => "streaming",
@@ -340,6 +450,149 @@ function createRecordedFactories() {
   return { factories, acquisitions, closeLog }
 }
 
+/**
+ * Creates the stream of a model that replies `Hi` and stops.
+ *
+ * @returns A stream of one chunk.
+ */
+async function* createHiReplyStream() {
+  yield createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
+}
+
+/**
+ * Creates the stream of a model that calls the client tool `read_text_file`
+ * and ends its round for the call's result.
+ *
+ * @returns A stream of the call, then the finish that hands it over.
+ */
+async function* createFileReadCallStream() {
+  yield createChatCompletionChunk({
+    toolCalls: [
+      {
+        index: 0,
+        id: "call_0",
+        type: "function",
+        function: { name: "read_text_file", arguments: '{"path":"/notes.md"}' }
+      }
+    ]
+  })
+  yield createChatCompletionChunk({ finishReason: "tool_calls" })
+}
+
+/**
+ * Creates spies in place of the model calls that a turn of a bundle makes.
+ *
+ * @param services - Bundle whose LM Studio LLM service, the one of
+ * {@link TURN_MODEL}, and chat service are spied on.
+ * @returns The spies. Every model is loaded with a context of 1,000,000
+ * tokens, in which each text counts one token; every reply is `Hi`; and a
+ * title request rejects until a case configures it.
+ */
+function createModelSpies(
+  services: Pick<SingletonServices, "llmProviderServices" | "chatService">
+) {
+  const findLlmContextMeasurement = vi
+    .spyOn(
+      services.llmProviderServices.lmStudio.llmService,
+      "findLlmContextMeasurement"
+    )
+    .mockImplementation(async (_model, texts) => ({
+      contextLength: 1_000_000,
+      textTokenCounts: texts.map(() => 1)
+    }))
+  const completeChatStream = vi
+    .spyOn(services.chatService, "completeChatStream")
+    .mockImplementation(async () => createHiReplyStream())
+  const generateTitle = vi
+    .spyOn(services.chatService, "generateTitle")
+    .mockRejectedValue(new Error("Unexpected title request"))
+  return { findLlmContextMeasurement, completeChatStream, generateTitle }
+}
+
+/** A bundle whose member the lead's stored turn may give work. */
+type DelegatingBundle = Readonly<{
+  /** The bundle, closed when the test finishes. */
+  services: SingletonServices
+  /** Reporters the bundle was created with, which record what they receive. */
+  reporters: ReturnType<typeof createLogReporters>
+  /** The lead's stored turn, whose reply streams and has no generation. */
+  delegating: TurnDelegationContext
+  /** The job message the lead's turn sends the researcher about moths. */
+  draft: JobMessageDraft
+}>
+
+/**
+ * Creates a bundle that stores the researcher as a member, stores a turn of
+ * the lead, and drafts the job message that turn sends the researcher.
+ *
+ * @returns The bundle, its reporters, the lead's turn, and the draft.
+ * @remarks The bundle is created from recorded factories and closed when
+ * the test finishes. Its model calls are spied on as
+ * {@link createModelSpies} spies on them, so every reply is `Hi`.
+ */
+async function openDelegatingBundle(): Promise<DelegatingBundle> {
+  const { factories } = createRecordedFactories()
+  const reporters = createLogReporters()
+  const services = await createSingletonServices(
+    TEST_BACKEND_CONFIG,
+    reporters,
+    factories
+  )
+  onTestFinished(async () => await closeSingletonServices(services))
+  createModelSpies(services)
+  services.agentService.createAgent(FIRST_MEMBER_DEFINITION)
+  const delegating = createPersonTurn(services.conversationTurns)
+  const draft = createJobMessageDraft(
+    services.replyParts,
+    delegating,
+    MOTHS_REQUEST
+  )
+  return Object.freeze({ services, reporters, delegating, draft })
+}
+
+/**
+ * Starts a person's turn that says `Hello` in a new conversation through a
+ * bundle's turn start, for the bundle's live Caliginia to answer.
+ *
+ * @param services - Bundle whose conversation turns, live agents, and turn
+ * start the turn goes through.
+ * @param settings - Model, controls, and tools the turn is started with.
+ * @param attachments - Attachments of the turn's message; no file is written
+ * for them.
+ * @returns The stored turn and its generation, which is already running,
+ * takes no part in delegation, and logs to a destination no case reads.
+ * @throws If Caliginia is not live.
+ */
+function startHelloTurn(
+  services: Pick<
+    SingletonServices,
+    "conversationTurns" | "agentRuntimeService" | "startTurn"
+  >,
+  settings: TurnSettings,
+  attachments: readonly ConversationAttachmentDraft[]
+): StartedTurn {
+  const agent = services.agentRuntimeService.loadChatAgent("caliginia")
+  if (agent === undefined) throw new Error("Caliginia is not live")
+  const userMessage: ConversationTurnUserMessage = {
+    ...createTurnUserMessage("Hello"),
+    attachments
+  }
+  const turn = services.conversationTurns.createConversationTurn({
+    conversation: createNewConversationTarget("caliginia"),
+    userMessage,
+    model: TURN_MODEL
+  })
+  const generation = services.startTurn({
+    turn,
+    agent,
+    settings,
+    startedBy: "person",
+    ...NO_TURN_DELEGATION_HOOKS,
+    logger: createBackendLogger(new CapturedLogDestination())
+  })
+  return { turn, generation }
+}
+
 describe("createSingletonServices", () => {
   it("derives each acquisition from the configuration", async () => {
     const { factories } = createRecordedFactories()
@@ -446,6 +699,21 @@ describe("createSingletonServices", () => {
     })
   })
 
+  it("lists delegate_work as the only agent tool Settings lists, apart from the built-in tools", async () => {
+    const { factories } = createRecordedFactories()
+
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+
+    expect(services.listedAgentTools.map((tool) => tool.name)).toEqual([
+      DELEGATE_WORK_TOOL_NAME
+    ])
+  })
+
   it("offers read_page once vmo at the configured host and port answers its health route", async () => {
     const { factories } = createRecordedFactories()
     const vmo = await startVmoServer(
@@ -541,6 +809,323 @@ describe("createSingletonServices", () => {
       )
     }
     expect(services.attachmentFileStore).toBeInstanceOf(AttachmentFileStore)
+    expect(services.replyGenerations).toBeInstanceOf(ReplyGenerationRegistry)
+    expect(services.activityHub).toBeInstanceOf(ActivityHub)
+    expect(services.conversationWakeSettings).toBeInstanceOf(
+      ConversationWakeSettings
+    )
+    expect(services.handleTurnStarted).toEqual(expect.any(Function))
+    expect(services.createTurnDelegation).toEqual(expect.any(Function))
+    expect(services.handleReplyEnded).toEqual(expect.any(Function))
+    expect(services.stopReply).toEqual(expect.any(Function))
+    expect(services.stopConversationJobs).toEqual(expect.any(Function))
+    expect(services.listWorkingReplies).toEqual(expect.any(Function))
+    expect(services.stopDeletedReplies).toEqual(expect.any(Function))
+  })
+
+  it("gives a member work through the bundle's delegation hooks: the job's turn is stored and answered by the member, and its result waits while the lead's reply streams", async () => {
+    const { services, reporters, delegating, draft } =
+      await openDelegatingBundle()
+    const conversationId = delegating.turn.conversation.id
+    const delegation = services.createTurnDelegation(delegating)
+
+    const outcome = delegation.createJobMessage(draft)
+    const job = await waitForFirstJobReplyEnd(services, conversationId)
+
+    expect(outcome).toEqual({
+      status: "sent",
+      jobNumber: 1,
+      agentName: "Researcher",
+      title: "Moths",
+      isNewJob: true
+    })
+    expect(job.state).toBe("replied")
+    expect(
+      services.conversationHistoryReader.getConversation(job.id)
+    ).toMatchObject({
+      parentConversationId: conversationId,
+      messages: [
+        { role: "user", content: "Find what moths eat", origin: "delegator" },
+        { id: job.replyId, status: "completed", parts: [{ content: "Hi" }] }
+      ]
+    })
+    expect(reporters.reportDelegationEvent.mock.calls).toEqual([
+      [
+        {
+          kind: "job-message-sent",
+          conversationId,
+          jobId: job.id,
+          jobNumber: 1,
+          agentCode: "researcher",
+          isNewJob: true
+        }
+      ],
+      [
+        {
+          kind: "report-stored",
+          conversationId,
+          jobId: job.id,
+          jobNumber: 1,
+          reportKind: "result"
+        }
+      ],
+      [{ kind: "wake-up-skipped", conversationId, reason: "reply-streaming" }]
+    ])
+  })
+
+  it("starts a person's turn in the bundle's reply generation registry and stores its reply and generated title on the acquired database", async () => {
+    const { factories } = createRecordedFactories()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    const model = createModelSpies(services)
+    model.generateTitle.mockResolvedValue("Greeting")
+
+    const { turn, generation } = startHelloTurn(
+      services,
+      PLAIN_TURN_SETTINGS,
+      NO_ATTACHMENTS
+    )
+    const registered = services.replyGenerations.findReplyGeneration({
+      conversationId: turn.conversation.id,
+      assistantMessageId: turn.assistantMessage.id
+    })
+    await generation.settled
+
+    expect(registered).toBe(generation)
+    expect(
+      services.conversationHistoryReader.getConversation(turn.conversation.id)
+    ).toMatchObject({
+      title: "Greeting",
+      messages: [
+        turn.userMessage,
+        { status: "completed", parts: [{ kind: "text", content: "Hi" }] }
+      ]
+    })
+  })
+
+  it("requests a turn's title once the LLM service finds the model loaded, without measuring a text", async () => {
+    const { factories } = createRecordedFactories()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    const model = createModelSpies(services)
+    model.generateTitle.mockResolvedValue("Greeting")
+
+    const { generation } = startHelloTurn(
+      services,
+      PLAIN_TURN_SETTINGS,
+      NO_ATTACHMENTS
+    )
+    await generation.settled
+
+    expect(model.findLlmContextMeasurement).toHaveBeenCalledWith(
+      TURN_MODEL.modelKey,
+      []
+    )
+    expect(model.generateTitle).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ message: "Hello", model: TURN_MODEL })
+    )
+  })
+
+  it("requests no title while the LLM service finds the turn's model not loaded", async () => {
+    const { factories } = createRecordedFactories()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    const model = createModelSpies(services)
+    model.findLlmContextMeasurement.mockResolvedValue(undefined)
+
+    const { generation } = startHelloTurn(
+      services,
+      PLAIN_TURN_SETTINGS,
+      NO_ATTACHMENTS
+    )
+    await generation.settled
+
+    expect(model.findLlmContextMeasurement).toHaveBeenCalledWith(
+      TURN_MODEL.modelKey,
+      []
+    )
+    expect(model.generateTitle).not.toHaveBeenCalled()
+  })
+
+  it("requests a turn's title at most the configured number of times", async () => {
+    const { factories } = createRecordedFactories()
+    const services = await createSingletonServices(
+      { ...TEST_BACKEND_CONFIG, titleGenerationMaxAttempts: 3 },
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    const model = createModelSpies(services)
+    model.generateTitle.mockRejectedValue(
+      new TitleGenerationOutputError("The model wrote no usable title")
+    )
+
+    const { generation } = startHelloTurn(
+      services,
+      PLAIN_TURN_SETTINGS,
+      NO_ATTACHMENTS
+    )
+    await generation.settled
+
+    expect(model.generateTitle).toHaveBeenCalledTimes(3)
+  })
+
+  it("reads a turn's image from the bundle's attachment file store for a model that sees images", async () => {
+    /** A photo the person attached, before its conversation numbers it. */
+    const photoAttachment: ConversationAttachmentDraft = Object.freeze({
+      kind: "image",
+      name: "photo.png",
+      sizeBytes: 33,
+      mediaType: "image/png",
+      width: 64,
+      height: 32
+    })
+
+    const { factories } = createRecordedFactories()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    const model = createModelSpies(services)
+    model.generateTitle.mockResolvedValue("Greeting")
+    const readAttachment = vi.spyOn(
+      services.attachmentFileStore,
+      "readAttachment"
+    )
+
+    const { turn, generation } = startHelloTurn(
+      services,
+      { ...PLAIN_TURN_SETTINGS, canSeeImages: true },
+      [photoAttachment]
+    )
+    await generation.settled
+
+    expect(readAttachment).toHaveBeenCalledWith({
+      conversationId: turn.conversation.id,
+      messageId: turn.userMessage.id,
+      name: "photo.png"
+    })
+  })
+
+  it("asks the person through the bundle's tool approval service before a turn's tool call runs", async () => {
+    const { factories } = createRecordedFactories()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    const model = createModelSpies(services)
+    model.generateTitle.mockResolvedValue("Greeting")
+    model.completeChatStream.mockImplementation(async () =>
+      createFileReadCallStream()
+    )
+    const createToolCallGate = vi.spyOn(
+      services.toolApprovalService,
+      "createToolCallGate"
+    )
+
+    const { generation } = startHelloTurn(
+      services,
+      { ...PLAIN_TURN_SETTINGS, clientTools: [READ_TEXT_FILE_TOOL] },
+      NO_ATTACHMENTS
+    )
+    await vi.waitFor(() => {
+      expect(generation.pendingToolCalls.toolApprovals).toHaveLength(1)
+    })
+
+    expect(createToolCallGate).toHaveBeenCalledOnce()
+    expect(generation.pendingToolCalls.toolApprovals).toMatchObject([
+      { call: { toolName: "read_text_file", arguments: { path: "/notes.md" } } }
+    ])
+  })
+
+  it("starts each turn with the tool call policy of the configured settings file", async () => {
+    const { factories } = createRecordedFactories()
+    const settingsFilePath = await writeSettingsFile(
+      JSON.stringify({ tools: { approvedFolders: ["/srv/shared/"] } })
+    )
+    const services = await createSingletonServices(
+      { ...TEST_BACKEND_CONFIG, settingsFilePath },
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    createModelSpies(services).generateTitle.mockResolvedValue("Greeting")
+    const agent = services.agentRuntimeService.loadChatAgent("caliginia")
+    if (agent === undefined) throw new Error("Caliginia is not live")
+    const createReply = vi.spyOn(agent, "createReply")
+
+    const { generation } = startHelloTurn(
+      services,
+      PLAIN_TURN_SETTINGS,
+      NO_ATTACHMENTS
+    )
+    await generation.settled
+
+    const toolCallPolicy = createReply.mock.lastCall?.[0].toolCallPolicy
+    expect(toolCallPolicy).toEqual({
+      settingsFilePath,
+      homeFolderPath: homedir(),
+      readApprovedFolders: expect.any(Function)
+    })
+    await expect(toolCallPolicy?.readApprovedFolders()).resolves.toStrictEqual({
+      kind: "listed",
+      folderPaths: ["/srv/shared"]
+    })
+  })
+
+  it("answers a turn that waited in its agent's line, finding its reply still streaming in the stored conversation", async () => {
+    const { factories } = createRecordedFactories()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    const model = createModelSpies(services)
+    model.generateTitle.mockResolvedValue("Greeting")
+    const release = Promise.withResolvers<void>()
+    model.completeChatStream.mockImplementation(async () => {
+      await release.promise
+      return createHiReplyStream()
+    })
+    const { agentRequestSlotCount } = TEST_BACKEND_CONFIG
+    for (let held = 0; held < agentRequestSlotCount; held += 1)
+      startHelloTurn(services, PLAIN_TURN_SETTINGS, NO_ATTACHMENTS)
+
+    const { turn, generation } = startHelloTurn(
+      services,
+      PLAIN_TURN_SETTINGS,
+      NO_ATTACHMENTS
+    )
+    await vi.waitFor(() => {
+      expect(model.completeChatStream).toHaveBeenCalledTimes(
+        agentRequestSlotCount
+      )
+    })
+    release.resolve()
+    await generation.settled
+
+    expect(
+      services.conversationHistoryReader.getConversation(turn.conversation.id)
+    ).toMatchObject({
+      messages: [turn.userMessage, { status: "completed" }]
+    })
   })
 
   it("creates the conversation adapters over the acquired database", async () => {
@@ -1011,6 +1596,33 @@ describe("closeSingletonServices", () => {
     return { services, ...recorded }
   }
 
+  /**
+   * Creates a bundle from recorded factories, whose activity hub's disposal
+   * the cleanup log records as `activity-hub` before the hub is disposed
+   * of.
+   *
+   * @returns The bundle and the recorded acquisitions and cleanup log.
+   * @remarks The bundle takes its hub's disposal method when it creates the
+   * hub, so the method is spied on the hub's class before the bundle is
+   * created; the spy is restored when the test finishes.
+   */
+  async function createServicesRecordingHubDisposal() {
+    const recorded = createRecordedFactories()
+    const dispose = ActivityHub.prototype[Symbol.dispose]
+    vi.spyOn(ActivityHub.prototype, Symbol.dispose).mockImplementation(
+      function (this: ActivityHub) {
+        recorded.closeLog.push("activity-hub")
+        dispose.call(this)
+      }
+    )
+    const services: SingletonServices = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      recorded.factories
+    )
+    return { services, ...recorded }
+  }
+
   it("releases every acquisition in reverse acquisition order", async () => {
     const { services, closeLog } = await createRecordedServices()
 
@@ -1019,8 +1631,79 @@ describe("closeSingletonServices", () => {
     expect(closeLog).toEqual(["chat", ...LLM_RUNTIME_RELEASE_NAMES, "database"])
   })
 
-  it("closes the email account checker, then the MCP server registry, before every acquisition", async () => {
-    const { services, closeLog } = await createRecordedServices()
+  it("closes the wake settings, then disposes of the activity hub, then ends every running reply generation, before it closes the MCP server registry or releases an acquisition, and leaves the reply generation registry closed", async () => {
+    const { services, closeLog } = await createServicesRecordingHubDisposal()
+    updateServiceClose(
+      services.conversationWakeSettings,
+      "wake-settings",
+      closeLog
+    )
+    const closeMcpServerRegistry = vi.spyOn(services.mcpServerRegistry, "close")
+    const replyTask = startControlledGeneration(services.replyGenerations)
+    // The reply task starts here, so the case can observe what was closed
+    // at the moment the cleanup cancels it.
+    await waitForMicrotasks()
+    let closedBeforeCancellation: readonly ClosedServiceName[] | undefined =
+      undefined
+    replyTask.context.abortSignal.addEventListener(
+      "abort",
+      () => {
+        closedBeforeCancellation = [...closeLog]
+      },
+      { once: true }
+    )
+
+    const closing = closeSingletonServices(services)
+    await waitForMicrotasks()
+    const closedWhileGenerating = {
+      isReplyCancelled: replyTask.context.abortSignal.aborted,
+      mcpServerRegistryCloseCount: closeMcpServerRegistry.mock.calls.length,
+      closedServices: [...closeLog]
+    }
+    replyTask.resolve()
+    await closing
+
+    expect(closedBeforeCancellation).toEqual(["wake-settings", "activity-hub"])
+    expect(closedWhileGenerating).toEqual({
+      isReplyCancelled: true,
+      mcpServerRegistryCloseCount: 0,
+      closedServices: ["wake-settings", "activity-hub"]
+    })
+    expect(closeMcpServerRegistry).toHaveBeenCalledOnce()
+    expect(closeLog).toEqual([
+      "wake-settings",
+      "activity-hub",
+      "chat",
+      ...LLM_RUNTIME_RELEASE_NAMES,
+      "database"
+    ])
+    expect(() =>
+      services.replyGenerations.findReplyGeneration(UNSTORED_REPLY_TARGET)
+    ).toThrow("Reply generation registry is closed")
+  })
+
+  it("ends the streams of the activity hub, which gives a later stream no event", async () => {
+    const { services } = await createRecordedServices()
+    const written: ActivityEvent[] = []
+    const stream = services.activityHub.openStream(async (event) => {
+      written.push(event)
+    })
+    const streamClosure = createSettlementReader(stream.closed)
+
+    await closeSingletonServices(services)
+    const lateStream = services.activityHub.openStream(async (event) => {
+      written.push(event)
+    })
+    const lateStreamClosure = createSettlementReader(lateStream.closed)
+    await waitForMicrotasks()
+
+    expect(streamClosure()).toBe("fulfilled")
+    expect(lateStreamClosure()).toBe("fulfilled")
+    expect(written).toEqual([{ type: "activity-snapshot", replies: [] }])
+  })
+
+  it("disposes of the activity hub, then closes the email account checker, then the MCP server registry, before every acquisition", async () => {
+    const { services, closeLog } = await createServicesRecordingHubDisposal()
     updateServiceClose(
       services.emailAccountChecker,
       "email-account-checker",
@@ -1035,6 +1718,7 @@ describe("closeSingletonServices", () => {
     await closeSingletonServices(services)
 
     expect(closeLog).toEqual([
+      "activity-hub",
       "email-account-checker",
       "mcp-server-registry",
       "chat",

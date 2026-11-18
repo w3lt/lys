@@ -33,12 +33,18 @@ describe("hasAgentPermission", () => {
     ["leader", "read-own-state", true],
     ["leader", "find-agents", true],
     ["leader", "read-any-state", true],
+    ["leader", "delegate-work", true],
+    ["leader", "take-work", false],
     ["member", "read-own-state", true],
     ["member", "find-agents", false],
     ["member", "read-any-state", false],
+    ["member", "delegate-work", false],
+    ["member", "take-work", true],
     ["tool-keeper", "read-own-state", false],
     ["tool-keeper", "find-agents", false],
-    ["tool-keeper", "read-any-state", false]
+    ["tool-keeper", "read-any-state", false],
+    ["tool-keeper", "delegate-work", false],
+    ["tool-keeper", "take-work", false]
   ] as const)("answers whether a %s may %s", (role, permission, expected) => {
     expect(hasAgentPermission(role, permission)).toBe(expected)
   })

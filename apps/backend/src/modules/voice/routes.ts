@@ -7,7 +7,6 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import type { WebSocket } from "ws"
 import { isAllowedOrigin } from "../../httpOrigins"
-import type ReplyGenerationRegistry from "../chat/replyGenerationRegistry"
 import { pickNotificationLine } from "./notificationLines"
 import { SpeechSocketRegistry } from "./speechSocketRegistry"
 import {
@@ -27,9 +26,9 @@ export type SpeechRouteOptions = Readonly<{
 /**
  * Installs the speech WebSocket routes.
  *
- * @param app - Backend with HTTP transport and the conversation history
- * reader registered.
- * @param generations - Registry shared with the chat route.
+ * @param app - Backend with HTTP transport, the conversation history
+ * reader, and the reply generation registry every turn start registers its
+ * generation with; the registry's owner disposes it.
  * @param options - Test seams for the voice probe and connection.
  * @throws If route registration fails.
  * @remarks The two sockets speak for one reply each. They accept the
@@ -39,13 +38,12 @@ export type SpeechRouteOptions = Readonly<{
  */
 export default function updateFastifyWithSpeechRoutes(
   app: FastifyInstance,
-  generations: ReplyGenerationRegistry,
   options: SpeechRouteOptions = {}
 ): void {
   const registry = new SpeechSocketRegistry()
   const deps: SpeechConnectionDependencies = {
     history: app.conversationHistoryReader,
-    generations,
+    generations: app.replyGenerations,
     registry,
     isReady: options.isReady ?? isVoiceReady,
     connect: options.connect ?? connectVoiceSpeech

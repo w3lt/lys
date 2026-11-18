@@ -20,6 +20,7 @@ import MemoryReply from "./memoryReply"
 import type { ReplyPartDraft, ReplyToolCallChange } from "./replyPartSequence"
 import ToolCatalog from "./toolCatalog"
 import { buildToolKeeperTools } from "./toolKeeperTools"
+import type { DelegationOffer, TurnDelegation } from "./turnDelegation"
 import { NO_UNOFFERED_TOOLS } from "./unofferedTools"
 
 /**
@@ -27,6 +28,28 @@ import { NO_UNOFFERED_TOOLS } from "./unofferedTools"
  * of a later round ends the search with the tools recommended so far.
  */
 export const MAXIMUM_TOOL_KEEPER_ROUND_COUNT = 6
+
+/**
+ * Offer of every search in delegation: a turn that works on no job, may not
+ * delegate, and has no jobs.
+ */
+const NO_SEARCH_DELEGATION_OFFER: DelegationOffer = Object.freeze({
+  kind: "main",
+  mayDelegate: false,
+  hasJobs: false
+})
+
+/**
+ * Part of every search in delegation: none. Its offer allows nothing, and
+ * Armitage's role neither delegates nor takes work, so no delegation tool
+ * is offered and a call of a callback is a defect.
+ */
+const NO_SEARCH_DELEGATION: TurnDelegation = Object.freeze({
+  offer: NO_SEARCH_DELEGATION_OFFER,
+  createJobMessage: rejectSearchDelegationCall,
+  createProgressNote: rejectSearchDelegationCall,
+  stopJob: rejectSearchDelegationCall
+})
 
 /** Where the tool calls of one search's reply are recorded. */
 type SearchCallRecording = Readonly<{
@@ -165,6 +188,7 @@ function buildSearchTurn(input: SearchTurnInput): AgentTurn {
     builtInTools: noBuiltInTools,
     mcpTools: noMcpTools,
     unofferedTools: NO_UNOFFERED_TOOLS,
+    delegation: NO_SEARCH_DELEGATION,
     abortSignal: search.abortSignal,
     createReplyPart: (draft) => createSearchReplyPart(recording, reply, draft),
     updateReplyPartContent: (partId, content) =>
@@ -245,7 +269,9 @@ function updateSearchToolCall(
  * @param task - Trimmed, non-empty task of the search.
  * @param now - Time the search started, as ISO 8601 text; the message's
  * time.
- * @returns A new validated message holding the task, without attachments.
+ * @returns A new validated message holding the task, without attachments
+ * or reports; its origin is `delegator`, as the asking agent, not the
+ * person, writes it, the way a delegator writes a job message.
  * @throws If the message breaks the conversation contract.
  */
 function buildSearchMessage(
@@ -257,7 +283,9 @@ function buildSearchMessage(
     createdAt: now,
     role: "user",
     content: task,
-    attachments: []
+    attachments: [],
+    origin: "delegator",
+    reports: []
   })
 }
 
@@ -297,6 +325,16 @@ function handleSearchEvent(): void {
  */
 function rejectAttachmentImageRead(): Promise<never> {
   return Promise.reject(new Error("A tool search reads no attachment image"))
+}
+
+/**
+ * Refuses a delegation call; a search offers no delegation tool, so a call
+ * is a defect.
+ *
+ * @throws Always, which fails the search.
+ */
+function rejectSearchDelegationCall(): never {
+  throw new Error("A tool search takes no part in delegation")
 }
 
 /**

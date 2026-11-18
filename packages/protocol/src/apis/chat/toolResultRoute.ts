@@ -75,9 +75,10 @@ const sendChatToolResultApiResponseSchemas = Object.freeze({
  * tool-call-not-pending problem with HTTP 409 and changes nothing, so a
  * repeated request is harmless. The body is limited to
  * {@link MAXIMUM_TOOL_RESULT_BODY_BYTES}. The backend sets no time limit on
- * a pending call: it waits until this request, Stop, or backend shutdown. A
- * newer turn in the conversation or deleting the conversation does not end
- * the wait yet. Changing the method, path, or schemas requires coordinated
+ * a pending call: it waits until this request, Stop, the deletion of the
+ * reply's conversation or of the main conversation its job belongs to, or
+ * backend shutdown. A newer turn in the conversation does not end the wait
+ * yet. Changing the method, path, or schemas requires coordinated
  * consumers.
  */
 export const sendChatToolResultApi = Object.freeze({

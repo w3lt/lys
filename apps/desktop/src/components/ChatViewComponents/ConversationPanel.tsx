@@ -1,4 +1,4 @@
-import type { ConversationSource } from "@lys/share"
+import type { ConversationSource, Job } from "@lys/share"
 import { ArrowDown } from "lucide-react"
 import type { ReactElement, RefObject } from "react"
 
@@ -8,6 +8,7 @@ import type {
   ConversationPresentation
 } from "./conversation-presentation"
 import ConversationTranscript from "./ConversationTranscript"
+import type { JobCardPresentation } from "./job-presentation"
 import StarterView from "./StarterView"
 
 /** Parent-owned controls shared by every {@link ConversationPanel} variant. */
@@ -31,8 +32,19 @@ type ConversationPanelCommonProps = {
    * and named in the pending-work status.
    */
   readonly agentName: string
+  /**
+   * Name of the agent that wrote the messages of the shown job; undefined in
+   * a main conversation.
+   */
+  readonly delegatorName: string | undefined
   /** Numbered sources of the conversation, which replies may cite. */
   readonly sources: readonly ConversationSource[]
+  /** Cards of every job of the conversation, in number order. */
+  readonly jobCards: readonly JobCardPresentation[]
+  /** Opens a job's conversation; receives the job's identity. */
+  readonly onOpenJob: (jobId: string) => void
+  /** Stops a job's latest reply; receives the job. */
+  readonly onStopJob: (job: Job) => void
 }
 
 /**
@@ -61,14 +73,62 @@ export type ConversationPanelProps = ConversationPanelCommonProps &
   ConversationPresentation
 
 /**
+ * Builds the content the panel scrolls: the starter view while the
+ * conversation is empty, otherwise the transcript.
+ *
+ * @param props - The panel's properties.
+ * @returns The starter view for an empty conversation without a lifecycle
+ * error, whose prompts call `onSendMessage` and discard its settlement;
+ * otherwise the transcript of the presentation's variant, with the error
+ * after it.
+ */
+function buildConversationBody(props: ConversationPanelProps): ReactElement {
+  const isEmptyConversation =
+    props.kind === "completed-only" &&
+    props.completedMessages.length === 0 &&
+    props.error === undefined
+  if (isEmptyConversation) {
+    return (
+      <StarterView
+        onSendStarterPrompt={(prompt) => void props.onSendMessage(prompt)}
+      />
+    )
+  }
+
+  const transcriptProps = {
+    delegatorName: props.delegatorName,
+    error: props.error,
+    jobCards: props.jobCards,
+    onOpenJob: props.onOpenJob,
+    onStopJob: props.onStopJob,
+    sources: props.sources,
+    speakerName: props.agentName
+  }
+  return props.kind === "streaming-tail" ? (
+    <ConversationTranscript
+      {...transcriptProps}
+      completedMessages={props.completedMessages}
+      kind="streaming-tail"
+      streamingMessage={props.streamingMessage}
+    />
+  ) : (
+    <ConversationTranscript
+      {...transcriptProps}
+      completedMessages={props.completedMessages}
+      kind="completed-only"
+    />
+  )
+}
+
+/**
  * Presents the conversation transcript and its navigation affordances.
  *
- * @remarks The parent owns conversation
- * state and sources, transcript position, scrolling, submission, and the name of the
- * agent that answers. The panel exposes no
- * interruption control, because cancellation must stay reachable in active
- * phases that have no assistant message and is therefore owned by the
- * composer. Starter clicks call `onSendMessage` once and intentionally discard
+ * @remarks The parent owns conversation state, sources, and jobs, transcript
+ * position, scrolling, submission, what opening and stopping a job do, the
+ * name of the agent that answers, and, in a job, the name of its delegator.
+ * The panel exposes no interruption control, because cancellation must stay
+ * reachable in active phases that have no assistant message and is therefore
+ * owned by the composer. Starter clicks call `onSendMessage` once and intentionally discard
  * its settlement because the store owns request failure state. The transcript
  * host is the supplied ref target and exposes native scroll semantics; the
  * jump control appears only when the parent reports that the reader is away
@@ -85,41 +145,10 @@ export default function ConversationPanel(
     onTranscriptScroll,
     onJumpToLatest,
     transcriptRef,
-    error,
-    onSendMessage,
     isAtBottom,
     activity,
-    agentName,
-    sources
+    agentName
   } = props
-  const isEmptyConversation =
-    props.kind === "completed-only" &&
-    props.completedMessages.length === 0 &&
-    error === undefined
-  const transcript =
-    props.kind === "streaming-tail" ? (
-      <ConversationTranscript
-        kind="streaming-tail"
-        completedMessages={props.completedMessages}
-        error={error}
-        sources={sources}
-        speakerName={agentName}
-        streamingMessage={props.streamingMessage}
-      />
-    ) : (
-      <ConversationTranscript
-        kind="completed-only"
-        completedMessages={props.completedMessages}
-        error={error}
-        sources={sources}
-        speakerName={agentName}
-      />
-    )
-  const conversationBody = isEmptyConversation ? (
-    <StarterView onSendStarterPrompt={(prompt) => void onSendMessage(prompt)} />
-  ) : (
-    transcript
-  )
 
   return (
     <section
@@ -133,7 +162,7 @@ export default function ConversationPanel(
         onScroll={onTranscriptScroll}
         ref={transcriptRef}
       >
-        {conversationBody}
+        {buildConversationBody(props)}
       </div>
 
       {!isAtBottom && (

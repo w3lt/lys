@@ -1,6 +1,6 @@
 ---
 title: SSE events
-description: The SSE payload variants emitted by the chat and reply-events routes.
+description: The SSE payload variants emitted by the chat, reply-events, and activity routes.
 docType: reference
 sidebar:
   order: 2
@@ -10,7 +10,9 @@ The chat route emits exactly eleven SSE payload variants, defined by
 `chatApiStreamEventSchema` in `@lys/protocol`. The reply-events route emits
 `reply-snapshot` followed by the nine generation variants (`title`,
 `reply-part`, `reply-part-delta`, `sources`, `done`, `interrupted`, `error`,
-`tool-approval`, `tool-call`), defined by `chatReplyEventSchema`.
+`tool-approval`, `tool-call`), defined by `chatReplyEventSchema`. The
+[activity stream](#activity-stream) emits seven variants of its own, defined
+by `activityEventSchema`.
 
 ## Event variants
 
@@ -21,7 +23,7 @@ The chat route emits exactly eleven SSE payload variants, defined by
 | `title`                            | `title`                                                                                        | The persisted conversation title, generated or reconciled.                                                                                |
 | `reply-part`                       | `part`                                                                                         | A new part of the reply, or a tool call that changed state, as stored.                                                                    |
 | `reply-part-delta`                 | `partId`, `content`, `updatedAt`                                                               | One non-empty fragment appended to a stored reasoning or text part.                                                                       |
-| `sources`                          | `sources`                                                                                      | Numbered sources a tool call's result shows, stored with the call.                                                                        |
+| `sources`                          | `sources`                                                                                      | Numbered sources a tool call's result shows, stored with the call, or those the reports a turn delivers cite.                             |
 | `done`                             | `finishReason`                                                                                 | Successful assistant completion with `stop` or `length`.                                                                                  |
 | `interrupted`                      | none                                                                                           | The reply ended before the model finished.                                                                                                |
 | `error`                            | `message`                                                                                      | A user-presentable chat generation error string.                                                                                          |
@@ -35,10 +37,10 @@ The chat route emits exactly eleven SSE payload variants, defined by
 
 Includes:
 
-- full `conversation` metadata, whose `title` is `null` until a title is
-  generated
+- full `conversation` metadata, with `kind` `main`, whose `title` is `null`
+  until a title is generated
 - one persisted user message, with the records of the files sent with it in
-  `attachments` (empty when none)
+  `attachments` (empty when none), and `origin` `person`
 - one persisted assistant message in `streaming` state
 
 ### `start-existing-conversation-turn`
@@ -46,7 +48,8 @@ Includes:
 Includes:
 
 - one persisted user message, with the records of the files sent with it in
-  `attachments` (empty when none)
+  `attachments` (empty when none), its `origin`, and the
+  [job reports](/reference/api/#jobs) it delivered in `reports`
 - one persisted assistant message in `streaming` state
 
 The desktop uses its current active conversation metadata together with these
@@ -129,6 +132,12 @@ event of the call whose result shows them, and only when there is at least
 one. A number keeps its source for the whole conversation, so a client merges
 the sources by number. Today only `web_search` and `read_page` number sources.
 
+A turn whose user message delivers job reports that cite sources also sends
+one `sources` event right after its start event, or after its stored `title`
+event when there is one, with the sources the reports cite in number order.
+Delivery numbers each of them in the conversation, so the reply can cite
+them as `[n]`. A turn whose reports cite none sends no such event.
+
 ### `done`
 
 Carries:
@@ -144,8 +153,9 @@ The only accepted `finishReason` values are `stop` and `length`.
 
 ### `interrupted`
 
-Carries no fields. Sent when the reply was stopped, superseded by a newer turn
-in its conversation, deleted with its conversation, or cancelled by backend
+Carries no fields. Sent when the reply was stopped, by the person or, for a
+job's reply, by its delegator, superseded by a newer turn in its
+conversation, deleted with its conversation, or cancelled by backend
 shutdown. The stored reply, if it still exists, is `interrupted` with exactly
 the parts delivered before this event, and its calls that were waiting or
 running are stored as `interrupted`. No `reply-part`, `reply-part-delta`,
@@ -163,8 +173,9 @@ backend's tool approval service sends it for every call the
 that is not saved as Just run, and for every call it requires approval of, of
 an MCP tool its server marks as destructive or as an open-world write, and
 of `web_search` from a reply's sixth call on, even on Just run; client,
-backend, and MCP tools alike except `read_attachment`, the agent state tools
-(`read_my_state`, `find_agents`, `read_agent_state`), and `find_tools`, which
+backend, and MCP tools alike, `delegate_work` included, except
+`read_attachment`, the agent state tools (`read_my_state`, `find_agents`,
+`read_agent_state`), `find_tools`, `report_progress`, and `stop_job`, which
 run without approval, right after the call's `reply-part` stored it as
 `awaiting-approval`; any other call of a tool on Just run gets no prompt. The
 client shows the call and answers with the
@@ -273,7 +284,8 @@ Every valid chat stream begins with one turn-start event. After that:
 
 1. `start-new-conversation-turn` or `start-existing-conversation-turn`
 2. for a titled existing conversation, its stored `title` event arrives next
-3. zero or more rounds, the first one only once the agent has a free
+3. for a turn that delivers job reports citing sources, one `sources` event
+4. zero or more rounds, the first one only once the agent has a free
    [request slot](/architecture/backend/#request-slots) for the reply, so a
    reply that waits in line sends nothing until then: each round's reasoning
    and text as `reply-part` and
@@ -282,8 +294,8 @@ Every valid chat stream begins with one turn-start event. After that:
    `tool-call` event in the model's order, the `tool-call` event of each
    allowed client tool's call when its answer arrives, and each call's later
    `reply-part` events, a succeeded call's `sources` event first
-4. exactly one of `done`, `interrupted`, or `error`
-5. for a conversation without a stored title, a generated `title` may arrive
+5. exactly one of `done`, `interrupted`, or `error`
+6. for a conversation without a stored title, a generated `title` may arrive
    before, during, or after the chat events
 
 A `title` event can still arrive after the reply's final event, because title
@@ -299,6 +311,66 @@ backend closes a follower that falls 4,096 events behind, and a reply whose
 final state cannot be stored sends none. Such a close says nothing about the
 reply's outcome; following the reply again, or reading its conversation,
 returns the stored state.
+
+## Activity stream
+
+`GET /api/v1/activity/events` is one stream for the whole app. It follows the
+replies the backend starts itself, the replies of [jobs](/reference/api/#jobs)
+and of [wake-up turns](/architecture/backend/#wake-up-turns), and the jobs
+they belong to. A reply the person started is not on it; the chat and
+reply-events routes carry it. Its events, selected by `type`:
+
+| Event name            | Payload fields                                                                          | Meaning                                                                                      |
+| --------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `activity-snapshot`   | `replies`                                                                               | The first event: every backend-started reply generating now, with what it waits for.         |
+| `reply-started`       | `conversationId`, `parentConversationId`, `assistantMessageId`                          | A job's reply or a wake-up reply started.                                                    |
+| `reply-ended`         | `conversationId`, `parentConversationId`, `assistantMessageId`, `status`                | A backend-started reply ended; every call and prompt it waited on ends with it.              |
+| `job-updated`         | `parentConversationId`, `job`                                                           | One job in its current state, after a job message, a progress note, or the end of its reply. |
+| `tool-approval`       | `conversationId`, `parentConversationId`, `assistantMessageId`, `call`, `approvalToken` | A backend-started reply waits for the person to allow or reject this call.                   |
+| `tool-approval-ended` | `conversationId`, `parentConversationId`, `assistantMessageId`, `callId`, `status`      | A prompt of a backend-started reply no longer waits: it was answered, or it expired.         |
+| `tool-call`           | `conversationId`, `parentConversationId`, `assistantMessageId`, `call`                  | A backend-started reply waits for the client to run this call of a client tool.              |
+
+`conversationId` is the conversation that holds the reply: the job, or the
+main conversation of a wake-up reply. `parentConversationId` is the job's
+parent, or `null` for a wake-up reply. Each entry of the snapshot's
+`replies` has the same three fields with `pendingToolCalls` and
+`pendingToolApprovals`, in the shape and order of a
+[`reply-snapshot`](#reply-snapshot); both are empty once the reply was
+stopped or its reply task settled.
+
+`reply-ended` carries the reply's stored final `status`, `completed`,
+`interrupted`, or `failed`, or `null` when the reply is no longer stored or
+could not be read. The event is sent also when the reply's end could not be
+stored; a reply still stored as `streaming` then ends as `interrupted`, the
+state startup recovery gives it. `job-updated` carries the whole
+[job](/reference/api/#jobs), so a newer one replaces an older one of the same
+job. `tool-approval` and `tool-call` carry the call in the shape of the chat
+events of the same name, and `tool-approval` also carries the prompt's
+single-use `approvalToken`. The client answers them with the
+[tool-approval](/reference/api/#tool-approvals) and
+[tool-result](/reference/api/#tool-results) routes, with the event's
+`conversationId` and `assistantMessageId`; the answer to a `tool-approval`
+also carries its `approvalToken`.
+
+`tool-approval-ended` is sent once for each prompt the reply sent as
+`tool-approval`, when the reply first stores the call in another state than
+`awaiting-approval`, and also reaches a client that found the prompt in its
+snapshot. `callId` is the call's `id`, and `status` is the state the call was
+stored in, always one of three: `running` once someone allowed it, `rejected`
+once someone rejected it, and `failed` when nobody answered within five
+minutes and the prompt expired. It is the activity stream's counterpart of the `reply-part`
+event that carries the call on the reply's own stream; the stream carries no
+other part of the reply.
+
+Each event reaches a client at most once, and nothing is replayed: a client
+that connects again starts from a new snapshot. A call can be both in the
+snapshot and in a later event, so a client merges calls by `call.id`. A
+snapshot is authoritative for the replies it lists: a prompt of a listed
+reply that is not in its `pendingToolApprovals` no longer waits, although
+the snapshot does not say whether it was answered or expired. The
+stream never ends by itself: it closes when the backend shuts down or when
+the client falls 4,096 events behind. Following changes nothing, and closing
+the stream ends only that client's observation.
 
 ## Coming soon
 

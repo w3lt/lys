@@ -1097,6 +1097,92 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
         AND provider IN ('lmStudio', 'ollama', 'ollamaCloud', 'groq')
       )
     );
+  `,
+  // Stores jobs: the work one agent gives another. A job is a conversation with
+  // a parent, the conversation it was started from. Its agent_code is the agent
+  // that works on it, its title is the title of its latest job message, and its
+  // job_number counts from 1 inside its parent, where it is unique. A job
+  // always has a title, which the job_number check keeps; a main conversation
+  // may still have none. The agent that gave the work is the parent's agent and
+  // is not stored again. Before this version only the person could start a
+  // conversation or write a user-role message, so NULL is the value of every
+  // existing row and keeps that meaning: no parent is a main conversation, and
+  // no origin is a message the person wrote. The other origins are `delegator`,
+  // a job message, and `wake-up`, a message the backend wrote so that the
+  // parent's agent reads new reports. job_call_id is the `delegate_work` call
+  // that sent a job message: every job message has one, and no other message
+  // does. A comparison with NULL makes a CHECK pass (see version 9), so without
+  // `origin IS NOT NULL` the job_call_id check would accept a call on a message
+  // the person wrote, and without `title IS NOT NULL` the job_number check
+  // would accept a job that has no title. job_reports holds what a job sends
+  // back: progress notes, and at most one report of how each of its replies
+  // ended, which the partial unique index keeps. A note and a failed report
+  // always have text. A stopped and an interrupted report never have text, so
+  // they cite no source. title is the title of the job message the report
+  // answers, kept here because a later job message replaces the job's title.
+  // source_numbers is a JSON list, of which SQLite checks only that it is JSON,
+  // and that it is exactly `[]` for a stopped or an interrupted report; the
+  // report schema checks the rest of every row the backend reads.
+  // delivered_message_id is the user-role message of the turn that delivered
+  // the report, NULL until then. Each column that references a conversation or
+  // a message has an index, so deleting the referenced row scans neither table.
+  // The change only adds: no stored row or column changes, and no table is
+  // rebuilt.
+  `
+    ALTER TABLE conversations ADD COLUMN parent_conversation_id TEXT
+      REFERENCES conversations(id) ON DELETE CASCADE;
+    ALTER TABLE conversations ADD COLUMN job_number INTEGER CHECK (
+      (job_number IS NULL) = (parent_conversation_id IS NULL)
+      AND (
+        job_number IS NULL
+        OR (job_number >= 1 AND title IS NOT NULL AND title <> '')
+      )
+    );
+    CREATE UNIQUE INDEX conversations_job_number_idx
+      ON conversations (parent_conversation_id, job_number)
+      WHERE parent_conversation_id IS NOT NULL;
+
+    ALTER TABLE conversation_messages ADD COLUMN origin TEXT CHECK (
+      origin IS NULL OR (role = 'user' AND origin IN ('delegator', 'wake-up'))
+    );
+    ALTER TABLE conversation_messages ADD COLUMN job_call_id TEXT
+      REFERENCES conversation_messages(id) ON DELETE CASCADE
+      CHECK (
+        (job_call_id IS NOT NULL)
+        = (origin IS NOT NULL AND origin = 'delegator')
+      );
+    CREATE INDEX conversation_messages_job_call_idx
+      ON conversation_messages (job_call_id)
+      WHERE job_call_id IS NOT NULL;
+
+    CREATE TABLE job_reports (
+      id TEXT PRIMARY KEY,
+      job_conversation_id TEXT NOT NULL
+        REFERENCES conversations(id) ON DELETE CASCADE,
+      reply_id TEXT NOT NULL
+        REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (
+        kind IN ('note', 'result', 'failed', 'stopped', 'interrupted')
+      ),
+      title TEXT NOT NULL CHECK (title <> ''),
+      content TEXT NOT NULL,
+      source_numbers TEXT NOT NULL CHECK (json_valid(source_numbers)),
+      created_at TEXT NOT NULL,
+      delivered_message_id TEXT
+        REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      CHECK (kind NOT IN ('note', 'failed') OR content <> ''),
+      CHECK (
+        kind NOT IN ('stopped', 'interrupted')
+        OR (content = '' AND source_numbers = '[]')
+      )
+    ) STRICT;
+    CREATE UNIQUE INDEX job_reports_reply_end_idx
+      ON job_reports (reply_id) WHERE kind <> 'note';
+    CREATE INDEX job_reports_reply_idx ON job_reports (reply_id);
+    CREATE INDEX job_reports_job_idx ON job_reports (job_conversation_id);
+    CREATE INDEX job_reports_delivered_idx
+      ON job_reports (delivered_message_id)
+      WHERE delivered_message_id IS NOT NULL
   `
 ]
 

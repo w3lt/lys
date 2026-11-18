@@ -135,8 +135,7 @@ const FOOTNOTE_REFERENCE_START = "[^"
  * yet, since it needs a character after one. Its letters wait, so that they
  * make no sentence before them final.
  */
-const URL_START =
-  /\b(?:h(?:t(?:t(?:p(?:s?(?::(?:\/\/?)?)?)?)?)?)?|w(?:w(?:w\.?)?)?)$/i
+const URL_START = /\b(?:h|ht|htt|https?(?::\/{0,2})?|w{1,3}|www\.)$/i
 
 /**
  * Where a paragraph still being written may yet become a link definition:

@@ -431,7 +431,7 @@ export class SpeechController {
    * @param reply - The reply the frame belongs to.
    * @param frame - Raw PCM, as the backend relays it.
    */
-  #play(reply: SpeechReply, frame: Uint8Array): void {
+  #addAudioFrame(reply: SpeechReply, frame: Uint8Array): void {
     this.#audibleReplyId = reply.replyId
     this.#player.enqueue(frame)
   }
@@ -453,7 +453,7 @@ export class SpeechController {
       onAudio: (frame) => {
         if (this.#open?.socket !== socket) return
         this.#open.frames += 1
-        this.#play(reply, frame)
+        this.#addAudioFrame(reply, frame)
       },
       onClose: (code) => {
         if (this.#open?.socket !== socket) return
@@ -474,7 +474,8 @@ export class SpeechController {
     this.#closeNotification()
     const socket = this.#deps.openSocket(this.#deps.notificationPath(reply), {
       onAudio: (frame) => {
-        if (this.#notification?.socket === socket) this.#play(reply, frame)
+        if (this.#notification?.socket === socket)
+          this.#addAudioFrame(reply, frame)
       },
       onClose: (code) => {
         if (this.#notification?.socket !== socket) return

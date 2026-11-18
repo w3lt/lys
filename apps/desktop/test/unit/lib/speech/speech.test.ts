@@ -80,6 +80,8 @@ class FakeWebSocket {
   public binaryType = "blob"
   /** Whether `close` ran. */
   public isClosed = false
+  /** What `close` throws, when the test sets it. */
+  public closeFailure: Error | undefined
   /** Its listeners, by event type. */
   readonly #listeners = new Map<string, ((event: unknown) => void)[]>()
 
@@ -105,6 +107,7 @@ class FakeWebSocket {
 
   /** Closes the socket from the client side. */
   public close(): void {
+    if (this.closeFailure !== undefined) throw this.closeFailure
     this.isClosed = true
   }
 
@@ -453,6 +456,37 @@ describe("startSpeech", () => {
     expect(openedUrls()).toEqual([
       `${SOCKET_BASE}${REPLY_PATH}/speech?from=start`
     ])
+  })
+
+  it("reports a failure of the speech update that the focus read runs", async () => {
+    const focused = createControlledPromise<boolean>()
+    fakeWindow.focused = focused.promise
+    const reportError = vi.fn()
+    vi.stubGlobal("reportError", reportError)
+    startSpeechForTest()
+    showConversation(buildStreamingAssistantMessage(3, "Hello"))
+    awaitTurn()
+    streamReply()
+    const failure = new Error("close failed")
+    socketAt().closeFailure = failure
+    focused.resolve(false)
+    await waitForMicrotasks()
+    expect(reportError).toHaveBeenCalledWith(failure)
+  })
+
+  it("reports a failure to remove the focus listener that registers after the cleanup", async () => {
+    const listening = createControlledPromise<() => void>()
+    fakeWindow.listening = listening.promise
+    const reportError = vi.fn()
+    vi.stubGlobal("reportError", reportError)
+    const stop = startSpeechForTest()
+    stop()
+    const failure = new Error("unlisten failed")
+    listening.resolve(() => {
+      throw failure
+    })
+    await waitForMicrotasks()
+    expect(reportError).toHaveBeenCalledWith(failure)
   })
 
   it("ignores a focus read that arrives after the cleanup", async () => {

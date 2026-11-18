@@ -37,11 +37,18 @@ function trackFocus(onChange: (focused: boolean) => void): () => void {
     const publish = (focused: boolean): void => {
       if (!disposed) onChange(focused)
     }
-    // Only the window's own rejection is expected; a throw from `publish`
-    // stays a failure of its own.
-    currentWindow.isFocused().then(publish, () => {
-      // The window never reported; the default stands.
-    })
+    // Only the window's own rejection means unknown focus. A failure of the
+    // speech update that `publish` runs goes to the platform's
+    // `reportError`, as an uncaught one does, since the desktop has no
+    // logger.
+    currentWindow
+      .isFocused()
+      .then(publish, () => {
+        // The window never reported; the default stands.
+      })
+      .catch((error: unknown) => {
+        reportError(error)
+      })
     const rememberUnlisten = (unlistenFocus: () => void): void => {
       if (disposed) unlistenFocus()
       else unlisten = unlistenFocus
@@ -52,6 +59,9 @@ function trackFocus(onChange: (focused: boolean) => void): () => void {
       })
       .then(rememberUnlisten, () => {
         // Focus events are unavailable; focus stays at its last value.
+      })
+      .catch((error: unknown) => {
+        reportError(error)
       })
     return () => {
       disposed = true

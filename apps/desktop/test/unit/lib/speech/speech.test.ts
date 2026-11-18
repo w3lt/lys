@@ -442,6 +442,19 @@ describe("startSpeech", () => {
     expect(fakeWindow.unlistens).toBe(1)
   })
 
+  it("keeps the focused default when the window cannot report its focus", async () => {
+    fakeWindow.focused = Promise.reject(new Error("no window"))
+    fakeWindow.listening = Promise.reject(new Error("no focus events"))
+    startSpeechForTest()
+    await waitForMicrotasks()
+    showConversation(buildStreamingAssistantMessage(3, "Hello"))
+    awaitTurn()
+    streamReply()
+    expect(openedUrls()).toEqual([
+      `${SOCKET_BASE}${REPLY_PATH}/speech?from=start`
+    ])
+  })
+
   it("ignores a focus read that arrives after the cleanup", async () => {
     const focused = createControlledPromise<boolean>()
     fakeWindow.focused = focused.promise

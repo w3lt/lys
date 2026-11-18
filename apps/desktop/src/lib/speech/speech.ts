@@ -37,12 +37,11 @@ function trackFocus(onChange: (focused: boolean) => void): () => void {
     const publish = (focused: boolean): void => {
       if (!disposed) onChange(focused)
     }
-    currentWindow
-      .isFocused()
-      .then(publish)
-      .catch(() => {
-        // The window never reported; the default stands.
-      })
+    // Only the window's own rejection is expected; a throw from `publish`
+    // stays a failure of its own.
+    currentWindow.isFocused().then(publish, () => {
+      // The window never reported; the default stands.
+    })
     const rememberUnlisten = (unlistenFocus: () => void): void => {
       if (disposed) unlistenFocus()
       else unlisten = unlistenFocus
@@ -51,8 +50,7 @@ function trackFocus(onChange: (focused: boolean) => void): () => void {
       .onFocusChanged(({ payload }) => {
         publish(payload)
       })
-      .then(rememberUnlisten)
-      .catch(() => {
+      .then(rememberUnlisten, () => {
         // Focus events are unavailable; focus stays at its last value.
       })
     return () => {

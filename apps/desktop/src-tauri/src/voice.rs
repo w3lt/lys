@@ -55,9 +55,10 @@ const VOICE_HEALTHY_STATUS_LINE_PREFIX: &[u8] = b"HTTP/1.1 200 ";
 /// It must equal `VOICE_HOST` and `VOICE_PORT` in
 /// `packages/protocol/src/constant.ts`, which the backend and the renderer
 /// use, and the default host and port of voice's web server in
-/// `apps/voice`. This copy is kept under an approved CONST-005 exception, as
-/// vmo's is: the renderer cannot check it without a round trip, and a unit
-/// test fails when the three differ.
+/// `apps/voice`. This copy is kept under the voice address copy exception to
+/// CONST-005, which mirrors vmo's approved one and is proposed with the voice
+/// pull request, pending the maintainer's approval: the renderer cannot check
+/// it without a round trip, and a unit test fails when the three differ.
 const VOICE_ADDRESS: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9090);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -593,25 +594,34 @@ pub async fn get_voice_health() -> Result<VoiceHealth, String> {
 #[cfg(test)]
 mod tests {
     use std::{
+        fs,
         io::{Read, Write},
         net::{SocketAddr, TcpListener, TcpStream},
-        process::Command,
-        sync::mpsc,
+        path::Path,
+        process::{Command, Stdio},
+        sync::{mpsc, Arc, Barrier},
         thread,
         time::{Duration, Instant},
     };
 
+    use nix::{sys::signal::kill, unistd::Pid};
     use serde_json::{json, to_value};
 
     use super::{
-        send_voice_health_check, Voice, VoiceHealth, VoiceProcessStatus, VoiceStopOutcome,
+        format_voice_stop_failure, send_voice_health_check, Voice, VoiceHealth, VoiceProcessStatus,
+        VoiceStopOutcome,
     };
+    use crate::tools::test_directory::TestDirectory;
+
+    /// Stop timeout of the cases whose child ignores `SIGTERM`.
+    const SHORT_STOP_TIMEOUT: Duration = Duration::from_millis(300);
 
     /// Stop timeout of the cases whose child exits on `SIGTERM`; never reached.
     const LONG_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 
-    /// Stop timeout of the case whose child ignores `SIGTERM`.
-    const SHORT_STOP_TIMEOUT: Duration = Duration::from_millis(300);
+    /// Stop timeout of the joined-stop case: the margin within which the
+    /// joining stop has to reach the owner after the first stop's `SIGTERM`.
+    const JOINED_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
     /// Longest any case waits for a condition before it fails.
     const CONDITION_LIMIT: Duration = Duration::from_secs(10);
@@ -624,7 +634,7 @@ mod tests {
     ///
     /// A stop failure fails the test unless the test is already failing, so
     /// that the original failure stays the reported one.
-    struct VoiceStopGuard(std::sync::Arc<Voice>);
+    struct VoiceStopGuard(Arc<Voice>);
 
     impl Drop for VoiceStopGuard {
         /// Stops the case's voice child and waits until it has exited.
@@ -637,16 +647,17 @@ mod tests {
 
     /// Creates an owner with `stop_timeout` together with the guard that stops
     /// its child when the case ends, before the case starts anything.
-    fn create_guarded_voice(stop_timeout: Duration) -> (std::sync::Arc<Voice>, VoiceStopGuard) {
-        let voice = std::sync::Arc::new(Voice::new(stop_timeout));
-        let guard = VoiceStopGuard(std::sync::Arc::clone(&voice));
+    fn create_guarded_voice(stop_timeout: Duration) -> (Arc<Voice>, VoiceStopGuard) {
+        let voice = Arc::new(Voice::new(stop_timeout));
+        let guard = VoiceStopGuard(Arc::clone(&voice));
         (voice, guard)
     }
 
-    /// Builds a command that runs `script` with `sh`.
+    /// Builds a command that runs `script` with `sh`, discarding what the
+    /// shell reports about the jobs a signal ended.
     fn build_shell_command(script: &str) -> Command {
         let mut command = Command::new("sh");
-        command.arg("-c").arg(script);
+        command.arg("-c").arg(script).stderr(Stdio::null());
         command
     }
 
@@ -663,12 +674,58 @@ mod tests {
         }
     }
 
+    /// Reads the number of lines of `path`, or zero while it does not exist.
+    fn read_line_count(path: &Path) -> usize {
+        fs::read_to_string(path).map_or(0, |text| text.lines().count())
+    }
+
+    /// Reads the process identifier that a case's script wrote to `path`.
+    fn read_pid_file(path: &Path) -> i32 {
+        fs::read_to_string(path)
+            .expect("read the pid file")
+            .trim()
+            .parse()
+            .expect("a process identifier in the pid file")
+    }
+
+    /// Answers whether a process with identifier `pid` still exists.
+    fn is_process_alive(pid: i32) -> bool {
+        kill(Pid::from_raw(pid), None).is_ok()
+    }
+
+    /// Starts a child that runs `trap_action` on `SIGTERM` and keeps running
+    /// otherwise, with a background `sleep` in its process group, and waits
+    /// until it has set that trap: a signal sent before would end it at once.
+    ///
+    /// The `sleep` starts after the trap is set, so it inherits an ignored
+    /// `SIGTERM` but not a trap's action. Returns the child's pid and the
+    /// `sleep`'s.
+    fn start_trapping_child(voice: &Voice, case: &TestDirectory, trap_action: &str) -> (u32, i32) {
+        let ready = case.path().join("ready");
+        let descendant = case.path().join("descendant.pid");
+        let script = format!(
+            "trap '{trap_action}' TERM; sleep 30 & echo $! > \"{}\"; : > \"{}\"; while :; do sleep 0.02; done",
+            descendant.display(),
+            ready.display()
+        );
+        let pid = get_running_pid(voice.start(build_shell_command(&script)).unwrap());
+        wait_for_condition("the child has set its trap", || ready.exists());
+        (pid, read_pid_file(&descendant))
+    }
+
     /// Gets the pid of a running status.
     fn get_running_pid(status: VoiceProcessStatus) -> u32 {
         match status {
             VoiceProcessStatus::Running { pid } => pid,
             other => panic!("expected a running voice, got {other:?}"),
         }
+    }
+
+    /// Waits at `barrier` for the other start, then starts a child that exits
+    /// on `SIGTERM` and returns the pid of the child that runs.
+    fn start_child_after_barrier(voice: &Voice, barrier: &Barrier) -> u32 {
+        barrier.wait();
+        get_running_pid(voice.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap())
     }
 
     #[test]
@@ -698,6 +755,22 @@ mod tests {
     }
 
     #[test]
+    fn a_failure_before_sigkill_is_kept_and_a_failed_sigkill_is_added() {
+        let error = String::from("failed to inspect it: Interrupted system call (os error 4)");
+
+        assert_eq!(format_voice_stop_failure(error.clone(), Ok(())), error);
+        assert_eq!(
+            format_voice_stop_failure(
+                error.clone(),
+                Err(String::from(
+                    "failed to wait for it: No child processes (os error 10)"
+                ))
+            ),
+            format!("{error}; failed to wait for it: No child processes (os error 10)")
+        );
+    }
+
+    #[test]
     fn stop_without_a_child_reports_stopped() {
         let voice = Voice::new(SHORT_STOP_TIMEOUT);
 
@@ -706,50 +779,64 @@ mod tests {
     }
 
     #[test]
-    fn stop_ends_a_child_that_exits_on_sigterm() {
+    fn stop_ends_the_process_group_of_a_child_that_exits_on_sigterm() {
+        let case = TestDirectory::create("voice-sigterm");
         let (voice, _stop) = create_guarded_voice(LONG_STOP_TIMEOUT);
-        get_running_pid(voice.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
+        let (_pid, descendant) = start_trapping_child(&voice, &case, "exit 0");
 
         assert_eq!(voice.stop(), Ok(VoiceStopOutcome::Stopped));
         assert_eq!(voice.status(), Ok(VoiceProcessStatus::Stopped));
+        wait_for_condition("the child's background sleep has exited", || {
+            !is_process_alive(descendant)
+        });
     }
 
     #[test]
-    fn stop_kills_a_child_that_ignores_sigterm() {
-        // The child ignores `SIGTERM`, so only `SIGKILL` ends the group. The
-        // ready file orders the stop after the trap is installed.
-        let case_dir =
-            std::env::temp_dir().join(format!("voice-sigkill-test-{}", std::process::id()));
-        std::fs::create_dir_all(&case_dir).expect("create the test directory");
-        let ready = case_dir.join("ready");
-        let script = format!(
-            "trap '' TERM; : > \"{}\"; while :; do sleep 0.02; done",
-            ready.display()
-        );
+    fn stop_kills_the_process_group_of_a_child_still_running_after_the_timeout() {
+        let case = TestDirectory::create("voice-kill");
         let (voice, _stop) = create_guarded_voice(SHORT_STOP_TIMEOUT);
-        get_running_pid(voice.start(build_shell_command(&script)).unwrap());
-        wait_for_condition("the child has installed its trap", || ready.exists());
+        // The child and its background `sleep` ignore `SIGTERM`, so the whole
+        // group outlives it and only `SIGKILL` ends it.
+        let (_pid, descendant) = start_trapping_child(&voice, &case, "");
 
         assert_eq!(voice.stop(), Ok(VoiceStopOutcome::Killed));
         assert_eq!(voice.status(), Ok(VoiceProcessStatus::Stopped));
-        std::fs::remove_dir_all(&case_dir).ok();
+        wait_for_condition("the child's background sleep has exited", || {
+            !is_process_alive(descendant)
+        });
+    }
+
+    #[test]
+    fn a_child_that_exited_on_its_own_reads_and_stops_as_stopped() {
+        let (voice, _stop) = create_guarded_voice(SHORT_STOP_TIMEOUT);
+        get_running_pid(voice.start(build_shell_command("exit 0")).unwrap());
+
+        wait_for_condition("the child has exited", || {
+            voice.status() == Ok(VoiceProcessStatus::Stopped)
+        });
+
+        assert_eq!(voice.stop(), Ok(VoiceStopOutcome::Stopped));
     }
 
     #[test]
     fn start_replaces_a_child_that_exited_on_its_own() {
+        let case = TestDirectory::create("voice-replace");
+        let spawned = case.path().join("spawned");
         let (voice, _stop) = create_guarded_voice(LONG_STOP_TIMEOUT);
         let first = get_running_pid(voice.start(build_shell_command("exit 0")).unwrap());
         wait_for_condition("the first child has exited", || {
             voice.status() == Ok(VoiceProcessStatus::Stopped)
         });
+        let script = format!(": > \"{}\"; {EXITS_ON_SIGTERM}", spawned.display());
 
-        let second = get_running_pid(voice.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
+        let second = get_running_pid(voice.start(build_shell_command(&script)).unwrap());
 
         assert_ne!(first, second);
         assert_eq!(
             voice.status(),
             Ok(VoiceProcessStatus::Running { pid: second })
         );
+        wait_for_condition("the second child has run", || spawned.exists());
         assert_eq!(voice.stop(), Ok(VoiceStopOutcome::Stopped));
     }
 
@@ -761,13 +848,98 @@ mod tests {
         let second = voice.start(build_shell_command(EXITS_ON_SIGTERM));
 
         assert_eq!(second, Ok(VoiceProcessStatus::Running { pid }));
+        assert_eq!(voice.status(), Ok(VoiceProcessStatus::Running { pid }));
         assert_eq!(voice.stop(), Ok(VoiceStopOutcome::Stopped));
+    }
+
+    #[test]
+    fn two_starts_released_together_spawn_one_child() {
+        let (voice, _stop) = create_guarded_voice(LONG_STOP_TIMEOUT);
+        // The barrier releases both starts together. The case asserts that
+        // whichever start runs second gets the first one's child; it cannot
+        // force both into the check and the spawn at once, which the owner's
+        // lock makes one step.
+        let barrier = Arc::new(Barrier::new(2));
+        let other_start = {
+            let (voice, barrier) = (Arc::clone(&voice), Arc::clone(&barrier));
+            thread::spawn(move || start_child_after_barrier(&voice, &barrier))
+        };
+
+        let pid = start_child_after_barrier(&voice, &barrier);
+
+        assert_eq!(other_start.join().unwrap(), pid);
+        assert_eq!(voice.status(), Ok(VoiceProcessStatus::Running { pid }));
+        assert_eq!(voice.stop(), Ok(VoiceStopOutcome::Stopped));
+    }
+
+    #[test]
+    fn start_names_the_program_it_cannot_run() {
+        let case = TestDirectory::create("voice-missing");
+        let missing = case.path().join("voice");
+        let (voice, _stop) = create_guarded_voice(SHORT_STOP_TIMEOUT);
+
+        let start = voice.start(Command::new(&missing));
+
+        assert_eq!(
+            start,
+            Err(format!(
+                "Failed to run {}: No such file or directory (os error 2)",
+                missing.display()
+            ))
+        );
+        assert_eq!(voice.status(), Ok(VoiceProcessStatus::Stopped));
+    }
+
+    #[test]
+    fn start_after_a_stop_spawns_a_new_child() {
+        let (voice, _stop) = create_guarded_voice(LONG_STOP_TIMEOUT);
+        let first = get_running_pid(voice.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
+        voice.stop().unwrap();
+
+        let second = get_running_pid(voice.start(build_shell_command(EXITS_ON_SIGTERM)).unwrap());
+
+        assert_ne!(first, second);
+        assert_eq!(voice.stop(), Ok(VoiceStopOutcome::Stopped));
+    }
+
+    #[test]
+    fn a_stop_in_progress_is_joined_without_a_second_sigterm() {
+        let case = TestDirectory::create("voice-join");
+        let term_log = case.path().join("term.log");
+        // The child logs SIGTERM and keeps running, so the first stop waits
+        // the whole timeout and kills it; a joined stop shares that outcome.
+        let (voice, _stop) = create_guarded_voice(JOINED_STOP_TIMEOUT);
+        let (pid, _descendant) = start_trapping_child(
+            &voice,
+            &case,
+            &format!("echo term >> \"{}\"", term_log.display()),
+        );
+        let first_stop = {
+            let voice = Arc::clone(&voice);
+            thread::spawn(move || voice.stop())
+        };
+        wait_for_condition("the child has logged SIGTERM", || {
+            read_line_count(&term_log) == 1
+        });
+        assert_eq!(voice.status(), Ok(VoiceProcessStatus::Stopping { pid }));
+        assert!(voice.start(build_shell_command(EXITS_ON_SIGTERM)).is_err());
+
+        // Joined on this thread right after `Stopping` was seen, so the join
+        // reaches the owner a few statements later, far within the first
+        // stop's timeout. Nothing outside `Voice` can observe a joined stop, so
+        // that margin is the one timing assumption left in this case.
+        let joined_stop = voice.stop();
+
+        assert_eq!(joined_stop, Ok(VoiceStopOutcome::Killed));
+        assert_eq!(first_stop.join().unwrap(), Ok(VoiceStopOutcome::Killed));
+        assert_eq!(read_line_count(&term_log), 1);
+        assert_eq!(voice.status(), Ok(VoiceProcessStatus::Stopped));
     }
 
     /// Starts a server on a free loopback port that accepts one connection,
     /// sends the request it reads to the returned channel, and answers with
-    /// `answer`, or holds the connection open without answering when `answer`
-    /// is `None`.
+    /// `answer`, or holds the connection open without answering when
+    /// `answer` is `None`.
     fn start_health_server(
         answer: Option<&'static str>,
     ) -> (SocketAddr, mpsc::Receiver<String>, thread::JoinHandle<()>) {

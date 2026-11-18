@@ -45,12 +45,13 @@ fn greet(name: &str) -> String {
 /// The builder registers the opener plugin, manages the resolved `LysHome`,
 /// the `CredentialFiles` that the file tools refuse, one
 /// mutex-protected `backend::Backend` resource, which reads the backend's list
-/// of MCP server process groups from that Lys home, and one `vmo::Vmo` owner, and
-/// exposes the backend, vmo, settings, and client tool commands to the
-/// renderer. On `Exit`, the managed backend and vmo are stopped together, and
-/// a failure or a killed vmo is reported to stderr without preventing the
-/// process from finishing its exit handling. Exit waits for vmo, which can
-/// take up to `vmo::VMO_STOP_TIMEOUT` while vmo deletes its VMs.
+/// of MCP server process groups from that Lys home, one `vmo::Vmo` owner,
+/// and one `voice::Voice` owner, and exposes the backend, vmo, voice,
+/// settings, and client tool commands to the renderer. On `Exit`, the managed
+/// backend, vmo, and voice are stopped together, and a failure or a killed vmo
+/// or voice is reported to stderr without preventing the process from
+/// finishing its exit handling. Exit waits for vmo, which can take up to
+/// `vmo::VMO_STOP_TIMEOUT` while vmo deletes its VMs.
 ///
 /// # Panics
 ///
@@ -119,12 +120,12 @@ fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunEvent) {
 }
 
 /// Stops the managed backend, vmo, and voice during application exit,
-/// writing each failure and a killed vmo to stderr.
+/// writing each failure and a killed vmo or voice to stderr.
 ///
 /// vmo can take up to [`vmo::VMO_STOP_TIMEOUT`] to delete its VMs, so its stop
 /// runs on a scoped thread while the backend stops, rather than after it;
-/// voice stops on the same thread. The call returns once all three stops have
-/// ended.
+/// voice stops on a second scoped thread at the same time. The call returns
+/// once all three stops have ended.
 fn stop_runtime_processes_at_exit(app_handle: &tauri::AppHandle) {
     let backend = app_handle.state::<backend::Backend>();
     let vmo = app_handle.state::<vmo::Vmo>().inner();

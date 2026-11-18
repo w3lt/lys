@@ -361,8 +361,9 @@ const SPOKEN_SILENCED: ReadonlySet<RootContent["type"]> = new Set<
  * and a `]` may complete a footnote reference and a `>` a tag or a comment,
  * whose letters are not spoken. The last word of the text being written waits
  * too when more letters may turn it into a bare URL, such as `htt`, and so does
- * inline code or math whose closing run ends the text, since one more backtick
- * or `$` would turn it back into text.
+ * inline code whose closing run ends the text, since one more backtick would
+ * turn it back into text, and the text before a block that carries no words,
+ * such as a code fence, while that block is on its first line.
  *
  * Each round's text is a markdown document of its own, its text parts joined as
  * the renderer joins them, so whatever one round leaves open, such as a code
@@ -644,15 +645,14 @@ type SplitRoundText = Readonly<{
 }>
 
 /**
- * Builds the split of a parsed round's text, whose last block may still
- * grow, before the blocks still being written: from the last block whose
- * first line ended,
- * or, in the list that ends the text, from the last such item. No later
- * text changes how a block before it reads, since a reference reads the
- * same before its definition arrives as after. Nothing settles while the
- * text from that block on parses into other blocks alone, as `- 42.` right
- * after a paragraph, where `42.` is text, alone is an empty ordered list,
- * because only the text from it on is parsed again.
+ * Builds the split of a parsed round's text, whose last block may still grow,
+ * before the blocks still being written: from the last block whose first line
+ * ended, or, in the list that ends the text, from the last such item. No later
+ * text changes how a block before it reads, since a reference reads the same
+ * before its definition arrives as after. Nothing settles while the text from
+ * that block on parses into other blocks alone, as `- 42.` right after a
+ * paragraph, where `42.` is text, alone is an empty ordered list, because only
+ * the text from it on is parsed again.
  *
  * @param tree - The parsed round's text; its nodes move into the result.
  * @param markdown - The text, which `tree` was parsed from.
@@ -849,7 +849,9 @@ function formatSpeechTree(tree: Root, lastBlock: LastBlock): string {
  * complete, and the text from its first reparsable mark outside code on, as
  * {@link REPARSABLE_MARK} defines it. Those sentences wait until the block
  * ends. Handing them out earlier would let the reparse take them back, and
- * the sentence before them would then be spoken again.
+ * the sentence before them would then be spoken again. A last block that
+ * {@link isSilentBlockOnFirstLine} is left out first, so the block before it
+ * counts as still being written.
  *
  * @param root - Parsed reply whose last block may still grow; changed in
  * place.
@@ -860,6 +862,10 @@ function removeReparsableText(root: Root, markdown: string): void {
   for (;;) {
     const last: RootContent | undefined = container.children.at(-1)
     if (last === undefined) return
+    if (isSilentBlockOnFirstLine(last, markdown)) {
+      container.children.pop()
+      continue
+    }
     if (last.type === "paragraph" || last.type === "heading") {
       removeReparsableLeaf(container, last, markdown)
       return
@@ -872,6 +878,24 @@ function removeReparsableText(root: Root, markdown: string): void {
       return
     container = last
   }
+}
+
+/**
+ * Whether a block that carries no words is still on its first line: more
+ * text on that line may turn it back into the next line of the block before
+ * it, as a backtick turns ```` ```a ```` into ```` ```a` ````, which is no
+ * code fence, so nothing before it is final yet.
+ *
+ * @param node - The last block of its container.
+ * @param markdown - The reply's text, which `node` was parsed from.
+ * @returns Whether the block is one of {@link SPOKEN_SILENCED} whose first
+ * line has not ended.
+ */
+function isSilentBlockOnFirstLine(
+  node: RootContent,
+  markdown: string
+): boolean {
+  return SPOKEN_SILENCED.has(node.type) && !hasFirstLineEnded(node, markdown)
 }
 
 /**
@@ -922,8 +946,8 @@ function isPossibleDefinition(
 
 /**
  * Cuts a node's inline content at its first reparsable mark in plain text,
- * as {@link findReparsableMarkIndex} finds it, or at inline code or math
- * that {@link isSpanClosedAtTextEnd} may yet turn back into text: the text
+ * as {@link findReparsableMarkIndex} finds it, or at inline code that
+ * {@link isCodeSpanClosedAtTextEnd} may yet turn back into text: the text
  * node holding the mark keeps only its text before the mark, such a span is
  * left out, and so is every node after it. A mark in code or math is never
  * parsed again, so it cuts nothing.
@@ -946,7 +970,7 @@ function removeTextFromReparsableMark(
   }
   if (!("children" in node)) return false
   for (const [index, child] of node.children.entries()) {
-    if (isSpanClosedAtTextEnd(child, textEnd)) {
+    if (isCodeSpanClosedAtTextEnd(child, textEnd)) {
       node.children.length = index
       return true
     }
@@ -959,19 +983,21 @@ function removeTextFromReparsableMark(
 }
 
 /**
- * Whether a node is inline code or math whose closing run ends the text
- * being written: one more backtick or `$` would lengthen the run, which then
- * no longer closes the span, so the span would turn back into text.
+ * Whether a node is inline code whose closing backtick run ends the text
+ * being written: one more backtick would lengthen the run, which then no
+ * longer closes the span, so the span would turn back into text. Inline
+ * math needs no such check, since the `$` that opens it holds its text once
+ * it is text again, as {@link REPARSABLE_MARK} defines.
  *
  * @param node - An inline node of the text being written.
  * @param textEnd - The length of that text.
  * @returns Whether the node is such a span.
  */
-function isSpanClosedAtTextEnd(node: RootContent, textEnd: number): boolean {
-  return (
-    (node.type === "inlineCode" || node.type === "inlineMath") &&
-    node.position?.end.offset === textEnd
-  )
+function isCodeSpanClosedAtTextEnd(
+  node: RootContent,
+  textEnd: number
+): boolean {
+  return node.type === "inlineCode" && node.position?.end.offset === textEnd
 }
 
 /**

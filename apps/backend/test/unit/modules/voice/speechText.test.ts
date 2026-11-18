@@ -488,6 +488,22 @@ describe("SpeechSentenceBuffer structure changes", () => {
     [
       "a code span holding a tag loses its closing run",
       "Try `A <i>x</i>. B``. Done."
+    ],
+    [
+      "a code fence line after a paragraph turns back into its text",
+      "Pay $5 now. Then\n```a` and $3 more. End."
+    ],
+    [
+      "a math fence line after a paragraph turns back into its text",
+      "Pay $5 now. Then\n$$x$$ and $3 more. End."
+    ],
+    [
+      "an HTML block start after a paragraph turns back into its text",
+      "Pay $5 now. Then\n<divx and $3 more. End."
+    ],
+    [
+      "a thematic break after a paragraph turns back into its text",
+      "Pay $5 now. Then\n***x and $3 more. End."
     ]
   ])(
     "speaks text streamed one character at a time as the whole text when %s",

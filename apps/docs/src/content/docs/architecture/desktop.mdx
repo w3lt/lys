@@ -224,7 +224,8 @@ name. Stop works as in any conversation. `useDelegatorName`
 (`src/lib/hooks/delegatorName.ts`) names the delegator from the agent list.
 When a card's Stop, the notice's Back, or Stop all leaves while it has
 focus, focus moves in the same commit to the control its owner names, the
-card's title or the message field, through `useFocusedRemovalReport` and
+card's title, the message field, or New conversation while the field is off,
+through `useFocusedRemovalReport` and
 `useFocusSuccessor` in `src/components/focus-target.ts`.
 
 ## Assistant message rendering

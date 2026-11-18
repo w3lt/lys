@@ -217,6 +217,62 @@ describe("SpeechSentenceBuffer structure changes", () => {
     ])
   })
 
+  it.each([
+    ["inline code", ["Run `a` then $3. Next", " $4 more. Bye."]],
+    ["emphasis", ["It is *cheap $3. Then* $4 more", ". Bye."]],
+    ["a link", ["See [the $3 plan](https://x.y). Then", " $4 more. Bye."]]
+  ])(
+    "holds text from a dollar sign that follows %s in its block",
+    (_place, fragments) => {
+      expect(speakStreamed(fragments)).toEqual(
+        speakFinished(fragments.join(""))
+      )
+    }
+  )
+
+  it("speaks what precedes a dollar sign held inside emphasis at once", () => {
+    const buffer = new SpeechSentenceBuffer("start")
+    buffer.loadSnapshot({ text: "", lastTextPart: "open" })
+    expect(buffer.push("Run `a` now. Then *pay $3*. Next")).toEqual([
+      "Run a now."
+    ])
+  })
+
+  it.each([
+    [
+      "a citation marker",
+      ["Intro here. Source [1].", "\n\n[", "1]: https://example.com\n"]
+    ],
+    [
+      "a full link reference",
+      ["Intro here. See [the docs][d] now.", "\n\n[d", "]: https://x.y\n"]
+    ],
+    [
+      "an image reference",
+      ["Look ![a pic][p] here. Then more.", "\n\n[p]: https://x.y/p.png\n"]
+    ],
+    ["a footnote reference", ["Note[^1] here. More.", "\n\n[^1]: The note.\n"]]
+  ])(
+    "speaks %s once whose definition arrives later",
+    (_reference, fragments) => {
+      expect(speakStreamed(fragments)).toEqual(
+        speakFinished(fragments.join(""))
+      )
+    }
+  )
+
+  it("reads a link reference with no definition by its text", () => {
+    expect(speakFinished("See [the docs][d] and [this][] now.")).toEqual([
+      "See the docs and this now."
+    ])
+  })
+
+  it("speaks the sentence before an image once while the image streams", () => {
+    const fragments = ["Look ![a pi", "c](https://x.y/c.png) here. Then more."]
+    expect(speakStreamed(fragments)).toEqual(speakFinished(fragments.join("")))
+    expect(speakStreamed(fragments)).toEqual(["Look here.", "Then more."])
+  })
+
   it("hands out every sentence still held when the reply finishes", () => {
     const buffer = new SpeechSentenceBuffer("start")
     buffer.loadSnapshot({ text: "", lastTextPart: "open" })

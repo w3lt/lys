@@ -58,6 +58,24 @@ const LETTER_PATTERN = /\p{L}/u
  */
 const CITATION_MARKERS = new RegExp(CITATION_MARKER_PATTERN.source, "g")
 
+/** One whole citation marker, such as `[1]`. */
+const WHOLE_CITATION_MARKER = new RegExp(`^${CITATION_MARKER_PATTERN.source}$`)
+
+/**
+ * A mark in plain text that more text may parse again into something never
+ * spoken: a `$` that a later `$` may pair into inline math, or the `![` of an
+ * image whose syntax is not complete yet.
+ */
+const REPARSABLE_MARK = /\$|!\[/
+
+/**
+ * Reference syntax as text shows it while its definition has not arrived:
+ * `[text][label]`, `[text][]`, `[text]`, `![alt][label]`, `![alt]`, and
+ * `[^label]`. Group 1 is the image mark, group 2 what the first brackets
+ * enclose, and group 3 the label's brackets, when there are any.
+ */
+const REFERENCE_SYNTAX = /(!?)\[([^[\]]*)\](\[[^[\]]*\])?/g
+
 /**
  * Longest piece of text, in UTF-16 code units, sent to voice in one message.
  * voice refuses a message over 16 KiB; JSON writes one code unit as at most
@@ -125,12 +143,14 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * like `[1]`, code blocks, math, tables, images, and bare URLs are not
  * words, so they are not spoken; inline code is read as words; formatting
  * is dropped; a link is spoken by its text, unless the text is the URL
- * itself; each paragraph, heading, and list item ends a sentence. An
- * unclosed code fence holds the rest of the text back until it closes. A
- * paragraph or heading still being written waits until it ends when it
- * holds a `|`, because its next line may turn it into a table header, and
- * from its first `$` outside code on, because a later `$` may turn that text
- * into inline math.
+ * itself; each paragraph, heading, and list item ends a sentence. A
+ * reference reads the same before its definition arrives as after: a link
+ * by its text; a citation marker, an image, and a footnote reference not at
+ * all. An unclosed code fence holds the rest of the text back until it
+ * closes. A paragraph or heading still being written waits until it ends
+ * when it holds a `|`, because its next line may turn it into a table
+ * header, and from its first `$` or `![` outside code on, because a later
+ * `$` may turn that text into inline math and the `![` may begin an image.
  *
  * A sentence is final once a later sentence holding a letter follows it, a
  * line break ends it, or its text part ends, so a period inside a number, a
@@ -354,7 +374,7 @@ function endsWithLineBreak(segment: string): boolean {
 function toPlainText(markdown: string, lastBlock: LastBlock): string {
   const tree = markdownParser.parse(markdown)
   const definitions = collectDefinitions(tree)
-  if (lastBlock === "open") holdReparsableText(tree, definitions)
+  if (lastBlock === "open") removeReparsableText(tree, definitions)
   const blocks: string[] = []
   for (const child of tree.children) collectBlock(child, definitions, blocks)
   return blocks
@@ -371,8 +391,9 @@ function toPlainText(markdown: string, lastBlock: LastBlock): string {
  * Leaves out the text of the paragraph or heading still being written that
  * more text may parse again into something never spoken: the whole block
  * when it holds a `|`, which the next line may turn into a table header,
- * and the text from its first `$` outside code on, which a later `$` may
- * turn into inline math. Those sentences wait until the block ends.
+ * and the text from its first reparsable mark outside code on, as
+ * {@link REPARSABLE_MARK} defines it. Those sentences wait until the block
+ * ends.
  * Handing them out earlier would let the reparse take them back, and the
  * sentence before them would then be spoken again.
  *
@@ -380,13 +401,13 @@ function toPlainText(markdown: string, lastBlock: LastBlock): string {
  * place.
  * @param definitions - Link definitions of the reply.
  */
-function holdReparsableText(root: Root, definitions: Definitions): void {
+function removeReparsableText(root: Root, definitions: Definitions): void {
   let container: BlockContainer = root
   for (;;) {
     const last: RootContent | undefined = container.children.at(-1)
     if (last === undefined) return
     if (last.type === "paragraph" || last.type === "heading") {
-      holdReparsableLeaf(container, last, definitions)
+      removeReparsableLeaf(container, last, definitions)
       return
     }
     if (
@@ -401,7 +422,7 @@ function holdReparsableText(root: Root, definitions: Definitions): void {
 
 /**
  * Leaves out the text of the open paragraph or heading that more text may
- * parse again, as {@link holdReparsableText} describes.
+ * parse again, as {@link removeReparsableText} describes.
  *
  * @param container - The block holding the leaf as its last child; changed
  * in place.
@@ -409,7 +430,7 @@ function holdReparsableText(root: Root, definitions: Definitions): void {
  * place.
  * @param definitions - Link definitions of the reply.
  */
-function holdReparsableLeaf(
+function removeReparsableLeaf(
   container: BlockContainer,
   leaf: Paragraph | Heading,
   definitions: Definitions
@@ -418,30 +439,31 @@ function holdReparsableLeaf(
     container.children.pop()
     return
   }
-  const before = textBeforeOpenDollar(leaf, definitions)
+  const before = findTextBeforeReparsableMark(leaf, definitions)
   if (before !== undefined) leaf.children = [{ type: "text", value: before }]
 }
 
 /**
- * Renders a node's inline text up to its first `$` in plain text, which a
- * later `$` may still pair with; a `$` in code or math never pairs.
+ * Renders a node's inline text up to its first reparsable mark in plain
+ * text, as {@link REPARSABLE_MARK} defines it; a mark in code or math is
+ * never parsed again.
  *
  * @param node - The node to render.
  * @param definitions - Link definitions of the reply.
- * @returns The text before that `$`, or undefined when there is none.
+ * @returns The text before that mark, or undefined when there is none.
  */
-function textBeforeOpenDollar(
+function findTextBeforeReparsableMark(
   node: Root | RootContent,
   definitions: Definitions
 ): string | undefined {
   if (node.type === "text") {
-    const index = node.value.indexOf("$")
+    const index = node.value.search(REPARSABLE_MARK)
     return index === -1 ? undefined : node.value.slice(0, index)
   }
   if (!("children" in node)) return undefined
   let before = ""
   for (const child of node.children) {
-    const prefix = textBeforeOpenDollar(child, definitions)
+    const prefix = findTextBeforeReparsableMark(child, definitions)
     if (prefix !== undefined) return before + prefix
     before += inline(child, definitions)
   }
@@ -503,12 +525,14 @@ function addDefinitions(
 function inline(node: Root | RootContent, definitions: Definitions): string {
   switch (node.type) {
     case "text":
+      return formatReferenceSyntax(node.value)
     case "inlineCode":
       return node.value
     case "link":
       return linkText(inlineChildren(node, definitions), node.url)
     case "linkReference": {
       const label = inlineChildren(node, definitions)
+      if (isCitationMarkerLabel(label)) return ""
       const url = definitions.get(node.identifier.toLowerCase())
       return url === undefined ? label : linkText(label, url)
     }
@@ -523,6 +547,58 @@ function inline(node: Root | RootContent, definitions: Definitions): string {
     default:
       return inlineChildren(node, definitions)
   }
+}
+
+/**
+ * Reads reference syntax in plain text as the reference reads once its
+ * definition arrives, because a definition may follow the reference by any
+ * number of paragraphs: a full or collapsed link reference by its text, and
+ * a citation marker, an image, or a footnote reference not at all. A
+ * shortcut link reference, `[text]`, is left as it is: its brackets are not
+ * words, so it already reads as the link does.
+ *
+ * @param text - A text node's value.
+ * @returns The text with each reference replaced.
+ */
+function formatReferenceSyntax(text: string): string {
+  let formatted = ""
+  let end = 0
+  for (const reference of text.matchAll(REFERENCE_SYNTAX)) {
+    formatted += text.slice(end, reference.index) + formatReference(reference)
+    end = reference.index + reference[0].length
+  }
+  return formatted + text.slice(end)
+}
+
+/**
+ * Reads one match of {@link REFERENCE_SYNTAX} as its reference reads once
+ * defined.
+ *
+ * @param reference - The match, with its image mark, enclosed text, and
+ * label brackets.
+ * @returns The enclosed text, nothing, or the syntax unchanged for a
+ * shortcut link reference.
+ */
+function formatReference(reference: RegExpExecArray): string {
+  const [syntax, imageMark, enclosed = "", labelBrackets] = reference
+  if (
+    imageMark === "!" ||
+    enclosed.startsWith("^") ||
+    isCitationMarkerLabel(enclosed)
+  )
+    return ""
+  return labelBrackets === undefined ? syntax : enclosed
+}
+
+/**
+ * Whether a reference's text in brackets is a citation marker, which is
+ * never spoken.
+ *
+ * @param label - What the reference's brackets enclose, such as `1`.
+ * @returns Whether `[label]` is one whole citation marker.
+ */
+function isCitationMarkerLabel(label: string): boolean {
+  return WHOLE_CITATION_MARKER.test(`[${label}]`)
 }
 
 /**

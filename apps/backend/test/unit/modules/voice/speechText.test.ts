@@ -281,22 +281,55 @@ describe("SpeechSentenceBuffer structure changes", () => {
   )
 
   it.each([
-    ["emphasis", "[*the* docs]"],
-    ["inline code", "[`npm`]"],
-    ["nested brackets", "[a [b] c]"]
+    ["emphasis", "[*the* docs]", "See the docs now."],
+    ["inline code", "[`npm` docs]", "See npm docs now."],
+    ["nested brackets", "[a [b] c]", "See a [b] c now."],
+    ["a bare URL", "[https://x.y]", "See now."]
   ])(
-    "speaks a link reference whose text holds %s once its definition arrives after a later sentence",
-    (_content, linkText) => {
+    "speaks a link reference whose text holds %s by its text, once, when its definition arrives after a later sentence",
+    (_content, linkText, sentence) => {
       const fragments = [
         `Intro here. See ${linkText}[d] now.`,
         " More text here.",
         "\n\n[d]: https://x.y\n"
       ]
-      expect(listStreamedSentences(fragments)).toEqual(
-        listFinishedSentences(fragments.join(""))
-      )
+      expect(listStreamedSentences(fragments)).toEqual([
+        "Intro here.",
+        sentence,
+        "More text here."
+      ])
+      expect(listFinishedSentences(fragments.join(""))).toEqual([
+        "Intro here.",
+        sentence,
+        "More text here."
+      ])
     }
   )
+
+  it("speaks an indented line that directly follows a definition", () => {
+    const text = "Hello there.\n\n[a]: http://x\n    Read me now.\n\nBye."
+    const expected = ["Hello there.", "Read me now.", "Bye."]
+    expect(listFinishedSentences(text)).toEqual(expected)
+    expect(listStreamedSentences([...text])).toEqual(expected)
+  })
+
+  it("never speaks a definition whose title is still open", () => {
+    const text =
+      'Intro. Go.\n\n[a]: http://x "Hello. World is a title"\n\nAfter.'
+    expect(listStreamedSentences([...text])).toEqual([
+      "Intro.",
+      "Go.",
+      "After."
+    ])
+  })
+
+  it("keeps a URL in inline code and drops a bare one", () => {
+    expect(
+      listFinishedSentences(
+        "Run `curl https://x.y` now. Or visit www.x.y/docs."
+      )
+    ).toEqual(["Run curl https://x.y now.", "Or visit."])
+  })
 
   it("speaks inline code that looks like a reference once while a hold is active", () => {
     const fragments = ["Use `[a][b]` today. Then $5 and more", " text. End."]

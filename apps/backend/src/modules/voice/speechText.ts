@@ -13,8 +13,22 @@ import remarkMath from "remark-math"
 import remarkParse from "remark-parse"
 import { unified } from "unified"
 
-/** A span of the reply's source text, by UTF-16 offset. */
-type SourceRange = Readonly<{ start: number; end: number }>
+/**
+ * Reference syntax found in a block's text, as {@link findReference} reads
+ * it.
+ */
+type ReferenceSyntax = Readonly<{
+  /** Index of its first character: the `!` of an image, else its `[`. */
+  start: number
+  /** Index just after its last `]`. */
+  end: number
+  /** Whether a `!` marks it as an image. */
+  isImage: boolean
+  /** What its first, possibly nested, brackets enclose. */
+  enclosed: string
+  /** Whether a label in brackets, possibly empty, follows them. */
+  hasLabel: boolean
+}>
 
 /** A block whose last child may be the block still being written. */
 type BlockContainer = Root | Blockquote | List | ListItem
@@ -63,12 +77,39 @@ const WHOLE_CITATION_MARKER = new RegExp(`^${CITATION_MARKER_PATTERN.source}$`)
 const REPARSABLE_MARK = /\$|!\[/
 
 /**
- * Reference syntax as text shows it, which is how every reference parses
- * once the reply's definitions are left out: `[text][label]`, `[text][]`, `[text]`, `![alt][label]`, `![alt]`, and
- * `[^label]`. Group 1 is the image mark, group 2 what the first brackets
- * enclose, and group 3 the label's brackets, when there are any.
+ * Where a paragraph still being written may yet become a link definition:
+ * it starts with a label in brackets and a colon, and its title may still
+ * be open.
  */
-const REFERENCE_SYNTAX = /(!?)\[([^[\]]*)\](\[[^[\]]*\])?/g
+const DEFINITION_START = /^\[(?:[^[\]\\]|\\.)+\]:/
+
+/** Opens inline code in a block's text, so its brackets read as written. */
+const CODE_START = "\uE000"
+
+/** Closes inline code in a block's text. */
+const CODE_END = "\uE001"
+
+/** Stands for `[` inside inline code until the block is formatted. */
+const CODE_OPEN_BRACKET = "\uE002"
+
+/** Stands for `]` inside inline code until the block is formatted. */
+const CODE_CLOSE_BRACKET = "\uE003"
+
+/** The private-use characters that mark inline code in a block's text. */
+const CODE_MARKS = /[\uE000-\uE003]/g
+
+/**
+ * One marked inline code span, captured so that splitting a block's text on
+ * it keeps the span at every odd index.
+ */
+const CODE_SPAN = /(\uE000[^\uE001]*\uE001)/
+
+/**
+ * A bare URL, which is not spoken: a scheme or `www.` and everything up to
+ * the next whitespace, except the punctuation that ends it, such as the
+ * period of its sentence.
+ */
+const BARE_URL = /\b(?:https?:\/\/|www\.)\S*[^\s.,:;!?"'’”)\]*_~]/giu
 
 /**
  * Longest piece of text, in UTF-16 code units, sent to voice in one message.
@@ -136,16 +177,17 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * @remarks The text is what the renderer shows, spoken: citation markers
  * like `[1]`, code blocks, math, tables, images, and bare URLs are not
  * words, so they are not spoken; inline code is read as words; formatting
- * is dropped; a link is spoken by its text, unless the text is the URL
- * itself; each paragraph, heading, and list item ends a sentence. The
- * text is read as if it held no link or footnote definition, so a reference
- * reads the same before its definition arrives as after: a link by its
- * text; a citation marker, an image, and a footnote reference not at all.
- * An unclosed code fence holds the rest of the text back until it
+ * is dropped; a link is spoken by its text, and a bare URL, in a link's
+ * text or not, is not spoken; each paragraph, heading, and list item ends a
+ * sentence. A reference reads the same before its definition arrives as
+ * after: a link by its text; a citation marker, an image, and a footnote
+ * reference not at all. An unclosed code fence holds the rest of the text back until it
  * closes. A paragraph or heading still being written waits until it ends
  * when it holds a `|`, because its next line may turn it into a table
- * header, and from its first `$` or `![` outside code on, because a later
- * `$` may turn that text into inline math and the `![` may begin an image.
+ * header, or when it starts with a label in brackets and a colon, because a
+ * closing title quote may turn it into a link definition; and from its
+ * first `$` or `![` outside code on, because a later `$` may turn that text
+ * into inline math and the `![` may begin an image.
  *
  * A sentence is final once a later sentence holding a letter follows it, a
  * line break ends it, or its text part ends, so a period inside a number, a
@@ -374,8 +416,8 @@ function hasTrailingLineBreak(segment: string): boolean {
  * @returns The plain text.
  */
 function formatSpeechText(markdown: string, lastBlock: LastBlock): string {
-  const tree = parseWithoutDefinitions(markdown)
-  if (lastBlock === "open") removeReparsableText(tree)
+  const tree = markdownParser.parse(markdown)
+  if (lastBlock === "open") removeReparsableText(tree, markdown)
   const blocks: string[] = []
   for (const child of tree.children) addBlocks(child, blocks)
   return blocks
@@ -391,8 +433,9 @@ function formatSpeechText(markdown: string, lastBlock: LastBlock): string {
 /**
  * Leaves out the text of the paragraph or heading still being written that
  * more text may parse again into something never spoken: the whole block
- * when it holds a `|`, which the next line may turn into a table header,
- * and the text from its first reparsable mark outside code on, as
+ * when it holds a `|`, which the next line may turn into a table header, or
+ * when it starts like a link definition, which a closing title quote may
+ * complete, and the text from its first reparsable mark outside code on, as
  * {@link REPARSABLE_MARK} defines it. Those sentences wait until the block
  * ends.
  * Handing them out earlier would let the reparse take them back, and the
@@ -400,14 +443,15 @@ function formatSpeechText(markdown: string, lastBlock: LastBlock): string {
  *
  * @param root - Parsed reply whose last block may still grow; changed in
  * place.
+ * @param markdown - The reply's text, which `root` was parsed from.
  */
-function removeReparsableText(root: Root): void {
+function removeReparsableText(root: Root, markdown: string): void {
   let container: BlockContainer = root
   for (;;) {
     const last: RootContent | undefined = container.children.at(-1)
     if (last === undefined) return
     if (last.type === "paragraph" || last.type === "heading") {
-      removeReparsableLeaf(container, last)
+      removeReparsableLeaf(container, last, markdown)
       return
     }
     if (
@@ -428,16 +472,42 @@ function removeReparsableText(root: Root): void {
  * in place.
  * @param leaf - The paragraph or heading still being written; changed in
  * place.
+ * @param markdown - The reply's text, which the leaf was parsed from.
  */
 function removeReparsableLeaf(
   container: BlockContainer,
-  leaf: Paragraph | Heading
+  leaf: Paragraph | Heading,
+  markdown: string
 ): void {
-  if (formatInlineChildren(leaf).includes("|")) {
+  if (
+    formatInlineChildren(leaf).includes("|") ||
+    isPossibleDefinition(leaf, markdown)
+  ) {
     container.children.pop()
     return
   }
   removeTextFromReparsableMark(leaf)
+}
+
+/**
+ * Whether a paragraph still being written may yet become a link definition,
+ * which is never spoken: while its title is open, it parses as text.
+ *
+ * @param leaf - The paragraph or heading still being written.
+ * @param markdown - The reply's text, which the leaf was parsed from.
+ * @returns Whether the leaf is a paragraph whose source starts with a label
+ * in brackets and a colon.
+ */
+function isPossibleDefinition(
+  leaf: Paragraph | Heading,
+  markdown: string
+): boolean {
+  const start = leaf.position?.start.offset
+  return (
+    leaf.type === "paragraph" &&
+    start !== undefined &&
+    DEFINITION_START.test(markdown.slice(start))
+  )
 }
 
 /**
@@ -469,63 +539,40 @@ function removeTextFromReparsableMark(node: Root | RootContent): boolean {
 }
 
 /**
- * Cleans one block of inline text: whitespace collapsed, and no space left
- * before closing punctuation. Citation markers are already dropped from the
- * block's text nodes, so a citation-shaped index in inline code, such as
- * `arr[1]`, reads as written.
+ * Cleans one block of inline text: reference syntax outside inline code read
+ * as {@link formatReferenceSyntax} reads it, bare URLs outside inline code
+ * dropped, whitespace collapsed, and no space left before closing
+ * punctuation. Inline code reads as written, so a citation-shaped index such
+ * as `arr[1]`, or a URL, stays.
  *
- * @param text - Inline text of one block.
+ * @param text - Inline text of one block, its inline code marked as
+ * {@link formatInlineText} marks it.
  * @returns The cleaned text, possibly empty.
  */
 function formatBlockText(text: string): string {
-  return text
+  return formatWithoutBareUrls(formatReferenceSyntax(text))
+    .replaceAll(CODE_OPEN_BRACKET, "[")
+    .replaceAll(CODE_CLOSE_BRACKET, "]")
+    .replace(CODE_MARKS, "")
     .replace(/\s+/g, " ")
     .replace(/ ([.,;:!?)\]])/g, "$1")
     .trim()
 }
 
 /**
- * Parses reply markdown as if it held no link or footnote definition.
+ * Drops the bare URLs of a block's text outside its inline code.
  *
- * @param markdown - The reply's text.
- * @returns The parsed reply, in which every reference is plain text.
- * @remarks A definition may follow its reference by any number of
- * paragraphs, and it changes how the reference parses. Parsing as if no
- * definition existed makes a reference read the same before its definition
- * arrives as after, so a sentence already spoken never reads differently
- * later. Definitions are never spoken, so blanking them loses no words.
+ * @param text - A block's text, its inline code marked.
+ * @returns The text without them.
+ * @remarks Links render by their text, so a block's text keeps every
+ * character the reply shows, and a URL reads the same whether GFM linked it,
+ * which it does not inside a link's text, or not.
  */
-function parseWithoutDefinitions(markdown: string): Root {
-  const tree = markdownParser.parse(markdown)
-  const ranges = listDefinitionRanges(tree)
-  if (ranges.length === 0) return tree
-  let blanked = ""
-  let end = 0
-  for (const range of ranges) {
-    blanked += markdown.slice(end, range.start)
-    blanked += markdown.slice(range.start, range.end).replace(/[^\n]/g, " ")
-    end = range.end
-  }
-  return markdownParser.parse(blanked + markdown.slice(end))
-}
-
-/**
- * Lists where the link and footnote definitions of a subtree are written.
- *
- * @param node - Root of the subtree.
- * @returns The definitions' source ranges, in document order. The parser
- * records a position on every node, so none is skipped in practice; a
- * definition without one would be kept, and its references would read
- * as defined.
- */
-function listDefinitionRanges(node: Root | RootContent): SourceRange[] {
-  if (node.type === "definition" || node.type === "footnoteDefinition") {
-    const start = node.position?.start.offset
-    const end = node.position?.end.offset
-    return start === undefined || end === undefined ? [] : [{ start, end }]
-  }
-  if (!("children" in node)) return []
-  return node.children.flatMap(listDefinitionRanges)
+function formatWithoutBareUrls(text: string): string {
+  return text
+    .split(CODE_SPAN)
+    .map((part, index) => (index % 2 === 0 ? part.replace(BARE_URL, "") : part))
+    .join("")
 }
 
 /**
@@ -533,17 +580,22 @@ function listDefinitionRanges(node: Root | RootContent): SourceRange[] {
  *
  * @param node - Inline node, or a node whose children are inline.
  * @returns The words the node reads as; empty for content that is not
- * spoken.
+ * spoken. Inline code is marked, and its brackets stand in for, so that
+ * {@link formatBlockText} reads reference syntax around it only.
  */
 function formatInlineText(node: Root | RootContent): string {
   switch (node.type) {
     case "text":
-      return formatReferenceSyntax(node.value)
+      return node.value.replace(CODE_MARKS, "")
     case "inlineCode":
-      return node.value
-    case "link":
-      return formatLinkText(formatInlineChildren(node), node.url)
+      return formatInlineCode(node.value)
+    case "linkReference": {
+      const label = formatInlineChildren(node)
+      return isCitationMarkerLabel(label) ? "" : label
+    }
     case "image":
+    case "imageReference":
+    case "footnoteReference":
     case "inlineMath":
     case "html":
       return ""
@@ -555,46 +607,111 @@ function formatInlineText(node: Root | RootContent): string {
 }
 
 /**
- * Reads reference syntax in plain text as a defined reference reads: a full
- * or collapsed link reference by its text, and a citation marker, an image,
- * or a footnote reference not at all. A shortcut link reference, `[text]`,
- * is left as it is: its brackets are not words, so it already reads as the
- * link does. Syntax that formatting splits across nodes, such as
- * `[*the* docs][d]`, stays as written; it reads the same whether its
- * definition arrived or not, because the reply is parsed without its
- * definitions.
+ * Marks inline code in a block's text, with its brackets stood in for, so
+ * that reference syntax is never read inside it.
  *
- * @param text - A text node's value.
- * @returns The text with each reference replaced.
+ * @param code - The code as written.
+ * @returns The marked code.
  */
-function formatReferenceSyntax(text: string): string {
-  let formatted = ""
-  let end = 0
-  for (const reference of text.matchAll(REFERENCE_SYNTAX)) {
-    formatted += text.slice(end, reference.index) + formatReference(reference)
-    end = reference.index + reference[0].length
-  }
-  return formatted + text.slice(end)
+function formatInlineCode(code: string): string {
+  const stoodIn = code
+    .replaceAll("[", CODE_OPEN_BRACKET)
+    .replaceAll("]", CODE_CLOSE_BRACKET)
+  return `${CODE_START}${stoodIn}${CODE_END}`
 }
 
 /**
- * Reads one match of {@link REFERENCE_SYNTAX} as its reference reads once
- * defined.
+ * Reads reference syntax in a block's text as a defined reference reads: a
+ * full or collapsed link reference by its text, and a citation marker, an
+ * image, or a footnote reference not at all. A shortcut link reference,
+ * `[text]`, keeps its brackets, which are not words, so it already reads as
+ * the link does.
  *
- * @param reference - The match, with its image mark, enclosed text, and
- * label brackets.
- * @returns The enclosed text, nothing, or the syntax unchanged for a
- * shortcut link reference.
+ * @param text - A block's text, or the text a reference's brackets enclose.
+ * @returns The text with each reference read.
+ * @remarks Until its definition arrives, a reference is text, which
+ * formatting splits across nodes, as in `[*the* docs][d]`; reading the
+ * block's joined text makes it read the same before its definition arrives
+ * as after. Brackets nest, as link text may.
  */
-function formatReference(reference: RegExpExecArray): string {
-  const [syntax, imageMark, enclosed = "", labelBrackets] = reference
+function formatReferenceSyntax(text: string): string {
+  let formatted = ""
+  let index = 0
+  for (;;) {
+    const open = text.indexOf("[", index)
+    if (open === -1) return formatted + text.slice(index)
+    const reference = findReference(text, open)
+    const end = reference === undefined ? open + 1 : reference.end
+    formatted +=
+      reference === undefined
+        ? text.slice(index, end)
+        : text.slice(index, reference.start) + formatReference(reference)
+    index = end
+  }
+}
+
+/**
+ * Finds the reference syntax that starts at an opening bracket.
+ *
+ * @param text - Text to read.
+ * @param open - Index of a `[` in `text`.
+ * @returns The syntax, or undefined when the bracket is never closed.
+ */
+function findReference(
+  text: string,
+  open: number
+): ReferenceSyntax | undefined {
+  const close = findClosingBracket(text, open)
+  if (close === undefined) return undefined
+  const labelEnd = text.startsWith("[", close + 1)
+    ? text.indexOf("]", close + 2)
+    : -1
+  const hasLabel =
+    labelEnd !== -1 && !text.slice(close + 2, labelEnd).includes("[")
+  const isImage = text[open - 1] === "!"
+  return {
+    start: isImage ? open - 1 : open,
+    end: hasLabel ? labelEnd + 1 : close + 1,
+    isImage,
+    enclosed: text.slice(open + 1, close),
+    hasLabel
+  }
+}
+
+/**
+ * Finds the bracket that closes an opening one, counting nested pairs.
+ *
+ * @param text - Text to read.
+ * @param open - Index of a `[` in `text`.
+ * @returns The index of its `]`, or undefined when it is never closed.
+ */
+function findClosingBracket(text: string, open: number): number | undefined {
+  let depth = 0
+  for (let index = open; index < text.length; index += 1) {
+    if (text[index] === "[") depth += 1
+    if (text[index] === "]") depth -= 1
+    if (depth === 0) return index
+  }
+  return undefined
+}
+
+/**
+ * Reads one reference as it reads once defined.
+ *
+ * @param reference - The syntax {@link findReference} found.
+ * @returns Its enclosed text, read the same way, in brackets for a shortcut
+ * link reference; nothing for a citation marker, an image, or a footnote
+ * reference.
+ */
+function formatReference(reference: ReferenceSyntax): string {
   if (
-    imageMark === "!" ||
-    enclosed.startsWith("^") ||
-    isCitationMarkerLabel(enclosed)
+    reference.isImage ||
+    reference.enclosed.startsWith("^") ||
+    isCitationMarkerLabel(reference.enclosed)
   )
     return ""
-  return labelBrackets === undefined ? syntax : enclosed
+  const enclosed = formatReferenceSyntax(reference.enclosed)
+  return reference.hasLabel ? enclosed : `[${enclosed}]`
 }
 
 /**
@@ -606,23 +723,6 @@ function formatReference(reference: RegExpExecArray): string {
  */
 function isCitationMarkerLabel(label: string): boolean {
   return WHOLE_CITATION_MARKER.test(`[${label}]`)
-}
-
-/**
- * Renders a link by its text.
- *
- * @param label - The link's text, already rendered.
- * @param url - Where the link points.
- * @returns The label, or nothing when the label is the URL itself.
- */
-function formatLinkText(label: string, url: string): string {
-  const formatForComparison = (value: string) =>
-    value
-      .trim()
-      .toLowerCase()
-      .replace(/^https?:\/\//, "")
-      .replace(/\/$/, "")
-  return formatForComparison(label) === formatForComparison(url) ? "" : label
 }
 
 /**

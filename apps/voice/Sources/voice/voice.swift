@@ -8,6 +8,18 @@ private enum MainChild: Sendable {
     case service
 }
 
+/// The speech models could not be loaded, so voice could never speak.
+///
+/// It ends ``serveVoice(loadModels:services:)``, so voice exits instead of
+/// answering `503` for good, and the host reports it stopped.
+struct ModelLoadError: Error, CustomStringConvertible {
+    /// Why loading failed.
+    let cause: any Error
+
+    /// The message voice prints before it exits.
+    var description: String { "could not load the speech models: \(cause)" }
+}
+
 /// Command-line entry point of voice.
 @main
 struct voice {
@@ -16,10 +28,9 @@ struct voice {
     ///
     /// The sockets serve at once; `/health` answers `503` and the speech
     /// socket refuses handshakes until the models are loaded, which happens
-    /// once, here. The servers keep serving after the warm-up ends, whether
-    /// it loaded the models or failed. voice stops on `SIGINT` or `SIGTERM`,
-    /// or when a server stops. It prints the error and exits with status 1
-    /// when startup or a server fails.
+    /// once, here. voice stops on `SIGINT` or `SIGTERM`, or when a server
+    /// stops. It prints the error and exits with status 1 when startup or a
+    /// server fails, or when the models cannot be loaded.
     static func main() async {
         let modelsDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".lys", isDirectory: true)
@@ -33,29 +44,17 @@ struct voice {
             let router = try Router(routes: [.buildHealth(isReady: { engine.isReady })])
             let httpServer = WebServer(router: router)
             let socketServer = SpeechSocketServer(engine: engine)
-            try await withThrowingTaskGroup(of: MainChild.self) { group in
-                group.addTask {
-                    await loadEngineModels(engine)
-                    return .warmUp
-                }
-                group.addTask {
-                    try await httpServer.start()
-                    return .service
-                }
-                group.addTask {
-                    try await socketServer.start()
-                    return .service
-                }
-                group.addTask {
-                    await waitForSignal(in: [SIGINT, SIGTERM])
-                    return .service
-                }
-                var ended = try await group.next()
-                while ended == .warmUp {
-                    ended = try await group.next()
-                }
-                group.cancelAll()
-            }
+            try await serveVoice(
+                loadModels: {
+                    try await engine.loadModels()
+                    print("voice: models ready")
+                },
+                services: [
+                    { try await httpServer.start() },
+                    { try await socketServer.start() },
+                    { await waitForSignal(in: [SIGINT, SIGTERM]) },
+                ]
+            )
         } catch {
             FileHandle.standardError.write(Data("voice: \(error)\n".utf8))
             exit(1)
@@ -75,16 +74,41 @@ struct voice {
     }
 }
 
-/// Warms the models, reporting failure without stopping the servers; the
-/// health route and the speech socket stay unavailable until a later start
-/// loads them.
+/// Runs voice's services while the models load, until a service ends.
 ///
-/// - Parameter engine: Engine whose models are loaded.
-private func loadEngineModels(_ engine: SpeechEngine) async {
-    do {
-        try await engine.loadModels()
-        print("voice: models ready")
-    } catch {
-        FileHandle.standardError.write(Data("voice: could not load the speech models: \(error)\n".utf8))
+/// The services and the model load start at once. Loading the models does
+/// not end the run; the first service that ends or fails does, and so does a
+/// failed load. The other children are cancelled, and have ended, before the
+/// call returns or throws.
+///
+/// - Parameters:
+///   - loadModels: Loads the speech models, once.
+///   - services: The servers and the signal wait.
+/// - Throws: ``ModelLoadError`` when `loadModels` fails, or the error of the
+///   first service that fails.
+func serveVoice(
+    loadModels: @escaping @Sendable () async throws -> Void,
+    services: [@Sendable () async throws -> Void]
+) async throws {
+    try await withThrowingTaskGroup(of: MainChild.self) { group in
+        group.addTask {
+            do {
+                try await loadModels()
+            } catch {
+                throw ModelLoadError(cause: error)
+            }
+            return .warmUp
+        }
+        for service in services {
+            group.addTask {
+                try await service()
+                return .service
+            }
+        }
+        var ended = try await group.next()
+        while ended == .warmUp {
+            ended = try await group.next()
+        }
+        group.cancelAll()
     }
 }

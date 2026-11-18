@@ -45,8 +45,8 @@ private final class FakeSpeechSession: SpeechSession, @unchecked Sendable {
 
     /// Emits the sentence's frames at once, unless synthesis fails.
     ///
-    /// - Parameter text: Sentence to speak.
-    func enqueue(_ text: String) {
+    /// The sentence itself is not read: every sentence yields the same frames.
+    func enqueue(_: String) {
         guard !failSynthesis else { return }
         for _ in 0 ..< framesPerSentence {
             continuation.yield([Float](repeating: 0.5, count: samplesPerFrame))

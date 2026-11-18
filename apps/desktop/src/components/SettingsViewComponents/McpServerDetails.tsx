@@ -22,7 +22,7 @@ import type { ToolSettings } from "@/lib/store/settings"
 import { TOOL_APPROVALS, type ToolApproval } from "@/lib/store/tool-settings"
 import { isToolOn, type ToolListState } from "@/lib/store/tools"
 
-import { handleFocusTargetAttach } from "./focus-target"
+import { handleFocusTargetAttach } from "@/components/focus-target"
 import {
   filterMcpTools,
   findMcpServerApproval,

@@ -267,37 +267,40 @@ reply that waits for the client's answer to a tool call has no time limit, and
 only some events end the wait. The exception was approved by the maintainer on
 2026-10-09 for [PR #128](https://github.com/w3lt/lys/pull/128), and widened by
 the maintainer on 2026-10-11 for [PR #157](https://github.com/w3lt/lys/pull/157)
-to the wait for the answer to a backend tool's call.
+to the wait for the answer to a backend tool's call. On 2026-11-16 the
+maintainer approved its current text in chat, for
+[issue #246](https://github.com/w3lt/lys/issues/246): deleting the
+conversation and a delegator's `stop_job` end the wait, the removal condition
+is a newer turn alone, and the scope names the activity stream.
 
 - **Scope:** the wait for the client's answer to a tool call in the reply's
   generation, which is the person's answer to an approval prompt or a client
-  tool's result; its pending prompts and calls; and the reply-events
-  connections that follow it while it waits. Every other API still follows
-  API-019.
+  tool's result; its pending prompts and calls; and the connections that
+  follow it while it waits: the reply-events connections, and the activity
+  stream (`GET /api/v1/activity/events`), which follows the replies of jobs
+  and of wake-up turns. Every other API still follows API-019.
 - **Constraint:** the backend sets no timer on the wait for a client tool's
   result. A prompt the person has not answered expires after five minutes
   ([#342](https://github.com/w3lt/lys/issues/342)): the call is stored as
   failed without running and the reply goes on, so no answer is given for the
-  person. The answer, Stop, or backend shutdown ends either wait sooner. A
-  newer turn in the conversation or deleting the
-  conversation does not end it yet: the delete route cannot reach the running
-  generations, and a waiting reply writes nothing that would notice either
-  change ([#137](https://github.com/w3lt/lys/issues/137)).
+  person. The answer, Stop, deleting the conversation, or backend shutdown
+  ends either wait sooner, and a job's wait also ends when its delegator
+  stops the job with `stop_job`. A newer turn in the conversation does not
+  end it yet: a waiting reply writes nothing that would notice the change
+  ([#137](https://github.com/w3lt/lys/issues/137)).
 - **Alternatives considered:** a timer that answers a call after a fixed time
   was not taken, because it would answer for the person. Ending the wait on a
-  newer turn or a deletion was deferred to
+  newer turn was deferred to
   [#137](https://github.com/w3lt/lys/issues/137) to keep this pull request's
   scope.
 - **Risk and control:** a waiting reply keeps its generation, its pending
   calls, and every reply-events connection that follows it until the wait
-  ends. After a deletion the desktop can no longer reach Stop, so the wait
-  lasts until the backend shuts down, which quitting the app does. After a
-  newer turn, the old reply keeps waiting, and a later round that only calls
-  tools can keep asking for calls until Stop.
+  ends. After a newer turn, the old reply keeps waiting, and a later round
+  that only calls tools can keep asking for calls until Stop.
 - **Removal condition:** [#137](https://github.com/w3lt/lys/issues/137) ends
-  the wait on a newer turn or a deletion. The missing timer on a client tool's
-  result stays by design: the tool runs on the person's machine, and its
-  result or Stop bounds the wait.
+  the wait on a newer turn. The missing timer on a client tool's result
+  stays by design: the tool runs on the person's machine, and its result or
+  Stop bounds the wait.
 
 ## Tool run failure exception
 

@@ -1,4 +1,5 @@
 import {
+  conversationIsJobProblemSchema,
   conversationNotFoundProblemSchema,
   deleteConversationApi,
   getConversationApi,
@@ -8,6 +9,8 @@ import {
   type ListConversationsApiResponse
 } from "@lys/protocol"
 import type { Conversation, ConversationMetadata } from "@lys/share"
+
+import { JOB_CONVERSATION_MESSAGE } from "@/lib/job-messages"
 
 /** Transport scope sampled once for one conversation request. */
 export type ConversationApiConnection = {
@@ -167,19 +170,25 @@ function isConversationNotFoundProblem(body: unknown): boolean {
  *
  * @param response - Failed response whose body is consumed here.
  * @returns The absence outcome for the declared missing-conversation problem.
- * @throws A caller-safe error naming the HTTP status for every other failure.
+ * @throws With {@link JOB_CONVERSATION_MESSAGE} for the declared problem of a
+ * conversation that is a job, and a caller-safe error naming the HTTP status
+ * for every other failure.
  */
 async function parseConversationFailure(
   response: Response
 ): Promise<ConversationNotFoundResult> {
-  if (response.status !== 404) {
-    throw createConversationResponseError(response.status)
+  const body = await readFailureBody(response)
+  if (response.status === 404 && isConversationNotFoundProblem(body)) {
+    return CONVERSATION_NOT_FOUND_RESULT
   }
-  if (!isConversationNotFoundProblem(await readFailureBody(response))) {
-    throw createConversationResponseError(response.status)
+  if (
+    response.status === 409 &&
+    conversationIsJobProblemSchema.safeParse(body).success
+  ) {
+    throw new Error(JOB_CONVERSATION_MESSAGE)
   }
 
-  return CONVERSATION_NOT_FOUND_RESULT
+  throw createConversationResponseError(response.status)
 }
 
 /**
@@ -332,8 +341,10 @@ export async function getConversation(
  * @param connection - Backend origin and local cancellation signal.
  * @returns The persisted metadata, or the absence outcome when the backend
  * reports the declared missing-conversation problem.
- * @throws On an invalid identifier or title, cancellation, transport failure,
- * any other failed status, malformed metadata, or a mismatched identity.
+ * @throws With {@link JOB_CONVERSATION_MESSAGE} when the conversation is a
+ * job, which keeps its title; and on an invalid identifier or title,
+ * cancellation, transport failure, any other failed status, malformed
+ * metadata, or a mismatched identity.
  * @remarks Aborting after the backend accepted the request can leave the new
  * title persisted; a later list read establishes the stored title.
  */
@@ -375,8 +386,10 @@ export async function updateConversationTitle(
  * @returns The deletion outcome, or the absence outcome when the backend
  * reports the declared missing-conversation problem; both establish that the
  * conversation is no longer stored.
- * @throws On an invalid identifier, cancellation, transport failure, any other
- * failed status, or an unexpected success status.
+ * @throws With {@link JOB_CONVERSATION_MESSAGE} when the conversation is a
+ * job, which stays stored; and on an invalid identifier, cancellation,
+ * transport failure, any other failed status, or an unexpected success
+ * status.
  * @remarks Aborting after the backend accepted the request can still delete
  * the conversation.
  */

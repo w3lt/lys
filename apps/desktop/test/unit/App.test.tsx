@@ -10,6 +10,10 @@ import {
 } from "@/lib/store/settings"
 import type { VmoServerInfo } from "@/lib/store/vmo-runtime"
 import {
+  ACTIVITY_ROUTE,
+  buildIdleActivityRoute
+} from "./support/activityFixtures"
+import {
   buildCompletedAssistantMessage,
   buildConversation,
   buildUserMessage,
@@ -130,9 +134,11 @@ describe("App", () => {
     const backend = startBackendFake({
       [TOOL_LIST_ROUTE]: () =>
         buildJsonResponse(200, { tools: [], unavailableTools: [] }),
-      // The shell asks the backend to apply the MCP servers once it runs.
+      // The shell asks the backend to apply the MCP servers and follows its
+      // activity once it runs.
       [MCP_SERVER_SYNC_ROUTE]: () =>
-        buildJsonResponse(200, { settings: "applied", servers: [] })
+        buildJsonResponse(200, { settings: "applied", servers: [] }),
+      [ACTIVITY_ROUTE]: buildIdleActivityRoute()
     })
     const { useLysStore, App } = await loadFreshApp()
     const { useToolStore } = await import("@/lib/store/tools")
@@ -170,7 +176,9 @@ describe("App", () => {
     startStoppedDesktopHost()
     const backend = startBackendFake({
       [MCP_SERVER_SYNC_ROUTE]: () =>
-        buildJsonResponse(200, { settings: "applied", servers: [] })
+        buildJsonResponse(200, { settings: "applied", servers: [] }),
+      // The shell also follows the backend's activity once it runs.
+      [ACTIVITY_ROUTE]: buildIdleActivityRoute()
     })
     const { useLysStore, App } = await loadFreshApp()
     const { useMcpServerStore } = await import("@/lib/store/mcp-servers")
@@ -196,6 +204,44 @@ describe("App", () => {
       filterRouteRequests(backend.requests, MCP_SERVER_SYNC_ROUTE)
     ).toHaveLength(1)
     expect(useMcpServerStore.getState().list.status).toBe("loaded")
+  })
+
+  it("follows the activity stream while the backend runs and the shell is mounted, and stops after unmount", async () => {
+    startStoppedDesktopHost()
+    const backend = startBackendFake({
+      [ACTIVITY_ROUTE]: buildIdleActivityRoute(),
+      // The shell also asks the backend to apply the MCP servers once it runs.
+      [MCP_SERVER_SYNC_ROUTE]: () =>
+        buildJsonResponse(200, { settings: "applied", servers: [] })
+    })
+    const { useLysStore, App } = await loadFreshApp()
+    // Settings shows no view that reads the backend on its own.
+    useLysStore.setState({ activeView: "settings" })
+    const { unmount } = render(<App />)
+    await screen.findByRole("main", { name: "Settings" })
+    const runningBackend: BackendServerInfo = { status: "running" }
+    const stoppedBackend: BackendServerInfo = { status: "stopped" }
+
+    act(() => {
+      useLysStore.setState({ backendServerInfo: runningBackend })
+    })
+    await vi.waitFor(() => {
+      expect(
+        filterRouteRequests(backend.requests, ACTIVITY_ROUTE)
+      ).toHaveLength(1)
+    })
+    unmount()
+    useLysStore.setState({ backendServerInfo: stoppedBackend })
+    useLysStore.setState({ backendServerInfo: runningBackend })
+    await waitForMicrotasks()
+
+    const activityRequests = filterRouteRequests(
+      backend.requests,
+      ACTIVITY_ROUTE
+    )
+    expect(activityRequests).toHaveLength(1)
+    // Ending the read cancels the stream the backend opened for it.
+    expect(activityRequests[0]?.signal?.aborted).toBe(true)
   })
 
   it("switches to Settings and back to the chat on Done", async () => {

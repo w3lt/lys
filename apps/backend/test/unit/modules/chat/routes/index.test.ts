@@ -15,7 +15,6 @@ import {
   LM_STUDIO_QWEN3_8B
 } from "../../../support/llmFixtures"
 import { createChatCompletionChunk } from "../../../support/openAiEndpointFake"
-import { TOOL_CALL_POLICY } from "../../../support/toolFixtures"
 
 /** Model both requests of the shared-memory case name. */
 const MODEL = LM_STUDIO_QWEN3_8B
@@ -29,10 +28,7 @@ describe("registerChatRoutes", () => {
   ])("installs the %s endpoint", async (_label, endpoint) => {
     const testApp = await createChatRouteTestApp()
 
-    await registerChatRoutes(testApp.app, {
-      titleGenerationMaxAttempts: 1,
-      toolCallPolicy: TOOL_CALL_POLICY
-    })
+    await registerChatRoutes(testApp.app)
 
     expect(
       testApp.app.hasRoute({ method: endpoint.method, url: endpoint.path })
@@ -51,10 +47,7 @@ describe("registerChatRoutes", () => {
     testApp.listDownloadedLlmModels.mockResolvedValue([
       createDownloadedLlmModel({ modelKey: MODEL.modelKey })
     ])
-    await registerChatRoutes(testApp.app, {
-      titleGenerationMaxAttempts: 1,
-      toolCallPolicy: TOOL_CALL_POLICY
-    })
+    await registerChatRoutes(testApp.app)
 
     const chat = await sendChatRequest(testApp.app, {
       conversation: { kind: "new", agentCode: "caliginia" },

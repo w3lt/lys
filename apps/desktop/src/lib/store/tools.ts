@@ -22,21 +22,6 @@ export type ToolChoice = {
   readonly approval: ToolApproval
 }
 
-/**
- * Whether a tool the person has not switched is on, by what the tool does
- * with the machine.
- *
- * @remarks A tool that only reads data on this machine starts on; a tool
- * that sends requests off the machine starts off. An MCP tool, whose access
- * depends on its server, starts on: the person added the server for its
- * tools, and every call asks first unless they choose Just run.
- */
-const IS_TOOL_ON_BY_DEFAULT = Object.freeze({
-  reads: true,
-  network: false,
-  unknown: true
-} satisfies Readonly<Record<ToolAccess, boolean>>)
-
 /** Lifecycle of the list of every tool: the desktop's and the backend's. */
 export type ToolListState =
   | {
@@ -145,7 +130,25 @@ export function isToolOn(
   toolSwitches: ReadonlyMap<string, boolean>,
   tool: Pick<ToolDefinition, "name" | "access">
 ): boolean {
-  return toolSwitches.get(tool.name) ?? IS_TOOL_ON_BY_DEFAULT[tool.access]
+  /**
+   * Whether a tool the person has not switched is on, by what the tool does
+   * with the machine.
+   *
+   * @remarks A tool that only reads data on this machine starts on; a tool that
+   * sends requests off the machine starts off. An MCP tool, whose access
+   * depends on its server, starts on: the person added the server for its
+   * tools, and every call asks first unless they choose Just run. A tool that
+   * gives work to another agent inside Lys starts on, because every call asks
+   * first unless the person chooses Just run.
+   */
+  const isToolOnByDefault = Object.freeze({
+    reads: true,
+    network: false,
+    agents: true,
+    unknown: true
+  } satisfies Readonly<Record<ToolAccess, boolean>>)
+
+  return toolSwitches.get(tool.name) ?? isToolOnByDefault[tool.access]
 }
 
 /**

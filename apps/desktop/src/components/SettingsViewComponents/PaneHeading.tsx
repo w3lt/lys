@@ -1,4 +1,4 @@
-import { isDocumentFocusLost } from "./focus-target"
+import { isDocumentFocusLost } from "@/components/focus-target"
 
 /** Properties accepted by {@link PaneHeading}. */
 export type PaneHeadingProps = {

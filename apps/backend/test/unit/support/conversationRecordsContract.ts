@@ -1,13 +1,21 @@
 import { MAXIMUM_CONVERSATION_LIST_PAGE_SIZE } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import * as z from "zod"
-import type {
-  ConversationAssistantMessage,
-  ConversationAttachment,
-  ConversationSource,
-  LlmProvider,
-  ReplyPart,
-  ToolCallReplyPart
+import {
+  DELEGATE_WORK_TOOL_NAME,
+  jobReportSchema,
+  type ConversationAssistantMessage,
+  type ConversationAttachment,
+  type ConversationMetadata,
+  type ConversationSource,
+  type ConversationUserMessage,
+  type Job,
+  type JobReport,
+  type JobReportKind,
+  type JobState,
+  type LlmProvider,
+  type ReplyPart,
+  type ToolCallReplyPart
 } from "@lys/share"
 import type {
   ConversationRecordEditor,
@@ -15,6 +23,7 @@ import type {
   ConversationTurnRecordWriter,
   ConversationTurnTransaction,
   ListConversationsInput,
+  NewUserMessage,
   ReplyPartRecordWriter,
   UpdateReplyToolCallInput
 } from "../../../src/modules/conversation/records"
@@ -42,6 +51,13 @@ export type ConversationRowFixture = Readonly<{
   agentCode: string
   /** Creation time; also the initial activity time. */
   createdAt: string
+  /**
+   * Stored conversation a job was started from; omitted, with `jobNumber`,
+   * for a main conversation.
+   */
+  parentConversationId?: string
+  /** A job's number in its parent; omitted for a main conversation. */
+  jobNumber?: number
 }>
 
 /** Stored user-message columns a harness writes exactly as given. */
@@ -59,6 +75,16 @@ export type UserMessageRowFixture = Readonly<{
   createdAt: string
   /** Attachments stored under the message; none when omitted. */
   attachments?: readonly ConversationAttachment[]
+  /**
+   * Who wrote the message when the person did not: the delegator of a job,
+   * or the backend for a wake-up. Omitted for the person's message.
+   */
+  origin?: "delegator" | "wake-up"
+  /**
+   * Stored tool call that sent a job message; omitted for every other
+   * message.
+   */
+  jobCallId?: string
 }>
 
 /** Stored assistant-message columns a harness writes exactly as given. */
@@ -92,6 +118,28 @@ export type AssistantMessageRowFixture = Readonly<{
   updatedAt: string
 }>
 
+/** Stored job-report columns a harness writes exactly as given. */
+export type JobReportRowFixture = Readonly<{
+  /** Report identity. */
+  id: string
+  /** The job the report is from: its stored conversation identity. */
+  jobId: string
+  /** Stored reply of the job the report belongs to. */
+  replyId: string
+  /** What the report says. */
+  kind: JobReportKind
+  /** Title of the job message the report answers. */
+  title: string
+  /** Text of the report; a note and a failed report have some. */
+  content: string
+  /** Numbers of the delegator's sources the text cites. */
+  sourceNumbers: readonly number[]
+  /** Time the report was written. */
+  createdAt: string
+  /** Stored user message that delivered the report; null while none has. */
+  deliveredMessageId: string | null
+}>
+
 /** Records providers over one empty store, with the controls a case needs. */
 export type ConversationRecordsHarness = Readonly<{
   /** Read snapshots of the store. */
@@ -117,6 +165,10 @@ export type ConversationRecordsHarness = Readonly<{
   saveAssistantMessage: (row: AssistantMessageRowFixture) => void
   /** Stores one source of a stored conversation exactly as given. */
   saveSource: (conversationId: string, source: ConversationSource) => void
+  /** Stores one report of a stored job's reply exactly as given. */
+  saveJobReport: (row: JobReportRowFixture) => void
+  /** Lists every stored report, oldest first and then by identity. */
+  listJobReports: () => readonly JobReportRowFixture[]
   /** Closes the store as its owner does; a repeated call changes nothing. */
   closeRecords: () => void
 }>
@@ -205,8 +257,439 @@ type ListedConversationFixture = Readonly<{
  * @param second - Second offset within the minute.
  * @returns An ISO timestamp with millisecond precision.
  */
-function createFixtureTimestamp(minute: number, second = 0): string {
+export function createFixtureTimestamp(minute: number, second = 0): string {
   return new Date(Date.UTC(2025, 0, 1, 0, minute, second)).toISOString()
+}
+
+/**
+ * The controls a job fixture is stored with; the conversation records harness
+ * and the job records harness both have them.
+ */
+export type JobSeedingHarness = Pick<
+  ConversationRecordsHarness,
+  "saveConversation" | "saveUserMessage" | "saveAssistantMessage"
+>
+
+/**
+ * Stores a main conversation that Caliginia answers, holding one message of
+ * the person.
+ *
+ * @param harness - Store under test.
+ * @param sequence - Identity sequence of the conversation; the next one
+ * identifies the person's message.
+ * @returns The conversation's identity.
+ * @remarks The conversation is created at midnight of 2025-01-01 and the
+ * person's message one second later.
+ */
+export function saveMainConversation(
+  harness: JobSeedingHarness,
+  sequence: number
+): string {
+  const id = createFixtureUuidV7(sequence)
+  harness.saveConversation({
+    id,
+    title: null,
+    agentCode: "caliginia",
+    createdAt: createFixtureTimestamp(0)
+  })
+  harness.saveUserMessage({
+    id: createFixtureUuidV7(sequence + 1),
+    conversationId: id,
+    content: "Collect information about moths",
+    createdAt: createFixtureTimestamp(0, 1)
+  })
+  return id
+}
+
+/**
+ * Stores a later message of the person in a stored main conversation.
+ *
+ * @param harness - Store under test.
+ * @param conversationId - Stored main conversation.
+ * @param sequence - Identity sequence of the message.
+ * @returns The message's identity.
+ * @remarks Stored at 00:40 of 2025-01-01. Job fixtures use earlier minutes,
+ * so the message follows them.
+ */
+export function saveFollowUpMessage(
+  harness: JobSeedingHarness,
+  conversationId: string,
+  sequence: number
+): string {
+  const id = createFixtureUuidV7(sequence)
+  harness.saveUserMessage({
+    id,
+    conversationId,
+    content: "Go on",
+    createdAt: createFixtureTimestamp(40)
+  })
+  return id
+}
+
+/** Values that distinguish one stored `delegate_work` call. */
+export type JobCallFixture = Readonly<{
+  /**
+   * Identity sequence of the delegator's reply that holds the call; the next
+   * one identifies the call.
+   */
+  sequence: number
+  /** Stored conversation that holds the call: the parent of its job. */
+  parentId: string
+  /** Time at which the call's reply is stored. */
+  createdAt: string
+}>
+
+/** Identities of one stored `delegate_work` call. */
+export type StoredJobCallFixture = Readonly<{
+  /** The call. */
+  callId: string
+  /** The delegator's reply, in the job's parent, that holds the call. */
+  delegatorReplyId: string
+}>
+
+/**
+ * Stores, in a conversation, the completed reply of its agent whose one part
+ * is a succeeded `delegate_work` call.
+ *
+ * @param harness - Store under test.
+ * @param fixture - Identities, conversation, and time of the call's reply.
+ * @returns The identities of the call and of its reply.
+ * @remarks The call's part is stored at the time of the reply-part fixtures,
+ * not at the fixture's, so the conversation's activity time is not one a
+ * case chooses.
+ */
+export function saveJobCall(
+  harness: Pick<JobSeedingHarness, "saveAssistantMessage">,
+  fixture: JobCallFixture
+): StoredJobCallFixture {
+  const call = createToolCallPart(
+    {
+      sequence: fixture.sequence + 1,
+      round: 0,
+      toolName: DELEGATE_WORK_TOOL_NAME,
+      argumentText: "{}"
+    },
+    { status: "succeeded", result: "Job started.", sourceNumbers: [] }
+  )
+  const delegatorReplyId = createFixtureUuidV7(fixture.sequence)
+  harness.saveAssistantMessage({
+    id: delegatorReplyId,
+    conversationId: fixture.parentId,
+    model: "qwen/qwen3-8b",
+    provider: "lmStudio",
+    parts: [call],
+    status: "completed",
+    finishReason: "stop",
+    createdAt: fixture.createdAt,
+    updatedAt: fixture.createdAt
+  })
+  return { callId: call.id, delegatorReplyId }
+}
+
+/** Values that distinguish one stored job message. */
+export type JobMessageFixture = Readonly<{
+  /**
+   * Identity sequence of the delegator's reply that holds the call; the two
+   * that follow identify the call and the job message.
+   */
+  sequence: number
+  /** Stored conversation the job belongs to, which holds the call. */
+  parentId: string
+  /** Stored job the message is sent to. */
+  jobId: string
+  /** Time at which the call's reply and the job message are stored. */
+  createdAt: string
+}>
+
+/** Identities of one stored job message. */
+export type StoredJobMessageFixture = Readonly<{
+  /** The job message. */
+  id: string
+  /** The `delegate_work` call that sent it. */
+  callId: string
+  /** The delegator's reply, in the job's parent, that holds the call. */
+  delegatorReplyId: string
+}>
+
+/**
+ * Stores one job message and, in the job's parent, the completed reply whose
+ * `delegate_work` call sent it.
+ *
+ * @param harness - Store under test.
+ * @param fixture - Identities, conversations, and time of the message.
+ * @returns The identities of the message and of its call.
+ * @remarks The parent gains the call as {@link saveJobCall} stores it, so
+ * its activity time is not one a case chooses. The job's activity time is
+ * the message's time when that is later than the stored one.
+ */
+export function saveJobMessage(
+  harness: JobSeedingHarness,
+  fixture: JobMessageFixture
+): StoredJobMessageFixture {
+  const call = saveJobCall(harness, fixture)
+  const id = createFixtureUuidV7(fixture.sequence + 2)
+  harness.saveUserMessage({
+    id,
+    conversationId: fixture.jobId,
+    content: "Find what moths eat",
+    createdAt: fixture.createdAt,
+    origin: "delegator",
+    jobCallId: call.callId
+  })
+  return {
+    id,
+    callId: call.callId,
+    delegatorReplyId: call.delegatorReplyId
+  }
+}
+
+/** Values that distinguish one stored job. */
+export type JobFixture = Readonly<{
+  /**
+   * Identity sequence of the job conversation; the four that follow identify
+   * the delegator's reply that holds the call, the call, the job message, and
+   * the job's reply.
+   */
+  sequence: number
+  /** Stored conversation the job belongs to. */
+  parentId: string
+  /** The job's number in its parent. */
+  number: number
+  /**
+   * Minute of 2025-01-01 at which the job is created; its message is stored
+   * one second later and its reply two seconds later.
+   */
+  createdAtMinute: number
+  /** State of the job's reply; a completed one finished with `stop`. */
+  replyStatus: AssistantMessageRowFixture["status"]
+  /**
+   * Parts of the job's reply; none when omitted. They are stored at their own
+   * times, after which the job's activity time is not one a case chooses.
+   */
+  replyParts?: readonly ReplyPart[]
+}>
+
+/**
+ * Creates the fixture of one job of a stored conversation from its number
+ * alone.
+ *
+ * @param parentId - Stored conversation the job belongs to.
+ * @param number - The job's number in that conversation.
+ * @param replyStatus - State of the job's reply.
+ * @returns The fixture: identity sequences from ten times the number, and
+ * creation at the minute of the number, so one case stores at most one job
+ * of each number this way.
+ */
+export function createJobFixture(
+  parentId: string,
+  number: number,
+  replyStatus: JobFixture["replyStatus"]
+): JobFixture {
+  return {
+    sequence: number * 10,
+    parentId,
+    number,
+    createdAtMinute: number,
+    replyStatus
+  }
+}
+
+/** Identities of one stored job. */
+export type StoredJobFixture = Readonly<{
+  /** The job conversation. */
+  id: string
+  /** The `delegate_work` call that sent the job's first message. */
+  callId: string
+  /** The delegator's reply, in the job's parent, that holds that call. */
+  delegatorReplyId: string
+  /** The job's first message. */
+  messageId: string
+  /** The job's reply. */
+  replyId: string
+}>
+
+/**
+ * Stores one job of the agent `researcher`, titled `Job` and its number, with
+ * its first message and one reply.
+ *
+ * @param harness - Store under test.
+ * @param fixture - Identities, parent, number, time, and reply of the job.
+ * @returns The identities of the job, its first message with its call, and
+ * its reply.
+ * @remarks The parent gains the reply that holds the call, as
+ * {@link saveJobMessage} stores it.
+ */
+export function saveJob(
+  harness: JobSeedingHarness,
+  fixture: JobFixture
+): StoredJobFixture {
+  const id = createFixtureUuidV7(fixture.sequence)
+  harness.saveConversation({
+    id,
+    title: `Job ${fixture.number}`,
+    agentCode: "researcher",
+    createdAt: createFixtureTimestamp(fixture.createdAtMinute),
+    parentConversationId: fixture.parentId,
+    jobNumber: fixture.number
+  })
+  const message = saveJobMessage(harness, {
+    sequence: fixture.sequence + 1,
+    parentId: fixture.parentId,
+    jobId: id,
+    createdAt: createFixtureTimestamp(fixture.createdAtMinute, 1)
+  })
+  const replyId = createFixtureUuidV7(fixture.sequence + 4)
+  const repliedAt = createFixtureTimestamp(fixture.createdAtMinute, 2)
+  harness.saveAssistantMessage({
+    id: replyId,
+    conversationId: id,
+    model: "qwen/qwen3-8b",
+    provider: "lmStudio",
+    parts: fixture.replyParts ?? [],
+    status: fixture.replyStatus,
+    finishReason: fixture.replyStatus === "completed" ? "stop" : null,
+    createdAt: repliedAt,
+    updatedAt: repliedAt
+  })
+  return {
+    id,
+    callId: message.callId,
+    delegatorReplyId: message.delegatorReplyId,
+    messageId: message.id,
+    replyId
+  }
+}
+
+/**
+ * Builds the job a reader returns for a job stored by {@link saveJob} whose
+ * reply has no parts and sent no note, and that has no second job message.
+ *
+ * @param stored - Identities the job was stored with.
+ * @param fixture - Number and creation minute the job was stored with.
+ * @param state - State the job's reply and its end report give it.
+ * @returns The expected job, last active when its reply was stored.
+ */
+export function buildExpectedJob(
+  stored: StoredJobFixture,
+  fixture: Pick<JobFixture, "number" | "createdAtMinute">,
+  state: JobState
+): Job {
+  return {
+    id: stored.id,
+    number: fixture.number,
+    agentCode: "researcher",
+    title: `Job ${fixture.number}`,
+    state,
+    latestNote: null,
+    replyId: stored.replyId,
+    jobCallIds: [stored.callId],
+    createdAt: createFixtureTimestamp(fixture.createdAtMinute),
+    updatedAt: createFixtureTimestamp(fixture.createdAtMinute, 2)
+  }
+}
+
+/** Values that distinguish one stored report of a job's reply. */
+export type JobReportFixture = Readonly<{
+  /** Identity sequence of the report. */
+  sequence: number
+  /** What the report says. */
+  kind: JobReportKind
+  /** Title of the job message the report answers. */
+  title: string
+  /** Text of the report. */
+  content: string
+  /** Time the report was written. */
+  createdAt: string
+  /** Numbers of the delegator's sources the text cites; none when omitted. */
+  sourceNumbers?: readonly number[]
+  /** Stored user message that delivered the report; none when omitted. */
+  deliveredMessageId?: string
+}>
+
+/**
+ * Stores one report of a stored job's reply.
+ *
+ * @param harness - Store under test.
+ * @param job - The job, whose reply the report belongs to.
+ * @param fixture - Identity, kind, title, text, time, sources, and delivery
+ * of the report.
+ * @returns The stored row.
+ */
+export function saveReport(
+  harness: Pick<ConversationRecordsHarness, "saveJobReport">,
+  job: StoredJobFixture,
+  fixture: JobReportFixture
+): JobReportRowFixture {
+  const row: JobReportRowFixture = {
+    id: createFixtureUuidV7(fixture.sequence),
+    jobId: job.id,
+    replyId: job.replyId,
+    kind: fixture.kind,
+    title: fixture.title,
+    content: fixture.content,
+    sourceNumbers: fixture.sourceNumbers ?? [],
+    createdAt: fixture.createdAt,
+    deliveredMessageId: fixture.deliveredMessageId ?? null
+  }
+  harness.saveJobReport(row)
+  return row
+}
+
+/**
+ * Builds the report a store returns for a stored row of a job stored by
+ * {@link saveJob}.
+ *
+ * @param row - The row as it is stored.
+ * @param jobNumber - Number the job was stored with.
+ * @returns The expected report: the row's own values with the number and the
+ * agent of its job, validated by the shared schema.
+ * @throws If the row's values violate the report contract.
+ */
+export function buildExpectedReport(
+  row: JobReportRowFixture,
+  jobNumber: number
+): JobReport {
+  return jobReportSchema.parse({
+    id: row.id,
+    jobId: row.jobId,
+    jobNumber,
+    agentCode: "researcher",
+    title: row.title,
+    kind: row.kind,
+    content: row.content,
+    sourceNumbers: row.sourceNumbers,
+    createdAt: row.createdAt
+  })
+}
+
+/**
+ * Builds the row of the report startup recovery stores for the streaming
+ * reply of a job stored by {@link saveJob}.
+ *
+ * @param job - Identities the job was stored with.
+ * @param jobNumber - Number the job was stored with, which its title holds.
+ * @param createdAt - Time the recovery ran at.
+ * @returns The expected undelivered `interrupted` row: the job's title, no
+ * text, no cited source, and any UUIDv7 the store chose.
+ */
+export function buildExpectedInterruptedReportRow(
+  job: StoredJobFixture,
+  jobNumber: number,
+  createdAt: string
+): JobReportRowFixture {
+  return {
+    id: expect.stringMatching(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    ),
+    jobId: job.id,
+    replyId: job.replyId,
+    kind: "interrupted",
+    title: `Job ${jobNumber}`,
+    content: "",
+    sourceNumbers: [],
+    createdAt,
+    deliveredMessageId: null
+  }
 }
 
 /**
@@ -273,19 +756,39 @@ function saveConversationWithReply(
 }
 
 /**
- * Creates the metadata of a new, untitled conversation.
+ * Creates the metadata of a new, untitled main conversation.
  *
  * @param id - Conversation identity.
- * @returns Valid metadata created at {@link CHANGED_AT}.
+ * @returns Valid metadata created at {@link CHANGED_AT}, with no parent, job
+ * number, or delegator.
  */
-function createNewConversationMetadata(id: string) {
+function createNewConversationMetadata(id: string): ConversationMetadata {
   return {
     id,
     title: null,
     agentCode: "lys",
+    kind: "main",
+    parentConversationId: null,
+    jobNumber: null,
+    delegatorAgentCode: null,
     createdAt: CHANGED_AT,
     updatedAt: CHANGED_AT
   }
+}
+
+/**
+ * Creates a new message of the person, without attachments.
+ *
+ * @param sequence - Identity sequence of the message.
+ * @param content - Non-empty authored text.
+ * @returns A valid user message written at {@link CHANGED_AT} that delivers
+ * no reports.
+ */
+function createNewUserMessage(
+  sequence: number,
+  content: string
+): Extract<NewUserMessage, { origin: "person" }> {
+  return { ...createUserMessage(sequence, content), createdAt: CHANGED_AT }
 }
 
 /**
@@ -542,6 +1045,515 @@ function registerReplyPartSearchCases(
 }
 
 /**
+ * Registers the {@link ConversationRecordReader.listConversations} cases that
+ * keep jobs out of the list and its counts, and the backend's wake-up
+ * messages out of previews and search.
+ *
+ * @param createHarness - Creates the records over an empty store per case.
+ */
+function registerMainConversationListCases(
+  createHarness: ConversationRecordsHarnessFactory
+): void {
+  it("lists and counts main conversations only: a job is in neither storedCount, matchCount, nor the page", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    saveJob(harness, createJobFixture(mainId, 1, "completed"))
+
+    const page = harness.recordReader.listConversations(FIRST_PAGE)
+
+    expect(page.storedCount).toBe(1)
+    expect(page.matchCount).toBe(1)
+    expect(page.conversations.map(({ id }) => id)).toEqual([mainId])
+  })
+
+  it("does not find a main conversation by text that only its job contains", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const jobText = createTextPart({
+      sequence: 15,
+      round: 0,
+      content: "Moths eat nectar"
+    })
+    saveJob(harness, {
+      ...createJobFixture(mainId, 1, "completed"),
+      replyParts: [jobText]
+    })
+
+    expect(
+      harness.recordReader.listConversations({
+        ...FIRST_PAGE,
+        query: "moths eat"
+      })
+    ).toEqual({
+      conversations: [],
+      storedCount: 1,
+      matchCount: 0,
+      hasMore: false
+    })
+  })
+
+  it("skips a wake-up message as preview and in search, and uses the newest person or reply text instead", () => {
+    const harness = createHarness()
+    const answeredAt = createFixtureTimestamp(1, 31)
+    const answerTimes = { createdAt: answeredAt, updatedAt: answeredAt }
+    const answer = createTextPart({
+      sequence: 151,
+      round: 0,
+      content: "Answer",
+      times: answerTimes
+    })
+    saveQuestionWithReply(harness, [answer], "completed")
+    harness.saveUserMessage({
+      id: createFixtureUuidV7(160),
+      conversationId: createFixtureUuidV7(1),
+      content: "Reports from your jobs arrived.",
+      createdAt: createFixtureTimestamp(2),
+      origin: "wake-up"
+    })
+
+    const { recordReader } = harness
+    expect(
+      recordReader.listConversations(FIRST_PAGE).conversations[0]?.preview
+    ).toEqual({ role: "assistant", content: "Answer" })
+    expect(
+      recordReader.listConversations({ ...FIRST_PAGE, query: "arrived" })
+    ).toMatchObject({ conversations: [], matchCount: 0 })
+  })
+}
+
+/**
+ * Lists who wrote each user message of a stored conversation.
+ *
+ * @param harness - Store under test.
+ * @param conversationId - Conversation to read.
+ * @returns The origins in transcript order; none when the conversation is
+ * not stored.
+ */
+function listUserMessageOrigins(
+  harness: ConversationRecordsHarness,
+  conversationId: string
+): string[] {
+  const conversation = harness.recordReader.findConversation(conversationId)
+  return (conversation?.messages ?? []).flatMap((message) =>
+    message.role === "user" ? [message.origin] : []
+  )
+}
+
+/**
+ * Lists the reports each user message of a stored conversation delivered.
+ *
+ * @param harness - Store under test.
+ * @param conversationId - Conversation to read.
+ * @returns Each user message's reports, in transcript order; none when the
+ * conversation is not stored.
+ */
+export function listUserMessageReports(
+  harness: Pick<ConversationRecordsHarness, "recordReader">,
+  conversationId: string
+): (readonly JobReport[])[] {
+  const conversation = harness.recordReader.findConversation(conversationId)
+  return (conversation?.messages ?? []).flatMap((message) =>
+    message.role === "user" ? [message.reports] : []
+  )
+}
+
+/**
+ * Registers the {@link ConversationRecordReader.findConversation} cases that
+ * read a job, the jobs of a main conversation, and who wrote a user message.
+ *
+ * @param createHarness - Creates the records over an empty store per case.
+ */
+function registerJobReadCases(
+  createHarness: ConversationRecordsHarnessFactory
+): void {
+  it("reads a job with its parent, its number, and its parent's agent as the delegator, and without jobs of its own", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const job = saveJob(harness, {
+      sequence: 10,
+      parentId: mainId,
+      number: 3,
+      createdAtMinute: 1,
+      replyStatus: "completed"
+    })
+
+    expect(harness.recordReader.findConversation(job.id)).toMatchObject({
+      id: job.id,
+      title: "Job 3",
+      agentCode: "researcher",
+      kind: "job",
+      parentConversationId: mainId,
+      jobNumber: 3,
+      delegatorAgentCode: "caliginia",
+      jobs: []
+    })
+  })
+
+  it("lists a main conversation's jobs in number order, not in creation or identity order", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const secondFixture: JobFixture = {
+      sequence: 10,
+      parentId: mainId,
+      number: 2,
+      createdAtMinute: 1,
+      replyStatus: "streaming"
+    }
+    const firstFixture: JobFixture = {
+      sequence: 20,
+      parentId: mainId,
+      number: 1,
+      createdAtMinute: 2,
+      replyStatus: "completed"
+    }
+    const second = saveJob(harness, secondFixture)
+    const first = saveJob(harness, firstFixture)
+
+    expect(harness.recordReader.findConversation(mainId)?.jobs).toEqual([
+      buildExpectedJob(first, firstFixture, "replied"),
+      buildExpectedJob(second, secondFixture, "working")
+    ])
+  })
+
+  it("reads a job message as the delegator's and a wake-up message as a wake-up", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const job = saveJob(harness, {
+      sequence: 10,
+      parentId: mainId,
+      number: 1,
+      createdAtMinute: 1,
+      replyStatus: "completed"
+    })
+    harness.saveUserMessage({
+      id: createFixtureUuidV7(300),
+      conversationId: mainId,
+      content: "Reports from your jobs arrived.",
+      createdAt: createFixtureTimestamp(40),
+      origin: "wake-up"
+    })
+
+    expect(listUserMessageOrigins(harness, job.id)).toEqual(["delegator"])
+    expect(listUserMessageOrigins(harness, mainId)).toEqual([
+      "person",
+      "wake-up"
+    ])
+  })
+
+  it("rejects a stored job that has no message or reply", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    harness.saveConversation({
+      id: createFixtureUuidV7(10),
+      title: "Find what moths eat",
+      agentCode: "researcher",
+      createdAt: createFixtureTimestamp(1),
+      parentConversationId: mainId,
+      jobNumber: 1
+    })
+
+    expect(() => harness.recordReader.findConversation(mainId)).toThrow(
+      z.ZodError
+    )
+  })
+
+  it("rejects a stored job that has jobs of its own", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const job = saveJob(harness, createJobFixture(mainId, 1, "completed"))
+    saveJob(harness, createJobFixture(job.id, 2, "completed"))
+
+    expect(() => harness.recordReader.findConversation(job.id)).toThrow(
+      z.ZodError
+    )
+  })
+}
+
+/**
+ * Registers the {@link ConversationRecordReader.findConversation} cases that
+ * read the reports a user message delivered.
+ *
+ * @param createHarness - Creates the records over an empty store per case.
+ */
+function registerDeliveredReportReadCases(
+  createHarness: ConversationRecordsHarnessFactory
+): void {
+  it("reads a report on the message that delivered it, with its job's number and agent and its own title, text, sources, and time", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const job = saveJob(harness, {
+      sequence: 10,
+      parentId: mainId,
+      number: 3,
+      createdAtMinute: 1,
+      replyStatus: "completed"
+    })
+    const deliveringId = saveFollowUpMessage(harness, mainId, 300)
+    saveReport(harness, job, {
+      sequence: 200,
+      kind: "result",
+      title: "Find what moths eat",
+      content: "They eat wool [2].",
+      createdAt: createFixtureTimestamp(1, 5),
+      sourceNumbers: [2, 5],
+      deliveredMessageId: deliveringId
+    })
+
+    expect(listUserMessageReports(harness, mainId)).toEqual([
+      [],
+      [
+        {
+          id: createFixtureUuidV7(200),
+          jobId: job.id,
+          jobNumber: 3,
+          agentCode: "researcher",
+          title: "Find what moths eat",
+          kind: "result",
+          content: "They eat wool [2].",
+          sourceNumbers: [2, 5],
+          createdAt: createFixtureTimestamp(1, 5)
+        }
+      ]
+    ])
+  })
+
+  it("reads a message's reports oldest first, not in write or identity order", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const job = saveJob(harness, {
+      sequence: 10,
+      parentId: mainId,
+      number: 1,
+      createdAtMinute: 1,
+      replyStatus: "completed"
+    })
+    const deliveringId = saveFollowUpMessage(harness, mainId, 300)
+    saveReport(harness, job, {
+      sequence: 200,
+      kind: "result",
+      title: "Job 1",
+      content: "They eat wool.",
+      createdAt: createFixtureTimestamp(1, 4),
+      deliveredMessageId: deliveringId
+    })
+    saveReport(harness, job, {
+      sequence: 201,
+      kind: "note",
+      title: "Job 1",
+      content: "Looking",
+      createdAt: createFixtureTimestamp(1, 3),
+      deliveredMessageId: deliveringId
+    })
+
+    expect(
+      listUserMessageReports(harness, mainId)
+        .at(-1)
+        ?.map((report) => report.kind)
+    ).toEqual(["note", "result"])
+  })
+
+  it("reads each report only on the message that delivered it, and an undelivered report on none", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const job = saveJob(harness, {
+      sequence: 10,
+      parentId: mainId,
+      number: 1,
+      createdAtMinute: 1,
+      replyStatus: "streaming"
+    })
+    const deliveringId = saveFollowUpMessage(harness, mainId, 300)
+    saveReport(harness, job, {
+      sequence: 200,
+      kind: "note",
+      title: "Job 1",
+      content: "Delivered note",
+      createdAt: createFixtureTimestamp(1, 3),
+      deliveredMessageId: deliveringId
+    })
+    saveReport(harness, job, {
+      sequence: 201,
+      kind: "note",
+      title: "Job 1",
+      content: "Undelivered note",
+      createdAt: createFixtureTimestamp(1, 4)
+    })
+
+    expect(
+      listUserMessageReports(harness, mainId).map((reports) =>
+        reports.map((report) => report.content)
+      )
+    ).toEqual([[], ["Delivered note"]])
+    expect(listUserMessageReports(harness, job.id)).toEqual([[]])
+  })
+
+  it("rejects a delivered report that violates the report contract", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const job = saveJob(harness, {
+      sequence: 10,
+      parentId: mainId,
+      number: 1,
+      createdAtMinute: 1,
+      replyStatus: "completed"
+    })
+    const deliveringId = saveFollowUpMessage(harness, mainId, 300)
+    harness.saveJobReport({
+      id: "not-a-uuid",
+      jobId: job.id,
+      replyId: job.replyId,
+      kind: "result",
+      title: "Job 1",
+      content: "They eat wool.",
+      sourceNumbers: [],
+      createdAt: createFixtureTimestamp(1, 5),
+      deliveredMessageId: deliveringId
+    })
+
+    expect(() => harness.recordReader.findConversation(mainId)).toThrow(
+      z.ZodError
+    )
+  })
+
+  it.for([
+    ["a report citing its sources out of order", "result", "Wool.", [5, 2]],
+    ["a report citing a source twice", "result", "Wool.", [2, 2]]
+  ] as const)(
+    "rejects %s, which the report contract refuses",
+    ([, kind, content, sourceNumbers]) => {
+      const harness = createHarness()
+      const mainId = saveMainConversation(harness, 1)
+      const job = saveJob(harness, createJobFixture(mainId, 1, "completed"))
+      saveReport(harness, job, {
+        sequence: 200,
+        kind,
+        title: "Job 1",
+        content,
+        createdAt: createFixtureTimestamp(1, 5),
+        sourceNumbers,
+        deliveredMessageId: saveFollowUpMessage(harness, mainId, 300)
+      })
+
+      expect(() => harness.recordReader.findConversation(mainId)).toThrow(
+        z.ZodError
+      )
+    }
+  )
+}
+
+/**
+ * Registers the {@link ConversationRecordReader.findConversationMetadata}
+ * cases: the metadata of a main conversation and of a job, absence, a
+ * transcript that is not read, and invalid stored metadata.
+ *
+ * @param createHarness - Creates the records over an empty store per case.
+ */
+function registerConversationMetadataReadCases(
+  createHarness: ConversationRecordsHarnessFactory
+): void {
+  it("returns undefined for an absent conversation", () => {
+    const { recordReader } = createHarness()
+
+    expect(
+      recordReader.findConversationMetadata(CONVERSATION_ID)
+    ).toBeUndefined()
+  })
+
+  it("reads a main conversation's metadata, with no parent, job number, or delegator, and without its transcript", () => {
+    const harness = createHarness()
+    harness.saveConversation({
+      id: CONVERSATION_ID,
+      title: "Trip plan",
+      agentCode: "lys",
+      createdAt: CREATED_AT
+    })
+    harness.saveUserMessage({
+      id: createFixtureUuidV7(10),
+      conversationId: CONVERSATION_ID,
+      content: "Hello",
+      createdAt: "2025-01-01T00:00:01.000Z"
+    })
+
+    expect(
+      harness.recordReader.findConversationMetadata(CONVERSATION_ID)
+    ).toEqual({
+      id: CONVERSATION_ID,
+      title: "Trip plan",
+      agentCode: "lys",
+      kind: "main",
+      parentConversationId: null,
+      jobNumber: null,
+      delegatorAgentCode: null,
+      createdAt: CREATED_AT,
+      updatedAt: "2025-01-01T00:00:01.000Z"
+    })
+  })
+
+  it("reads a job's metadata with its parent, its number, and its parent's agent as the delegator", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const job = saveJob(harness, {
+      sequence: 10,
+      parentId: mainId,
+      number: 3,
+      createdAtMinute: 1,
+      replyStatus: "completed"
+    })
+
+    expect(harness.recordReader.findConversationMetadata(job.id)).toEqual({
+      id: job.id,
+      title: "Job 3",
+      agentCode: "researcher",
+      kind: "job",
+      parentConversationId: mainId,
+      jobNumber: 3,
+      delegatorAgentCode: "caliginia",
+      createdAt: createFixtureTimestamp(1),
+      updatedAt: createFixtureTimestamp(1, 2)
+    })
+  })
+
+  it("reads the metadata of a conversation whose stored message violates the message contract, which findConversation rejects", () => {
+    const harness = createHarness()
+    harness.saveConversation({
+      id: CONVERSATION_ID,
+      title: null,
+      agentCode: "lys",
+      createdAt: CREATED_AT
+    })
+    harness.saveUserMessage({
+      id: "not-a-uuid",
+      conversationId: CONVERSATION_ID,
+      content: "Hello",
+      createdAt: "2025-01-01T00:00:01.000Z"
+    })
+
+    expect(() =>
+      harness.recordReader.findConversation(CONVERSATION_ID)
+    ).toThrow(z.ZodError)
+    expect(
+      harness.recordReader.findConversationMetadata(CONVERSATION_ID)
+    ).toMatchObject({ id: CONVERSATION_ID, parentConversationId: null })
+  })
+
+  it("rejects stored metadata that violates the metadata contract and stays usable", () => {
+    const harness = createHarness()
+    harness.saveConversation({
+      id: CONVERSATION_ID,
+      title: "",
+      agentCode: "lys",
+      createdAt: CREATED_AT
+    })
+
+    expect(() =>
+      harness.recordReader.findConversationMetadata(CONVERSATION_ID)
+    ).toThrow(z.ZodError)
+
+    expect(harness.recordEditor.deleteConversation(CONVERSATION_ID)).toBe(true)
+  })
+}
+
+/**
  * Registers the provider-independent {@link ConversationRecordReader}
  * contract cases.
  *
@@ -571,10 +1583,15 @@ export function registerConversationRecordReaderContractSuite(
           id: CONVERSATION_ID,
           title: "Trip plan",
           agentCode: "lys",
+          kind: "main",
+          parentConversationId: null,
+          jobNumber: null,
+          delegatorAgentCode: null,
           createdAt: CREATED_AT,
           updatedAt: CREATED_AT,
           messages: [],
-          sources: []
+          sources: [],
+          jobs: []
         })
       })
 
@@ -612,6 +1629,8 @@ export function registerConversationRecordReaderContractSuite(
             role: "user",
             content: "Hello",
             attachments: [],
+            origin: "person",
+            reports: [],
             createdAt: "2025-01-01T00:00:01.000Z"
           },
           {
@@ -778,6 +1797,8 @@ export function registerConversationRecordReaderContractSuite(
           role: "user",
           content: "local only",
           attachments: [],
+          origin: "person",
+          reports: [],
           createdAt: "2025-01-01T00:00:09.000Z"
         })
 
@@ -826,6 +1847,12 @@ export function registerConversationRecordReaderContractSuite(
 
       registerStoredPartAndSourceRejectionCases(createHarness)
       registerConversationSourceReadCases(createHarness)
+      registerJobReadCases(createHarness)
+      registerDeliveredReportReadCases(createHarness)
+    })
+
+    describe("findConversationMetadata", () => {
+      registerConversationMetadataReadCases(createHarness)
     })
 
     describe("listConversations", () => {
@@ -892,6 +1919,7 @@ export function registerConversationRecordReaderContractSuite(
 
       registerReplyPreviewCases(createHarness)
       registerReplyPartSearchCases(createHarness)
+      registerMainConversationListCases(createHarness)
 
       it("previews nothing for a conversation without messages", () => {
         const harness = createHarness()
@@ -1085,6 +2113,9 @@ export function registerConversationRecordReaderContractSuite(
       expect(() =>
         harness.recordReader.findConversation(CONVERSATION_ID)
       ).toThrow("Database is closed")
+      expect(() =>
+        harness.recordReader.findConversationMetadata(CONVERSATION_ID)
+      ).toThrow("Database is closed")
       expect(() => harness.recordReader.listConversations(FIRST_PAGE)).toThrow(
         "Database is closed"
       )
@@ -1122,6 +2153,10 @@ export function registerConversationRecordEditorContractSuite(
           id: CONVERSATION_ID,
           title: "Greeting",
           agentCode: "stored-agent",
+          kind: "main",
+          parentConversationId: null,
+          jobNumber: null,
+          delegatorAgentCode: null,
           createdAt: createFixtureTimestamp(1),
           updatedAt: createFixtureTimestamp(1, 1)
         })
@@ -1163,6 +2198,35 @@ export function registerConversationRecordEditorContractSuite(
         ).toBeUndefined()
 
         expect(recordReader.listConversations(FIRST_PAGE).storedCount).toBe(0)
+      })
+
+      it("renames a job and returns its parent, its number, and its delegator", () => {
+        const harness = createHarness()
+        const mainId = saveMainConversation(harness, 1)
+        const job = saveJob(harness, {
+          sequence: 10,
+          parentId: mainId,
+          number: 2,
+          createdAtMinute: 1,
+          replyStatus: "completed"
+        })
+
+        expect(
+          harness.recordEditor.updateConversationTitle(job.id, "Renamed")
+        ).toEqual({
+          id: job.id,
+          title: "Renamed",
+          agentCode: "researcher",
+          kind: "job",
+          parentConversationId: mainId,
+          jobNumber: 2,
+          delegatorAgentCode: "caliginia",
+          createdAt: createFixtureTimestamp(1),
+          updatedAt: createFixtureTimestamp(1, 2)
+        })
+        expect(harness.recordReader.findConversation(job.id)?.title).toBe(
+          "Renamed"
+        )
       })
     })
 
@@ -1244,6 +2308,35 @@ export function registerConversationRecordEditorContractSuite(
           harness.recordReader.findConversation(CONVERSATION_ID)?.messages
         ).toMatchObject([{ attachments: [{ number: 1, name: "notes.md" }] }])
       })
+
+      it("removes a main conversation's jobs with it, and no other conversation's", () => {
+        const harness = createHarness()
+        const mainId = saveMainConversation(harness, 1)
+        const otherId = saveMainConversation(harness, 100)
+        const job = saveJob(harness, {
+          sequence: 10,
+          parentId: mainId,
+          number: 1,
+          createdAtMinute: 1,
+          replyStatus: "streaming"
+        })
+        const otherJob = saveJob(harness, {
+          sequence: 110,
+          parentId: otherId,
+          number: 1,
+          createdAtMinute: 2,
+          replyStatus: "streaming"
+        })
+
+        expect(harness.recordEditor.deleteConversation(mainId)).toBe(true)
+
+        expect(harness.recordReader.findConversation(job.id)).toBeUndefined()
+        expect(
+          harness.recordReader
+            .findConversation(otherId)
+            ?.jobs.map(({ id }) => id)
+        ).toEqual([otherJob.id])
+      })
     })
 
     it("rejects every operation after the store closes", () => {
@@ -1290,13 +2383,10 @@ async function saveConversationAroundAwait(
 ): Promise<void> {
   transaction.createConversation(createNewConversationMetadata(CONVERSATION_ID))
   await Promise.resolve()
-  transaction.createUserMessage(CONVERSATION_ID, {
-    id: createFixtureUuidV7(10),
-    role: "user",
-    content: "after await",
-    attachments: [],
-    createdAt: CHANGED_AT
-  })
+  transaction.createUserMessage(
+    CONVERSATION_ID,
+    createNewUserMessage(10, "after await")
+  )
 }
 
 /**
@@ -1326,7 +2416,8 @@ export function registerConversationTurnRecordWriterContractSuite(
         expect(recordReader.findConversation(CONVERSATION_ID)).toEqual({
           ...createNewConversationMetadata(CONVERSATION_ID),
           messages: [],
-          sources: []
+          sources: [],
+          jobs: []
         })
       })
 
@@ -1416,7 +2507,8 @@ export function registerConversationTurnRecordWriterContractSuite(
         expect(harness.recordReader.findConversation(CONVERSATION_ID)).toEqual({
           ...metadata,
           messages: [],
-          sources: []
+          sources: [],
+          jobs: []
         })
       })
 
@@ -1439,13 +2531,10 @@ export function registerConversationTurnRecordWriterContractSuite(
           "Database operation has ended"
         )
         expect(() =>
-          transaction.createUserMessage(CONVERSATION_ID, {
-            id: createFixtureUuidV7(10),
-            role: "user",
-            content: "late",
-            attachments: [],
-            createdAt: CHANGED_AT
-          })
+          transaction.createUserMessage(
+            CONVERSATION_ID,
+            createNewUserMessage(10, "late")
+          )
         ).toThrow("Database operation has ended")
         expect(() =>
           transaction.createAssistantMessage(
@@ -1564,6 +2653,100 @@ export function registerConversationTurnRecordWriterContractSuite(
         expect(
           harness.recordReader.findConversation(CONVERSATION_ID)?.messages[0]
         ).toMatchObject({ ...state, updatedAt: "2025-01-01T00:00:01.000Z" })
+      })
+
+      it("gives each job reply found streaming at startup an interrupted report with the job's title, and marks it interrupted", () => {
+        const harness = createHarness()
+        const mainId = saveMainConversation(harness, 1)
+        const firstFixture = createJobFixture(mainId, 1, "streaming")
+        const secondFixture = createJobFixture(mainId, 2, "streaming")
+        const first = saveJob(harness, firstFixture)
+        const second = saveJob(harness, secondFixture)
+
+        harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
+          CHANGED_AT
+        )
+
+        // Both reports carry the recovery's time, so they list in the order
+        // of their random identities.
+        const reports = harness.listJobReports()
+        expect(reports).toHaveLength(2)
+        expect(reports).toEqual(
+          expect.arrayContaining([
+            buildExpectedInterruptedReportRow(first, 1, CHANGED_AT),
+            buildExpectedInterruptedReportRow(second, 2, CHANGED_AT)
+          ])
+        )
+        expect(harness.recordReader.findConversation(mainId)?.jobs).toEqual([
+          buildExpectedJob(first, firstFixture, "interrupted"),
+          buildExpectedJob(second, secondFixture, "interrupted")
+        ])
+        expect(
+          harness.recordReader.findConversation(first.id)?.messages.at(-1)
+        ).toMatchObject({
+          id: first.replyId,
+          status: "interrupted",
+          updatedAt: CHANGED_AT
+        })
+      })
+
+      it("gives a main conversation's streaming reply no report", () => {
+        const harness = createHarness()
+        saveConversationWithReply(harness, CONVERSATION_ID, {
+          sequence: 11,
+          parts: [],
+          status: "streaming",
+          finishReason: null
+        })
+
+        harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
+          CHANGED_AT
+        )
+
+        expect(harness.listJobReports()).toEqual([])
+        expect(
+          harness.recordReader.findConversation(CONVERSATION_ID)?.messages
+        ).toMatchObject([{ status: "interrupted" }])
+      })
+
+      it("inserts no second report when recovery runs again", () => {
+        const harness = createHarness()
+        const mainId = saveMainConversation(harness, 1)
+        const job = saveJob(harness, createJobFixture(mainId, 1, "streaming"))
+        harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
+          CHANGED_AT
+        )
+
+        harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
+          "2026-03-04T05:06:08.000Z"
+        )
+
+        expect(harness.listJobReports()).toEqual([
+          buildExpectedInterruptedReportRow(job, 1, CHANGED_AT)
+        ])
+      })
+
+      it("keeps the end report a streaming job reply already has and stores no second one", () => {
+        const harness = createHarness()
+        const mainId = saveMainConversation(harness, 1)
+        const fixture = createJobFixture(mainId, 1, "streaming")
+        const job = saveJob(harness, fixture)
+        const row = saveReport(harness, job, {
+          sequence: 200,
+          kind: "stopped",
+          title: "Job 1",
+          content: "",
+          createdAt: createFixtureTimestamp(30)
+        })
+
+        harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
+          CHANGED_AT
+        )
+
+        expect(harness.listJobReports()).toEqual([row])
+        expect(harness.recordReader.findConversation(mainId)?.jobs).toEqual([
+          buildExpectedJob(job, fixture, "stopped")
+        ])
       })
     })
 
@@ -1844,6 +3027,213 @@ export function registerConversationTurnRecordWriterContractSuite(
 }
 
 /**
+ * Creates the metadata of a new job of the agent `researcher`, started from
+ * a conversation Caliginia answers.
+ *
+ * @param sequence - Identity sequence of the job.
+ * @param parentId - Conversation the job is started from.
+ * @param jobNumber - The job's number in that conversation.
+ * @returns Valid metadata created at {@link CHANGED_AT}.
+ */
+function createNewJobMetadata(
+  sequence: number,
+  parentId: string,
+  jobNumber: number
+): ConversationMetadata {
+  return {
+    id: createFixtureUuidV7(sequence),
+    title: "Find what moths eat",
+    agentCode: "researcher",
+    kind: "job",
+    parentConversationId: parentId,
+    jobNumber,
+    delegatorAgentCode: "caliginia",
+    createdAt: CHANGED_AT,
+    updatedAt: CHANGED_AT
+  }
+}
+
+/**
+ * Registers the {@link ConversationTurnTransaction.createConversation} cases
+ * that create a job.
+ *
+ * @param createHarness - Creates the records over an empty store per case.
+ */
+function registerJobCreationCases(
+  createHarness: ConversationRecordsHarnessFactory
+): void {
+  it("creates a job that the same transaction and later reads return with its parent, its number, and its delegator", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const metadata = createNewJobMetadata(20, mainId, 2)
+    const expected = { ...metadata, messages: [], sources: [], jobs: [] }
+
+    const observed =
+      harness.turnRecordWriter.handleConversationTurnWriteRequest(
+        (transaction) => {
+          transaction.createConversation(metadata)
+          return transaction.findConversation(metadata.id)
+        }
+      )
+
+    expect(observed).toEqual(expected)
+    expect(harness.recordReader.findConversation(metadata.id)).toEqual(expected)
+  })
+
+  it("refuses a job whose parent is not stored", () => {
+    const harness = createHarness()
+    const metadata = createNewJobMetadata(20, CONVERSATION_ID, 1)
+
+    expect(() =>
+      harness.turnRecordWriter.handleConversationTurnWriteRequest(
+        (transaction) => {
+          transaction.createConversation(metadata)
+        }
+      )
+    ).toThrow("FOREIGN KEY constraint failed")
+
+    expect(harness.recordReader.findConversation(metadata.id)).toBeUndefined()
+  })
+
+  it("refuses a job without a title", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const metadata = { ...createNewJobMetadata(20, mainId, 1), title: null }
+
+    expect(() =>
+      harness.turnRecordWriter.handleConversationTurnWriteRequest(
+        (transaction) => {
+          transaction.createConversation(metadata)
+        }
+      )
+    ).toThrow(
+      "CHECK constraint failed: (job_number IS NULL) = (parent_conversation_id IS NULL)"
+    )
+
+    expect(harness.recordReader.findConversation(metadata.id)).toBeUndefined()
+  })
+
+  it("refuses a job whose number its parent already uses and keeps the stored job", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const fixture = createJobFixture(mainId, 1, "completed")
+    const stored = saveJob(harness, fixture)
+    const metadata = createNewJobMetadata(20, mainId, 1)
+
+    expect(() =>
+      harness.turnRecordWriter.handleConversationTurnWriteRequest(
+        (transaction) => {
+          transaction.createConversation(metadata)
+        }
+      )
+    ).toThrow(
+      "UNIQUE constraint failed: conversations.parent_conversation_id, conversations.job_number"
+    )
+
+    expect(harness.recordReader.findConversation(metadata.id)).toBeUndefined()
+    expect(harness.recordReader.findConversation(mainId)?.jobs).toEqual([
+      buildExpectedJob(stored, fixture, "replied")
+    ])
+  })
+}
+
+/**
+ * Creates a new job message, without attachments.
+ *
+ * @param sequence - Identity sequence of the message.
+ * @returns A valid message of a delegator written at {@link CHANGED_AT} that
+ * delivers no reports, without the call that sends it, which each case adds.
+ */
+function createNewJobMessage(
+  sequence: number
+): ConversationUserMessage & Readonly<{ origin: "delegator" }> {
+  return {
+    ...createNewUserMessage(sequence, "Now look at butterflies"),
+    origin: "delegator"
+  }
+}
+
+/**
+ * Registers the {@link ConversationTurnTransaction.createUserMessage} cases
+ * that store who wrote a message and the call that sent a job message.
+ *
+ * @param createHarness - Creates the records over an empty store per case.
+ */
+function registerMessageAuthorCases(
+  createHarness: ConversationRecordsHarnessFactory
+): void {
+  it.each([
+    ["the person's message", "person"],
+    ["a wake-up message", "wake-up"]
+  ] as const)("stores %s with its author", (_label, origin) => {
+    const { turnRecordWriter, recordReader } = createHarness()
+    const message = { ...createNewUserMessage(10, "Hello"), origin }
+
+    turnRecordWriter.handleConversationTurnWriteRequest((transaction) => {
+      transaction.createConversation(
+        createNewConversationMetadata(CONVERSATION_ID)
+      )
+      transaction.createUserMessage(CONVERSATION_ID, message)
+    })
+
+    expect(recordReader.findConversation(CONVERSATION_ID)?.messages).toEqual([
+      message
+    ])
+  })
+
+  it("stores a delegator's message with its call, which the job then lists after its earlier calls", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const job = saveJob(harness, createJobFixture(mainId, 1, "completed"))
+    const call = saveJobCall(harness, {
+      sequence: 100,
+      parentId: mainId,
+      createdAt: createFixtureTimestamp(30)
+    })
+    const message = createNewJobMessage(300)
+
+    harness.turnRecordWriter.handleConversationTurnWriteRequest(
+      (transaction) => {
+        transaction.createUserMessage(job.id, {
+          ...message,
+          jobCallId: call.callId
+        })
+      }
+    )
+
+    expect(
+      harness.recordReader.findConversation(job.id)?.messages.at(-1)
+    ).toEqual(message)
+    expect(
+      harness.recordReader.findConversation(mainId)?.jobs[0]?.jobCallIds
+    ).toEqual([job.callId, call.callId])
+  })
+
+  it("refuses a delegator's message whose call is not stored and writes nothing", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const job = saveJob(harness, createJobFixture(mainId, 1, "completed"))
+    const message = createNewJobMessage(300)
+    const unstoredCallId = createFixtureUuidV7(999)
+
+    expect(() =>
+      harness.turnRecordWriter.handleConversationTurnWriteRequest(
+        (transaction) => {
+          transaction.createUserMessage(job.id, {
+            ...message,
+            jobCallId: unstoredCallId
+          })
+        }
+      )
+    ).toThrow("FOREIGN KEY constraint failed")
+
+    expect(
+      harness.recordReader.findConversation(job.id)?.messages
+    ).toHaveLength(2)
+  })
+}
+
+/**
  * Registers the provider-independent {@link ConversationTurnTransaction}
  * contract cases, each run inside one turn write.
  *
@@ -1864,11 +3254,17 @@ export function registerConversationTurnTransactionContractSuite(
         }
       )
 
-      expect(observed).toEqual({ ...metadata, messages: [], sources: [] })
+      expect(observed).toEqual({
+        ...metadata,
+        messages: [],
+        sources: [],
+        jobs: []
+      })
       expect(recordReader.findConversation(CONVERSATION_ID)).toEqual({
         ...metadata,
         messages: [],
-        sources: []
+        sources: [],
+        jobs: []
       })
     })
 
@@ -1906,16 +3302,14 @@ export function registerConversationTurnTransactionContractSuite(
         createdAt: CREATED_AT,
         attachments: [createTextAttachment(1, "notes.md")]
       })
+      const message = createUserMessage(11, "Second", [
+        createTextAttachment(1, "other.md")
+      ])
 
       expect(() =>
         harness.turnRecordWriter.handleConversationTurnWriteRequest(
           (transaction) => {
-            transaction.createUserMessage(
-              CONVERSATION_ID,
-              createUserMessage(11, "Second", [
-                createTextAttachment(1, "other.md")
-              ])
-            )
+            transaction.createUserMessage(CONVERSATION_ID, message)
           }
         )
       ).toThrow()
@@ -1974,10 +3368,15 @@ export function registerConversationTurnTransactionContractSuite(
         id: CONVERSATION_ID,
         title: "Trip plan",
         agentCode: "stored-agent",
+        kind: "main",
+        parentConversationId: null,
+        jobNumber: null,
+        delegatorAgentCode: null,
         createdAt: CREATED_AT,
         updatedAt: CREATED_AT,
         messages: [],
-        sources: []
+        sources: [],
+        jobs: []
       })
     })
 
@@ -1985,13 +3384,10 @@ export function registerConversationTurnTransactionContractSuite(
       {
         role: "user",
         createMessage: (transaction: ConversationTurnTransaction) => {
-          transaction.createUserMessage(CONVERSATION_ID, {
-            id: createFixtureUuidV7(10),
-            role: "user",
-            content: "Hello",
-            attachments: [],
-            createdAt: CHANGED_AT
-          })
+          transaction.createUserMessage(
+            CONVERSATION_ID,
+            createNewUserMessage(10, "Hello")
+          )
         }
       },
       {
@@ -2043,13 +3439,10 @@ export function registerConversationTurnTransactionContractSuite(
 
       harness.turnRecordWriter.handleConversationTurnWriteRequest(
         (transaction) => {
-          transaction.createUserMessage(CONVERSATION_ID, {
-            id: createFixtureUuidV7(10),
-            role: "user",
-            content: "Hello",
-            attachments: [],
-            createdAt: CHANGED_AT
-          })
+          transaction.createUserMessage(
+            CONVERSATION_ID,
+            createNewUserMessage(10, "Hello")
+          )
         }
       )
 
@@ -2083,6 +3476,8 @@ export function registerConversationTurnTransactionContractSuite(
         role: "user",
         content: "Hello",
         attachments: [],
+        origin: "person",
+        reports: [],
         createdAt: CHANGED_AT
       } as const
       const assistantMessage = {
@@ -2193,6 +3588,9 @@ export function registerConversationTurnTransactionContractSuite(
         updatedAt: "2025-01-01T00:00:01.000Z"
       })
     })
+
+    registerJobCreationCases(createHarness)
+    registerMessageAuthorCases(createHarness)
   })
 }
 

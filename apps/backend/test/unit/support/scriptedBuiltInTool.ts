@@ -11,7 +11,8 @@ import type {
  * Work one run of a {@link ScriptedBuiltInTool} does.
  *
  * @param word - Word the call asked about.
- * @param context - The run's cancellation and source numbering.
+ * @param context - The run's call identity, cancellation, and source
+ * numbering.
  * @returns What the model reads.
  * @throws Whatever the script throws, such as the abort reason.
  */
@@ -156,7 +157,8 @@ export class ScriptedBuiltInTool implements BuiltInTool {
    * Runs one look-up.
    *
    * @param word - Word to look up.
-   * @param context - The run's cancellation and source numbering.
+   * @param context - The run's call identity, cancellation, and source
+   * numbering.
    * @returns The script's result.
    * @throws The abort reason when already stopped, or the script's failure.
    */

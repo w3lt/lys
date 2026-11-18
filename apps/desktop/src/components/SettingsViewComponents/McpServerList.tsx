@@ -27,7 +27,7 @@ import {
   McpServerDetails,
   type ConnectedMcpServerState
 } from "./McpServerDetails"
-import { isDocumentFocusLost } from "./focus-target"
+import { isDocumentFocusLost } from "@/components/focus-target"
 import {
   buildMcpListedServerKey,
   canAddMcpServer,

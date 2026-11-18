@@ -13,10 +13,21 @@ import type {
   ReplyToolCallChange
 } from "../agent/replyPartSequence"
 
-/** Conversation a turn starts or continues, selected by `kind`. */
+/**
+ * Conversation a turn starts or continues, and so who writes the turn's
+ * user message, selected by `kind`.
+ *
+ * @remarks Each kind is one pairing the turn allows: the person writes a
+ * new or an existing main conversation, the backend writes a wake-up
+ * message into an existing main conversation, and a delegator writes a new
+ * or an existing job, with the call that sends the job message. The turn
+ * refuses a job message that continues a main conversation; whoever
+ * continues a conversation as the person or as the backend makes sure it is
+ * a main conversation.
+ */
 export type ConversationTurnTarget =
   | Readonly<{
-      /** The turn creates a conversation. */
+      /** The person starts a main conversation. */
       kind: "new"
       /**
        * UUIDv7 the new conversation is stored under, made by the caller
@@ -27,13 +38,64 @@ export type ConversationTurnTarget =
       agentCode: string
     }>
   | Readonly<{
-      /** The turn continues a stored conversation, which keeps its agent. */
+      /**
+       * The person continues a stored main conversation, which keeps its
+       * agent.
+       */
       kind: "existing"
       /** UUIDv7 of the stored conversation. */
       id: string
     }>
+  | Readonly<{
+      /**
+       * The backend continues a stored main conversation with a wake-up
+       * message, so its agent reads the reports of its jobs.
+       */
+      kind: "wake-up"
+      /** UUIDv7 of the stored conversation. */
+      id: string
+    }>
+  | Readonly<{
+      /** A delegator starts a job: its first job message starts it. */
+      kind: "new-job"
+      /** UUIDv7 the new job is stored under, made by the caller. */
+      id: string
+      /** Valid code of the agent that works on the job. */
+      agentCode: string
+      /**
+       * UUIDv7 of the stored conversation the job is started from. Its agent
+       * is the job's delegator.
+       */
+      parentConversationId: string
+      /** Non-empty title of the job message, which becomes the job's title. */
+      title: string
+      /**
+       * UUIDv7 of the stored `delegate_work` call, in the job's parent, that
+       * sends the job message.
+       */
+      jobCallId: string
+    }>
+  | Readonly<{
+      /**
+       * A delegator continues a stored job with a later job message. The job
+       * keeps its agent, its parent, and its number.
+       */
+      kind: "existing-job"
+      /** UUIDv7 of the stored job: its conversation. */
+      id: string
+      /** Non-empty title of the job message, which replaces the job's title. */
+      title: string
+      /**
+       * UUIDv7 of the stored `delegate_work` call, in the job's parent, that
+       * sends the job message.
+       */
+      jobCallId: string
+    }>
 
-/** The user message of a turn before it is stored. */
+/**
+ * The user message of a turn before it is stored; the turn's target says
+ * who writes it.
+ */
 export type ConversationTurnUserMessage = Readonly<{
   /**
    * UUIDv7 the message is stored under, made by the caller before the
@@ -51,7 +113,10 @@ export type ConversationTurnUserMessage = Readonly<{
 
 /** Inputs for atomically creating one persisted user/assistant pair. */
 export type CreateConversationTurnOptions = Readonly<{
-  /** Conversation the turn starts or continues. */
+  /**
+   * Conversation the turn starts or continues, which says who writes the
+   * user message.
+   */
   conversation: ConversationTurnTarget
   /** User message appended once to the transcript, with its attachments. */
   userMessage: ConversationTurnUserMessage
@@ -63,27 +128,40 @@ export type CreateConversationTurnOptions = Readonly<{
 
 /** Immutable turn identities plus an independent snapshot of the earlier transcript. */
 export type ConversationTurn = Readonly<{
-  /** Snapshot before this turn, including the code of its agent. */
+  /**
+   * Snapshot before this turn, including the code of its agent. A job this
+   * turn starts or continues carries the title of the turn's job message.
+   * Its sources include the ones the reports this turn delivered added, so
+   * the turn numbers its new sources after them.
+   */
   conversation: Conversation
-  /** User message committed with this turn, with its numbered attachments. */
+  /**
+   * User message committed with this turn, with its numbered attachments,
+   * who wrote it, and the reports this turn delivered with it, oldest first.
+   */
   userMessage: ConversationUserMessage
   /** Streaming reply without parts committed with this turn. */
   assistantMessage: ConversationAssistantMessage
-  /** Whether this operation created the conversation. */
+  /** Whether this operation created the conversation, a job included. */
   isNewConversation: boolean
 }>
 
 /** Synchronous turn writes borrowed until the backend store closes; no cleanup authority. */
 export interface ConversationTurnWriter {
   /**
-   * Atomically creates a complete user/assistant pair and any new parent conversation.
+   * Atomically creates a complete user/assistant pair, with the conversation
+   * or the job the turn starts.
    * @param options - Conversation selection and validated message inputs.
    * @returns Independent prior transcript and newly committed pair.
-   * @throws If the target is absent, validation fails, or persistence is closed/unavailable; no partial turn remains.
+   * @throws If the target or a new job's parent is absent, a job message
+   * continues a conversation that is not a job, validation fails, or
+   * persistence is closed/unavailable; no partial turn remains.
    * @remarks The new turn supersedes a reply still streaming in the same
    * conversation: that reply becomes interrupted with its stored parts kept
    * and its waiting and running calls interrupted, and later writes for it
-   * return false.
+   * return false. Every report of the conversation's jobs that is not
+   * delivered yet is delivered with the turn's user message, in the same
+   * write.
    */
   createConversationTurn(
     options: CreateConversationTurnOptions
@@ -120,7 +198,7 @@ export interface GeneratedConversationTitleWriter {
 
 /**
  * Stores the parts of a streaming reply before they are sent to its
- * followers, for the chat route that lends them to the reply's agent.
+ * followers, for the turn start that lends them to the reply's agent.
  *
  * @remarks Each call reads the current time once and stores it with the part
  * or change. A reply that is finalized, superseded, or deleted refuses every

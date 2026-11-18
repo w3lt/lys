@@ -19,13 +19,15 @@ const getConversationApiResponseSchemas = Object.freeze({
  * Describes the GET endpoint that reads one stored conversation with its
  * complete transcript.
  *
- * @remarks A 200 response contains the persisted conversation, including its
- * system prompt and every message in persisted order. An assistant message may
- * still report `streaming` when its generation has not been finalized; the
- * response observes stored state and does not attach the reader to that
- * generation. A missing conversation returns the conversation-not-found
- * problem with HTTP 404. Changing the method, path, or schemas requires
- * coordinated consumers.
+ * @remarks A 200 response contains the persisted conversation with every
+ * message in persisted order. The endpoint reads a job like a main
+ * conversation: a job carries its parent, its number in that parent, and the
+ * agent of the parent as its delegator, and a main conversation lists the
+ * jobs started from it. An assistant message may still report `streaming`
+ * when its generation has not been finalized; the response observes stored
+ * state and does not attach the reader to that generation. A missing
+ * conversation returns the conversation-not-found problem with HTTP 404.
+ * Changing the method, path, or schemas requires coordinated consumers.
  */
 export const getConversationApi = Object.freeze({
   method: "GET",

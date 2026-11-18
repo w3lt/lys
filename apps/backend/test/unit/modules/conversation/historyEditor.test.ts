@@ -42,6 +42,10 @@ describe("StoredConversationHistoryEditor", () => {
         id: turn.conversation.id,
         title: "Greeting",
         agentCode: "lys",
+        kind: "main",
+        parentConversationId: null,
+        jobNumber: null,
+        delegatorAgentCode: null,
         createdAt: before?.createdAt,
         updatedAt: before?.updatedAt
       })

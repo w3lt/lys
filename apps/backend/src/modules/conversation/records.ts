@@ -3,7 +3,9 @@ import type {
   Conversation,
   ConversationAssistantMessage,
   ConversationMetadata,
+  ConversationSource,
   ConversationUserMessage,
+  JobReport,
   ReplyPart,
   ToolCallReplyPart
 } from "@lys/share"
@@ -22,12 +24,12 @@ export type ConversationListBoundary = Readonly<{
   id: string
 }>
 
-/** Selection of one page of conversation summaries. */
+/** Selection of one page of main conversation summaries. */
 export type ListConversationsInput = Readonly<{
   /**
    * Normalized search text matched case-insensitively against titles, the
-   * person's messages, and each text part of a reply, but not reasoning or
-   * tool calls; empty matches every conversation.
+   * person's messages, and each text part of a reply, but not reasoning,
+   * tool calls, or wake-up messages; empty matches every main conversation.
    */
   query: string
   /** Last conversation of the previous page; undefined for the first page. */
@@ -39,20 +41,47 @@ export type ListConversationsInput = Readonly<{
   limit: number
 }>
 
-/** One page of conversation summaries read from one consistent snapshot. */
+/**
+ * One page of main conversation summaries read from one consistent snapshot.
+ * A job is neither listed nor counted.
+ */
 export type ConversationPage = Readonly<{
   /**
-   * Matching conversations after the boundary, newest activity first and
-   * then by descending identity, at most the requested limit.
+   * Matching main conversations after the boundary, newest activity first
+   * and then by descending identity, at most the requested limit.
    */
   conversations: readonly ConversationSummary[]
-  /** Number of stored conversations, independent of the query. */
+  /** Number of stored main conversations, independent of the query. */
   storedCount: number
-  /** Number of stored conversations matching the query. */
+  /** Number of stored main conversations matching the query. */
   matchCount: number
   /** Whether a matching conversation follows the last one on this page. */
   hasMore: boolean
 }>
+
+/** Who wrote a user message that is not stored yet, selected by `origin`. */
+export type NewUserMessageAuthor =
+  | Readonly<{
+      /** The person wrote the message, in a chat request. */
+      origin: "person"
+    }>
+  | Readonly<{
+      /** The backend wrote a wake-up message. */
+      origin: "wake-up"
+    }>
+  | Readonly<{
+      /** A delegator wrote a job message. */
+      origin: "delegator"
+      /** UUIDv7 of the stored `delegate_work` call that sends the message. */
+      jobCallId: string
+    }>
+
+/**
+ * A user message to append, as the variant its origin selects: a job
+ * message carries the call that sends it, and no other message has one.
+ */
+export type NewUserMessage = Readonly<ConversationUserMessage> &
+  NewUserMessageAuthor
 
 /** One new part for a reply that is still streaming. */
 export type CreateReplyPartInput = Readonly<{
@@ -116,15 +145,49 @@ export type UpdateAssistantMessageStateInput = Readonly<{
 export type SynchronousConversationTurnResult<Result> =
   Result extends PromiseLike<unknown> ? never : Result
 
+/** One report to deliver with the user message of a turn. */
+export type JobReportDelivery = Readonly<{
+  /** UUIDv7 of a stored report that is not delivered yet. */
+  reportId: string
+  /**
+   * UUIDv7 of the stored user message of the turn that delivers the report,
+   * in the conversation the report's job was started from.
+   */
+  messageId: string
+  /**
+   * Text the delegator reads, stored in place of the report's text;
+   * non-empty for a note and for a `failed` report, and empty for a
+   * `stopped` and for an `interrupted` report.
+   */
+  content: string
+  /**
+   * Numbers of the sources of the delegator's conversation the text cites,
+   * ascending; empty when it cites none, and always for a `stopped` and for
+   * an `interrupted` report.
+   */
+  sourceNumbers: readonly number[]
+}>
+
+/**
+ * The records one turn operation is lent, over the same write transaction.
+ */
+export type ConversationTurnRecords = Readonly<{
+  /** Reads and writes of the turn's conversation and its messages. */
+  turn: ConversationTurnTransaction
+  /** What storing the turn changes about jobs. */
+  jobs: JobTurnTransaction
+}>
+
 /**
  * Turn-creation work run inside one write transaction.
  *
  * @typeParam Result - Value returned once the transaction commits.
- * @remarks The transaction is lent for this call only and refuses every call
- * once the operation returns.
+ * @remarks The transaction and the job records are lent for this call only,
+ * over the same write, and refuse every call once the operation returns.
  */
 export type ConversationTurnOperation<Result> = (
-  transaction: ConversationTurnTransaction
+  transaction: ConversationTurnTransaction,
+  jobs: JobTurnTransaction
 ) => SynchronousConversationTurnResult<Result>
 
 /**
@@ -153,12 +216,29 @@ export interface ConversationRecordReader {
    */
   findConversation(conversationId: string): Conversation | undefined
   /**
-   * Reads one page of conversation summaries and both counts.
+   * Reads one conversation's metadata without its transcript.
+   *
+   * @param conversationId - UUIDv7 to look up.
+   * @returns The metadata of a main conversation or of a job, which carries
+   * its parent, its number, and its delegator; or undefined when the
+   * conversation is not stored. Its messages, sources, and jobs are not
+   * read, so a conversation whose transcript violates the conversation
+   * contract is still read.
+   * @throws If the store is closed or the stored metadata violates the
+   * metadata contract; the records stay usable.
+   */
+  findConversationMetadata(
+    conversationId: string
+  ): ConversationMetadata | undefined
+  /**
+   * Reads one page of main conversation summaries and both counts; a job
+   * is neither listed nor counted.
    *
    * @param input - Search text, page boundary, and page size.
-   * @returns The page; each summary previews its latest matching user
-   * message or reply text part, or its latest one when only the title
-   * matches; reasoning and tool calls are never previewed.
+   * @returns The page; each summary previews its latest matching message of
+   * the person or reply text part, or its latest one when only the title
+   * matches; reasoning, tool calls, and wake-up messages are never
+   * previewed.
    * @throws If the store is closed or a stored value violates the summary
    * contract; the records stay usable.
    */
@@ -196,7 +276,8 @@ export interface ConversationRecordEditor {
     title: string
   ): ConversationMetadata | undefined
   /**
-   * Permanently deletes a conversation and every message in it.
+   * Permanently deletes a conversation and every message in it, and with it
+   * every job started from it and the jobs' reports.
    *
    * @param conversationId - UUIDv7 to delete.
    * @returns True when it was stored; false when it was already absent.
@@ -226,8 +307,8 @@ export interface ConversationTurnRecordWriter {
    * Runs turn-creation work in one write transaction.
    *
    * @typeParam Result - Value produced by the operation.
-   * @param operation - Synchronous work; its transaction is valid for this
-   * call only.
+   * @param operation - Synchronous work; the transaction and the job records
+   * it is lent are valid for this call only.
    * @returns The operation's result after everything it wrote is committed.
    * @throws The operation's or the commit's failure, after everything the
    * operation wrote is rolled back.
@@ -244,15 +325,24 @@ export interface ConversationTurnRecordWriter {
     operation: ConversationTurnOperation<Result>
   ): Result
   /**
-   * Marks every reply still streaming, in every conversation, as interrupted.
+   * Stores an `interrupted` report for each reply of a job that is still
+   * streaming, then marks every reply still streaming, in every
+   * conversation, as interrupted.
    *
-   * @param updatedAt - Message timestamp stored on each interrupted reply.
-   * @remarks Keeps each reply's parts, has no finish reason, and changes no
+   * @param updatedAt - Message timestamp stored on each interrupted reply,
+   * and the time each report is written at.
+   * @remarks Each report has a new UUIDv7 identity, carries its job's title,
+   * has no text and no cited source, and waits to be delivered to the job's
+   * delegator. A reply that already has an end report keeps it and gets no
+   * second one, and a reply of a main conversation gets no report. Each
+   * reply keeps its parts, has no finish reason, and changes no
    * conversation's activity time. Each such reply's tool calls still waiting
    * for approval or running become interrupted too, keeping their
    * `updatedAt`: the reply stopped working when the earlier process ended,
-   * not now. Repeating the call changes nothing more.
-   * @throws If the store is closed or the write fails.
+   * not now. The reports and the marks are written together. Repeating the
+   * call changes nothing more and stores no second report.
+   * @throws If the store is closed, a stored reply of a job or its job
+   * violates its contract, or the write fails.
    */
   updateAllStreamingAssistantMessagesToInterrupted(updatedAt: string): void
   /**
@@ -439,12 +529,16 @@ export interface ConversationTurnTransaction {
     updatedAt: string
   ): void
   /**
-   * Stores a new conversation exactly as given.
+   * Stores a new conversation exactly as given: a main conversation, or a
+   * job with its parent and its number.
    *
-   * @param metadata - Valid metadata whose identity is not stored yet.
+   * @param metadata - Valid metadata whose identity is not stored yet. A job
+   * names a stored parent, a number no job of that parent has, and a title.
+   * Its delegator's code is not stored: reads take it from the parent.
    * @throws If the transaction has ended or the write fails.
-   * @throws The store's own error when the identity is already stored, which
-   * breaks the precondition.
+   * @throws The store's own error when the identity is already stored, or
+   * when a job's parent is not stored, its number is one a job of that parent
+   * has, or it has no title, each of which breaks the precondition.
    */
   createConversation(metadata: ConversationMetadata): void
   /**
@@ -459,24 +553,25 @@ export interface ConversationTurnTransaction {
    */
   findConversation(conversationId: string): Conversation | undefined
   /**
-   * Appends a user message exactly as given, with its attachments.
+   * Appends a user message exactly as given, with its attachments and who
+   * wrote it.
    *
    * @param conversationId - UUIDv7 of a stored conversation.
-   * @param message - Valid message whose identity is not stored yet; its
-   * attachments carry numbers the conversation does not store yet.
+   * @param message - Valid message whose identity is not stored yet, with
+   * the call that sends it when it is a job message; its attachments carry
+   * numbers the conversation does not store yet. Its reports are not stored
+   * by this call: {@link JobTurnTransaction.updateJobReportToDelivered}
+   * delivers a report with a stored message.
    * @throws If the transaction has ended or the write fails.
    * @throws The store's own error when the conversation is not stored, the
-   * message's identity is, or an attachment's number is stored for the
-   * conversation already, which breaks the precondition.
+   * message's identity is, the call is not stored, or an attachment's number
+   * is stored for the conversation already, which breaks the precondition.
    * @remarks Moves the conversation's activity time forward: to the message's
    * time when that is later than the stored activity time, and otherwise to a
    * later time the store chooses. Each attachment is stored under the
    * message, and is read back with it by `findConversation`.
    */
-  createUserMessage(
-    conversationId: string,
-    message: ConversationUserMessage
-  ): void
+  createUserMessage(conversationId: string, message: NewUserMessage): void
   /**
    * Appends an assistant message exactly as given, including its state.
    *
@@ -492,5 +587,79 @@ export interface ConversationTurnTransaction {
   createAssistantMessage(
     conversationId: string,
     message: ConversationAssistantMessage
+  ): void
+}
+
+/**
+ * Reads and writes what storing one turn changes about jobs, inside the
+ * write transaction lent to a {@link ConversationTurnOperation}: the title
+ * of a continued job, the delivery of the reports that wait for the turn's
+ * conversation, and the sources those reports add to it.
+ *
+ * @remarks Every change is part of the enclosing transaction: it commits only
+ * when the operation returns and is rolled back when it throws. No call
+ * changes the activity time of a conversation. Valid only while that
+ * operation runs; afterwards every call fails with
+ * `Database operation has ended`, or with `Database is closed` once the store
+ * is closed, and changes nothing. Concurrency model: single-owner, confined
+ * to the running operation.
+ */
+export interface JobTurnTransaction {
+  /**
+   * Replaces a job's title with the title of the job message that continues
+   * it, and keeps everything else of the job.
+   *
+   * @param jobId - UUIDv7 of the job: its conversation. A main conversation
+   * and an identity that is not stored are left as they are.
+   * @param title - Non-empty title, stored as given.
+   * @throws If the transaction has ended or the write fails.
+   * @throws The store's own error when the title is empty, which breaks the
+   * precondition; the stored title is then kept.
+   */
+  updateJobTitle(jobId: string, title: string): void
+  /**
+   * Lists the reports of a conversation's jobs that are not delivered yet,
+   * of every kind, including this transaction's writes.
+   *
+   * @param parentConversationId - UUIDv7 of the conversation the jobs were
+   * started from.
+   * @returns The reports, oldest first and then by identity, each with the
+   * number and the agent of its job; none when the conversation has no jobs
+   * or is not stored.
+   * @throws If the transaction has ended or a stored report violates the
+   * report contract.
+   */
+  listUndeliveredJobReports(parentConversationId: string): readonly JobReport[]
+  /**
+   * Marks one report as delivered with a message, and stores the text and
+   * the source numbers its delegator reads.
+   *
+   * @param delivery - The report, the delivering message, and what the
+   * delegator reads.
+   * @throws If the transaction has ended or the write fails.
+   * @throws `Job report is not waiting for delivery` when the report is not
+   * stored or is already delivered; nothing is then changed, so a report is
+   * delivered once.
+   * @throws The store's own error when the message is not stored, the text
+   * of a note or of a `failed` report is empty, or a `stopped` or an
+   * `interrupted` report is given a text or a source number, each of which
+   * breaks the precondition; the report then stays undelivered.
+   */
+  updateJobReportToDelivered(delivery: JobReportDelivery): void
+  /**
+   * Stores one source of a conversation, which then reads it among its
+   * sources.
+   *
+   * @param conversationId - UUIDv7 of a stored conversation.
+   * @param source - Valid source under a number none of the conversation's
+   * sources has, for a URL none of them has.
+   * @throws If the transaction has ended or the write fails.
+   * @throws The store's own error when the conversation is not stored, or one
+   * of its sources has the number or the URL, each of which breaks the
+   * precondition; its sources are then kept as they are.
+   */
+  createConversationSource(
+    conversationId: string,
+    source: ConversationSource
   ): void
 }

@@ -8,11 +8,13 @@ import {
   buildComposerModelState,
   calculateComposerActivity,
   calculateLocalRuntimeConnection,
+  calculateWorkingJobCount,
   findComposerBannerAction,
   formatComposerActivity,
   formatComposerModelLabel,
   formatComposerPlaceholder,
   formatUnavailableRuntimeMessage,
+  formatWorkingJobs,
   listComposerModelGroups,
   type ComposerActivity,
   type ComposerModelState,
@@ -29,6 +31,10 @@ import type {
   ModelInventoryState
 } from "@/lib/store/model-runtime"
 import type { SecretsSettings } from "@/lib/store/settings"
+import {
+  buildJob,
+  createFixtureUuidV7
+} from "../../support/conversationFixtures"
 import { buildLlmInfo } from "../../support/modelFixtures"
 import { buildComposerRuntime } from "../../support/providerModelFixtures"
 import {
@@ -151,12 +157,6 @@ const NO_GROQ_KEY: SecretsSettings = Object.freeze({
   groqApiKey: null
 })
 
-/** Caliginia while the agent list is unread, known only by her code. */
-const UNREAD_AGENT: ConversationAgent = {
-  status: "unread",
-  code: CALIGINIA_AGENT_CODE
-}
-
 /** A stored agent the read agent list no longer holds. */
 const DELETED_AGENT: ConversationAgent = {
   status: "deleted",
@@ -231,7 +231,12 @@ function describeBanner(state: ComposerModelState) {
       backendAddress: BACKEND_ADDRESS
     }),
     action: findComposerBannerAction(state).label,
-    placeholder: formatComposerPlaceholder(state, "idle", LYSIPTERA)
+    placeholder: formatComposerPlaceholder({
+      state,
+      activity: "idle",
+      agent: LYSIPTERA,
+      isJob: false
+    })
   }
 }
 
@@ -959,31 +964,68 @@ describe("formatComposerPlaceholder", () => {
   ])(
     "reads $connection/$activity with a listed agent as $placeholder",
     ({ state, activity, placeholder }) => {
-      expect(formatComposerPlaceholder(state, activity, LYSIPTERA)).toBe(
-        placeholder
-      )
+      expect(
+        formatComposerPlaceholder({
+          state,
+          activity,
+          agent: LYSIPTERA,
+          isJob: false
+        })
+      ).toBe(placeholder)
     }
   )
 
   it("waits on a model when there is none and no provider is named", () => {
     expect(
-      formatComposerPlaceholder(
-        buildModelState({ model: null, availability: null, provider: null }),
-        "idle",
-        LYSIPTERA
-      )
+      formatComposerPlaceholder({
+        state: buildModelState({
+          model: null,
+          availability: null,
+          provider: null
+        }),
+        activity: "idle",
+        agent: LYSIPTERA,
+        isJob: false
+      })
     ).toBe("Waiting on a model…")
   })
 
   it("invites the agent by its code while the agent list is unread", () => {
+    // Caliginia, known only by her code.
+    const unreadAgent: ConversationAgent = {
+      status: "unread",
+      code: CALIGINIA_AGENT_CODE
+    }
+
     expect(
-      formatComposerPlaceholder(buildModelState(), "idle", UNREAD_AGENT)
+      formatComposerPlaceholder({
+        state: buildModelState(),
+        activity: "idle",
+        agent: unreadAgent,
+        isJob: false
+      })
     ).toBe("Say something to caliginia")
   })
 
   it("says a conversation whose agent was deleted is read-only", () => {
     expect(
-      formatComposerPlaceholder(buildModelState(), "idle", DELETED_AGENT)
+      formatComposerPlaceholder({
+        state: buildModelState(),
+        activity: "idle",
+        agent: DELETED_AGENT,
+        isJob: false
+      })
+    ).toBe("This conversation is read-only.")
+  })
+
+  it("says a job is read-only", () => {
+    expect(
+      formatComposerPlaceholder({
+        state: buildModelState(),
+        activity: "idle",
+        agent: LYSIPTERA,
+        isJob: true
+      })
     ).toBe("This conversation is read-only.")
   })
 
@@ -1006,11 +1048,27 @@ describe("formatComposerPlaceholder", () => {
   ])(
     "names what it waits on while %s, before a deleted agent",
     (_connection, state, placeholder) => {
-      expect(formatComposerPlaceholder(state, "idle", DELETED_AGENT)).toBe(
-        placeholder
-      )
+      expect(
+        formatComposerPlaceholder({
+          state,
+          activity: "idle",
+          agent: DELETED_AGENT,
+          isJob: false
+        })
+      ).toBe(placeholder)
     }
   )
+
+  it("names a lost connection first in a job too", () => {
+    expect(
+      formatComposerPlaceholder({
+        state: buildModelState({ backendStatus: "stopped" }),
+        activity: "idle",
+        agent: LYSIPTERA,
+        isJob: true
+      })
+    ).toBe("Waiting on the backend…")
+  })
 })
 
 describe("formatComposerActivity", () => {
@@ -1020,6 +1078,36 @@ describe("formatComposerActivity", () => {
     ["opening-conversation", "Opening…"]
   ] as const)("shows %s as %j", (activity, label) => {
     expect(formatComposerActivity(activity)).toBe(label)
+  })
+})
+
+describe("calculateWorkingJobCount", () => {
+  it("counts only the jobs whose latest reply streams", () => {
+    const jobs = [
+      buildJob({ state: "working" }),
+      buildJob({ id: createFixtureUuidV7(81), number: 2, state: "replied" }),
+      buildJob({ id: createFixtureUuidV7(82), number: 3, state: "failed" }),
+      buildJob({ id: createFixtureUuidV7(83), number: 4, state: "stopped" }),
+      buildJob({
+        id: createFixtureUuidV7(84),
+        number: 5,
+        state: "interrupted"
+      }),
+      buildJob({ id: createFixtureUuidV7(85), number: 6, state: "working" })
+    ]
+
+    expect(calculateWorkingJobCount(jobs)).toBe(2)
+  })
+
+  it("counts none for a conversation without jobs", () => {
+    expect(calculateWorkingJobCount([])).toBe(0)
+  })
+})
+
+describe("formatWorkingJobs", () => {
+  it("says one working job in the singular and more in the plural", () => {
+    expect(formatWorkingJobs(1)).toBe("1 job is working")
+    expect(formatWorkingJobs(3)).toBe("3 jobs are working")
   })
 })
 

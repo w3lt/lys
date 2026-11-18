@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useAnsweringAgent } from "@/lib/hooks/answeringAgent"
 import { useChatContextMeasurement } from "@/lib/hooks/chatContextMeasurement"
 import { useConversationModel } from "@/lib/hooks/conversationModel"
+import { useDelegatorName } from "@/lib/hooks/delegatorName"
 import { useLysStore } from "@/lib/store"
 import { useAgentStore } from "@/lib/store/agents"
 import {
@@ -22,6 +23,7 @@ import {
   type ConversationAgent
 } from "@/lib/store/agents/conversation-agent"
 import { useChatViewStore } from "@/lib/store/chat-view"
+import type { ChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import { calculateStagedImageTokens } from "@/lib/store/chat-view/attachments"
 import { useConversationHistoryStore } from "@/lib/store/conversation-history"
 import { findShownToolCall, useToolCallStore } from "@/lib/store/tool-calls"
@@ -30,6 +32,8 @@ import ComposerAgentMenu from "./ComposerComponents/ComposerAgentMenu"
 import ComposerAttachmentTray from "./ComposerComponents/ComposerAttachmentTray"
 import ComposerContextMeter from "./ComposerComponents/ComposerContextMeter"
 import ComposerDeletedAgentNotice from "./ComposerComponents/ComposerDeletedAgentNotice"
+import ComposerJobNotice from "./ComposerComponents/ComposerJobNotice"
+import ComposerJobsBar from "./ComposerComponents/ComposerJobsBar"
 import ComposerModelMenu from "./ComposerComponents/ComposerModelMenu"
 import ComposerOfflineBanner from "./ComposerComponents/ComposerOfflineBanner"
 import ComposerPlusMenu from "./ComposerComponents/ComposerPlusMenu"
@@ -42,6 +46,7 @@ import {
   buildComposerModelState,
   calculateComposerActivity,
   calculateLocalRuntimeConnection,
+  calculateWorkingJobCount,
   findComposerBannerAction,
   formatComposerActivity,
   formatComposerModelLabel,
@@ -62,7 +67,9 @@ export type ComposerProps = {
    * Parent-owned ref attached to the message field.
    *
    * @remarks The parent uses it only to move focus into the field after the
-   * user opens or starts a conversation.
+   * user opens or starts a conversation; the job notice and the jobs bar
+   * use it to move focus into the field after their Back or Stop all leaves
+   * with focus, unless the field is off.
    */
   readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
   /**
@@ -70,6 +77,17 @@ export type ComposerProps = {
    * message field once that conversation is shown.
    */
   readonly onStartConversation: () => void
+  /**
+   * Requests that the parent open a conversation, by its identity: a job's
+   * parent, from the job's notice.
+   */
+  readonly onOpenConversation: (conversationId: string) => void
+  /**
+   * Identity of the job the person last opened from its card, or undefined
+   * while they opened none; the job notice's Back takes focus as it appears
+   * for that job.
+   */
+  readonly jobOpenedFromCardId: string | undefined
 }
 
 /** The conversation's model as the composer shows it. */
@@ -96,7 +114,8 @@ type ComposerContextView = {
 type ShownToolCallAnswers = {
   /**
    * Rejects the waiting call with the draft as the person's reason, and
-   * clears the draft.
+   * clears the draft; in a job, rejects it without a reason and keeps the
+   * draft.
    *
    * @param callId - Call that waits for the person.
    */
@@ -158,6 +177,61 @@ function useComposerModel(): ComposerModelView {
     state,
     isUnavailable: calculateLocalRuntimeConnection(state) !== "ready",
     groups: listComposerModelGroups(runtime)
+  }
+}
+
+/** A job as the chat-view store shows it. */
+type ShownJob = Extract<ChatViewConversation, { kind: "job" }>
+
+/**
+ * Observes whether the chat view shows a job.
+ *
+ * @returns The shown conversation while it is a job, otherwise undefined;
+ * the same object until the chat-view store replaces the conversation.
+ * @remarks The chat-view store owns the shown conversation; the hook only
+ * reads it.
+ */
+function useShownJob(): ShownJob | undefined {
+  return useChatViewStore((state) =>
+    state.conversation?.kind === "job" ? state.conversation : undefined
+  )
+}
+
+/** What the composer's jobs bar shows, and how it stops the jobs. */
+type JobsBar = Readonly<{
+  /**
+   * Number of the shown conversation's jobs that work, while the bar is
+   * shown; 0 while it is hidden.
+   */
+  workingJobCount: number
+  /**
+   * Asks the chat-view store to stop every working job of the shown
+   * conversation, and returns at once; the store records a failed stop as
+   * an inline error, and the jobs' new states arrive as job updates.
+   */
+  stopJobs: () => void
+}>
+
+/**
+ * Selects what the composer's jobs bar shows.
+ *
+ * @param isActivityIdle - Whether no reply is awaited and no past
+ * conversation is opening; read reactively.
+ * @returns The number of working jobs of the shown main conversation while
+ * the composer is idle, else 0, recalculated on every render; and the stop
+ * action, a new function on every render.
+ * @remarks The chat-view store owns the conversation, its jobs, and the
+ * stop. While a reply is awaited the bar is hidden, because Stop reply
+ * stops the turn; a job shows no bar, because jobs start no jobs.
+ */
+function useJobsBar(isActivityIdle: boolean): JobsBar {
+  const conversation = useChatViewStore((state) => state.conversation)
+  const stopJobs = useChatViewStore((state) => state.stopJobs)
+  const isShown = isActivityIdle && conversation?.kind === "main"
+
+  return {
+    workingJobCount: isShown ? calculateWorkingJobCount(conversation.jobs) : 0,
+    stopJobs: () => void stopJobs()
   }
 }
 
@@ -232,27 +306,33 @@ function useComposerContextMeter(isComposerIdle: boolean): ComposerContextView {
  *
  * @param messageFieldRef - Parent-owned host of the message field; read when
  * a dismissal moves focus.
+ * @param isJob - Reactive: whether the shown conversation is a job, whose
+ * field is off, so the draft was not written for the call.
  * @returns The rejection and the dismissal, each a new function on every
  * render that answers with the draft of that render.
  * @remarks The tool-call store owns the calls and sends the answers; the
- * chat-view store owns the draft, which a rejection clears at once without
- * waiting for the answer to be sent.
+ * chat-view store owns the draft, which a rejection outside a job clears at
+ * once without waiting for the answer to be sent.
  */
 function useShownToolCallAnswers(
-  messageFieldRef: RefObject<HTMLTextAreaElement | null>
+  messageFieldRef: RefObject<HTMLTextAreaElement | null>,
+  isJob: boolean
 ): ShownToolCallAnswers {
   const inputDraft = useChatViewStore((state) => state.inputDraft)
   const setInputDraft = useChatViewStore((state) => state.setInputDraft)
 
   /**
    * Rejects the waiting tool call with the draft as the person's reason, and
-   * clears the draft.
+   * clears the draft; in a job, rejects it without a reason and keeps the
+   * draft.
    *
    * @param callId - Call that waits for the person.
    */
   function rejectToolCall(callId: string): void {
-    void useToolCallStore.getState().rejectToolCall(callId, inputDraft)
-    setInputDraft("")
+    void useToolCallStore
+      .getState()
+      .rejectToolCall(callId, isJob ? "" : inputDraft)
+    if (!isJob) setInputDraft("")
   }
 
   /**
@@ -273,8 +353,9 @@ function useShownToolCallAnswers(
  * Tracks files dragged over the composer field and stages the files dropped
  * on it.
  *
- * @param isUnavailable - Reactive: whether the conversation's model cannot
- * answer; files are then neither marked nor staged.
+ * @param isDisabled - Reactive: whether the field is off, because the
+ * conversation's model cannot answer, its agent was deleted, or it is a
+ * job; files are then neither marked nor staged.
  * @returns Whether files are dragged over the field while they can be added,
  * and the field's drag handlers, each a new function on every render.
  * @remarks The hook owns whether a drag is over the field, reset by a drop or
@@ -282,7 +363,7 @@ function useShownToolCallAnswers(
  * dropped files. Every drag over the field and every drop prevents the
  * browser's default, so a dropped file is not opened.
  */
-function useComposerFileDrop(isUnavailable: boolean): ComposerFileDrop {
+function useComposerFileDrop(isDisabled: boolean): ComposerFileDrop {
   const addAttachments = useChatViewStore((state) => state.addAttachments)
   const [isDropping, setIsDropping] = useState(false)
 
@@ -293,7 +374,7 @@ function useComposerFileDrop(isUnavailable: boolean): ComposerFileDrop {
    */
   function handleDragOver(event: DragEvent<HTMLDivElement>): void {
     event.preventDefault()
-    if (isUnavailable || isDropping) return
+    if (isDisabled || isDropping) return
 
     setIsDropping(true)
   }
@@ -326,13 +407,13 @@ function useComposerFileDrop(isUnavailable: boolean): ComposerFileDrop {
   function handleDrop(event: DragEvent<HTMLDivElement>): void {
     event.preventDefault()
     setIsDropping(false)
-    if (isUnavailable) return
+    if (isDisabled) return
 
     void addAttachments(Array.from(event.dataTransfer.files))
   }
 
   return {
-    isDropping: isDropping && !isUnavailable,
+    isDropping: isDropping && !isDisabled,
     handleDragOver,
     handleDragLeave,
     handleDrop
@@ -411,6 +492,104 @@ function ComposerRecoveryBanner({
   )
 }
 
+/** Properties accepted by {@link ComposerNotices}. */
+type ComposerNoticesProps = {
+  /** The agent that answers the shown conversation. */
+  readonly agent: ConversationAgent
+  /** Whether the conversation's model cannot answer; its banner then shows. */
+  readonly isModelUnavailable: boolean
+  /**
+   * Whether no reply is awaited and no past conversation is opening; the
+   * jobs bar shows only then.
+   */
+  readonly isActivityIdle: boolean
+  /** Identity of the job the person last opened from its card, if any. */
+  readonly jobOpenedFromCardId: string | undefined
+  /**
+   * Host of the message field, which takes focus when Back or Stop all
+   * leaves with it and the field is on.
+   */
+  readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
+  /**
+   * Host of the session controls' New conversation button, which takes
+   * focus when Back or Stop all leaves with it and the message field is off.
+   */
+  readonly newConversationButtonRef: RefObject<HTMLButtonElement | null>
+  /**
+   * Requests that the parent open a conversation, by its identity: the
+   * shown job's parent.
+   */
+  readonly onOpenConversation: (conversationId: string) => void
+  /** Requests that the parent start a new conversation. */
+  readonly onStartConversation: () => void
+}
+
+/**
+ * States above the field why the person cannot write in the shown
+ * conversation, its agent was deleted or it is a job, and how many of its
+ * jobs work.
+ *
+ * @remarks The chat-view store owns the shown conversation, its jobs, and
+ * their stop, and the agent store the list the delegator is named from; the
+ * parent owns the requests and the message field. The deleted-agent notice
+ * shows while the model can answer and the conversation is not a job, whose
+ * notice stands in for it. The job notice names the agent that gave the job,
+ * and its Back asks the parent to open the job's parent; Back takes focus as
+ * it appears for the job the person opened from its card. The jobs bar shows
+ * while the activity is idle and jobs of the shown main conversation work,
+ * and its Stop all asks the store to stop them. Every notice stays rendered
+ * while hidden, so its status line exists before it speaks. When Back or
+ * Stop all leaves with focus, focus moves to the message field, or to New
+ * conversation while the field is off. The component owns no state.
+ * @param props - The agent, the model's unavailability, whether the activity
+ * is idle, the job last opened from its card, the hosts of the message field
+ * and of New conversation, and the parent's requests.
+ * @returns The deleted-agent notice, the job notice, and the jobs bar.
+ */
+function ComposerNotices({
+  agent,
+  isModelUnavailable,
+  isActivityIdle,
+  jobOpenedFromCardId,
+  messageFieldRef,
+  newConversationButtonRef,
+  onOpenConversation,
+  onStartConversation
+}: ComposerNoticesProps): ReactElement {
+  const job = useShownJob()
+  const isJob = job !== undefined
+  const delegatorName = useDelegatorName(job?.delegatorAgentCode ?? null)
+  const jobsBar = useJobsBar(isActivityIdle)
+
+  /** Asks the parent to open the shown job's parent conversation. */
+  function handleOpenParentConversation(): void {
+    if (job !== undefined) onOpenConversation(job.parentConversationId)
+  }
+
+  return (
+    <>
+      <ComposerDeletedAgentNotice
+        isShown={agent.status === "deleted" && !isJob && !isModelUnavailable}
+        onStartConversation={onStartConversation}
+      />
+      <ComposerJobNotice
+        delegatorName={delegatorName ?? ""}
+        isBackFocusedOnShow={isJob && job.id === jobOpenedFromCardId}
+        isShown={isJob}
+        messageFieldRef={messageFieldRef}
+        newConversationButtonRef={newConversationButtonRef}
+        onOpenParentConversation={handleOpenParentConversation}
+      />
+      <ComposerJobsBar
+        messageFieldRef={messageFieldRef}
+        newConversationButtonRef={newConversationButtonRef}
+        onStopJobs={jobsBar.stopJobs}
+        workingJobCount={jobsBar.workingJobCount}
+      />
+    </>
+  )
+}
+
 /**
  * Lists the files staged for the next message and says why the store
  * refused a file.
@@ -452,7 +631,7 @@ function ComposerStagedAttachments(): ReactElement {
 
 /** Properties accepted by {@link ComposerFileChooser}. */
 type ComposerFileChooserProps = {
-  /** Whether files cannot be chosen, while the model cannot answer. */
+  /** Whether files cannot be chosen, while the field is off. */
   readonly isDisabled: boolean
 }
 
@@ -515,7 +694,10 @@ type ComposerMessageInputProps = {
   readonly agentName: string
   /** Text shown while the draft is empty. */
   readonly placeholder: string
-  /** Whether the field is off: the model cannot answer or the agent was deleted. */
+  /**
+   * Whether the field is off: the model cannot answer, the agent was
+   * deleted, or the conversation is a job.
+   */
   readonly isDisabled: boolean
   /** Whether Enter cannot send the draft now. */
   readonly isSendDisabled: boolean
@@ -698,6 +880,8 @@ type ComposerFieldProps = {
   readonly modelState: ComposerModelState
   /** Whether the current measurement with the draft exceeds the window. */
   readonly isOverWindow: boolean
+  /** Whether the shown conversation is a job, which the person only reads. */
+  readonly isJob: boolean
   /** Parent-owned host the message field is attached to. */
   readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
   /**
@@ -715,13 +899,13 @@ type ComposerFieldProps = {
  *
  * @remarks The chat-view store owns the draft. The field owns whether a drag
  * is over it and whether its message field has focus, and marks both on its
- * host. The message field and the add menu are off while the model cannot
- * answer, and the message field also while the agent was deleted. Send needs
+ * host. The message field, the add menu, and file drops are off while the
+ * model cannot answer, while the agent was deleted, and in a job. Send needs
  * a draft that is not blank and, once measured, fits the window, and is off
- * while chat work runs or the field is off. Files dropped while the model
- * cannot answer are not staged.
+ * while chat work runs or the field is off.
  * @param props - The composer's activity, agent, model state, window
- * overflow, the message field's host, and the parent's rejection.
+ * overflow, whether the conversation is a job, the message field's host,
+ * and the parent's rejection.
  * @returns The composer field.
  */
 function ComposerField({
@@ -729,14 +913,15 @@ function ComposerField({
   agent,
   modelState,
   isOverWindow,
+  isJob,
   messageFieldRef,
   onRejectToolCall
 }: ComposerFieldProps): ReactElement {
   const inputDraft = useChatViewStore((state) => state.inputDraft)
   const isUnavailable = calculateLocalRuntimeConnection(modelState) !== "ready"
-  const drop = useComposerFileDrop(isUnavailable)
+  const isFieldDisabled = isUnavailable || agent.status === "deleted" || isJob
+  const drop = useComposerFileDrop(isFieldDisabled)
   const [isFocused, setIsFocused] = useState(false)
-  const isFieldDisabled = isUnavailable || agent.status === "deleted"
   const canSubmitDraft = inputDraft.trim().length > 0 && !isOverWindow
   const isSendDisabled =
     activity !== "idle" || isFieldDisabled || !canSubmitDraft
@@ -753,7 +938,7 @@ function ComposerField({
       <ComposerStagedAttachments />
 
       <div className="composer__row">
-        <ComposerFileChooser isDisabled={isUnavailable} />
+        <ComposerFileChooser isDisabled={isFieldDisabled} />
 
         <ComposerMessageInput
           agentName={formatConversationAgentName(agent)}
@@ -762,7 +947,12 @@ function ComposerField({
           messageFieldRef={messageFieldRef}
           onIsFocusedChange={setIsFocused}
           onRejectToolCall={onRejectToolCall}
-          placeholder={formatComposerPlaceholder(modelState, activity, agent)}
+          placeholder={formatComposerPlaceholder({
+            state: modelState,
+            activity,
+            agent,
+            isJob
+          })}
         />
 
         <ComposerSendButton
@@ -780,18 +970,89 @@ function ComposerField({
   )
 }
 
+/** Properties accepted by {@link ComposerEditor}. */
+type ComposerEditorProps = {
+  /** Chat work that keeps the composer from sending. */
+  readonly activity: ComposerActivity
+  /** The agent that answers the next message. */
+  readonly agent: ConversationAgent
+  /** What the composer knows of the conversation's model. */
+  readonly modelState: ComposerModelState
+  /** Whether the current measurement with the draft exceeds the window. */
+  readonly isOverWindow: boolean
+  /** Parent-owned host the message field is attached to. */
+  readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
+}
+
+/**
+ * Presents the tool-call prompt and the field below it, which share the
+ * answers to the shown call that use the draft.
+ *
+ * @remarks The chat-view store owns the shown conversation and the draft;
+ * the tool-call store owns the calls. In a job the field routes no keys, so
+ * the prompt names none, and a rejection carries no reason and keeps the
+ * draft. The component owns no state.
+ * @param props - The composer's activity, agent, model state, window
+ * overflow, and the message field's host.
+ * @returns The tool-call prompt and the composer field.
+ */
+function ComposerEditor({
+  activity,
+  agent,
+  modelState,
+  isOverWindow,
+  messageFieldRef
+}: ComposerEditorProps): ReactElement {
+  const isJob = useShownJob() !== undefined
+  const toolCallAnswers = useShownToolCallAnswers(messageFieldRef, isJob)
+
+  return (
+    <>
+      <ComposerToolCallPrompt
+        agentName={formatConversationAgentName(agent)}
+        hasKeyShortcuts={!isJob}
+        onDismissToolCall={toolCallAnswers.dismissToolCall}
+        onRejectToolCall={toolCallAnswers.rejectToolCall}
+      />
+
+      <ComposerField
+        activity={activity}
+        agent={agent}
+        isJob={isJob}
+        isOverWindow={isOverWindow}
+        messageFieldRef={messageFieldRef}
+        modelState={modelState}
+        onRejectToolCall={toolCallAnswers.rejectToolCall}
+      />
+    </>
+  )
+}
+
+/** Properties accepted by {@link ComposerNavigationButtons}. */
+type ComposerNavigationButtonsProps = {
+  /**
+   * Parent-owned host of the New conversation button, which takes focus
+   * when a notice's control leaves with it while the message field is off.
+   */
+  readonly newConversationButtonRef: RefObject<HTMLButtonElement | null>
+}
+
 /**
  * Offers a new conversation, past conversations, and the settings view.
  *
  * @remarks The chat-view store resets the conversation, the history store
  * owns whether past conversations are shown, and the application store owns
- * the active view; the component owns no state. The Past conversations
+ * the active view; the component owns no state. New conversation is always
+ * on, and the parent attaches its host to it. The Past conversations
  * button opens history, or closes it when open, exposes that state through
  * `aria-expanded`, and names its Command+K or Control+K shortcut. Each
  * button is named by hidden text beside its icon and titled for the pointer.
+ * @param props - The New conversation button's host.
  * @returns The New conversation, Past conversations, and Settings buttons.
  */
-function ComposerNavigationButtons(): ReactElement {
+function ComposerNavigationButtons({
+  newConversationButtonRef
+}: ComposerNavigationButtonsProps): ReactElement {
   const resetConversation = useChatViewStore((state) => state.resetConversation)
   const setActiveView = useLysStore((state) => state.setActiveView)
   const isHistoryOpen = useConversationHistoryStore(
@@ -818,6 +1079,7 @@ function ComposerNavigationButtons(): ReactElement {
     <>
       <Button
         onClick={resetConversation}
+        ref={newConversationButtonRef}
         size="icon-xs"
         title="New conversation"
         type="button"
@@ -873,6 +1135,11 @@ type ComposerSessionControlsProps = {
    * @param isOpen - Proposed state, shown once the parent passes it back.
    */
   readonly onIsModelMenuOpenChange: (isOpen: boolean) => void
+  /**
+   * Parent-owned host of the New conversation button, which takes focus
+   * when a notice's control leaves with it while the message field is off.
+   */
+  readonly newConversationButtonRef: RefObject<HTMLButtonElement | null>
 }
 
 /**
@@ -889,8 +1156,9 @@ type ComposerSessionControlsProps = {
  * open. Choosing a model picks it for the shown conversation only. Edit
  * agents opens the Agents pane, and the model menu's Open Providers the
  * Providers pane. The component owns no state.
- * @param props - The activity, agent, model state, menu groups, and the
- * model menu's open state with its proposal.
+ * @param props - The activity, agent, model state, menu groups, the model
+ * menu's open state with its proposal, and the New conversation button's
+ * host.
  * @returns The composer's session controls.
  */
 function ComposerSessionControls({
@@ -899,6 +1167,7 @@ function ComposerSessionControls({
   modelState,
   modelGroups,
   isModelMenuOpen,
+  newConversationButtonRef,
   onIsModelMenuOpenChange
 }: ComposerSessionControlsProps): ReactElement {
   const agentList = useAgentStore((state) => state.list)
@@ -913,7 +1182,9 @@ function ComposerSessionControls({
 
   return (
     <div className="composer__actions">
-      <ComposerNavigationButtons />
+      <ComposerNavigationButtons
+        newConversationButtonRef={newConversationButtonRef}
+      />
 
       <span aria-hidden="true" className="composer__divider" />
 
@@ -994,6 +1265,73 @@ function ComposerStatus({
   )
 }
 
+/** Properties accepted by {@link ComposerMeta}. */
+type ComposerMetaProps = {
+  /** Chat work that keeps the composer from sending. */
+  readonly activity: ComposerActivity
+  /** The agent that answers the next message. */
+  readonly agent: ConversationAgent
+  /** The conversation's model as the composer shows it. */
+  readonly model: ComposerModelView
+  /** What the composer knows of the context of the next message. */
+  readonly context: ComposerContextView
+  /** Whether the model menu is open; the parent owns it. */
+  readonly isModelMenuOpen: boolean
+  /**
+   * Proposes opening or closing the model menu.
+   *
+   * @param isOpen - Proposed state, shown once the parent passes it back.
+   */
+  readonly onIsModelMenuOpenChange: (isOpen: boolean) => void
+  /**
+   * Parent-owned host of the New conversation button, which takes focus
+   * when a notice's control leaves with it while the message field is off.
+   */
+  readonly newConversationButtonRef: RefObject<HTMLButtonElement | null>
+}
+
+/**
+ * Presents the row below the message field: the session controls, then
+ * what the composer is doing and the context meter.
+ *
+ * @remarks The parent owns the activity, the agent, the model, the context,
+ * whether the model menu is open, and the New conversation button's host;
+ * the component owns no state.
+ * @param props - The activity, agent, model, and context, the model menu's
+ * open state with its proposal, and the New conversation button's host.
+ * @returns The composer's meta row.
+ */
+function ComposerMeta({
+  activity,
+  agent,
+  context,
+  isModelMenuOpen,
+  model,
+  newConversationButtonRef,
+  onIsModelMenuOpenChange
+}: ComposerMetaProps): ReactElement {
+  return (
+    <div className="composer__meta">
+      <ComposerSessionControls
+        activity={activity}
+        agent={agent}
+        isModelMenuOpen={isModelMenuOpen}
+        modelGroups={model.groups}
+        modelState={model.state}
+        newConversationButtonRef={newConversationButtonRef}
+        onIsModelMenuOpenChange={onIsModelMenuOpenChange}
+      />
+
+      <ComposerStatus
+        activity={activity}
+        hasAttachedTextFiles={context.hasAttachedTextFiles}
+        isModelUnavailable={model.isUnavailable}
+        meter={context.meter}
+      />
+    </div>
+  )
+}
+
 /**
  * Presents the chat draft editor, its context tray, and the session controls.
  *
@@ -1045,13 +1383,30 @@ function ComposerStatus({
  * selects the agent of the new conversation from the agent store's list, and
  * once a conversation is shown or its first reply is awaited that agent is
  * fixed. The field is named after the agent. When the shown conversation's
- * agent was deleted, the field and Send are disabled and a notice above the
- * field offers a new conversation; the conversation stays readable. The
- * notice's status line stays rendered while it is empty, and its New
- * conversation button asks the parent for the conversation, because the
- * button leaves with the notice and the parent moves focus to the field. The
- * menu's Start a new one resets the conversation in the store instead and
- * keeps the menu open, so the agent can be chosen at once.
+ * agent was deleted, the field, the add menu, file drops, and Send are off
+ * and a notice above the field offers a new conversation; the conversation
+ * stays readable. The notice's status line stays rendered while it is empty,
+ * and its New conversation button asks the parent for the conversation,
+ * because the button leaves with the notice and the parent moves focus to
+ * the field. The menu's Start a new one resets the conversation in the store
+ * instead and keeps the menu open, so the agent can be chosen at once.
+ *
+ * A job is read-only, as a conversation whose agent was deleted is: the
+ * field, the add menu, file drops, and Send are off, and a notice above the
+ * field, which stands in for the deleted-agent notice, names the agent that
+ * gave the job and offers Back to the conversation, which asks the parent to
+ * open the job's parent. Stop keeps working while the job's reply is
+ * followed. Back takes focus as it appears for the job the person opened
+ * from its card; when it leaves while it has focus, focus moves to the
+ * field, or to New conversation in the session controls when the field
+ * stays off in the parent.
+ *
+ * While the shown conversation's jobs work and no reply is awaited, a bar
+ * above the field says how many work and offers Stop all, which asks the
+ * chat-view store to stop them; Send stays available, because jobs do not
+ * hold the request. When Stop all leaves while it has focus, as once the
+ * last job ends, focus moves to the field, or to New conversation while the
+ * field is off.
  *
  * Above the field, the tool-call prompt shows the first tool call of the
  * shown conversation that waits for the person or whose answer failed to
@@ -1062,7 +1417,12 @@ function ComposerStatus({
  * rejects it with the draft as the reason, and Enter without Shift allows it
  * once when the draft is empty or rejects it with the draft as the reason
  * otherwise. A rejection, from the field or the card, clears the draft; Allow
- * anyway keeps it.
+ * anyway keeps it. In a job the field is off and routes no keys, so only the
+ * card's buttons answer, the card names no keys, and a rejection carries no
+ * reason and keeps the draft, which was not written for the call. A call of
+ * one of the shown conversation's jobs waits in that conversation too, with
+ * a line naming the job's agent and title, and is announced under the job's
+ * agent.
  *
  * Files chosen through the add menu or dropped on the field are handed to
  * the store, which reads and admits them and lists them in the tray above
@@ -1085,12 +1445,15 @@ function ComposerStatus({
  * wherever they appear; staged text files are read on request, so they are
  * not counted.
  *
- * @param props - Parent-owned ref for the message field and the request
- * for a new conversation.
+ * @param props - Parent-owned ref for the message field, the requests for a
+ * new conversation and for opening one, and the job last opened from its
+ * card.
  * @returns The rendered conversation composer.
  */
 export function Composer({
+  jobOpenedFromCardId,
   messageFieldRef,
+  onOpenConversation,
   onStartConversation
 }: ComposerProps): ReactElement {
   const agent = useAnsweringAgent()
@@ -1102,7 +1465,7 @@ export function Composer({
   const context = useComposerContextMeter(
     activity === "idle" && !model.isUnavailable
   )
-  const toolCallAnswers = useShownToolCallAnswers(messageFieldRef)
+  const newConversationButtonRef = useRef<HTMLButtonElement>(null)
 
   return (
     <footer className="composer">
@@ -1110,44 +1473,35 @@ export function Composer({
         modelState={model.state}
         onOpenModelMenu={() => setIsModelMenuOpen(true)}
       />
-      <ComposerDeletedAgentNotice
-        isShown={agent.status === "deleted" && !model.isUnavailable}
+      <ComposerNotices
+        agent={agent}
+        isActivityIdle={activity === "idle"}
+        isModelUnavailable={model.isUnavailable}
+        jobOpenedFromCardId={jobOpenedFromCardId}
+        messageFieldRef={messageFieldRef}
+        newConversationButtonRef={newConversationButtonRef}
+        onOpenConversation={onOpenConversation}
         onStartConversation={onStartConversation}
       />
 
       <div className="composer__inner">
-        <ComposerToolCallPrompt
-          agentName={formatConversationAgentName(agent)}
-          onDismissToolCall={toolCallAnswers.dismissToolCall}
-          onRejectToolCall={toolCallAnswers.rejectToolCall}
-        />
-
-        <ComposerField
+        <ComposerEditor
           activity={activity}
           agent={agent}
           isOverWindow={context.isOverWindow}
           messageFieldRef={messageFieldRef}
           modelState={model.state}
-          onRejectToolCall={toolCallAnswers.rejectToolCall}
         />
 
-        <div className="composer__meta">
-          <ComposerSessionControls
-            activity={activity}
-            agent={agent}
-            isModelMenuOpen={isModelMenuOpen}
-            modelGroups={model.groups}
-            modelState={model.state}
-            onIsModelMenuOpenChange={setIsModelMenuOpen}
-          />
-
-          <ComposerStatus
-            activity={activity}
-            hasAttachedTextFiles={context.hasAttachedTextFiles}
-            isModelUnavailable={model.isUnavailable}
-            meter={context.meter}
-          />
-        </div>
+        <ComposerMeta
+          activity={activity}
+          agent={agent}
+          context={context}
+          isModelMenuOpen={isModelMenuOpen}
+          model={model}
+          newConversationButtonRef={newConversationButtonRef}
+          onIsModelMenuOpenChange={setIsModelMenuOpen}
+        />
       </div>
     </footer>
   )

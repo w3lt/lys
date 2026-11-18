@@ -1,9 +1,11 @@
 import { render, screen, within } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import LysMessage from "@/components/ChatViewComponents/LysMessage"
 import {
   buildCompletedChatViewReply,
   buildEndedChatViewReply,
+  buildJob,
+  buildJobCard,
   buildReasoningPart,
   buildTextPart,
   buildStreamingChatViewReply,
@@ -17,10 +19,31 @@ const SPEAKER_NAME = "Caliginia"
 /** Sources of a conversation that has none. */
 const NO_SOURCES = Object.freeze([])
 
+/**
+ * Job properties of a reply that sent no job a message; nothing calls the
+ * callbacks.
+ */
+const NO_JOBS = Object.freeze({
+  jobCards: [],
+  onOpenJob: vi.fn(),
+  onStopJob: vi.fn()
+})
+
+/** The `delegate_work` call of round 0 that started job 1. */
+const DELEGATION = buildToolCallPart(65, 0, {
+  toolName: "delegate_work",
+  argumentText:
+    '{"agent":"nyx","title":"News","instructions":"Find the news."}',
+  status: "succeeded",
+  result: "Job 1 started.",
+  sourceNumbers: []
+})
+
 describe("LysMessage", () => {
   it("renders a completed reply as Markdown under the answering agent's name, with no status", async () => {
     render(
       <LysMessage
+        {...NO_JOBS}
         kind="terminal"
         message={buildCompletedChatViewReply(2, "A **local** chat app.")}
         replyNumber={1}
@@ -46,6 +69,7 @@ describe("LysMessage", () => {
     (status, label) => {
       render(
         <LysMessage
+          {...NO_JOBS}
           kind="terminal"
           message={buildEndedChatViewReply(2, "Partial answer", status)}
           replyNumber={1}
@@ -64,6 +88,7 @@ describe("LysMessage", () => {
   it("shows the generating caret, naming the answering agent, while the reply streams, and no outcome", () => {
     render(
       <LysMessage
+        {...NO_JOBS}
         kind="streaming"
         message={buildStreamingChatViewReply(2, "Thinking")}
         replyNumber={1}
@@ -83,6 +108,7 @@ describe("LysMessage", () => {
     startDecodedImageHost()
     const { container } = render(
       <LysMessage
+        {...NO_JOBS}
         kind="terminal"
         message={buildCompletedChatViewReply(2, "Hi")}
         replyNumber={1}
@@ -128,6 +154,7 @@ describe("LysMessage", () => {
 
       render(
         <LysMessage
+          {...NO_JOBS}
           kind="terminal"
           message={reply}
           replyNumber={1}
@@ -153,6 +180,7 @@ describe("LysMessage", () => {
     it("links and lists only the sources it may cite, keeping other markers as text", async () => {
       render(
         <LysMessage
+          {...NO_JOBS}
           kind="terminal"
           message={buildCompletedChatViewReply(2, "Moths [1] like lamps [2].")}
           replyNumber={1}
@@ -184,6 +212,7 @@ describe("LysMessage", () => {
       async (_label, answer, linkedNumbers) => {
         render(
           <LysMessage
+            {...NO_JOBS}
             kind="terminal"
             message={buildCompletedChatViewReply(2, [
               SEARCH,
@@ -219,6 +248,7 @@ describe("LysMessage", () => {
     it("shows its steps without an answer while its last round's calls run, and says it is still working", () => {
       render(
         <LysMessage
+          {...NO_JOBS}
           kind="streaming"
           message={buildStreamingChatViewReply(2, [
             buildToolCallPart(21, 0, {
@@ -243,6 +273,7 @@ describe("LysMessage", () => {
     it("says it is thinking while it streams its reasoning", () => {
       render(
         <LysMessage
+          {...NO_JOBS}
           kind="streaming"
           message={buildStreamingChatViewReply(2, [
             buildReasoningPart(20, 0, "Hmm")
@@ -259,6 +290,7 @@ describe("LysMessage", () => {
     it("shows neither reasoning, steps, nor sources for a reply that has none", () => {
       render(
         <LysMessage
+          {...NO_JOBS}
           kind="terminal"
           message={buildCompletedChatViewReply(2, "Just text.")}
           replyNumber={1}
@@ -270,6 +302,60 @@ describe("LysMessage", () => {
       expect(screen.getByRole("article")).toHaveTextContent("Just text.")
       expect(screen.queryByText(/^Thought for|^Thinking$|tool call/)).toBeNull()
       expect(screen.queryByText(/^Sources/)).toBeNull()
+    })
+  })
+
+  describe("a reply that started a job", () => {
+    it("shows a job's card between the steps and the answer", async () => {
+      render(
+        <LysMessage
+          jobCards={[buildJobCard(buildJob())]}
+          kind="terminal"
+          message={buildCompletedChatViewReply(2, [
+            DELEGATION,
+            buildTextPart(23, 1, "Nyx is on it.")
+          ])}
+          onOpenJob={vi.fn()}
+          onStopJob={vi.fn()}
+          replyNumber={1}
+          sources={NO_SOURCES}
+          speakerName={SPEAKER_NAME}
+        />
+      )
+
+      const steps = screen.getByText(/1 step · 1 tool call$/)
+      const jobs = screen.getByRole("list", { name: "Jobs" })
+      const answer = await screen.findByText("Nyx is on it.")
+      expect(
+        within(jobs).getByRole("button", { name: "News, job 1" })
+      ).toBeVisible()
+      expect(
+        steps.compareDocumentPosition(jobs) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(
+        jobs.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    })
+
+    it("leaves a delegate_work call without a known job as an ordinary step", () => {
+      render(
+        <LysMessage
+          {...NO_JOBS}
+          kind="terminal"
+          message={buildCompletedChatViewReply(2, [
+            DELEGATION,
+            buildTextPart(23, 1, "Nyx is on it.")
+          ])}
+          replyNumber={1}
+          sources={NO_SOURCES}
+          speakerName={SPEAKER_NAME}
+        />
+      )
+
+      expect(screen.queryByRole("list", { name: "Jobs" })).toBeNull()
+      expect(
+        screen.getByLabelText("delegate_work nyx Done, reply 1")
+      ).toBeInTheDocument()
     })
   })
 })

@@ -1,11 +1,14 @@
-import type {
-  ConversationAssistantMessage,
-  ConversationAttachment,
-  ConversationMessage,
-  ConversationSource,
-  ConversationUserMessage,
-  ReplyPart,
-  ToolCallReplyPart
+import {
+  jobReportSchema,
+  type ConversationAssistantMessage,
+  type ConversationAttachment,
+  type ConversationMessage,
+  type ConversationSource,
+  type ConversationUserMessage,
+  type JobReport,
+  type JobReportKind,
+  type ReplyPart,
+  type ToolCallReplyPart
 } from "@lys/share"
 import { v7 as uuidv7 } from "uuid"
 import type {
@@ -37,25 +40,75 @@ export const FIXTURE_CONVERSATION_ID = createFixtureUuidV7(1)
 export const FIXTURE_TIMESTAMP = "2026-01-02T03:04:05.678Z"
 
 /**
- * Creates a stored user message.
+ * Creates a stored user message the person wrote.
  *
  * @param sequence - Identity sequence of the message.
  * @param content - Non-empty authored text.
  * @param attachments - Stored attachments in number order; none when omitted.
- * @returns A valid user message.
+ * @returns A valid user message of the person that delivers no reports.
  */
 export function createUserMessage(
   sequence: number,
   content: string,
   attachments: readonly ConversationAttachment[] = []
-): ConversationUserMessage {
+): ConversationUserMessage & Readonly<{ origin: "person" }> {
   return {
     id: createFixtureUuidV7(sequence),
     role: "user",
     content,
     attachments,
+    origin: "person",
+    reports: [],
     createdAt: FIXTURE_TIMESTAMP
   }
+}
+
+/** Values that distinguish one delivered report fixture from another. */
+export type DeliveredReportFixture = Readonly<{
+  /** Identity sequence of the report. */
+  sequence: number
+  /** Number of the job that sent the report, from 1. */
+  jobNumber: number
+  /** Code of the agent that works on the job. */
+  agentCode: string
+  /** Title of the job message the report answers. */
+  title: string
+  /** What the report says. */
+  kind: JobReportKind
+  /** Text of the report; empty for a stopped or an interrupted report. */
+  content: string
+}>
+
+/**
+ * Creates a report as a user-role message of the job's parent conversation
+ * delivers it.
+ *
+ * @param fixture - Identity, job, agent, title, kind, and text of the report.
+ * @returns A report written at the fixture time that cites no source,
+ * validated by the shared schema. Its job's conversation identity follows
+ * from the job number, so reports of one job name the same job.
+ * @throws If the fixture's kind does not allow its text.
+ */
+export function createDeliveredReport(
+  fixture: DeliveredReportFixture
+): JobReport {
+  /**
+   * Identity sequence the jobs of report fixtures count from: job `n` of a
+   * report fixture has the sequence `9000 + n`.
+   */
+  const reportJobSequenceBase = 9000
+
+  return jobReportSchema.parse({
+    id: createFixtureUuidV7(fixture.sequence),
+    jobId: createFixtureUuidV7(reportJobSequenceBase + fixture.jobNumber),
+    jobNumber: fixture.jobNumber,
+    agentCode: fixture.agentCode,
+    title: fixture.title,
+    kind: fixture.kind,
+    content: fixture.content,
+    sourceNumbers: [],
+    createdAt: FIXTURE_TIMESTAMP
+  })
 }
 
 /**
@@ -71,8 +124,30 @@ export function createNewConversationTarget(
 }
 
 /**
+ * Creates the target of a turn that starts a job of the agent `researcher`
+ * titled `Find what moths eat`.
+ *
+ * @param parentConversationId - Conversation the job is started from.
+ * @param jobCallId - The `delegate_work` call that sends the job message.
+ * @returns The target with a fresh UUIDv7.
+ */
+export function createNewJobTarget(
+  parentConversationId: string,
+  jobCallId: string
+): Extract<ConversationTurnTarget, { kind: "new-job" }> {
+  return {
+    kind: "new-job",
+    id: uuidv7(),
+    agentCode: "researcher",
+    parentConversationId,
+    title: "Find what moths eat",
+    jobCallId
+  }
+}
+
+/**
  * Creates the user message of a turn before it is stored, without
- * attachments.
+ * attachments. The turn's target says who writes it.
  *
  * @param content - Authored text.
  * @returns The message with a fresh UUIDv7, as the chat route makes one.
@@ -304,7 +379,8 @@ export type ConversationTurnFixture = Readonly<{
 }>
 
 /**
- * Creates a persisted turn for an untitled existing conversation.
+ * Creates a persisted turn for an untitled existing main conversation
+ * without jobs.
  *
  * @param fixture - Agent code, earlier transcript, and new user content.
  * @returns A turn whose new pair uses identity sequences 1001 and 1002.
@@ -317,10 +393,15 @@ export function createConversationTurn(
       id: FIXTURE_CONVERSATION_ID,
       title: null,
       agentCode: fixture.agentCode,
+      kind: "main",
+      parentConversationId: null,
+      jobNumber: null,
+      delegatorAgentCode: null,
       createdAt: FIXTURE_TIMESTAMP,
       updatedAt: FIXTURE_TIMESTAMP,
       messages: [...fixture.earlierMessages],
-      sources: fixture.sources ?? []
+      sources: fixture.sources ?? [],
+      jobs: []
     },
     userMessage: createUserMessage(1001, fixture.userMessageContent),
     assistantMessage: createAssistantMessage(1002, [], {

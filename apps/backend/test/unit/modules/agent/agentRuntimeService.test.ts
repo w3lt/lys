@@ -47,6 +47,7 @@ import {
   TOOL_KEEPER_SEARCH_TOOLS,
   type ToolKeeperScript
 } from "../../support/toolKeeperContract"
+import { NO_TURN_DELEGATION } from "../../support/turnDelegationFakes"
 
 /** Time the clock reads when a case starts. */
 const NOW = "2026-10-24T10:00:00.000Z"
@@ -298,6 +299,7 @@ async function createHelloReply(
     builtInTools: [],
     mcpTools: [],
     unofferedTools: NO_UNOFFERED_TOOLS,
+    delegation: NO_TURN_DELEGATION,
     abortSignal: new AbortController().signal,
     updateAssistantMessageState: () => true,
     findReplyStatus: () => "streaming",

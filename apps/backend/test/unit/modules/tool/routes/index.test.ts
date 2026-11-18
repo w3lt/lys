@@ -2,8 +2,15 @@ import {
   checkWebSearchKeyApiResponseSchema,
   listBackendToolsApiResponseSchema
 } from "@lys/protocol"
-import { mcpSettingsSchema, type McpServerSettings } from "@lys/share"
+import {
+  DELEGATE_WORK_TOOL_NAME,
+  mcpSettingsSchema,
+  REPORT_PROGRESS_TOOL_NAME,
+  STOP_JOB_TOOL_NAME,
+  type McpServerSettings
+} from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
+import { buildListedDelegationDefinitions } from "../../../../../src/modules/agent/delegationTools"
 import { openMcpServer } from "../../../../../src/modules/mcp/mcpServerOpening"
 import type { McpServerEvent } from "../../../../../src/modules/mcp/mcpServerEvent"
 import McpServerRegistry from "../../../../../src/modules/mcp/mcpServerRegistry"
@@ -45,9 +52,6 @@ const WEB_PAGE_ORIGIN = "https://attacker.example"
 
 /** Longest one test opening of an MCP server may take. */
 const MCP_OPENING_TIMEOUT_MILLISECONDS = 10_000
-
-/** Bound of the wait for an MCP server to connect. */
-const MCP_STATE_WAIT = Object.freeze({ timeout: 10_000, interval: 10 })
 
 /**
  * Tool a fake MCP server lists, whose input schema uses keywords beyond
@@ -121,10 +125,34 @@ function createMcpServerRegistry(
 }
 
 /**
+ * Creates an MCP server registry connected to one fake HTTP server, `notes`,
+ * which lists {@link FIND_NOTES_TOOL}.
+ *
+ * @returns The registry, once it lists the server's tool; closed when the
+ * case finishes.
+ */
+async function createConnectedNotesRegistry(): Promise<McpServerRegistry> {
+  /** Bound of the wait for the server to connect. */
+  const mcpStateWait = Object.freeze({ timeout: 10_000, interval: 10 })
+
+  const mcpServer = await startFakeMcpHttpServer(
+    answerAsMcpServer([FIND_NOTES_TOOL])
+  )
+  const registry = createMcpServerRegistry([
+    buildHttpServerSettings("notes", mcpServer.url)
+  ])
+  await registry.updateServers()
+  await vi.waitFor(() => {
+    expect(registry.listToolDefinitions()).toHaveLength(1)
+  }, mcpStateWait)
+  return registry
+}
+
+/**
  * Registers the tool routes, behind the backend's HTTP transport, over a web
  * search provider whose key reads give one result and whose requests would
- * reach a fake Tavily server, a read-page tool that reads through vmo, and
- * an MCP server registry.
+ * reach a fake Tavily server, a read-page tool that reads through vmo, an
+ * MCP server registry, and the delegation tool Settings lists.
  *
  * @param keyRead - What every key read gives.
  * @param vmoOrigin - Origin of vmo; a fake vmo that answers its health route
@@ -161,6 +189,7 @@ async function createToolRouteApp(
       })
     }
   ])
+  app.decorate("listedAgentTools", buildListedDelegationDefinitions())
   await registerToolRoutes(app)
   return { app, server }
 }
@@ -177,7 +206,8 @@ describe("registerToolRoutes", () => {
         tools: [
           buildReadPageDefinition(),
           buildWebSearchDefinition(),
-          LOOK_UP_WORD_TOOL
+          LOOK_UP_WORD_TOOL,
+          ...buildListedDelegationDefinitions()
         ],
         unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
       })
@@ -217,20 +247,10 @@ describe("registerToolRoutes", () => {
     })
 
     it("lists the tools of the connected MCP servers after the built-in tools, with their input schemas whole", async () => {
-      const mcpServer = await startFakeMcpHttpServer(
-        answerAsMcpServer([FIND_NOTES_TOOL])
-      )
-      const registry = createMcpServerRegistry([
-        buildHttpServerSettings("notes", mcpServer.url)
-      ])
-      await registry.updateServers()
-      await vi.waitFor(() => {
-        expect(registry.listToolDefinitions()).toHaveLength(1)
-      }, MCP_STATE_WAIT)
       const { app } = await createToolRouteApp(
         { status: "missing" },
         undefined,
-        registry
+        await createConnectedNotesRegistry()
       )
 
       const response = await app.inject({ method: "GET", url: "/api/v1/tools" })
@@ -241,6 +261,7 @@ describe("registerToolRoutes", () => {
           buildReadPageDefinition(),
           buildWebSearchDefinition(),
           LOOK_UP_WORD_TOOL,
+          ...buildListedDelegationDefinitions(),
           {
             name: "mcp__notes__find_notes",
             description: "Finds notes.",
@@ -257,6 +278,64 @@ describe("registerToolRoutes", () => {
       expect(
         listBackendToolsApiResponseSchema.safeParse(response.json()).success
       ).toBe(true)
+    })
+
+    it("lists delegate_work after the built-in tools and before the MCP tools, in the agents group with agents access and the backend runner", async () => {
+      const { app } = await createToolRouteApp(
+        { status: "missing" },
+        undefined,
+        await createConnectedNotesRegistry()
+      )
+
+      const response = await app.inject({ method: "GET", url: "/api/v1/tools" })
+
+      const { tools } = listBackendToolsApiResponseSchema.parse(response.json())
+      expect(tools.map((tool) => tool.name)).toEqual([
+        "read_page",
+        "web_search",
+        LOOK_UP_WORD_TOOL.name,
+        DELEGATE_WORK_TOOL_NAME,
+        "mcp__notes__find_notes"
+      ])
+      expect(tools[3]).toMatchObject({
+        name: DELEGATE_WORK_TOOL_NAME,
+        group: "agents",
+        access: "agents",
+        runner: "backend"
+      })
+    })
+
+    it("never lists delegate_work as unavailable, even while read_page and web_search are", async () => {
+      const { app } = await createToolRouteApp(
+        { status: "missing" },
+        await findClosedVmoOrigin()
+      )
+
+      const response = await app.inject({ method: "GET", url: "/api/v1/tools" })
+
+      expect(response.json()).toMatchObject({
+        unavailableTools: [
+          { name: "read_page", reason: "page-reader-not-ready" },
+          { name: "web_search", reason: "api-key-missing" }
+        ]
+      })
+      expect(
+        listBackendToolsApiResponseSchema.parse(response.json()).tools
+      ).toContainEqual(
+        expect.objectContaining({ name: DELEGATE_WORK_TOOL_NAME })
+      )
+    })
+
+    it("lists neither report_progress nor stop_job", async () => {
+      const { app } = await createToolRouteApp({ status: "missing" })
+
+      const response = await app.inject({ method: "GET", url: "/api/v1/tools" })
+
+      const names = listBackendToolsApiResponseSchema
+        .parse(response.json())
+        .tools.map((tool) => tool.name)
+      expect(names).not.toContain(REPORT_PROGRESS_TOOL_NAME)
+      expect(names).not.toContain(STOP_JOB_TOOL_NAME)
     })
 
     it("registers the tools path for GET only", async () => {

@@ -9,12 +9,15 @@ import type {
   ConversationTurnOperation,
   ConversationTurnRecordWriter,
   ConversationTurnTransaction,
+  NewUserMessage,
   UpdateAssistantMessageStateInput
 } from "../../../modules/conversation/records"
 import type {
   DatabaseStatementCompiler,
   DatabaseWriter
 } from "../databaseTransactions"
+import { createInterruptedJobReports } from "../delegation/jobReports"
+import SqliteJobTurnTransaction from "../delegation/sqliteJobTurnTransaction"
 import { findConversation } from "./findConversation"
 
 /**
@@ -181,23 +184,29 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
   }
 
   /**
-   * Implements {@link ConversationTurnTransaction.createConversation}.
+   * Implements {@link ConversationTurnTransaction.createConversation}; a
+   * job's row holds its parent and its number, and no delegator.
    * @param metadata - Interface-defined metadata.
    * @throws The interface-defined ended-transaction and write failures; a
-   * stored identity fails the primary-key constraint.
+   * stored identity fails the primary-key constraint, a job's parent that is
+   * not stored the foreign-key constraint, a number the parent already uses
+   * the unique index, and a job without a title the check constraint.
    */
   public createConversation(metadata: ConversationMetadata): void {
     this.#statements
       .getStatement(
-        `INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO conversations
+    (id, title, agent_code, created_at, updated_at, parent_conversation_id, job_number)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         metadata.id,
         metadata.title,
         metadata.agentCode,
         metadata.createdAt,
-        metadata.updatedAt
+        metadata.updatedAt,
+        metadata.parentConversationId,
+        metadata.jobNumber
       )
   }
 
@@ -213,23 +222,33 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
 
   /**
    * Implements {@link ConversationTurnTransaction.createUserMessage}, storing
-   * each attachment of the message under it.
+   * each attachment of the message under it. The person's message is stored
+   * without an origin, as every message was before a row had one.
    * @param conversationId - Interface-defined conversation.
-   * @param message - Interface-defined message with its attachments.
-   * @throws The interface-defined failures; an absent conversation fails the
-   * foreign-key constraint, a stored identity the primary-key constraint,
-   * and a stored attachment number the unique constraint.
+   * @param message - Interface-defined message with its attachments, and
+   * with its call when it is a job message.
+   * @throws The interface-defined failures; an absent conversation or call
+   * fails the foreign-key constraint, a stored identity the primary-key
+   * constraint, and a stored attachment number the unique constraint.
    */
   public createUserMessage(
     conversationId: string,
-    message: ConversationUserMessage
+    message: NewUserMessage
   ): void {
     this.#statements
       .getStatement(
-        `INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
-    VALUES (?, ?, 'user', ?, ?)`
+        `INSERT INTO conversation_messages
+    (id, conversation_id, role, content, created_at, origin, job_call_id)
+    VALUES (?, ?, 'user', ?, ?, ?, ?)`
       )
-      .run(message.id, conversationId, message.content, message.createdAt)
+      .run(
+        message.id,
+        conversationId,
+        message.content,
+        message.createdAt,
+        message.origin === "person" ? null : message.origin,
+        message.origin === "delegator" ? message.jobCallId : null
+      )
     createMessageAttachments(this.#statements, conversationId, message)
   }
 
@@ -288,8 +307,8 @@ export default class SqliteConversationTurnRecordWriter implements ConversationT
 
   /**
    * Implements {@link ConversationTurnRecordWriter.handleConversationTurnWriteRequest}
-   * by lending the operation a transaction over the write's statement
-   * compiler.
+   * by lending the operation a transaction and job records over the write's
+   * one statement compiler, so both write in the same transaction.
    * @typeParam Result - Interface-defined operation result.
    * @param operation - Interface-defined synchronous work.
    * @returns The interface-defined result after the commit.
@@ -301,20 +320,27 @@ export default class SqliteConversationTurnRecordWriter implements ConversationT
   ): Result {
     return this.#databaseWriter.handleDatabaseWriteRequest<Result>(
       (statements) =>
-        operation(new SqliteConversationTurnTransaction(statements))
+        operation(
+          new SqliteConversationTurnTransaction(statements),
+          new SqliteJobTurnTransaction(statements)
+        )
     )
   }
 
   /**
    * Implements
-   * {@link ConversationTurnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted}.
-   * @param updatedAt - Interface-defined message timestamp.
-   * @throws The interface-defined closed and write failures.
+   * {@link ConversationTurnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted}:
+   * the reports are stored as {@link createInterruptedJobReports} stores
+   * them, while the replies still stream, and then the replies are marked.
+   * @param updatedAt - Interface-defined message and report timestamp; also
+   * the time of each report's identity.
+   * @throws The interface-defined closed, validation, and write failures.
    */
   public updateAllStreamingAssistantMessagesToInterrupted(
     updatedAt: string
   ): void {
     this.#databaseWriter.handleDatabaseWriteRequest((statements) => {
+      createInterruptedJobReports(statements, updatedAt)
       updateAllStreamingRepliesToInterrupted(statements, updatedAt)
     })
   }

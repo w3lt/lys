@@ -1,4 +1,6 @@
 import type {
+  ActivityEvent,
+  ActivityReply,
   ChatReplyEvent,
   ChatReplyPathParams,
   ChatToolApprovalAnswer,
@@ -101,7 +103,9 @@ type HeldToolApprovalAnswer =
        * The backend ended the prompt because nobody answered within its time
        * limit, and stored the call as failed without running it. The call
        * stays held, also after its reply's following stops, until the person
-       * dismisses it or a later reply of its conversation is followed.
+       * dismisses it or a later reply of its conversation is followed; the
+       * call of a reply the activity stream announced goes with that reply's
+       * end.
        */
       readonly status: "expired"
     }
@@ -144,8 +148,9 @@ type HeldToolRunAnswer =
 export type HeldToolCallAnswer = HeldToolApprovalAnswer | HeldToolRunAnswer
 
 /**
- * One tool call of a followed reply, held until the store stops following
- * that reply.
+ * One tool call of a reply the store follows or the activity stream
+ * announced, held until the store stops following that reply or the stream
+ * ends it.
  *
  * @remarks `step` says which request of the backend the call answers: its
  * approval prompt, or its run request. A client tool's call answers its
@@ -198,10 +203,26 @@ type SendingHeldToolCall =
       readonly answer: Extract<HeldToolRunAnswer, { status: "sending" }>
     })
 
+/**
+ * One reply the activity stream announced: its conversation, that
+ * conversation's parent, and the reply.
+ */
+type ActivityReplyTarget = Readonly<
+  Pick<
+    ActivityReply,
+    "conversationId" | "parentConversationId" | "assistantMessageId"
+  >
+>
+
 /** Observable state of the tool-call store. */
 type ToolCallState = {
   /** Every held call, in arrival order. */
   readonly heldCalls: readonly HeldToolCall[]
+  /**
+   * Replies the activity stream announced and has not ended, by assistant
+   * message id; replaced, never changed in place.
+   */
+  readonly activityReplies: ReadonlyMap<string, ActivityReplyTarget>
 }
 
 /** Actions of the tool-call store. */
@@ -212,15 +233,44 @@ type ToolCallActions = {
    *
    * @param target - Reply that is generating, and its conversation.
    * @remarks The store follows the reply on its own connection, independent
-   * of the chat view, until the reply ends; a reply it already follows is
-   * ignored. The backend decides which calls need the person: each prompt
-   * waits for the person in arrival order, and each call sent to run runs at
-   * once. When the following ends, every call of the reply still held is
-   * dropped, except a prompt that expired, which stays until the person
-   * dismisses it. Starting to follow a reply drops the expired prompts of
-   * the conversation's other replies.
+   * of the chat view, until the reply ends or the activity stream announces
+   * it. A reply it already follows, or that the stream announced, is
+   * ignored, since the stream then delivers its calls. The backend decides
+   * which calls need the person: each prompt waits for the person in arrival
+   * order, and each call sent to run runs at once. When the following ends,
+   * every call of the reply still held is dropped, except a prompt that
+   * expired, which stays until the person dismisses it; when it ends because
+   * the stream announced the reply, every call stays. Starting to follow a
+   * reply drops the expired prompts of the conversation's other replies.
    */
   startReplyToolCallFollow: (target: ChatReplyPathParams) => void
+  /**
+   * Takes one event of the activity stream, which delivers the replies the
+   * backend starts itself, such as a job's reply, with their approval
+   * prompts and desktop tool calls.
+   *
+   * @param event - Validated activity event.
+   * @returns A promise that settles once the event's calls are held; a
+   * desktop tool's run and the sending of its result go on after it.
+   * Reading the tool list, running a tool, and sending an answer never
+   * reject it; a store listener that throws does.
+   * @remarks A snapshot replaces the announced replies: the calls of a reply
+   * announced before and not listed now are dropped, and those of a reply
+   * the store follows itself are kept. A prompt of a listed reply that the
+   * snapshot no longer lists as waiting, and whose answer the backend had
+   * not taken as far as the store knows, is marked answered and no longer
+   * shown, since the snapshot does not say whether it expired.
+   * `tool-approval-ended` ends one held prompt as a live change of its call
+   * does: a prompt whose call was stored as failed shows as expired, and one
+   * answered elsewhere is no longer shown. `reply-ended` drops the reply's
+   * calls, answered or not, expired prompts included. A call of a reply the
+   * stream has not announced is ignored, and a call already held is not held
+   * again. The store ends its own follow of a reply the stream announces;
+   * the calls it already holds for that reply stay. Held calls stay while
+   * the stream is down, and the next snapshot keeps, ends, or drops them.
+   * Job updates change nothing here.
+   */
+  handleActivityEvent: (event: ActivityEvent) => Promise<void>
   /**
    * Allows one call that waits for the person and sends the answer.
    *
@@ -329,9 +379,11 @@ const REFUSED_ANSWER = Object.freeze({ status: "refused" } as const)
 const EXPIRED_ANSWER = Object.freeze({ status: "expired" } as const)
 
 /**
- * Answer states of a held prompt that a live change of its call can end.
- * The backend sends a call's changes in order, so a call it ran after taking
- * an answer arrives as `running` before it can arrive as `failed`.
+ * Answer states of a held prompt whose answer the backend has not taken, as
+ * far as the store knows: a live change of its call can end it, and so can
+ * an activity snapshot that no longer lists it as waiting. The backend sends
+ * a call's changes in order, so a call it ran after taking an answer arrives
+ * as `running` before it can arrive as `failed`.
  */
 const LIVE_ENDABLE_APPROVAL_STATUSES: ReadonlySet<
   HeldToolApprovalAnswer["status"]
@@ -366,6 +418,28 @@ function isAnswerNeededToolCall(
 }
 
 /**
+ * Answers whether a held call belongs to a conversation.
+ *
+ * @param state - Tool-call store state.
+ * @param heldCall - Call the store holds.
+ * @param conversationId - Conversation to look in.
+ * @returns True when the call's reply is in that conversation, or in a job
+ * of it whose reply the activity stream announced.
+ */
+function isToolCallOfConversation(
+  state: ToolCallState,
+  heldCall: HeldToolCall,
+  conversationId: string
+): boolean {
+  const { target } = heldCall
+  return (
+    target.conversationId === conversationId ||
+    state.activityReplies.get(target.assistantMessageId)
+      ?.parentConversationId === conversationId
+  )
+}
+
+/**
  * Answers whether a held call's prompt expired.
  *
  * @param heldCall - Call the store holds.
@@ -380,10 +454,11 @@ function isExpiredToolCall(heldCall: HeldToolCall): heldCall is ShownToolCall {
  *
  * @param state - Tool-call store state.
  * @param conversationId - Conversation the chat view shows, if any.
- * @returns The earliest-arrived call of that conversation that waits for the
- * person or whose answer failed to send; when none does, the
- * earliest-arrived one whose prompt expired; otherwise undefined. An
- * unchanged state returns the same call object.
+ * @returns The earliest-arrived call that waits for the person or whose
+ * answer failed to send, of that conversation or of a job of it whose reply
+ * the activity stream announced; when none does, the earliest-arrived such
+ * call whose prompt expired; otherwise undefined. An unchanged state returns
+ * the same call object.
  */
 export function findShownToolCall(
   state: ToolCallState,
@@ -391,8 +466,8 @@ export function findShownToolCall(
 ): ShownToolCall | undefined {
   if (conversationId === undefined) return undefined
 
-  const conversationCalls = state.heldCalls.filter(
-    (heldCall) => heldCall.target.conversationId === conversationId
+  const conversationCalls = state.heldCalls.filter((heldCall) =>
+    isToolCallOfConversation(state, heldCall, conversationId)
   )
   return (
     conversationCalls.find(isAnswerNeededToolCall) ??
@@ -428,6 +503,27 @@ function findEndedToolApprovalAnswer(
 }
 
 /**
+ * Answers whether one reply waits for the person to allow or reject a call.
+ *
+ * @param heldCalls - Calls the tool-call store holds.
+ * @param assistantMessageId - Reply to look for.
+ * @returns True while a prompt of that reply waits for the person or the
+ * answer to it failed to send. A run whose result failed to send does not
+ * count.
+ */
+export function isReplyAwaitingApproval(
+  heldCalls: readonly HeldToolCall[],
+  assistantMessageId: string
+): boolean {
+  return heldCalls.some(
+    (heldCall) =>
+      heldCall.target.assistantMessageId === assistantMessageId &&
+      heldCall.step === "approval" &&
+      isAnswerNeededToolCall(heldCall)
+  )
+}
+
+/**
  * Formats a value thrown while sending an answer.
  *
  * @param error - Untrusted thrown value.
@@ -458,6 +554,149 @@ function buildReplyFollows(
   else nextFollows.set(assistantMessageId, abortController)
 
   return nextFollows
+}
+
+/**
+ * Builds the target of one reply the activity stream announced.
+ *
+ * @param reply - Reply as an event or a snapshot names it.
+ * @returns A frozen target holding only the reply's three identities.
+ */
+function buildActivityReplyTarget(
+  reply: ActivityReplyTarget
+): ActivityReplyTarget {
+  return Object.freeze({
+    conversationId: reply.conversationId,
+    parentConversationId: reply.parentConversationId,
+    assistantMessageId: reply.assistantMessageId
+  })
+}
+
+/**
+ * Builds the held calls without the calls of some replies, answered or not.
+ *
+ * @param heldCalls - Current held calls, left unchanged.
+ * @param droppedReplyIds - Assistant message ids of the replies whose calls
+ * are dropped.
+ * @returns A frozen list of every other call, in arrival order.
+ */
+function buildHeldToolCallsWithoutReplies(
+  heldCalls: readonly HeldToolCall[],
+  droppedReplyIds: ReadonlySet<string>
+): readonly HeldToolCall[] {
+  return Object.freeze(
+    heldCalls.filter(
+      (heldCall) => !droppedReplyIds.has(heldCall.target.assistantMessageId)
+    )
+  )
+}
+
+/**
+ * Answers whether a held call is a prompt whose answer the backend has not
+ * taken, as far as the store knows.
+ *
+ * @param heldCall - Call the store holds.
+ * @returns True while the call is in its approval step and its answer waits
+ * for the person, is being sent, failed to send, or was refused.
+ */
+function isOpenToolApproval(heldCall: HeldToolCall): boolean {
+  return (
+    heldCall.step === "approval" &&
+    LIVE_ENDABLE_APPROVAL_STATUSES.has(heldCall.answer.status)
+  )
+}
+
+/**
+ * Builds one held call as an activity snapshot leaves it.
+ *
+ * @param heldCall - Call the store holds, left unchanged.
+ * @param listedReplyIds - Assistant message ids of the replies the snapshot
+ * lists.
+ * @param waitingCallIds - Calls whose prompts the snapshot lists as waiting.
+ * @returns The call marked `answered` when it is an open prompt of a listed
+ * reply that the snapshot no longer lists as waiting: the backend no longer
+ * waits for it, and the snapshot does not say whether it expired. Otherwise
+ * the same call.
+ */
+function buildActivitySnapshotToolCall(
+  heldCall: HeldToolCall,
+  listedReplyIds: ReadonlySet<string>,
+  waitingCallIds: ReadonlySet<string>
+): HeldToolCall {
+  const isEndedApproval =
+    isOpenToolApproval(heldCall) &&
+    listedReplyIds.has(heldCall.target.assistantMessageId) &&
+    !waitingCallIds.has(heldCall.call.id)
+  if (!isEndedApproval) return heldCall
+
+  return Object.freeze({ ...heldCall, answer: ANSWERED_ANSWER })
+}
+
+/**
+ * Builds the state an activity snapshot leaves.
+ *
+ * @param state - Current state, left unchanged.
+ * @param replies - Every reply the snapshot lists.
+ * @returns A state whose announced replies are the listed ones. The calls of
+ * a reply announced before and not listed now are dropped, answered or not:
+ * it ended while the stream was down. A listed reply's open prompt that the
+ * snapshot no longer lists as waiting is marked answered, as
+ * {@link buildActivitySnapshotToolCall} describes. The calls of a reply the
+ * store follows itself are kept, since the stream never announced it.
+ */
+function buildActivitySnapshotState(
+  state: ToolCallState,
+  replies: readonly ActivityReply[]
+): ToolCallState {
+  const activityReplies = new Map(
+    replies.map(
+      (reply) =>
+        [reply.assistantMessageId, buildActivityReplyTarget(reply)] as const
+    )
+  )
+  const endedReplyIds = new Set(
+    [...state.activityReplies.keys()].filter(
+      (assistantMessageId) => !activityReplies.has(assistantMessageId)
+    )
+  )
+  const listedReplyIds = new Set(activityReplies.keys())
+  const waitingCallIds = new Set(
+    replies.flatMap((reply) =>
+      reply.pendingToolApprovals.map(({ call }) => call.id)
+    )
+  )
+  const heldCalls = buildHeldToolCallsWithoutReplies(
+    state.heldCalls,
+    endedReplyIds
+  ).map((heldCall) =>
+    buildActivitySnapshotToolCall(heldCall, listedReplyIds, waitingCallIds)
+  )
+
+  return { activityReplies, heldCalls: Object.freeze(heldCalls) }
+}
+
+/**
+ * Builds the state the end of one reply the activity stream announced
+ * leaves.
+ *
+ * @param state - Current state, left unchanged.
+ * @param assistantMessageId - Reply the stream reports ended.
+ * @returns A state without the reply and without its calls, answered or not.
+ */
+function buildActivityReplyEndState(
+  state: ToolCallState,
+  assistantMessageId: string
+): ToolCallState {
+  const activityReplies = new Map(state.activityReplies)
+  activityReplies.delete(assistantMessageId)
+
+  return {
+    activityReplies,
+    heldCalls: buildHeldToolCallsWithoutReplies(
+      state.heldCalls,
+      new Set([assistantMessageId])
+    )
+  }
 }
 
 /**
@@ -628,8 +867,8 @@ function buildResentHeldToolCall(
  *
  * @param dependencies - Reply transport, answer senders, tool list reader,
  * and tool runner for one store.
- * @returns A Zustand hook and store API owning the held calls and the reply
- * follows that deliver them.
+ * @returns A Zustand hook and store API owning the held calls, the reply
+ * follows that deliver them, and the replies the activity stream announced.
  */
 function createToolCallStore(
   dependencies: ToolCallStoreDependencies
@@ -659,6 +898,27 @@ function createToolCallStore(
           heldCall.answer.toolAnswer
         )
     }
+  }
+
+  /**
+   * Ends the store's own follow of a reply the activity stream announced,
+   * keeping the reply's held calls.
+   *
+   * @param assistantMessageId - Reply whose calls the stream now delivers.
+   * @remarks Nothing happens when the store does not follow the reply. The
+   * ended follow is no longer the reply's follow when it stops, so it
+   * drops nothing.
+   */
+  function stopOwnReplyFollow(assistantMessageId: string): void {
+    const abortController = replyFollows.get(assistantMessageId)
+    if (abortController === undefined) return
+
+    replyFollows = buildReplyFollows(
+      replyFollows,
+      assistantMessageId,
+      undefined
+    )
+    abortController.abort()
   }
 
   /**
@@ -715,8 +975,8 @@ function createToolCallStore(
      * @param callId - Identifier of the call.
      * @param step - Step whose answer was sent.
      * @returns True while the store holds the call in that step and still
-     * sending; false once the follow stopped, the call moved to its run, or
-     * another send settled it.
+     * sending; false once the call was dropped with its reply's calls, the
+     * call moved to its run, or another send settled it.
      */
     function isHeldToolCallSending(
       callId: string,
@@ -724,6 +984,20 @@ function createToolCallStore(
     ): boolean {
       const heldCall = findHeldToolCall(callId)
       return heldCall?.step === step && heldCall.answer.status === "sending"
+    }
+
+    /**
+     * Answers whether the store takes the calls of one reply.
+     *
+     * @param assistantMessageId - Reply to look for.
+     * @returns True while the store follows the reply itself, or the activity
+     * stream announced the reply and has not ended it.
+     */
+    function isReplyFollowedOrAnnounced(assistantMessageId: string): boolean {
+      return (
+        replyFollows.has(assistantMessageId) ||
+        get().activityReplies.has(assistantMessageId)
+      )
     }
 
     /**
@@ -749,8 +1023,10 @@ function createToolCallStore(
      * not, except a prompt that expired.
      *
      * @param assistantMessageId - Reply whose following stops.
-     * @param abortController - Controller of the follow that stops; a newer
-     * follow of the same reply is left alone.
+     * @param abortController - Controller of the follow that stops. Nothing
+     * happens when it is no longer the reply's follow: a newer follow of the
+     * same reply is left alone, and so are the calls of a reply whose follow
+     * ended because the activity stream announced it.
      */
     function stopReplyToolCallFollow(
       assistantMessageId: string,
@@ -775,31 +1051,51 @@ function createToolCallStore(
      * Moves a held prompt on when its call's stored state shows the backend
      * no longer waits for it.
      *
-     * @param part - One part of a followed reply, as stored.
-     * @param endableStatuses - Answer states of a held prompt this part may
+     * @param callId - Identifier of the call.
+     * @param status - State the backend stored the call in.
+     * @param endableStatuses - Answer states of a held prompt this state may
      * end.
-     * @remarks Only a tool call held in its approval step, whose answer is in
-     * one of the given states, changes: to `expired` when the call is stored
-     * as failed, or to `answered` once the backend took an answer, this
-     * store's or another caller's. A send still in flight then leaves the new
-     * state alone. A `refused` answer waits here for the state the backend
-     * stored before it refused.
+     * @remarks Only a call held in its approval step, whose answer is in one
+     * of the given states, changes: to `expired` when the call is stored as
+     * failed, or to `answered` once the backend took an answer, this store's
+     * or another caller's. A send still in flight then leaves the new state
+     * alone. A `refused` answer waits here for the state the backend stored
+     * before it refused.
      */
     function updateEndedToolApproval(
-      part: ReplyPart,
+      callId: string,
+      status: ToolCallReplyPartStatus,
       endableStatuses: ReadonlySet<HeldToolApprovalAnswer["status"]>
     ): void {
-      if (part.kind !== "tool-call") return
-      const heldCall = findHeldToolCall(part.id)
+      const heldCall = findHeldToolCall(callId)
       if (
         heldCall?.step !== "approval" ||
         !endableStatuses.has(heldCall.answer.status)
       )
         return
-      const answer = findEndedToolApprovalAnswer(part.status)
+      const answer = findEndedToolApprovalAnswer(status)
       if (answer === undefined) return
 
       updateHeldToolCall(Object.freeze({ ...heldCall, answer }))
+    }
+
+    /**
+     * Moves a held prompt on when a part of its followed reply stores its
+     * call in a state that shows the backend no longer waits for it.
+     *
+     * @param part - One part of a followed reply, as stored.
+     * @param endableStatuses - Answer states of a held prompt this part may
+     * end.
+     * @remarks A part that is not a tool call changes nothing; a tool call
+     * changes its prompt as {@link updateEndedToolApproval} describes.
+     */
+    function updateEndedToolApprovalOfPart(
+      part: ReplyPart,
+      endableStatuses: ReadonlySet<HeldToolApprovalAnswer["status"]>
+    ): void {
+      if (part.kind !== "tool-call") return
+
+      updateEndedToolApproval(part.id, part.status, endableStatuses)
     }
 
     /**
@@ -841,8 +1137,8 @@ function createToolCallStore(
      * @param input - Validated input to run with.
      * @returns A promise that settles after the result was sent or failed to
      * send; it never rejects. A call that is no longer running when the tool
-     * finishes is not answered: its reply's follow stopped, or an earlier
-     * result of the same call reached the backend.
+     * finishes is not answered: it was dropped with its reply's calls, or an
+     * earlier result of the same call reached the backend.
      */
     async function runHeldToolCall(
       heldCall: HeldToolCall,
@@ -858,7 +1154,8 @@ function createToolCallStore(
     }
 
     /**
-     * Holds one prompt of a followed reply and starts answering it.
+     * Holds one prompt of a followed or announced reply and starts answering
+     * it.
      *
      * @param target - Reply that made the call, and its conversation.
      * @param approvalPrompt - Call the backend shows for approval, and the
@@ -955,15 +1252,15 @@ function createToolCallStore(
     }
 
     /**
-     * Holds the prompts that arrived for a followed reply and starts answering
-     * each one.
+     * Holds the prompts that arrived for a followed or announced reply and
+     * starts answering each one.
      *
      * @param target - Reply that made the calls, and its conversation.
      * @param approvalPrompts - Prompts in arrival order, each with its
      * token: one live prompt, or the prompts a snapshot lists as waiting.
      * @returns A promise that settles once the prompts are held. Calls already
-     * held are ignored; when the reply stopped being followed while the tool
-     * list was read, every call is.
+     * held are ignored; when, once the tool list is read, the store neither
+     * follows the reply nor has it announced, every call is.
      */
     async function handleToolApprovalArrival(
       target: ChatReplyPathParams,
@@ -974,10 +1271,172 @@ function createToolCallStore(
       )
       if (arrivedPrompts.length === 0) return
       const list = await dependencies.getToolList()
-      if (!replyFollows.has(target.assistantMessageId)) return
+      if (!isReplyFollowedOrAnnounced(target.assistantMessageId)) return
 
       for (const approvalPrompt of arrivedPrompts) {
         startToolApproval(target, approvalPrompt, list)
+      }
+    }
+
+    /**
+     * Handles one prompt the activity stream sent, by holding it and
+     * starting to answer it.
+     *
+     * @param target - Reply that made the call, and its conversation.
+     * @param approvalPrompt - Call the backend shows for approval, with the
+     * token its answer carries.
+     * @returns A promise that settles once the prompt is held or ignored.
+     * @remarks A prompt of a reply the stream has not announced, or has
+     * ended, is ignored, also while the store follows that reply itself,
+     * whose own follow delivers its prompts; otherwise see
+     * {@link handleToolApprovalArrival}.
+     */
+    async function handleActivityToolApproval(
+      target: ChatReplyPathParams,
+      approvalPrompt: ChatToolApprovalPrompt
+    ): Promise<void> {
+      if (!get().activityReplies.has(target.assistantMessageId)) return
+
+      await handleToolApprovalArrival(target, [approvalPrompt])
+    }
+
+    /**
+     * Holds and runs one call the activity stream sent to run.
+     *
+     * @param target - Reply that made the call, and its conversation.
+     * @param call - Call to run.
+     * @remarks A call of a reply the stream has not announced, or has ended,
+     * is ignored; otherwise see {@link startToolRun}.
+     */
+    function startActivityToolRun(
+      target: ChatReplyPathParams,
+      call: ChatToolCall
+    ): void {
+      if (!get().activityReplies.has(target.assistantMessageId)) return
+
+      startToolRun(target, call)
+    }
+
+    /**
+     * Handles the snapshot that starts every activity stream.
+     *
+     * @param replies - Every backend-started reply generating now, with the
+     * calls it waits for.
+     * @returns A promise that settles once the listed calls are held.
+     * @remarks The listed replies become the announced ones, as
+     * {@link buildActivitySnapshotState} describes. The store ends its own
+     * follow of each of them, then holds the prompts of all of them, reading
+     * the tool list for each at once, and then runs their calls, as a
+     * reply's own snapshot does; calls already held are not held again.
+     */
+    async function handleActivitySnapshot(
+      replies: readonly ActivityReply[]
+    ): Promise<void> {
+      set((state) => buildActivitySnapshotState(state, replies))
+      for (const reply of replies) stopOwnReplyFollow(reply.assistantMessageId)
+
+      await Promise.all(
+        replies.map((reply) =>
+          handleToolApprovalArrival(reply, reply.pendingToolApprovals)
+        )
+      )
+      for (const reply of replies) {
+        for (const call of reply.pendingToolCalls) {
+          startActivityToolRun(reply, call)
+        }
+      }
+    }
+
+    /**
+     * Handles the activity event that announces one backend-started reply.
+     *
+     * @param target - Reply that started, its conversation, and that
+     * conversation's parent.
+     * @remarks The store ends its own follow of the reply, if any; the calls
+     * it already holds for the reply stay.
+     */
+    function handleActivityReplyStart(target: ActivityReplyTarget): void {
+      const announcedReply = buildActivityReplyTarget(target)
+      set((state) => ({
+        activityReplies: new Map(state.activityReplies).set(
+          announcedReply.assistantMessageId,
+          announcedReply
+        )
+      }))
+      stopOwnReplyFollow(announcedReply.assistantMessageId)
+    }
+
+    /**
+     * Handles the activity event that ends one backend-started reply.
+     *
+     * @param assistantMessageId - Reply that ended.
+     * @remarks The reply is no longer announced, and its held calls are
+     * dropped, answered or not.
+     */
+    function handleActivityReplyEnd(assistantMessageId: string): void {
+      set((state) => buildActivityReplyEndState(state, assistantMessageId))
+    }
+
+    /**
+     * Handles the activity event that reports the end of one prompt of a
+     * backend-started reply.
+     *
+     * @param event - The event, naming the reply, the call, and the state the
+     * reply stored the call in.
+     * @remarks The prompt moves on as {@link updateEndedToolApproval}
+     * describes for a live change. The end of a prompt the store does not
+     * hold, or holds for another reply than the event names, changes nothing.
+     */
+    function handleActivityToolApprovalEnd(
+      event: Extract<ActivityEvent, { type: "tool-approval-ended" }>
+    ): void {
+      const heldCall = findHeldToolCall(event.callId)
+      if (heldCall?.target.assistantMessageId !== event.assistantMessageId)
+        return
+
+      updateEndedToolApproval(
+        event.callId,
+        event.status,
+        LIVE_ENDABLE_APPROVAL_STATUSES
+      )
+    }
+
+    /**
+     * Implements {@link ToolCallActions.handleActivityEvent} for this store.
+     *
+     * @param event - Validated activity event.
+     * @returns The settlement defined by
+     * {@link ToolCallActions.handleActivityEvent}.
+     */
+    async function handleActivityEvent(event: ActivityEvent): Promise<void> {
+      switch (event.type) {
+        case "activity-snapshot":
+          await handleActivitySnapshot(event.replies)
+          return
+        case "reply-started":
+          handleActivityReplyStart(event)
+          return
+        case "reply-ended":
+          handleActivityReplyEnd(event.assistantMessageId)
+          return
+        case "job-updated":
+          return
+        case "tool-approval":
+          await handleActivityToolApproval(event, {
+            call: event.call,
+            approvalToken: event.approvalToken
+          })
+          return
+        case "tool-approval-ended":
+          handleActivityToolApprovalEnd(event)
+          return
+        case "tool-call":
+          startActivityToolRun(event, event.call)
+          return
+        default: {
+          const unhandledEvent: never = event
+          return unhandledEvent
+        }
       }
     }
 
@@ -996,7 +1455,10 @@ function createToolCallStore(
       switch (event.type) {
         case "reply-snapshot":
           for (const part of event.assistantMessage.parts) {
-            updateEndedToolApproval(part, SNAPSHOT_ENDABLE_APPROVAL_STATUSES)
+            updateEndedToolApprovalOfPart(
+              part,
+              SNAPSHOT_ENDABLE_APPROVAL_STATUSES
+            )
           }
           if (event.assistantMessage.status !== "streaming") {
             return "reply-ended"
@@ -1013,7 +1475,10 @@ function createToolCallStore(
           startToolRun(target, event.call)
           return "reply-continues"
         case "reply-part":
-          updateEndedToolApproval(event.part, LIVE_ENDABLE_APPROVAL_STATUSES)
+          updateEndedToolApprovalOfPart(
+            event.part,
+            LIVE_ENDABLE_APPROVAL_STATUSES
+          )
           return "reply-continues"
         case "title":
         case "reply-part-delta":
@@ -1065,7 +1530,9 @@ function createToolCallStore(
      * @returns A promise that settles once the following ended; it never
      * rejects. It ends when the reply ends, when a follow fails, or after
      * {@link MAXIMUM_FRUITLESS_REPLY_FOLLOWS} closes in a row brought no
-     * event past the snapshot; the reply's held calls are then dropped.
+     * event past the snapshot; the reply's held calls are then dropped. It
+     * also ends when the activity stream announces the reply, which keeps
+     * them.
      */
     async function followReplyToolCalls(
       target: ChatReplyPathParams,
@@ -1099,7 +1566,7 @@ function createToolCallStore(
      * @param target - Reply that is generating, and its conversation.
      */
     function startReplyToolCallFollow(target: ChatReplyPathParams): void {
-      if (replyFollows.has(target.assistantMessageId)) return
+      if (isReplyFollowedOrAnnounced(target.assistantMessageId)) return
 
       dropHeldToolCalls(
         (heldCall) =>
@@ -1199,7 +1666,9 @@ function createToolCallStore(
 
     return {
       heldCalls: NO_HELD_CALLS,
+      activityReplies: new Map(),
       startReplyToolCallFollow,
+      handleActivityEvent,
       resolveToolCall,
       rejectToolCall,
       sendUnsentToolCallAnswer,
@@ -1235,17 +1704,21 @@ async function getToolList(): Promise<ToolListState> {
 /**
  * Tool-call store used by the chat view and the composer.
  *
- * @remarks This singleton follows every reply the chat view starts or
- * follows, independent of which conversation is shown. The backend decides
- * which tool calls need the person: the store shows each approval prompt,
- * runs through Tauri each client tool's call the backend sends to run, and
- * sends every answer to the backend origin the application store names when
- * each request starts. It reads neither the Tools pane's switches nor the
- * saved Just run choices. It holds nothing across a renderer reload: a
- * prompt or call still waiting is found again through its reply's snapshot
- * when the reply is followed again, as when its conversation is shown after
- * the reload. Quitting the app stops the backend, which drops every waiting
- * call; the reply is marked interrupted when the backend next starts.
+ * @remarks This singleton follows each reply the chat view starts or
+ * follows, independent of which conversation is shown, unless the activity
+ * stream delivers it: the replies the backend starts itself, such as a job's
+ * reply, come from the activity events handed to
+ * {@link ToolCallActions.handleActivityEvent}. The backend decides which
+ * tool calls need the person: the store shows each approval prompt, runs
+ * through Tauri each client tool's call the backend sends to run, and sends
+ * every answer to the backend origin the application store names when each
+ * request starts. It reads neither the Tools pane's switches nor the saved
+ * Just run choices. It holds nothing across a renderer reload: a prompt or
+ * call still waiting is found again through its reply's snapshot when the
+ * reply is followed again, as when its conversation is shown after the
+ * reload, or through the next activity snapshot. Quitting the app stops the
+ * backend, which drops every waiting call; the reply is marked interrupted
+ * when the backend next starts.
  */
 export const useToolCallStore: UseBoundStore<StoreApi<ToolCallStore>> =
   createToolCallStore({

@@ -262,6 +262,7 @@ describe("tool labels", () => {
     expect(formatToolGroupCount(1, 2)).toBe("1 of 2 on")
     expect(formatToolAccessLabel("reads")).toBe("reads")
     expect(formatToolAccessLabel("network")).toBe("network")
+    expect(formatToolAccessLabel("agents")).toBe("gives work")
     expect(formatToolAccessLabel("unknown")).toBe("depends on server")
   })
 
@@ -419,6 +420,11 @@ describe("tool labels", () => {
       "run",
       "network",
       "Sends its request off this machine the moment the model asks, without showing you what it sends."
+    ],
+    [
+      "run",
+      "agents",
+      "Starts the job the moment the model asks, without showing you its instructions. The tools the other agent uses still follow their own settings."
     ],
     [
       "run",

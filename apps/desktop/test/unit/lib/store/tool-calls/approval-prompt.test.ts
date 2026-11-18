@@ -8,6 +8,7 @@ import {
 import type { ToolListState } from "@/lib/store/tools"
 import {
   buildBackendToolDefinition,
+  buildDelegateWorkToolDefinition,
   buildMcpToolDefinition,
   buildToolCall,
   buildToolDefinition
@@ -75,6 +76,34 @@ describe("calculateToolApprovalPrompt", () => {
         runner: "backend",
         toolName: "read_page",
         url: "https://example.com/docs"
+      }
+    })
+  })
+
+  it("asks about a delegate_work call the list holds, with the agent, title, instructions, and job it would send", () => {
+    const delegateWork = buildDelegateWorkToolDefinition()
+    const list: ToolListState = Object.freeze({
+      status: "loaded",
+      tools: [READ_TEXT_FILE, delegateWork],
+      unavailableTools: new Map()
+    })
+    const call = buildToolCall(65, "delegate_work", {
+      agent: "nyx",
+      title: "News",
+      instructions: "Find this week's hologram news.",
+      job: 2
+    })
+
+    expect(calculateToolApprovalPrompt(call, list)).toEqual({
+      status: "ask",
+      definition: delegateWork,
+      input: {
+        runner: "backend",
+        toolName: "delegate_work",
+        agentCode: "nyx",
+        title: "News",
+        instructions: "Find this week's hologram news.",
+        jobNumber: 2
       }
     })
   })

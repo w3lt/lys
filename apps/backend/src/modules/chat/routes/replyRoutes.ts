@@ -21,6 +21,7 @@ import type {
 } from "../pendingToolCalls"
 import ReplyEventSubscription from "../replyEventSubscription"
 import type ReplyGenerationRegistry from "../replyGenerationRegistry"
+import type { StopReply } from "../replyStop"
 import {
   createChatReplyNotFoundProblem,
   createChatReplyNotGeneratingProblem,
@@ -46,15 +47,17 @@ type ChatReplyRouteDependencies = Readonly<{
  * Installs the endpoints that follow, stop, and answer the tool calls and
  * approval prompts of one reply's generation.
  *
- * @param app - Backend with SSE, validation, and conversation persistence.
- * @param generations - Registry shared with the chat route; its owner
- * disposes it.
+ * @param app - Backend with SSE, validation, conversation persistence, the
+ * reply generation registry every turn start registers its generation
+ * with, and the person's stop of a reply; the registry's owner disposes
+ * it.
  * @throws If route registration fails.
  */
 export default function updateFastifyWithChatReplyRoutes(
-  app: FastifyInstance,
-  generations: ReplyGenerationRegistry
+  app: FastifyInstance
 ): void {
+  const generations = app.replyGenerations
+  const stopReply = app.stopReply
   const dependencies = {
     history: app.conversationHistoryReader,
     generations
@@ -76,7 +79,7 @@ export default function updateFastifyWithChatReplyRoutes(
     url: stopChatReplyApi.path,
     schema: { params: stopChatReplyApi.params },
     handler: async (request, reply) =>
-      handleStopChatReplyRequest(request, reply, generations)
+      handleStopChatReplyRequest(request, reply, stopReply)
   })
   app.route<SendChatToolResultApiRoute>({
     method: sendChatToolResultApi.method,
@@ -162,37 +165,49 @@ async function handleChatReplyEventsRequest(
 }
 
 /**
- * Stops one reply's running generation and answers after the reply is stored
+ * Stops one reply's running generation for the person, with every working
+ * job below its conversation, and answers once each stopped reply is stored
  * final.
  *
  * @param request - Validated reply identifiers.
  * @param reply - HTTP response owner.
- * @param generations - Borrowed registry.
- * @returns Settlement after the 204 or the not-generating problem is sent.
- * @throws If the registry is closed because shutdown began; nothing is
- * stopped.
+ * @param stopReply - Borrowed person's stop of a reply.
+ * @returns Settlement after the 204 or the not-generating problem is sent;
+ * the problem when no generation runs for the reply, also once shutdown
+ * began, and nothing is stopped then.
+ * @throws If the conversation store is closed or a stored identity violates
+ * the conversation contract; nothing is stopped then.
+ * @throws {TypeError} If the stop's outcome is one this module does not
+ * know.
  */
 async function handleStopChatReplyRequest(
   request: FastifyRequest<StopChatReplyApiRoute>,
   reply: FastifyReply<StopChatReplyApiRoute>,
-  generations: ReplyGenerationRegistry
+  stopReply: StopReply
 ): Promise<void> {
-  const generation = generations.findReplyGeneration(request.params)
-  if (generation === undefined) {
-    reply
-      .type("application/problem+json")
-      .code(409)
-      .send(
-        createChatReplyNotGeneratingProblem(
-          request.params.assistantMessageId,
-          request.url
+  const outcome = await stopReply(request.params)
+  switch (outcome) {
+    case "stopped":
+      reply.code(204).send()
+      return
+    case "not-generating":
+      reply
+        .type("application/problem+json")
+        .code(409)
+        .send(
+          createChatReplyNotGeneratingProblem(
+            request.params.assistantMessageId,
+            request.url
+          )
         )
+      return
+    default: {
+      const unhandledOutcome: never = outcome
+      throw new TypeError(
+        `Unhandled reply stop outcome: ${JSON.stringify(unhandledOutcome)}`
       )
-    return
+    }
   }
-
-  await generation.stopReply()
-  reply.code(204).send()
 }
 
 /**

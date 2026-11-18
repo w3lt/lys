@@ -11,6 +11,10 @@ import type {
 } from "@lys/share"
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import type { GetAttachmentImageFileStatus } from "../../agent/agentContext"
+import {
+  buildDelegationOffer,
+  type ConversationDelegation
+} from "../../agent/turnDelegation"
 import { listAgentMcpTools } from "../../agent/builtInAgents"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
 import type { AttachmentFileStatus } from "../../attachment/attachmentFileStore"
@@ -59,6 +63,11 @@ type ChatContextRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
     findModelCapabilities: FindLlmModelCapabilities
     /** Examines stored attachment files without reading them. */
     attachmentFiles: Pick<AttachmentFileStore, "getAttachmentFileStatus">
+    /**
+     * Display name of the agent with a code, built-in or stored, deleted
+     * included; undefined when no agent has the code.
+     */
+    findAgentName: (code: string) => string | undefined
   }>
 
 /**
@@ -94,6 +103,17 @@ const NEW_CONVERSATION_HISTORY: MeasuredHistory = Object.freeze({
     Promise.resolve<AttachmentFileStatus>("missing")
 })
 
+/** Jobs of a conversation that has none yet. */
+const NO_CONVERSATION_JOBS: ConversationDelegation["jobs"] = Object.freeze([])
+
+/** Where a new conversation stands in delegation: a main one, with no job. */
+const NEW_CONVERSATION_DELEGATION: ConversationDelegation = Object.freeze({
+  kind: "main",
+  jobNumber: null,
+  delegatorAgentCode: null,
+  jobs: NO_CONVERSATION_JOBS
+})
+
 /** Explanation sent when no loaded instance matches the requested model. */
 const MODEL_NOT_LOADED_DETAIL =
   "The provider has not loaded the model. Load it, or choose a model the provider serves, in Settings → Models to measure the conversation."
@@ -103,9 +123,9 @@ const MODEL_NOT_LOADED_DETAIL =
  * message would be sent with.
  *
  * @param app - Backend with validation, the Zod response serializer, the
- * agent runtime service, the conversation reader, the providers' LLM
- * services behind the agents, the built-in tools, the MCP server registry,
- * and the attachment file store installed.
+ * agent service, the agent runtime service, the conversation reader, the
+ * providers' LLM services behind the agents, the built-in tools, the MCP
+ * server registry, and the attachment file store installed.
  * @param findModelCapabilities - Capabilities of the model a request names,
  * read from its provider's inventory and remembered by the lookup while that
  * provider stays connected; shared with
@@ -128,7 +148,9 @@ export default function registerChatContextRoute(
     findMcpTool: (toolName: string) =>
       app.mcpServerRegistry.findTurnTool(toolName),
     findModelCapabilities,
-    attachmentFiles: app.attachmentFileStore
+    attachmentFiles: app.attachmentFileStore,
+    findAgentName: (code: string) =>
+      app.agentService.findAgent(code)?.agent.name
   } satisfies ChatContextRouteDependencies
   app.route<ChatContextApiRoute>({
     method: chatContextApi.method,
@@ -151,7 +173,7 @@ export default function registerChatContextRoute(
  * @param request - Validated chat-context input.
  * @param reply - Response owner.
  * @param dependencies - Borrowed agent, conversation, tool, and model
- * lookups, and the attachment files.
+ * lookups, the attachment files, and the agent names.
  * @returns Settlement after the measurement or a problem is sent.
  * @throws An `UnknownBackendToolError` for an offered backend tool the
  * backend does not run, such as a tool no applied MCP server lists, or for
@@ -169,7 +191,12 @@ export default function registerChatContextRoute(
  * An offered MCP tool whose server is not connected is left out, because
  * its definition is known only while the server is connected, and so is a
  * tool only Lys may use when the agent is neither Caliginia nor Lysiptera,
- * as its turn would not offer it.
+ * as its turn would not offer it. The delegation tools and the note about a
+ * job are counted as a turn would offer them, from the offer
+ * {@link buildDelegationOffer} builds: `delegate_work` for a new or main
+ * conversation whose request names it, `stop_job` with `delegate_work` or
+ * once the stored conversation has a job, and, for a stored job,
+ * `report_progress` and the note with its delegator's display name.
  */
 async function handleChatContextRequest(
   request: FastifyRequest<ChatContextApiRoute>,
@@ -183,10 +210,7 @@ async function handleChatContextRequest(
     body.tools
   )
   const unofferedTools = findUnofferedTools(dependencies.builtInTools, body)
-  const storedConversation =
-    body.conversation.kind === "existing"
-      ? dependencies.findConversation(body.conversation.id)
-      : undefined
+  const storedConversation = findMeasuredConversation(body, dependencies)
   const requestedAgent = loadRequestedAgent(body.conversation, {
     loadChatAgent: dependencies.loadChatAgent,
     findConversationAgentCode: () => storedConversation?.agentCode
@@ -195,7 +219,6 @@ async function handleChatContextRequest(
     sendUnansweredTurnProblem(reply, requestedAgent, request.url)
     return
   }
-  const { agent } = requestedAgent
   const measured = buildMeasuredHistory(
     storedConversation,
     dependencies.attachmentFiles
@@ -208,7 +231,7 @@ async function handleChatContextRequest(
     capabilities.trainedForToolUse,
     measured.attachments
   )
-  const tools = buildOfferedDefinitions(body, requestedTools, agent.code)
+  const { agent } = requestedAgent
   const measurement = await agent.findContextMeasurement({
     history: measured.history,
     model: body.model,
@@ -216,8 +239,13 @@ async function handleChatContextRequest(
     getAttachmentImageFileStatus: measured.getAttachmentImageFileStatus,
     trainedForToolUse: capabilities.trainedForToolUse,
     directTools,
-    tools,
-    unofferedTools
+    tools: buildOfferedDefinitions(body, requestedTools, agent.code),
+    unofferedTools,
+    delegation: buildDelegationOffer(
+      storedConversation ?? NEW_CONVERSATION_DELEGATION,
+      requestedTools.offersDelegateWork,
+      dependencies.findAgentName
+    )
   })
   if (measurement === undefined) {
     sendModelNotLoadedProblem(reply, request.url)
@@ -242,6 +270,23 @@ function sendModelNotLoadedProblem(
     instance
   })
   reply.type("application/problem+json").code(problem.status).send(problem)
+}
+
+/**
+ * Finds the stored conversation a measurement continues.
+ *
+ * @param body - Validated chat-context input.
+ * @param dependencies - The conversation lookup.
+ * @returns The stored conversation with its messages; undefined for a new
+ * conversation, or for one that is not stored.
+ */
+function findMeasuredConversation(
+  body: ChatContextApiRequestBody,
+  dependencies: Pick<ChatContextRouteDependencies, "findConversation">
+): Conversation | undefined {
+  return body.conversation.kind === "existing"
+    ? dependencies.findConversation(body.conversation.id)
+    : undefined
 }
 
 /**

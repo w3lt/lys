@@ -1,5 +1,5 @@
 import type { LlmInfo } from "@lys/protocol"
-import type { LlmModelReference, LlmProvider } from "@lys/share"
+import type { Job, LlmModelReference, LlmProvider } from "@lys/share"
 
 import type { SettingsPane } from "@/app/types"
 import {
@@ -170,6 +170,21 @@ export type ComposerModelState = {
 export type UnavailableRuntimeState = ComposerModelState & {
   /** Persisted backend origin named in the copy. */
   readonly backendAddress: string
+}
+
+/** Facts that choose the composer textarea's placeholder. */
+export type ComposerPlaceholderInput = {
+  /**
+   * The backend, the conversation's model, and the provider the composer
+   * names.
+   */
+  readonly state: ComposerModelState
+  /** Chat work that keeps the composer from sending. */
+  readonly activity: ComposerActivity
+  /** Agent that answers the next message. */
+  readonly agent: ConversationAgent
+  /** Whether the shown conversation is a job, which the person only reads. */
+  readonly isJob: boolean
 }
 
 /** Why a provider the composer names cannot answer. */
@@ -764,23 +779,23 @@ function formatWaitingPlaceholder(
 /**
  * Formats the composer textarea placeholder.
  *
- * @param state - The backend, the conversation's model, and the provider
- * the composer names.
- * @param activity - Chat work that keeps the composer from sending.
- * @param agent - Agent that answers the next message.
+ * @param input - The backend, the conversation's model, and the provider
+ * the composer names; chat work; the answering agent; and whether the shown
+ * conversation is a job.
  * @returns The placeholder shown while the field is empty: what the composer
- * waits on, that a conversation whose agent was deleted is read-only, or an
- * invitation naming the agent.
+ * waits on, that a job or a conversation whose agent was deleted is
+ * read-only, or an invitation naming the agent.
  */
 export function formatComposerPlaceholder(
-  state: ComposerModelState,
-  activity: ComposerActivity,
-  agent: ConversationAgent
+  input: ComposerPlaceholderInput
 ): string {
+  const { state, activity, agent } = input
   const connection = calculateLocalRuntimeConnection(state)
   if (connection !== "ready")
     return formatWaitingPlaceholder(connection, state.provider)
-  if (agent.status === "deleted") return "This conversation is read-only."
+  if (input.isJob || agent.status === "deleted") {
+    return "This conversation is read-only."
+  }
 
   switch (activity) {
     case "idle":
@@ -807,6 +822,28 @@ export function formatComposerActivity(activity: ComposerActivity): string {
     case "opening-conversation":
       return "Opening…"
   }
+}
+
+/**
+ * Counts the jobs of a conversation that work.
+ *
+ * @param jobs - Jobs of the shown conversation, in number order.
+ * @returns How many of them are `working`: their latest reply streams.
+ */
+export function calculateWorkingJobCount(jobs: readonly Job[]): number {
+  return jobs.filter((job) => job.state === "working").length
+}
+
+/**
+ * Formats the sentence of the composer's jobs bar.
+ *
+ * @param workingJobCount - Number of jobs that work, from 1.
+ * @returns How many jobs work, as `1 job is working` or `3 jobs are working`.
+ */
+export function formatWorkingJobs(workingJobCount: number): string {
+  return workingJobCount === 1
+    ? "1 job is working"
+    : `${workingJobCount} jobs are working`
 }
 
 /**

@@ -1,14 +1,25 @@
 import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import {
+  activityEventSchema,
+  type ListedBackendToolUnavailableReason
+} from "@lys/protocol"
+import type { Job } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
+import type { AgentListState } from "@/lib/store/agents"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import type { HeldToolCall } from "@/lib/store/tool-calls"
+import type { ToolListState } from "@/lib/store/tools"
+import { buildActivityReply } from "../../support/activityFixtures"
+import { buildAgent, buildAgentSummary } from "../../support/agentFixtures"
 import {
   FIXTURE_BACKEND_URL,
   startBackendFake
 } from "../../support/backendFake"
 import {
   buildConversation,
+  buildConversationWithJobs,
+  buildJob,
   buildStreamingAssistantMessage,
   buildUserMessage,
   createFixtureUuidV7,
@@ -74,12 +85,6 @@ function buildWaitingRead(
   }
 }
 
-/** Route key of the tool-result endpoint for {@link FIRST_CALL}. */
-const FIRST_RESULT_ROUTE = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/tool-results/${FIRST_CALL.id}`
-
-/** Route key of the tool-approval endpoint for {@link FIRST_CALL}. */
-const FIRST_APPROVAL_ROUTE = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/tool-approvals/${FIRST_CALL.id}`
-
 /**
  * Loads fresh application, chat-view, and tool-call stores with the prompt
  * that reads them: the fixture conversation is shown with an empty draft,
@@ -101,6 +106,59 @@ async function loadFreshToolCallPrompt(heldCalls: readonly HeldToolCall[]) {
   return { useChatViewStore, useToolCallStore, ComposerToolCallPrompt }
 }
 
+/**
+ * Loads a fresh prompt whose shown conversation lists the given jobs, while
+ * a reply of job 1 waits for the person to answer a read of the fixture
+ * notes, as the activity stream reported it.
+ *
+ * @param jobs - Jobs the shown conversation lists.
+ * @returns The component, loaded with the stores it reads.
+ * @remarks The agent list names nyx `Nyx`. The tool list holds
+ * `read_text_file`, so the prompt needs no list read, and the tool-call
+ * store holds the prompt as it does once an activity snapshot listed it.
+ */
+async function loadFreshJobToolCallPrompt(jobs: readonly Job[]) {
+  const jobCall = buildToolCall(70, "read_text_file")
+  const { useChatViewStore, useToolCallStore, ComposerToolCallPrompt } =
+    await loadFreshToolCallPrompt([])
+  const { useAgentStore } = await import("@/lib/store/agents")
+  const { useToolStore } = await import("@/lib/store/tools")
+  const conversation = buildConversation(FIXTURE_CONVERSATION_ID, null, [
+    buildUserMessage(2, "Find the news")
+  ])
+  useChatViewStore.setState({
+    conversation: createStoredChatViewConversation(
+      buildConversationWithJobs(conversation, jobs)
+    )
+  })
+  const nyx = buildAgentSummary(buildAgent("nyx", { name: "Nyx" }))
+  const loadedAgentList: AgentListState = {
+    status: "loaded",
+    builtInAgents: [],
+    agents: [nyx],
+    isRefreshing: false
+  }
+  useAgentStore.setState({ list: loadedAgentList })
+  const readTextFile = buildToolDefinition("read_text_file")
+  const noUnavailableTools: ReadonlyMap<
+    string,
+    ListedBackendToolUnavailableReason
+  > = new Map()
+  const loadedToolList: ToolListState = {
+    status: "loaded",
+    tools: [readTextFile],
+    unavailableTools: noUnavailableTools
+  }
+  useToolStore.setState({ list: loadedToolList })
+  await useToolCallStore.getState().handleActivityEvent(
+    activityEventSchema.parse({
+      type: "activity-snapshot",
+      replies: [buildActivityReply({ pendingToolApprovals: [jobCall] })]
+    })
+  )
+  return ComposerToolCallPrompt
+}
+
 describe("ComposerToolCallPrompt", () => {
   it("keeps an empty status line and shows no card while no call needs the person", async () => {
     const { ComposerToolCallPrompt } = await loadFreshToolCallPrompt([])
@@ -108,6 +166,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onDismissToolCall={vi.fn()}
         onRejectToolCall={vi.fn()}
       />
@@ -127,6 +186,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Poet"
+        hasKeyShortcuts
         onDismissToolCall={vi.fn()}
         onRejectToolCall={vi.fn()}
       />
@@ -140,6 +200,66 @@ describe("ComposerToolCallPrompt", () => {
     )
   })
 
+  it("shows a job's prompt in its parent with a line naming the agent and the job", async () => {
+    const ComposerToolCallPrompt = await loadFreshJobToolCallPrompt([
+      buildJob()
+    ])
+
+    render(
+      <ComposerToolCallPrompt
+        agentName="Caliginia"
+        hasKeyShortcuts
+        onDismissToolCall={vi.fn()}
+        onRejectToolCall={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByRole("group", { name: "Tool call waiting for your answer" })
+    ).toHaveTextContent("From Nyx's job: News")
+    expect(screen.getByRole("status").textContent).toMatch(
+      /^Nyx is waiting for you to allow or reject read_text_file: /
+    )
+  })
+
+  it("shows no line for a call of the shown conversation itself", async () => {
+    const { ComposerToolCallPrompt } = await loadFreshToolCallPrompt([
+      buildWaitingRead(FIRST_CALL)
+    ])
+
+    render(
+      <ComposerToolCallPrompt
+        agentName="Caliginia"
+        hasKeyShortcuts
+        onDismissToolCall={vi.fn()}
+        onRejectToolCall={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("group")).toBeInTheDocument()
+    expect(screen.queryByText(/^From /)).not.toBeInTheDocument()
+  })
+
+  it("falls back when the job is not known yet", async () => {
+    const ComposerToolCallPrompt = await loadFreshJobToolCallPrompt([])
+
+    render(
+      <ComposerToolCallPrompt
+        agentName="Caliginia"
+        hasKeyShortcuts
+        onDismissToolCall={vi.fn()}
+        onRejectToolCall={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByRole("group", { name: "Tool call waiting for your answer" })
+    ).toHaveTextContent("From a job of this conversation")
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "A job of this conversation is waiting for you to allow or reject read_text_file: Read /notes/todo.md. Nothing is changed."
+    )
+  })
+
   it("shows nothing for a call of a conversation that is not shown", async () => {
     const { ComposerToolCallPrompt } = await loadFreshToolCallPrompt([
       buildWaitingRead(OTHER_CONVERSATION_CALL, createFixtureUuidV7(90))
@@ -148,6 +268,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onDismissToolCall={vi.fn()}
         onRejectToolCall={vi.fn()}
       />
@@ -158,9 +279,10 @@ describe("ComposerToolCallPrompt", () => {
   })
 
   it("sends the person's allowing answer, running nothing itself, then shows the next call that waits", async () => {
+    const firstApprovalRoute = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/tool-approvals/${FIRST_CALL.id}`
     const host = startNativeHostFake({ read_text_file: () => "Buy milk." })
     const backend = startBackendFake({
-      [FIRST_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
+      [firstApprovalRoute]: () => new Response(null, { status: 204 })
     })
     const { ComposerToolCallPrompt } = await loadFreshToolCallPrompt([
       buildWaitingRead(FIRST_CALL),
@@ -170,6 +292,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onDismissToolCall={vi.fn()}
         onRejectToolCall={vi.fn()}
       />
@@ -199,6 +322,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onDismissToolCall={vi.fn()}
         onRejectToolCall={onRejectToolCall}
       />
@@ -219,6 +343,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onDismissToolCall={vi.fn()}
         onRejectToolCall={vi.fn()}
       />
@@ -235,10 +360,33 @@ describe("ComposerToolCallPrompt", () => {
     ).toBeInTheDocument()
   })
 
+  it("offers Allow once, naming no keys, whatever the draft holds while the field routes none", async () => {
+    const { useChatViewStore, ComposerToolCallPrompt } =
+      await loadFreshToolCallPrompt([buildWaitingRead(FIRST_CALL)])
+    useChatViewStore.setState({ inputDraft: "not that file" })
+
+    render(
+      <ComposerToolCallPrompt
+        agentName="Caliginia"
+        hasKeyShortcuts={false}
+        onDismissToolCall={vi.fn()}
+        onRejectToolCall={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Allow once" })
+    ).not.toHaveAttribute("aria-keyshortcuts")
+    expect(
+      screen.queryByRole("button", { name: "Allow anyway" })
+    ).not.toBeInTheDocument()
+  })
+
   it("sends an unsent answer again on Try again, without running the tool again", async () => {
+    const firstResultRoute = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY.id}/tool-results/${FIRST_CALL.id}`
     startNativeHostFake({})
     const backend = startBackendFake({
-      [FIRST_RESULT_ROUTE]: () => new Response(null, { status: 204 })
+      [firstResultRoute]: () => new Response(null, { status: 204 })
     })
     const unsentAnswer = { status: "succeeded", content: "Buy milk." } as const
     const { ComposerToolCallPrompt } = await loadFreshToolCallPrompt([
@@ -257,6 +405,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onDismissToolCall={vi.fn()}
         onRejectToolCall={vi.fn()}
       />
@@ -288,6 +437,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Poet"
+        hasKeyShortcuts
         onDismissToolCall={onDismissToolCall}
         onRejectToolCall={vi.fn()}
       />
@@ -309,6 +459,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        hasKeyShortcuts
         onDismissToolCall={vi.fn()}
         onRejectToolCall={vi.fn()}
       />

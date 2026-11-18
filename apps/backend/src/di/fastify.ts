@@ -6,6 +6,7 @@ import {
 } from "fastify"
 import { LLM_PROVIDERS, type LlmProvider } from "@lys/share"
 import type { BackendConfig } from "../config"
+import { handleDelegationEvent } from "../modules/delegation/delegationEventLog"
 import {
   buildLlmProviderRecord,
   type LlmProviderRecord,
@@ -37,20 +38,24 @@ type SingletonServicePluginOptions = {
  * @returns A promise that resolves after the services are open and the shutdown hook is registered.
  * @throws If service construction or Fastify decoration and hook registration fails.
  * @remarks The services are exposed as Fastify decorations and disposed when
- * Fastify closes. After the HTTP listener opens, an `onListen` hook starts
- * the first LLM runtime connection attempt of every provider at once; each
- * attempt's failure is logged with its provider and never stops another's.
- * Fastify resolves `listen()` before running the hook, so no provider ever
- * delays or prevents listening. `inject()` and `ready()` do not run the
- * hook. An
+ * Fastify closes. In `preClose`, while SSE streams are still open, the
+ * turns' activity is closed as {@link closeTurnActivity} closes it: no
+ * wake-up turn starts any more, every activity stream ends, then every
+ * generation stores its final state and its followers end, before the
+ * server waits for requests and before the services close SQLite. After
+ * the HTTP listener opens, an `onListen` hook starts the first LLM runtime
+ * connection attempt of every provider at once; each attempt's failure is
+ * logged with its provider and never stops another's. Fastify resolves
+ * `listen()` before running the hook, so no provider ever delays or
+ * prevents listening. `inject()` and `ready()` do not run the hook. An
  * `onReady` hook applies the MCP settings before the backend listens, so the
  * first request already sees every configured server, connecting; the
  * servers connect in the background and never delay listening. The
  * services' failures that no caller observes, each runtime failure with its
- * provider, the messages of the LM
- * Studio SDK, the MCP servers' events, the email account checks, and the
- * failures to save their process groups file are logged through the
- * application's logger.
+ * provider, the messages of the LM Studio SDK, the MCP servers' events, the
+ * email account checks, the failures to save their process groups file,
+ * delegation's events, and the turns the backend starts itself are logged
+ * through the application's logger.
  */
 const openSingletonServices: FastifyPluginAsync<
   SingletonServicePluginOptions
@@ -66,10 +71,11 @@ const openSingletonServices: FastifyPluginAsync<
       )
     }
   }
+  const lmStudioSdk = new PinoLmStudioSdkLogger(app.log)
   const singletonServices = await createSingletonServices(config, {
     llmRuntime,
     pageRendering,
-    lmStudioSdk: new PinoLmStudioSdkLogger(app.log),
+    lmStudioSdk,
     reportMcpServerEvent: (event) => {
       handleMcpServerEvent(app.log, event)
     },
@@ -81,9 +87,16 @@ const openSingletonServices: FastifyPluginAsync<
     },
     sendEmailAccountCheckEvent: (event) => {
       handleEmailAccountCheckEvent(app.log, event)
-    }
+    },
+    reportDelegationEvent: (event) => {
+      handleDelegationEvent(app.log, event)
+    },
+    backendTurnLogger: app.log
   })
 
+  app.addHook("preClose", async () => {
+    await closeTurnActivity(singletonServices)
+  })
   app.addHook("onClose", async () => {
     await closeSingletonServices(singletonServices)
   })
@@ -98,6 +111,32 @@ const openSingletonServices: FastifyPluginAsync<
   })
 
   registerSingletonServices(app, singletonServices)
+}
+
+/**
+ * Closes what the running turns do while the backend shuts down, in the
+ * order that keeps a reply that ends during the shutdown from starting a
+ * wake-up turn.
+ *
+ * @param services - The wake settings, the activity hub, and the reply
+ * generation registry the plugin created; the bundle's cleanup releases
+ * them again later, which changes nothing.
+ * @returns A promise that resolves once every running generation stored its
+ * final state; it never rejects.
+ * @remarks Closes the wake settings first, so a reply that ends while the
+ * generations end starts no wake-up turn; then disposes of the activity
+ * hub, which ends every activity stream; then disposes the registry, which
+ * ends every generation.
+ */
+async function closeTurnActivity(
+  services: Pick<
+    SingletonServices,
+    "conversationWakeSettings" | "activityHub" | "replyGenerations"
+  >
+): Promise<void> {
+  services.conversationWakeSettings.close()
+  services.activityHub[Symbol.dispose]()
+  await services.replyGenerations[Symbol.asyncDispose]()
 }
 
 /**
@@ -209,6 +248,7 @@ function registerSingletonServices(
   app.decorate("agentService", singletonServices.agentService)
   app.decorate("agentRuntimeService", singletonServices.agentRuntimeService)
   app.decorate("builtInTools", singletonServices.builtInTools)
+  app.decorate("listedAgentTools", singletonServices.listedAgentTools)
   app.decorate("webSearchToolProvider", singletonServices.webSearchToolProvider)
   app.decorate("toolApprovalService", singletonServices.toolApprovalService)
   app.decorate("mcpServerRegistry", singletonServices.mcpServerRegistry)
@@ -218,6 +258,16 @@ function registerSingletonServices(
   )
   app.decorate("emailAccountChecker", singletonServices.emailAccountChecker)
   app.decorate("attachmentFileStore", singletonServices.attachmentFileStore)
+  app.decorate("replyGenerations", singletonServices.replyGenerations)
+  app.decorate("startTurn", singletonServices.startTurn)
+  app.decorate("activityHub", singletonServices.activityHub)
+  app.decorate("handleTurnStarted", singletonServices.handleTurnStarted)
+  app.decorate("createTurnDelegation", singletonServices.createTurnDelegation)
+  app.decorate("handleReplyEnded", singletonServices.handleReplyEnded)
+  app.decorate("stopReply", singletonServices.stopReply)
+  app.decorate("stopConversationJobs", singletonServices.stopConversationJobs)
+  app.decorate("listWorkingReplies", singletonServices.listWorkingReplies)
+  app.decorate("stopDeletedReplies", singletonServices.stopDeletedReplies)
 }
 
 /** Fastify plugin that opens the application-scoped singleton services. */

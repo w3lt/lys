@@ -15,6 +15,7 @@ import {
   type ReactElement
 } from "react"
 
+import { handleFocusTargetAttach } from "@/components/focus-target"
 import { Button } from "@/components/ui/button"
 import { NativeSelect } from "@/components/ui/native-select"
 import { Switch } from "@/components/ui/switch"
@@ -44,7 +45,6 @@ import {
 } from "./email-mailbox-state"
 import { useEmailMailboxView } from "./email-mailbox-view"
 import { formatEmailSecurityLabel } from "./email-presentation"
-import { handleFocusTargetAttach } from "./focus-target"
 import {
   formatClockTime,
   formatLysIdentitySummary,

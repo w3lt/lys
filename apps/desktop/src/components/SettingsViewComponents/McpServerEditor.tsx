@@ -29,7 +29,7 @@ import {
 import { parseMcpServerJson } from "@/lib/models/mcp-server-json"
 import type { McpSettingsSaveState } from "@/lib/store/mcp-settings"
 
-import { handleFocusTargetAttach } from "./focus-target"
+import { handleFocusTargetAttach } from "@/components/focus-target"
 import { McpDraftProblemSummary } from "./McpDraftProblemSummary"
 import {
   McpServerDraftFields,

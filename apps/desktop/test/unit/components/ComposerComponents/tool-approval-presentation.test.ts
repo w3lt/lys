@@ -2,6 +2,7 @@ import { TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
 import {
   formatToolCallAnnouncement,
+  formatToolCallJobLine,
   formatToolCallSummary
 } from "@/components/ComposerComponents/tool-approval-presentation"
 import type { ShownToolCall, ToolCallInput } from "@/lib/store/tool-calls"
@@ -99,6 +100,36 @@ describe("formatToolCallSummary", () => {
     )
   })
 
+  it("names the agent a new job goes to, its title, and all the instructions it gets", () => {
+    expect(
+      formatToolCallSummary({
+        runner: "backend",
+        toolName: "delegate_work",
+        agentCode: "nyx",
+        title: "News",
+        instructions: "Find this week's hologram news.",
+        jobNumber: undefined
+      })
+    ).toBe(
+      "Give nyx the job “News”. It gets only these instructions: Find this week's hologram news."
+    )
+  })
+
+  it("names the agent and the job a continuation goes to, its new title, and all the instructions it gets", () => {
+    expect(
+      formatToolCallSummary({
+        runner: "backend",
+        toolName: "delegate_work",
+        agentCode: "nyx",
+        title: "News",
+        instructions: "Find this week's hologram news.",
+        jobNumber: 2
+      })
+    ).toBe(
+      "Send nyx more work on job 2, now titled “News”. It gets only these instructions: Find this week's hologram news."
+    )
+  })
+
   it("asks whether to run an MCP tool, by its server's name for it, on its server", () => {
     expect(
       formatToolCallSummary({
@@ -161,5 +192,19 @@ describe("formatToolCallAnnouncement", () => {
 
   it("announces nothing while no call is shown", () => {
     expect(formatToolCallAnnouncement(undefined, "Caliginia")).toBe("")
+  })
+})
+
+describe("formatToolCallJobLine", () => {
+  it("names the agent and the title of the job a call comes from", () => {
+    expect(formatToolCallJobLine({ agentName: "Nyx", title: "News" })).toBe(
+      "From Nyx's job: News"
+    )
+  })
+
+  it("says only that the call comes from a job of this conversation while the job is not known", () => {
+    expect(formatToolCallJobLine(undefined)).toBe(
+      "From a job of this conversation"
+    )
   })
 })

@@ -1,6 +1,6 @@
 ---
 name: verify-lys
-description: Launch the real Lys stack (backend from source, Vite-served desktop renderer in headless Chrome, a fake Ollama provider and a fake Tauri host at the production boundaries) and drive user workflows end to end with machine-readable results and screenshots. Use it to prove chat streaming, settings persistence, or backend lifecycle behavior after a change, or to check whether a regression is real; run it from the repository root on macOS.
+description: Launch the real Lys stack (backend from source, Vite-served desktop renderer in headless Chrome, a fake Ollama provider and a fake Tauri host at the production boundaries) and drive user workflows end to end with machine-readable results and screenshots. Use it to prove chat streaming, agent delegation, settings persistence, or backend lifecycle behavior after a change, or to check whether a regression is real; run it from the repository root on macOS.
 ---
 
 # Verify Lys
@@ -21,8 +21,12 @@ What stands in, each at a production boundary:
 
 - `scripts/fake-ollama.mjs` answers as a local Ollama server (`/api/tags`,
   `/api/show`, `/api/ps`, `/v1/chat/completions`). It streams a fixed reply
-  one word every 120 ms and answers title requests with a fixed title. The
-  user's machine cannot run a local model, so no journey depends on one.
+  one word every 120 ms and answers title requests with a fixed title. A
+  short delegation script picks other answers by a streamed request's last
+  message and offered tools: a `delegate_work` or `report_progress` call sent
+  as one chunk, or a scripted text. Its request log records each request's
+  offered tool names, last message role, and scripted answer. The user's
+  machine cannot run a local model, so no journey depends on one.
 - `scripts/fake-host.mjs` answers the renderer's Tauri `invoke` calls over
   HTTP. Chrome cannot drive the desktop's WKWebView on macOS, so the renderer
   runs in headless Chrome with `window.__TAURI_INTERNALS__.invoke` forwarded
@@ -122,6 +126,7 @@ Journeys and what each proves, grouped by feature file in `features/`:
 | `backend-health`         | backend-lifecycle    | `GET /api/v1/heath` answers `{ok: true}`; every pid listening on 12345 is in the host's backend process group; `GET /api/v1/llm/ollama/runtime` is `connected`; `GET /api/v1/llm/ollama/list` lists `lys-verify:latest` as loaded.                                                                                                                     |
 | `chat-stream-api`        | chat-streaming       | `POST /api/v1/chat` with `model: {provider: "ollama", modelKey: "lys-verify:latest"}` streams `start-new-conversation-turn`, a `reply-part` text part, at least 10 timed `reply-part-delta` events spread over at least 1 s, `done` with `stop`, and `title`; the conversation route and SQLite rows match and store the reply with provider `ollama`. |
 | `chat-stream-ui`         | chat-streaming       | Typing and Send show the streaming caret, a Stop button, partial text mid-stream, the whole reply when done, and the titled conversation in Past conversations.                                                                                                                                                                                        |
+| `agent-delegation-ui`    | agent-delegation     | Allowing Caliginia's `delegate_work` call shows the job's card and note; the result wakes the lead with `Reports · 2`; the job opens read-only, stays out of history, and SQLite, logs, and provider requests agree.                                                                                                                                   |
 | `settings-generation-ui` | settings-persistence | Reply ceiling switch off writes `generation.replyCeiling: 0` to `settings.json`, survives a reload, and switches back to 2048.                                                                                                                                                                                                                         |
 | `settings-autostart-ui`  | settings-persistence | "Start it when Lys opens" off writes `runtime.autoStartBackend: false`, survives a reload, and switches back to true.                                                                                                                                                                                                                                  |
 | `controls-and-type-ui`   | controls-and-type    | Every text in the chat, Past conversations, each Settings pane, the mailbox card, and the agent and MCP editors is on the type scale; every Button, ToggleGroup item, Input, NativeSelect, and Textarea renders its variant's text and its size's height.                                                                                              |
@@ -148,7 +153,23 @@ Runtime, Models, Generation, Agents, Tools, MCP, Providers, Secrets), switches
 `[aria-label="Stop backend"]` and `[aria-label="Start backend"]`, and the
 status region `[aria-label="Backend status"] h2` reading `Backend running`,
 `Backend starting`, `Backend stopping`, `Backend stopped`, or
-`Backend not responding`.
+`Backend not responding`. For agent delegation: the approval card
+`[aria-label="Tool call waiting for your answer"]` with its `Allow once`
+button; a job's card `article.chat-view__job` with its `data-state`, found by
+its button `[aria-label="<title>, job <number>"]`, and its
+`.chat-view__job-meta span`, `.chat-view__job-state`, `.chat-view__job-note`,
+and `.chat-view__job-stop`; the delivered reports
+`details.chat-view__reports > summary` reading `Reports · <count>` with
+`li.chat-view__report` rows and their `.chat-view__report-heading` and
+`.chat-view__report-content`; the
+composer notices `output.composer__notice-message` (the jobs bar, the job's
+read-only notice); speakers `.chat-view__speaker` and user copy
+`.chat-view__user-copy` in `article.chat-view__message`; the Tools pane rows
+`.settings-view__tool-row` and their `.settings-view__tool-name` in
+`section.settings-view__tool-group` under an
+`h2`, the access label `[data-badge="access"]`, switches
+`[role="switch"][aria-label="Use <tool>"]`; and Settings' Done button
+`button.settings-view__done`.
 
 To prove the verifier itself is alive, hold the reply back in
 `apps/backend/src/modules/chat/openAiReplyModel.ts` (accumulate
@@ -157,6 +178,8 @@ the two chat journeys, watch them fail on "at least 10 reply-part-delta
 events" and "mid-stream text must show the reply's opening words", then
 `git checkout -- apps/backend/src/modules/chat/openAiReplyModel.ts` and run
 them again. That was done on 2026-11-01 and is recorded in the feature map.
+The delegation journey's proof, with the wake-up call taken out, is in
+`features/agent-delegation.md`.
 
 ## Evidence
 
@@ -221,8 +244,8 @@ All executable, all under `.claude/skills/verify-lys/scripts/`:
   `--native`, `--keep`).
 - `fake-ollama.mjs --port-file <path> --request-log <path>`: the provider
   stand-in; listens on a free loopback port and writes it to the port file.
-  Its fixed reply, model name, title, and word interval live in
-  `lib/verificationProvider.mjs`, which the journeys import too.
+  Its fixed reply, model name, title, word interval, and delegation script
+  live in `lib/verificationProvider.mjs`, which the journeys import too.
 - `fake-host.mjs --lys-home <dir> --port-file <path> --backend-log <path> --backend-record <path> --invocation-log <path> --renderer-origin http://localhost:1420`:
   the Tauri host stand-in; `POST /invoke {cmd, args}` answers
   `{ok: true, value}` or `{ok: false, error}`, `GET /status` reports the
@@ -230,13 +253,15 @@ All executable, all under `.claude/skills/verify-lys/scripts/`:
 - `lib/`: `stack.mjs` (launch, health, stop, doctor facts), `cdp.mjs` (a
   minimal DevTools client on Node's WebSocket), `rendererPage.mjs` (open a
   page with the Tauri shim, click, type, screenshot), `rendererSteps.mjs`
-  (composer-ready wait, settings panes, switches, backend status heading),
+  (composer-ready wait, settings panes, switches, backend status heading,
+  transcript, job cards, reports, approval card, tool rows),
   `journey.mjs` (steps, evidence recorder, `rejectUnless`, `JourneyBlocked`),
   `processControl.mjs` (detached start, identity by pid plus start time,
   group stop, port listeners), `httpProbe.mjs` (JSON requests, timed
   server-sent events, port probe), `settingsDocument.mjs` (the default
   settings document mirrored from the Rust host, atomic 0600 writes),
-  `sqliteEvidence.mjs` (read-only `node:sqlite` rows), `runRecord.mjs` (run
+  `sqliteEvidence.mjs` (read-only `node:sqlite` rows, a conversation's jobs
+  with their messages and reports), `runRecord.mjs` (run
   directories, `active-run`), `waiting.mjs` (bounded waits).
 - `journeys/`: one file per journey plus `index.mjs`, which fixes the drive
   order. A new journey is a module exporting `{id, feature, title,

@@ -39,7 +39,8 @@ const VALID_RAW_CONFIG = Object.freeze({
   titleGenerationMaxAttempts: 3,
   generatedTitleMaxLength: 100,
   agentRequestSlotCount: 2,
-  agentWaitingRequestLimit: 8
+  agentWaitingRequestLimit: 8,
+  agentJobMessageLimit: 12
 })
 
 /**
@@ -111,7 +112,7 @@ describe("loadBackendConfig", () => {
     vi.mocked(readPrompt).mockImplementation((type) => FIXTURE_PROMPTS[type])
   })
 
-  it("resolves the shared endpoints, the Lys home paths, vmo's endpoint, every prompt, the fixed title limits, and the fixed agent request limits", () => {
+  it("resolves the shared endpoints, the Lys home paths, vmo's endpoint, every prompt, the fixed title limits, the fixed agent request limits, and the fixed job message limit", () => {
     vi.stubEnv("LYS_EMAIL_SERVER_PATH", undefined)
 
     expect(loadBackendConfig()).toEqual({
@@ -131,7 +132,8 @@ describe("loadBackendConfig", () => {
       titleGenerationMaxAttempts: 3,
       generatedTitleMaxLength: 100,
       agentRequestSlotCount: 2,
-      agentWaitingRequestLimit: 8
+      agentWaitingRequestLimit: 8,
+      agentJobMessageLimit: 12
     })
   })
 
@@ -263,7 +265,8 @@ describe("backendConfigSchema", () => {
         ...VALID_RAW_CONFIG,
         titleGenerationMaxAttempts: 1,
         generatedTitleMaxLength: 1,
-        agentRequestSlotCount: 1
+        agentRequestSlotCount: 1,
+        agentJobMessageLimit: 1
       }
     ],
     [
@@ -444,6 +447,16 @@ describe("backendConfigSchema", () => {
       "a fractional agent waiting request limit",
       { ...VALID_RAW_CONFIG, agentWaitingRequestLimit: 0.5 },
       "agentWaitingRequestLimit"
+    ],
+    [
+      "an agent job message limit of 0",
+      { ...VALID_RAW_CONFIG, agentJobMessageLimit: 0 },
+      "agentJobMessageLimit"
+    ],
+    [
+      "a fractional agent job message limit",
+      { ...VALID_RAW_CONFIG, agentJobMessageLimit: 1.5 },
+      "agentJobMessageLimit"
     ]
   ])("rejects %s and names only that key", (_label, input, key) => {
     expect(listIssueKeys(listConfigIssues(input))).toEqual(new Set([key]))

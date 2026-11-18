@@ -36,7 +36,7 @@ export type AddWebSources = (
   candidates: readonly WebSourceCandidate[]
 ) => readonly ConversationSource[]
 
-/** What one run of a built-in tool borrows from its turn. */
+/** What one run of a built-in tool is given by its turn. */
 export type BuiltInToolRunContext = Readonly<{
   /** UUIDv7 of the stored call that runs, its part's identity. */
   toolCallId: string
@@ -69,8 +69,8 @@ export type BuiltInToolResult =
 /**
  * Runs one parsed call.
  *
- * @param context - The call's cancellation and source numbering, borrowed
- * for the call.
+ * @param context - The call's identity, and its cancellation and source
+ * numbering, borrowed for the call.
  * @returns The text the model reads and the sources it shows.
  * @throws The abort reason once the context's signal aborts; any other
  * rejection is a defect, not an expected outcome.
@@ -170,10 +170,12 @@ export type TurnBuiltInTool = Readonly<{
   /**
    * Whether the tool's calls run without asking the person: true only for a
    * tool that reads what the person gave Lys for this conversation, such as
-   * the attachment reader, or what the backend knows about its agents and
-   * the turn's tools, such as the agent state tools, `find_tools`, and the
-   * tool keeper's search tools; every other tool's calls pass the approval
-   * gate.
+   * the attachment reader, that reads what the backend knows about its
+   * agents and the turn's tools, such as the agent state tools,
+   * `find_tools`, and the tool keeper's search tools, or that only acts
+   * inside a job the person already allowed when they allowed its
+   * `delegate_work` call, such as `stop_job`; every other tool's calls pass
+   * the approval gate.
    */
   runsWithoutApproval: boolean
 }>

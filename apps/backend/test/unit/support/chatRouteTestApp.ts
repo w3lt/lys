@@ -6,11 +6,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { onTestFinished, vi, type Mock, type MockInstance } from "vitest"
 import SqliteAgentRecordStore from "../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
+import SqliteJobActivityReader from "../../../src/infrastructure/database/delegation/sqliteJobActivityReader"
+import SqliteJobReader from "../../../src/infrastructure/database/delegation/sqliteJobReader"
+import SqliteJobReportWriter from "../../../src/infrastructure/database/delegation/sqliteJobReportWriter"
 import type {
   DatabaseFunctionRegistry,
   DatabaseReader,
   DatabaseWriter
 } from "../../../src/infrastructure/database/databaseTransactions"
+import type SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
+import ActivityHub from "../../../src/modules/activity/activityHub"
 import AgentRuntimeService, {
   buildConversationTitleLookup
 } from "../../../src/modules/agent/agentRuntimeService"
@@ -28,6 +33,22 @@ import {
   type FindLlmModelCapabilities
 } from "../../../src/modules/chat/routes/modelCapabilities"
 import {
+  startTurn,
+  type TurnStartDependencies
+} from "../../../src/modules/chat/turnStart"
+import {
+  listWorkingReplies,
+  stopDeletedReplies
+} from "../../../src/modules/delegation/conversationDeletions"
+import ConversationWakeSettings from "../../../src/modules/delegation/conversationWakeSettings"
+import { createDelegationRuntime } from "../../../src/modules/delegation/delegationRuntime"
+import { handleDelegationEvent } from "../../../src/modules/delegation/delegationEventLog"
+import {
+  stopConversationJobs,
+  stopReplyForPerson
+} from "../../../src/modules/delegation/jobStops"
+import ReplyStopRequests from "../../../src/modules/delegation/replyStopRequests"
+import {
   buildLlmProviderRecord,
   type LlmProviderRecord,
   type LlmProviderServices
@@ -44,6 +65,8 @@ import type { BuiltInToolEntry } from "../../../src/modules/tool/builtIn/builtIn
 import ToolApprovalService, {
   type ReadJustRunToolNames
 } from "../../../src/modules/toolApproval/toolApprovalService"
+import type { ToolCallPolicy } from "../../../src/modules/toolApproval/toolCallPolicy"
+import { TEST_BACKEND_CONFIG } from "./backendConfig"
 import { createChatSseTestApp } from "./chatSseRoute"
 import {
   createAcquiredFakeLlmRuntime,
@@ -60,6 +83,7 @@ import {
 } from "./scriptedBuiltInTool"
 import { ROOMY_CONTEXT_LENGTH } from "./replyContextMeterFakes"
 import { ScriptedBuiltInToolProvider } from "./scriptedBuiltInToolProvider"
+import { TOOL_CALL_POLICY } from "./toolFixtures"
 import { createOwnedMcpServerProcessGroups } from "./mcpServerProcessGroups"
 import SqliteToolSearchCallRecordWriter from "../../../src/infrastructure/database/conversations/sqliteToolSearchCallRecordWriter"
 
@@ -136,7 +160,8 @@ export type ChatRouteTestApp = TestFastify &
      */
     attachmentsDirectoryPath: string
     /**
-     * Registry a case passes to the chat route; disposed when the test
+     * Registry of `app.replyGenerations`, with which `app.startTurn`
+     * registers every generation it starts; disposed when the test
      * finishes, before the conversation database closes.
      */
     generations: ReplyGenerationRegistry
@@ -146,10 +171,11 @@ export type ChatRouteTestApp = TestFastify &
      */
     readMcpSettings: Mock<() => Promise<McpSettingsRead>>
     /**
-     * Read access to the in-memory conversation database the services store
-     * on, for records no service reads, such as the tool call decisions.
+     * Database the decorated conversation services and agent records store
+     * on, where a case stores rows no request stores, such as a job, and
+     * reads records no service reads, such as the tool call decisions.
      */
-    database: DatabaseReader
+    database: SqliteDatabase
   }>
 
 /**
@@ -187,14 +213,17 @@ type ChatRouteTestSpies = Pick<
   | "readMcpSettings"
 >
 
-/** The chat route test app's services and the spies inside them. */
+/**
+ * The chat route test app's services, the spies inside them, and the
+ * database they store on.
+ */
 type SpiedChatRouteTestServices = Readonly<{
   /** Services the application registers. */
   services: ChatRouteTestServices
   /** Spies inside the services, which a case configures or inspects. */
   spies: ChatRouteTestSpies
-  /** Read access to the conversation database the services store on. */
-  database: DatabaseReader
+  /** Database the conversation services and agent records store on. */
+  database: SqliteDatabase
 }>
 
 /** A chat service and the spies that replace its model calls. */
@@ -279,7 +308,10 @@ export type AgentConversationTestServices = Readonly<{
  *
  * @param builtInServers - Servers Lys ships that its MCP server registry
  * holds; none by default.
- * @returns The application, the destination of its log, and the spies.
+ * @param toolCallPolicy - Policy the turn start decides tool calls by; the
+ * fixture's, which lists no folder, by default.
+ * @returns The application, the destination of its log, the spies, and the
+ * database its services store on.
  * @throws If the SSE plugin cannot be registered.
  * @remarks The chat route is not registered; each case calls the registrar
  * under test. Unconfigured turn creation throws and both chat-service calls
@@ -313,14 +345,22 @@ export type AgentConversationTestServices = Readonly<{
  * registry is real, reads its
  * settings through the `readMcpSettings` spy, which reads no server, opens
  * servers with a 10-second limit, and logs nothing; it holds no server until
- * a case applies settings, and it is closed when the test finishes. When the
- * test finishes, the generation
- * registry is disposed first, so every generation it holds has stored its
- * final state before the in-memory conversation database is closed; the
- * directory is removed last.
+ * a case applies settings, and it is closed when the test finishes. The
+ * decorated turn start is the real one, as {@link registerTestTurnStart}
+ * binds it to the decorated services, to the tool call policy, and to the
+ * decorated reply generation registry, which is the returned one. The decorated delegation hooks, the
+ * person's stops, and the listing and cancellation of a deleted
+ * conversation's work are the real ones, as
+ * {@link registerTestTurnDelegations} builds them over the decorated
+ * services and the same database. When the
+ * test finishes, the activity hub of the delegation hooks is disposed of and
+ * the generation registry is disposed first, so every generation it holds has
+ * stored its final state before the in-memory conversation database is
+ * closed; the directory is removed last.
  */
 export async function createChatRouteTestApp(
-  builtInServers: readonly BuiltInMcpServer[] = []
+  builtInServers: readonly BuiltInMcpServer[] = [],
+  toolCallPolicy: ToolCallPolicy = TOOL_CALL_POLICY
 ): Promise<ChatRouteTestApp> {
   const attachmentsDirectoryPath = mkdtempSync(
     join(tmpdir(), "lys-chat-route-attachments-")
@@ -339,6 +379,8 @@ export async function createChatRouteTestApp(
   })
   testFastify.app.setValidatorCompiler(validatorCompiler)
   registerChatRouteTestServices(testFastify.app, services)
+  registerTestTurnStart(testFastify.app, generations, toolCallPolicy)
+  registerTestTurnDelegations(testFastify.app, database)
   return Object.freeze({
     ...testFastify,
     ...spies,
@@ -352,6 +394,131 @@ export async function createChatRouteTestApp(
 }
 
 /**
+ * Registers a reply generation registry and the turn start bound to it with
+ * the chat route test app, as the backend's composition root binds its own.
+ *
+ * @param app - Application with the conversation services, the chat
+ * service and each provider's LLM service, the tool approval service, and
+ * the attachment file store registered; the turn start borrows them for the
+ * test.
+ * @param generations - Registry the turn start registers every generation
+ * with; the caller disposes it.
+ * @param toolCallPolicy - Policy the turn start decides tool calls by.
+ * @throws If the application already has a reply generation registry or a
+ * turn start.
+ * @remarks Title requests and loaded checks go through `app.chatService` and
+ * the model's provider's LLM service in `app.llmProviderServices` when they
+ * run, so a case's spies on them apply. A turn gets at most two title
+ * requests.
+ */
+function registerTestTurnStart(
+  app: FastifyInstance,
+  generations: ReplyGenerationRegistry,
+  toolCallPolicy: ToolCallPolicy
+): void {
+  /**
+   * Most title requests the chat route test app's turn start makes for one
+   * turn.
+   */
+  const testTitleGenerationMaxAttempts = 2
+
+  const turns = app.conversationTurns
+  const dependencies: TurnStartDependencies = {
+    generations,
+    turns,
+    replyParts: app.replyParts,
+    titleWriter: turns,
+    findConversation: (conversationId) =>
+      app.conversationHistoryReader.getConversation(conversationId),
+    attachmentFiles: app.attachmentFileStore,
+    generateTitle: (options) => app.chatService.generateTitle(options),
+    findLoadedContextLength: async (model) =>
+      (
+        await app.llmProviderServices[
+          model.provider
+        ].llmService.findLlmContextMeasurement(model.modelKey, [])
+      )?.contextLength,
+    titleGenerationMaxAttempts: testTitleGenerationMaxAttempts,
+    toolCallPolicy,
+    toolApprovals: app.toolApprovalService
+  }
+  app.decorate("replyGenerations", generations)
+  app.decorate("startTurn", (options) => startTurn(dependencies, options))
+}
+
+/**
+ * Registers the delegation hooks, the person's stops, and the listing and
+ * cancellation of a deleted conversation's work with the chat route test
+ * app, over a delegation runtime built as the backend's composition root
+ * builds its own.
+ *
+ * @param app - Application with the agent services, the conversation
+ * services, the turn start, and the reply generation registry registered;
+ * the runtime borrows them for the test.
+ * @param database - Database the job records read and write; the caller
+ * closes it.
+ * @throws If the application already has one of the delegation hooks,
+ * either of the person's stops, or the listing or cancellation of a deleted
+ * conversation's work.
+ * @remarks The runtime's job records are the Sqlite ones over the database,
+ * and it stores job turns through `app.conversationTurns`, whose turn
+ * creation throws until a case configures it. Its hub is a real activity
+ * hub of its own, disposed of when the test finishes, before the generation
+ * registry is disposed. It remembers wake settings and stop requests in
+ * instances of its own, allows the job messages of
+ * {@link TEST_BACKEND_CONFIG}, and logs its events and the turns it starts
+ * with the application's logger.
+ */
+function registerTestTurnDelegations(
+  app: FastifyInstance,
+  database: SqliteDatabase
+): void {
+  const activityHub = new ActivityHub()
+  onTestFinished(() => {
+    activityHub[Symbol.dispose]()
+  })
+  const wakeSettings = new ConversationWakeSettings()
+  const stopRequests = new ReplyStopRequests()
+  const jobs = new SqliteJobReader(database)
+  const jobActivity = new SqliteJobActivityReader(database)
+  const reports = new SqliteJobReportWriter(database)
+  const runtime = createDelegationRuntime({
+    findAgent: (code) => app.agentService.findAgent(code),
+    loadChatAgent: (code) => app.agentRuntimeService.loadChatAgent(code),
+    findConversationAgentCode: (conversationId) =>
+      app.conversationHistoryReader.getConversationMetadata(conversationId)
+        ?.agentCode,
+    jobs,
+    jobActivity,
+    reports,
+    turns: app.conversationTurns,
+    startTurn: app.startTurn,
+    generations: app.replyGenerations,
+    hub: activityHub,
+    wakeSettings,
+    stopRequests,
+    agentJobMessageLimit: TEST_BACKEND_CONFIG.agentJobMessageLimit,
+    reportEvent: (event) => {
+      handleDelegationEvent(app.log, event)
+    },
+    logger: app.log
+  })
+  app.decorate("handleTurnStarted", runtime.handleTurnStarted)
+  app.decorate("createTurnDelegation", runtime.createTurnDelegation)
+  app.decorate("handleReplyEnded", runtime.handleReplyEnded)
+  app.decorate("stopReply", (target) => stopReplyForPerson(runtime, target))
+  app.decorate("stopConversationJobs", (conversationId) =>
+    stopConversationJobs(runtime, conversationId)
+  )
+  app.decorate("listWorkingReplies", (conversationId) =>
+    listWorkingReplies(runtime, conversationId)
+  )
+  app.decorate("stopDeletedReplies", (conversationId, replies) =>
+    stopDeletedReplies(runtime, conversationId, replies)
+  )
+}
+
+/**
  * Creates the services of {@link createChatRouteTestApp} over one in-memory
  * conversation database, with every call the chat route can reach replaced
  * by a spy.
@@ -360,7 +527,7 @@ export async function createChatRouteTestApp(
  * keeps its files under; the caller owns it.
  * @param builtInServers - Servers Lys ships that the MCP server registry
  * holds.
- * @returns The services, their spies, and read access to their database.
+ * @returns The services, their spies, and the database they store on.
  * @throws If the LLM runtime service cannot connect.
  * @remarks When the test finishes, the MCP server registry closes first,
  * then the LLM runtime services are disposed, and the database closes last.

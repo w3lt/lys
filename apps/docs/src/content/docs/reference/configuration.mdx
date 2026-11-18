@@ -101,6 +101,7 @@ not find a runtime that `build.sh` installed under another directory.
 | Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer                                                                                                                                                                                                                                                                                                                                                                                     |
 | Agent request slots            | `2`, from `agentRequestSlotCount` in `src/config.ts`; replies each live agent works on at once; must be a positive integer                                                                                                                                                                                                                                                                                                                                               |
 | Agent waiting request limit    | `8`, from `agentWaitingRequestLimit` in `src/config.ts`; replies that may wait per live agent for a free request slot; must be a non-negative integer, `0` meaning no reply waits                                                                                                                                                                                                                                                                                        |
+| Agent job message limit        | `12`, from `agentJobMessageLimit` in `src/config.ts`; job messages the agents may send in one main conversation since the person's last message there; must be a positive integer                                                                                                                                                                                                                                                                                        |
 
 `loadBackendConfig()` builds these values once when the backend starts, so a
 changed `LYS_HOME`, prompt file, or limit takes effect after a restart. The
@@ -110,7 +111,13 @@ at each connection attempt, and builds its URLs from the
 attempt limit applies to each chat turn. The title length limit counts Unicode
 code points before surrounding whitespace is trimmed. Every live agent gets
 the same request slots and waiting limit, each agent its own; see
-[request slots](/architecture/backend/#request-slots).
+[request slots](/architecture/backend/#request-slots). The job message limit
+counts the job messages stored in the jobs of one main conversation since
+the person's last message there, read from the database for each
+`delegate_work` call. A message of the person
+starts the count again; a wake-up turn does not. A call over the limit is
+refused with a reason the model reads, and nothing is stored; see
+[delegation](/architecture/backend/#delegation).
 
 ### Backend configuration validation
 
@@ -120,16 +127,16 @@ The backend validates the complete configuration with `backendConfigSchema` in
 application or any service. Every key is required, unknown keys are rejected,
 and no defaults are applied.
 
-| Key                                                                                               | Accepted values                                                                                        |
-| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `backendHost`                                                                                     | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers          |
-| `backendPort`, `vmoPort`                                                                          | An integer from 1 to 65535                                                                             |
-| `vmoHost`                                                                                         | An IPv4 loopback address (`127.x.x.x`); vmo does not authenticate its callers                          |
-| `databaseFilePath`, `settingsFilePath`, `attachmentsDirectoryPath`, `mcpProcessGroupsFilePath`    | An absolute path                                                                                       |
-| `emailServerPath`                                                                                 | An absolute path of at most 1,024 characters, without a control character or white space at either end |
-| `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `armitageSystemPrompt`, `titleGenerationPrompt` | Non-empty text without leading or trailing whitespace                                                  |
-| `titleGenerationMaxAttempts`, `generatedTitleMaxLength`, `agentRequestSlotCount`                  | A positive integer                                                                                     |
-| `agentWaitingRequestLimit`                                                                        | A non-negative integer                                                                                 |
+| Key                                                                                                      | Accepted values                                                                                        |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `backendHost`                                                                                            | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers          |
+| `backendPort`, `vmoPort`                                                                                 | An integer from 1 to 65535                                                                             |
+| `vmoHost`                                                                                                | An IPv4 loopback address (`127.x.x.x`); vmo does not authenticate its callers                          |
+| `databaseFilePath`, `settingsFilePath`, `attachmentsDirectoryPath`, `mcpProcessGroupsFilePath`           | An absolute path                                                                                       |
+| `emailServerPath`                                                                                        | An absolute path of at most 1,024 characters, without a control character or white space at either end |
+| `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `armitageSystemPrompt`, `titleGenerationPrompt`        | Non-empty text without leading or trailing whitespace                                                  |
+| `titleGenerationMaxAttempts`, `generatedTitleMaxLength`, `agentRequestSlotCount`, `agentJobMessageLimit` | A positive integer                                                                                     |
+| `agentWaitingRequestLimit`                                                                               | A non-negative integer                                                                                 |
 
 A value outside these rules stops the backend at startup with a `ZodError`
 whose issues name each failing key. The shared constants, the `LYS_HOME`

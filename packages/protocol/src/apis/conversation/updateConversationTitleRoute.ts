@@ -1,7 +1,9 @@
 import * as z from "zod"
 import { conversationMetadataSchema } from "@lys/share"
 import {
+  conversationIsJobProblemSchema,
   conversationNotFoundProblemSchema,
+  type ConversationIsJobProblem,
   type ConversationNotFoundProblem
 } from "../../http/errors/conversation"
 import {
@@ -37,7 +39,8 @@ const updateConversationTitleApiRequestBodySchema = z
 
 /** Selects the title-update failure validator by HTTP status. */
 const updateConversationTitleApiResponseSchemas = Object.freeze({
-  404: conversationNotFoundProblemSchema
+  404: conversationNotFoundProblemSchema,
+  409: conversationIsJobProblemSchema
 })
 
 /**
@@ -47,8 +50,10 @@ const updateConversationTitleApiResponseSchemas = Object.freeze({
  * resulting conversation metadata. Renaming does not change the conversation's
  * activity time, so its position in the newest-first list is unchanged.
  * Repeating the same request is idempotent. A missing conversation returns the
- * conversation-not-found problem with HTTP 404 and changes nothing. Changing
- * the method, path, or schemas requires coordinated consumers.
+ * conversation-not-found problem with HTTP 404 and changes nothing. A job
+ * returns the conversation-is-job problem with HTTP 409 and keeps its title,
+ * because the person reads and stops a job, nothing else. Changing the
+ * method, path, or schemas requires coordinated consumers.
  */
 export const updateConversationTitleApi = Object.freeze({
   method: "PATCH",
@@ -75,6 +80,8 @@ export type UpdateConversationTitleApiReply = {
   readonly 200: UpdateConversationTitleApiResponse
   /** No conversation is stored under the addressed identifier. */
   readonly 404: ConversationNotFoundProblem
+  /** The addressed conversation is a job, which the person cannot rename. */
+  readonly 409: ConversationIsJobProblem
 }
 
 /** Fastify route type for the title-update endpoint. */

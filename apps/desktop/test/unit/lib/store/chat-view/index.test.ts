@@ -1,4 +1,5 @@
 import type {
+  ActivityEvent,
   ChatReplyPathParams,
   ChatToolOffer,
   MessageGenerationOptions
@@ -13,7 +14,8 @@ import { describe, expect, it, vi } from "vitest"
 import {
   readChatEvents,
   readChatReplyEvents,
-  stopChatReply
+  stopChatReply,
+  stopConversationJobs
 } from "@/lib/apis/http/chat"
 import { getConversation } from "@/lib/apis/http/conversations"
 import type { AttachmentModelSupport } from "@/lib/models/attachment-model-support"
@@ -38,6 +40,7 @@ import {
 import {
   buildJsonResponse,
   createControlledRoute,
+  createTransportFailure,
   FIXTURE_BACKEND_URL,
   listRouteKeys,
   startBackendEventStream,
@@ -52,13 +55,24 @@ import {
   buildConversation,
   buildConversationMetadata,
   buildConversationNotFoundProblem,
+  buildConversationWithJobs,
+  buildDelegatorMessage,
+  buildEndedAssistantMessage,
+  buildJob,
+  buildJobConversation,
+  buildJobReport,
   buildTextPart,
   buildReplyNotGeneratingProblem,
   buildStreamingAssistantMessage,
   buildToolCallPart,
   buildUserMessage,
+  buildUserMessageWithReports,
+  buildWakeUpMessage,
   createFixtureUuidV7,
-  FIXTURE_CONVERSATION_ID
+  FIXTURE_CONVERSATION_ID,
+  FIXTURE_JOB_ID,
+  FIXTURE_JOB_REPLY_ID,
+  FIXTURE_WAKE_REPLY_ID
 } from "../../../support/conversationFixtures"
 import {
   buildLlmInfo,
@@ -282,6 +296,8 @@ function createChatHarness() {
       readChatReplyEvents(target, { backendUrl: FIXTURE_BACKEND_URL, signal }),
     stopChatReply: (target) =>
       stopChatReply(target, { backendUrl: FIXTURE_BACKEND_URL }),
+    stopConversationJobs: (conversationId) =>
+      stopConversationJobs(conversationId, { backendUrl: FIXTURE_BACKEND_URL }),
     getConversation: (conversationId, signal) =>
       getConversation(conversationId, {
         backendUrl: FIXTURE_BACKEND_URL,
@@ -959,6 +975,44 @@ describe("createChatViewStore", () => {
         buildUserMessage(4, "More").id,
         secondReply.id
       ])
+    })
+
+    it("merges the sources a continued turn's delivered reports cite, which the backend sends right after the start event and the title", async () => {
+      const { store, streams, send } = await startStreamingReply()
+      await sendStreamEvents(streams[0], { type: "done", finishReason: "stop" })
+      streams[0]?.close()
+      await send
+      const report = buildJobReport({
+        content: "Wool [3].",
+        sourceNumbers: [3]
+      })
+      const source = {
+        number: 3,
+        url: "https://moths.example/diet",
+        title: "Moth diet"
+      }
+
+      void store.getState().sendMessage("Any news?")
+      await waitForMicrotasks()
+      await sendStreamEvents(
+        streams[1],
+        {
+          type: "start-existing-conversation-turn",
+          userMessage: buildUserMessageWithReports(
+            buildUserMessage(4, "Any news?"),
+            [report]
+          ),
+          assistantMessage: buildStreamingAssistantMessage(5, "")
+        },
+        { type: "title", title: "Moths" },
+        { type: "sources", sources: [source] }
+      )
+
+      expect(store.getState().conversation).toMatchObject({
+        title: "Moths",
+        sources: [source],
+        messages: [{}, {}, { reports: [report] }, {}]
+      })
     })
 
     it("hands the reply of each started turn to the tool-call follow", async () => {
@@ -2146,6 +2200,697 @@ describe("following a stored reply", () => {
   })
 })
 
+/** Route key of the read of the fixture conversation. */
+const MAIN_READ_ROUTE = `GET /api/v1/conversations/${FIXTURE_CONVERSATION_ID}`
+
+/** The fixture conversation after its first turn, with job 1 working. */
+const MAIN_CONVERSATION = buildConversationWithJobs(
+  buildConversation(FIXTURE_CONVERSATION_ID, "Main", [
+    buildUserMessage(2, "Hello"),
+    buildCompletedAssistantMessage(3, "Hi")
+  ]),
+  [buildJob()]
+)
+
+/**
+ * The fixture conversation once job 1 replied and the backend started a
+ * wake-up reply for its report; sequence 62 is the wake-up reply's.
+ */
+const WOKEN_CONVERSATION = buildConversationWithJobs(
+  buildConversation(FIXTURE_CONVERSATION_ID, "Main", [
+    ...MAIN_CONVERSATION.messages,
+    buildWakeUpMessage(66, [buildJobReport()]),
+    buildStreamingAssistantMessage(62, "")
+  ]),
+  [buildJob({ state: "replied" })]
+)
+
+/** Route key of the reply-events endpoint for the wake-up reply. */
+const WAKE_EVENTS_ROUTE = `GET /api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${FIXTURE_WAKE_REPLY_ID}/events`
+
+/** The wake-up reply as the activity stream names it. */
+const WAKE_REPLY_TARGET = Object.freeze({
+  conversationId: FIXTURE_CONVERSATION_ID,
+  parentConversationId: null,
+  assistantMessageId: FIXTURE_WAKE_REPLY_ID
+})
+
+/** Activity event reporting that the backend started the wake-up reply. */
+const WAKE_REPLY_STARTED_EVENT: ActivityEvent = Object.freeze({
+  type: "reply-started",
+  ...WAKE_REPLY_TARGET
+})
+
+/** Activity event reporting that the wake-up reply completed. */
+const WAKE_REPLY_ENDED_EVENT: ActivityEvent = Object.freeze({
+  type: "reply-ended",
+  ...WAKE_REPLY_TARGET,
+  status: "completed"
+})
+
+/** First event of an activity stream while no backend-started reply runs. */
+const EMPTY_SNAPSHOT_EVENT: ActivityEvent = Object.freeze({
+  type: "activity-snapshot",
+  replies: Object.freeze([])
+})
+
+/** Route key of the stop request for job 1's reply. */
+const STOP_JOB_ROUTE = `POST /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/stop`
+
+/** Route key of the request that stops every job of the fixture conversation. */
+const STOP_JOBS_ROUTE = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/jobs/stop`
+
+/**
+ * Starts a backend whose reads of the fixture conversation the case answers,
+ * and opens {@link MAIN_CONVERSATION} in a new store.
+ *
+ * @param routes - Other routes the case needs; the chat route opens a new
+ * event stream per request unless the case replaces it.
+ * @returns The harness, the backend, the chat streams, and the reads of the
+ * fixture conversation in arrival order, the open's read first.
+ */
+async function openMainConversation(routes: BackendRoutes = {}) {
+  const mainReads = createControlledRoute()
+  const chat = startChatBackend({
+    [MAIN_READ_ROUTE]: mainReads.route,
+    ...routes
+  })
+  const harness = createChatHarness()
+  const open = harness.store
+    .getState()
+    .openConversation(FIXTURE_CONVERSATION_ID)
+  await waitForMicrotasks()
+  mainReads.responses[0]?.resolve(buildJsonResponse(200, MAIN_CONVERSATION))
+  await open
+  return { ...harness, ...chat, mainReads }
+}
+
+describe("handleActivityEvent", () => {
+  it("reads the shown conversation again when the backend starts a reply in it, and keeps the draft, the tray, and the error", async () => {
+    const { store, providers, mainReads, toolCallFollows } =
+      await openMainConversation({
+        [WAKE_EVENTS_ROUTE]: () => startBackendEventStream().response
+      })
+    store.getState().setInputDraft("half a thought")
+    await store
+      .getState()
+      .addAttachments([buildTextFile("notes.md", "# Notes")])
+    providers.newConversationModel = null
+    await store.getState().sendMessage("Hello")
+
+    store.getState().handleActivityEvent(WAKE_REPLY_STARTED_EVENT)
+    await waitForMicrotasks()
+    mainReads.responses[1]?.resolve(buildJsonResponse(200, WOKEN_CONVERSATION))
+    await waitForMicrotasks()
+
+    expect(store.getState().conversation?.messages.at(-1)?.id).toBe(
+      FIXTURE_WAKE_REPLY_ID
+    )
+    expect(store.getState()).toMatchObject({
+      inputDraft: "half a thought",
+      attachments: [{ draft: { name: "notes.md" } }],
+      error: expect.stringContaining("Chat is unavailable") as string,
+      request: {
+        status: "reply-streaming",
+        assistantMessageId: FIXTURE_WAKE_REPLY_ID
+      },
+      conversationOpen: { status: "idle" }
+    })
+    expect(toolCallFollows).toEqual([
+      {
+        conversationId: FIXTURE_CONVERSATION_ID,
+        assistantMessageId: FIXTURE_WAKE_REPLY_ID
+      }
+    ])
+  })
+
+  it("reads the shown conversation again after every snapshot", async () => {
+    const { store, backend, mainReads } = await openMainConversation()
+
+    store.getState().handleActivityEvent(EMPTY_SNAPSHOT_EVENT)
+    await waitForMicrotasks()
+    mainReads.responses[1]?.resolve(buildJsonResponse(200, MAIN_CONVERSATION))
+    await waitForMicrotasks()
+    store.getState().handleActivityEvent(EMPTY_SNAPSHOT_EVENT)
+    await waitForMicrotasks()
+    mainReads.responses[2]?.resolve(buildJsonResponse(200, MAIN_CONVERSATION))
+    await waitForMicrotasks()
+
+    expect(listRouteKeys(backend)).toEqual([
+      MAIN_READ_ROUTE,
+      MAIN_READ_ROUTE,
+      MAIN_READ_ROUTE
+    ])
+  })
+
+  it("ignores a reply of a conversation that is not shown", async () => {
+    const { store, backend } = await openMainConversation()
+
+    store.getState().handleActivityEvent({
+      type: "reply-started",
+      conversationId: FIXTURE_JOB_ID,
+      parentConversationId: FIXTURE_CONVERSATION_ID,
+      assistantMessageId: FIXTURE_JOB_REPLY_ID
+    })
+    await waitForMicrotasks()
+
+    expect(listRouteKeys(backend)).toEqual([MAIN_READ_ROUTE])
+  })
+
+  it.each<[string, ActivityEvent]>([
+    [
+      "a prompt",
+      {
+        type: "tool-approval",
+        ...WAKE_REPLY_TARGET,
+        call: buildToolCall(5, "read_text_file"),
+        approvalToken: createFixtureApprovalToken(5)
+      }
+    ],
+    [
+      "the end of a prompt",
+      {
+        type: "tool-approval-ended",
+        ...WAKE_REPLY_TARGET,
+        callId: buildToolCall(5, "read_text_file").id,
+        status: "failed"
+      }
+    ],
+    [
+      "a call to run",
+      {
+        type: "tool-call",
+        ...WAKE_REPLY_TARGET,
+        call: buildToolCall(4, "read_text_file")
+      }
+    ]
+  ])(
+    "leaves %s of a reply in the shown conversation to the tool-call store and reads nothing",
+    async (_label, event) => {
+      const { store, backend } = await openMainConversation()
+
+      store.getState().handleActivityEvent(event)
+      await waitForMicrotasks()
+
+      expect(listRouteKeys(backend)).toEqual([MAIN_READ_ROUTE])
+    }
+  )
+
+  it("reads nothing while no conversation is shown", async () => {
+    const backend = startBackendFake({})
+    const { store } = createChatHarness()
+
+    store.getState().handleActivityEvent(EMPTY_SNAPSHOT_EVENT)
+    await waitForMicrotasks()
+
+    expect(backend.requests).toEqual([])
+  })
+
+  it("reads a conversation again once it opened when the backend started a reply in it meanwhile", async () => {
+    const mainReads = createControlledRoute()
+    startBackendFake({ [MAIN_READ_ROUTE]: mainReads.route })
+    const { store } = createChatHarness()
+    const open = store.getState().openConversation(FIXTURE_CONVERSATION_ID)
+    await waitForMicrotasks()
+
+    store.getState().handleActivityEvent(WAKE_REPLY_STARTED_EVENT)
+    await waitForMicrotasks()
+    const readsWhileOpening = mainReads.responses.length
+    mainReads.responses[0]?.resolve(buildJsonResponse(200, MAIN_CONVERSATION))
+    await open
+
+    expect(readsWhileOpening).toBe(1)
+    expect(mainReads.responses).toHaveLength(2)
+  })
+
+  it("waits until its own request has ended", async () => {
+    const mainReads = createControlledRoute()
+    const { backend, streams } = startChatBackend({
+      [MAIN_READ_ROUTE]: mainReads.route
+    })
+    const { store } = createChatHarness()
+    const send = store.getState().sendMessage("Hello")
+    await waitForMicrotasks()
+
+    store.getState().handleActivityEvent(EMPTY_SNAPSHOT_EVENT)
+    await sendStreamEvents(streams[0], NEW_TURN_EVENT)
+    store.getState().handleActivityEvent(EMPTY_SNAPSHOT_EVENT)
+    await waitForMicrotasks()
+    const whileReplying = listRouteKeys(backend)
+    await sendStreamEvents(streams[0], { type: "done", finishReason: "stop" })
+    mainReads.responses[0]?.resolve(buildJsonResponse(200, MAIN_CONVERSATION))
+    streams[0]?.close()
+    await send
+
+    expect(whileReplying).toEqual([CHAT_ROUTE])
+    expect(listRouteKeys(backend)).toEqual([CHAT_ROUTE, MAIN_READ_ROUTE])
+  })
+
+  it("reads once its own request failed before its turn started", async () => {
+    const chatAnswers = createControlledRoute()
+    const { store, mainReads } = await openMainConversation({
+      [CHAT_ROUTE]: chatAnswers.route
+    })
+    const send = store.getState().sendMessage("More")
+    await waitForMicrotasks()
+
+    store.getState().handleActivityEvent(WAKE_REPLY_STARTED_EVENT)
+    await waitForMicrotasks()
+    const readsWhileAwaited = mainReads.responses.length
+    chatAnswers.responses[0]?.reject(createTransportFailure())
+    await send
+
+    expect(readsWhileAwaited).toBe(1)
+    expect(mainReads.responses).toHaveLength(2)
+  })
+
+  it("drops a read waiting for its own request when the view is reset", async () => {
+    const { store, backend, send } = await startStreamingReply(
+      buildStoredConversationRoutes(STORED_CONVERSATION)
+    )
+    store.getState().handleActivityEvent(EMPTY_SNAPSHOT_EVENT)
+
+    store.getState().resetConversation()
+    const open = store.getState().openConversation(STORED_ID)
+    await send
+    await open
+
+    expect(listRouteKeys(backend)).toEqual([
+      CHAT_ROUTE,
+      `GET /api/v1/conversations/${STORED_ID}`
+    ])
+  })
+
+  it("throws away a read that returns after a request started, and reads again once that request ended", async () => {
+    const answered = buildConversationWithJobs(
+      buildConversation(FIXTURE_CONVERSATION_ID, "Main", [
+        ...WOKEN_CONVERSATION.messages.slice(0, -1),
+        buildEndedAssistantMessage(62, "", "interrupted"),
+        buildUserMessage(4, "More"),
+        buildCompletedAssistantMessage(5, "More answers")
+      ]),
+      [buildJob({ state: "replied" })]
+    )
+    const { store, streams, mainReads } = await openMainConversation()
+    store.getState().handleActivityEvent(WAKE_REPLY_STARTED_EVENT)
+    await waitForMicrotasks()
+
+    const send = store.getState().sendMessage("More")
+    await waitForMicrotasks()
+    mainReads.responses[1]?.resolve(buildJsonResponse(200, WOKEN_CONVERSATION))
+    await waitForMicrotasks()
+    const afterLateRead = store
+      .getState()
+      .conversation?.messages.map(({ id }) => id)
+    await sendStreamEvents(streams[0], {
+      type: "start-existing-conversation-turn",
+      userMessage: buildUserMessage(4, "More"),
+      assistantMessage: buildStreamingAssistantMessage(5, "")
+    })
+    const readsBeforeDone = mainReads.responses.length
+    await sendStreamEvents(streams[0], { type: "done", finishReason: "stop" })
+    mainReads.responses[2]?.resolve(buildJsonResponse(200, answered))
+    await waitForMicrotasks()
+    streams[0]?.close()
+    await send
+
+    expect(afterLateRead).toEqual(
+      MAIN_CONVERSATION.messages.map(({ id }) => id)
+    )
+    expect(readsBeforeDone).toBe(2)
+    expect(store.getState().conversation?.messages.map(({ id }) => id)).toEqual(
+      answered.messages.map(({ id }) => id)
+    )
+  })
+
+  it("throws away a read that returns after the backend refused a request, and reads again at once", async () => {
+    const { store, mainReads } = await openMainConversation({
+      [CHAT_ROUTE]: () =>
+        buildJsonResponse(409, {
+          type: "urn:lys:problem:conversation:agent-missing",
+          title: "Conversation agent missing",
+          status: 409,
+          detail: "The agent of this conversation no longer exists."
+        })
+    })
+    store.getState().handleActivityEvent(WAKE_REPLY_STARTED_EVENT)
+    await waitForMicrotasks()
+    await store.getState().sendMessage("More")
+
+    mainReads.responses[1]?.resolve(buildJsonResponse(200, WOKEN_CONVERSATION))
+    await waitForMicrotasks()
+
+    expect(store.getState().conversation?.messages.map(({ id }) => id)).toEqual(
+      MAIN_CONVERSATION.messages.map(({ id }) => id)
+    )
+    expect(mainReads.responses).toHaveLength(3)
+  })
+
+  it.each<
+    [
+      string,
+      (store: ReturnType<typeof createChatViewStore>) => Promise<void>,
+      string | undefined
+    ]
+  >([
+    [
+      "an open of another conversation",
+      (store) => store.getState().openConversation(STORED_ID),
+      STORED_ID
+    ],
+    [
+      "a reset",
+      (store) => {
+        store.getState().resetConversation()
+        return waitForMicrotasks()
+      },
+      undefined
+    ],
+    [
+      "a newer read",
+      (store) => {
+        store.getState().handleActivityEvent(EMPTY_SNAPSHOT_EVENT)
+        return waitForMicrotasks()
+      },
+      FIXTURE_CONVERSATION_ID
+    ]
+  ])(
+    "cancels a read that %s replaced, and ignores its late answer",
+    async (_case, replaceRead, shownConversationId) => {
+      const { store, backend, mainReads } = await openMainConversation(
+        buildStoredConversationRoutes(STORED_CONVERSATION)
+      )
+      store.getState().handleActivityEvent(WAKE_REPLY_STARTED_EVENT)
+      await waitForMicrotasks()
+
+      await replaceRead(store)
+      const afterReplace = store.getState()
+      mainReads.responses[1]?.resolve(
+        buildJsonResponse(200, WOKEN_CONVERSATION)
+      )
+      await waitForMicrotasks()
+
+      expect(backend.requests[1]?.signal?.aborted).toBe(true)
+      expect(afterReplace.conversation?.id).toBe(shownConversationId)
+      expect(store.getState()).toBe(afterReplace)
+    }
+  )
+
+  it("keeps the shown conversation and reports that it no longer exists when the read does not find it", async () => {
+    const { store, mainReads } = await openMainConversation()
+    const { conversation } = store.getState()
+
+    store.getState().handleActivityEvent(EMPTY_SNAPSHOT_EVENT)
+    await waitForMicrotasks()
+    mainReads.responses[1]?.resolve(
+      buildJsonResponse(404, buildConversationNotFoundProblem())
+    )
+    await waitForMicrotasks()
+
+    expect(store.getState().conversation).toBe(conversation)
+    expect(store.getState().error).toBe("That conversation no longer exists.")
+  })
+
+  it("keeps the shown conversation and its error when the read fails", async () => {
+    const { store, providers, mainReads } = await openMainConversation()
+    providers.newConversationModel = null
+    await store.getState().sendMessage("More")
+    const { conversation, error } = store.getState()
+
+    store.getState().handleActivityEvent(WAKE_REPLY_ENDED_EVENT)
+    await waitForMicrotasks()
+    mainReads.responses[1]?.reject(createTransportFailure())
+    await waitForMicrotasks()
+
+    expect(store.getState()).toMatchObject({
+      conversation,
+      error,
+      request: { status: "idle" }
+    })
+  })
+
+  it("keeps following a completed reply's title when the read finds no streaming reply", async () => {
+    const { store, streams, send } = await startStreamingReply({
+      [MAIN_READ_ROUTE]: () => buildJsonResponse(200, MAIN_CONVERSATION)
+    })
+    await sendStreamEvents(streams[0], { type: "done", finishReason: "stop" })
+
+    store.getState().handleActivityEvent(EMPTY_SNAPSHOT_EVENT)
+    await waitForMicrotasks()
+    await sendStreamEvents(streams[0], { type: "title", title: "Named" })
+    streams[0]?.close()
+    await send
+
+    expect(store.getState().conversation).toMatchObject({
+      title: "Named",
+      jobs: [{ id: FIXTURE_JOB_ID }]
+    })
+  })
+
+  it("stops following a completed reply's title to follow a reply the read finds still generating", async () => {
+    const { store, streams, send } = await startStreamingReply({
+      [MAIN_READ_ROUTE]: () => buildJsonResponse(200, WOKEN_CONVERSATION),
+      [WAKE_EVENTS_ROUTE]: () => startBackendEventStream().response
+    })
+    await sendStreamEvents(streams[0], { type: "done", finishReason: "stop" })
+
+    store.getState().handleActivityEvent(WAKE_REPLY_STARTED_EVENT)
+    await waitForMicrotasks()
+    await send
+
+    expect(streams[0]?.isCancelled()).toBe(true)
+    expect(store.getState().request).toMatchObject({
+      status: "reply-streaming",
+      assistantMessageId: FIXTURE_WAKE_REPLY_ID
+    })
+  })
+
+  it("replaces a job of the shown conversation with the version that arrived last, and adds a new one in number order", async () => {
+    const { store } = await openMainConversation()
+
+    store.getState().handleActivityEvent({
+      type: "job-updated",
+      parentConversationId: FIXTURE_CONVERSATION_ID,
+      job: buildJob({ state: "replied" })
+    })
+    const afterReplace = store.getState().conversation?.jobs
+    store.getState().handleActivityEvent({
+      type: "job-updated",
+      parentConversationId: FIXTURE_CONVERSATION_ID,
+      job: buildJob({ id: createFixtureUuidV7(64), number: 3 })
+    })
+    store.getState().handleActivityEvent({
+      type: "job-updated",
+      parentConversationId: FIXTURE_CONVERSATION_ID,
+      job: buildJob({ id: createFixtureUuidV7(67), number: 2 })
+    })
+
+    expect(afterReplace?.map((job) => job.state)).toEqual(["replied"])
+    expect(
+      store.getState().conversation?.jobs.map((job) => job.number)
+    ).toEqual([1, 2, 3])
+  })
+
+  it("ignores a job of a conversation that is not shown", async () => {
+    const { store } = await openMainConversation()
+    const before = store.getState()
+
+    store.getState().handleActivityEvent({
+      type: "job-updated",
+      parentConversationId: STORED_ID,
+      job: buildJob({ state: "replied" })
+    })
+
+    expect(store.getState()).toBe(before)
+  })
+
+  it("refuses a job update that names the shown job as its parent and keeps the job as it was", async () => {
+    startBackendFake(buildStoredConversationRoutes(JOB_CONVERSATION))
+    const { store } = createChatHarness()
+    await store.getState().openConversation(FIXTURE_JOB_ID)
+    const before = store.getState()
+
+    expect(() =>
+      store.getState().handleActivityEvent({
+        type: "job-updated",
+        parentConversationId: FIXTURE_JOB_ID,
+        job: buildJob({ id: createFixtureUuidV7(70) })
+      })
+    ).toThrow("The backend reported a job started from a job")
+    expect(store.getState()).toBe(before)
+  })
+
+  it.each<[string, readonly ActivityEvent[]]>([
+    ["a read", [WAKE_REPLY_ENDED_EVENT]],
+    [
+      "a read that replaced an older one",
+      [WAKE_REPLY_ENDED_EVENT, EMPTY_SNAPSHOT_EVENT]
+    ]
+  ])(
+    "applies a job update that arrived during %s on top of that read",
+    async (_case, readEvents) => {
+      const { store, mainReads } = await openMainConversation()
+      readEvents.forEach((event) => store.getState().handleActivityEvent(event))
+      await waitForMicrotasks()
+
+      store.getState().handleActivityEvent({
+        type: "job-updated",
+        parentConversationId: FIXTURE_CONVERSATION_ID,
+        job: buildJob({ state: "replied" })
+      })
+      mainReads.responses[readEvents.length]?.resolve(
+        buildJsonResponse(
+          200,
+          buildConversationWithJobs(
+            buildConversation(
+              FIXTURE_CONVERSATION_ID,
+              "Named meanwhile",
+              MAIN_CONVERSATION.messages
+            ),
+            [buildJob()]
+          )
+        )
+      )
+      await waitForMicrotasks()
+
+      expect(mainReads.responses).toHaveLength(1 + readEvents.length)
+      expect(store.getState().conversation).toMatchObject({
+        title: "Named meanwhile",
+        jobs: [{ state: "replied" }]
+      })
+    }
+  )
+
+  it("applies a job update that arrived while the conversation opened on top of what the open read", async () => {
+    const mainReads = createControlledRoute()
+    startBackendFake({ [MAIN_READ_ROUTE]: mainReads.route })
+    const { store } = createChatHarness()
+    const open = store.getState().openConversation(FIXTURE_CONVERSATION_ID)
+    await waitForMicrotasks()
+
+    store.getState().handleActivityEvent({
+      type: "job-updated",
+      parentConversationId: FIXTURE_CONVERSATION_ID,
+      job: buildJob({ state: "replied" })
+    })
+    mainReads.responses[0]?.resolve(buildJsonResponse(200, MAIN_CONVERSATION))
+    await open
+
+    expect(store.getState().conversation).toMatchObject({
+      id: FIXTURE_CONVERSATION_ID,
+      jobs: [{ state: "replied" }]
+    })
+  })
+})
+
+describe("stopJob and stopJobs", () => {
+  it.each<[string, BackendRoute, string | undefined]>([
+    ["stopped it", () => new Response(null, { status: 204 }), undefined],
+    [
+      "was no longer generating it",
+      () => buildJsonResponse(409, buildReplyNotGeneratingProblem()),
+      undefined
+    ],
+    [
+      "failed",
+      () => buildJsonResponse(500, {}),
+      "The job could not be stopped: The backend could not stop the reply (HTTP 500)."
+    ]
+  ])(
+    "stops one job through its reply when the backend %s",
+    async (_case, stopRoute, error) => {
+      const { store, backend } = await openMainConversation({
+        [STOP_JOB_ROUTE]: stopRoute
+      })
+
+      await store.getState().stopJob(buildJob())
+
+      expect(listRouteKeys(backend)).toEqual([MAIN_READ_ROUTE, STOP_JOB_ROUTE])
+      expect(store.getState().error).toBe(error)
+      expect(store.getState().conversation?.jobs).toEqual(
+        MAIN_CONVERSATION.jobs
+      )
+    }
+  )
+
+  it.each<[string, BackendRoute, string | undefined]>([
+    ["stopped them", () => new Response(null, { status: 204 }), undefined],
+    [
+      "no longer stores the conversation",
+      () => buildJsonResponse(404, buildConversationNotFoundProblem()),
+      "That conversation no longer exists."
+    ],
+    [
+      "failed",
+      () => buildJsonResponse(500, {}),
+      "The jobs could not be stopped: The backend could not stop the jobs (HTTP 500)."
+    ]
+  ])(
+    "stops every job of the shown conversation when the backend %s",
+    async (_case, stopRoute, error) => {
+      const { store, backend } = await openMainConversation({
+        [STOP_JOBS_ROUTE]: stopRoute
+      })
+
+      await store.getState().stopJobs()
+
+      expect(listRouteKeys(backend)).toEqual([MAIN_READ_ROUTE, STOP_JOBS_ROUTE])
+      expect(store.getState().error).toBe(error)
+      expect(store.getState().conversation?.jobs).toEqual(
+        MAIN_CONVERSATION.jobs
+      )
+    }
+  )
+
+  it("sends no jobs stop while no conversation is shown", async () => {
+    const backend = startBackendFake({})
+    const { store } = createChatHarness()
+
+    await store.getState().stopJobs()
+
+    expect(backend.requests).toEqual([])
+  })
+
+  it.each<
+    [
+      string,
+      string,
+      (store: ReturnType<typeof createChatViewStore>) => Promise<void>
+    ]
+  >([
+    [
+      "one job",
+      STOP_JOB_ROUTE,
+      (store) => store.getState().stopJob(buildJob())
+    ],
+    ["every job", STOP_JOBS_ROUTE, (store) => store.getState().stopJobs()]
+  ])(
+    "records no failed stop of %s once the view was reset",
+    async (_case, routeKey, sendStop) => {
+      const stopRoute = createControlledRoute()
+      const { store } = await openMainConversation({
+        [routeKey]: stopRoute.route
+      })
+      const stop = sendStop(store)
+      await waitForMicrotasks()
+
+      store.getState().resetConversation()
+      stopRoute.responses[0]?.resolve(buildJsonResponse(500, {}))
+      await stop
+
+      expect(store.getState().error).toBeUndefined()
+    }
+  )
+})
+
+/** Job 1 of the fixture conversation, as stored after it replied. */
+const JOB_CONVERSATION = buildJobConversation(
+  buildConversation(FIXTURE_JOB_ID, "News", [
+    buildDelegatorMessage(68, "Find this week's hologram news."),
+    buildCompletedAssistantMessage(61, "Three stories.")
+  ])
+)
+
 describe("closeConversation", () => {
   it("resets the view when it shows the closed conversation", async () => {
     startBackendFake(buildStoredConversationRoutes(STORED_CONVERSATION))
@@ -2231,6 +2976,38 @@ describe("closeConversation", () => {
       conversationId: GENERATING_ID
     })
     expect(store.getState().conversation?.id).toBe(GENERATING_ID)
+  })
+
+  it("resets when the parent of the shown job is closed", async () => {
+    startBackendFake(buildStoredConversationRoutes(JOB_CONVERSATION))
+    const { store } = createChatHarness()
+    await store.getState().openConversation(FIXTURE_JOB_ID)
+
+    store.getState().closeConversation(FIXTURE_CONVERSATION_ID)
+
+    expect(store.getState().conversation).toBeUndefined()
+  })
+
+  it("keeps a shown job while another conversation opens to replace it, when the job's parent is closed", async () => {
+    const read = createControlledPromise<Response>()
+    startBackendFake({
+      ...buildStoredConversationRoutes(JOB_CONVERSATION),
+      [`GET /api/v1/conversations/${STORED_ID}`]: () => read.promise
+    })
+    const { store } = createChatHarness()
+    await store.getState().openConversation(FIXTURE_JOB_ID)
+    const open = store.getState().openConversation(STORED_ID)
+
+    store.getState().closeConversation(FIXTURE_CONVERSATION_ID)
+    const afterClose = store.getState().conversationOpen
+    read.resolve(buildJsonResponse(200, STORED_CONVERSATION))
+    await open
+
+    expect(afterClose).toMatchObject({
+      status: "opening",
+      conversationId: STORED_ID
+    })
+    expect(store.getState().conversation?.id).toBe(STORED_ID)
   })
 })
 
@@ -2602,5 +3379,20 @@ describe("useChatViewStore", () => {
       GENERATING_EVENTS_ROUTE,
       GENERATING_EVENTS_ROUTE
     ])
+  })
+
+  it("stops the shown conversation's jobs at the application store's backend", async () => {
+    const backend = startBackendFake({
+      ...buildStoredConversationRoutes(MAIN_CONVERSATION),
+      [STOP_JOBS_ROUTE]: () => new Response(null, { status: 204 })
+    })
+    const { useChatViewStore } = await loadFreshChatViewStore(0)
+    await useChatViewStore.getState().openConversation(FIXTURE_CONVERSATION_ID)
+
+    await useChatViewStore.getState().stopJobs()
+
+    expect(backend.requests.at(-1)?.url).toBe(
+      `${FIXTURE_BACKEND_URL}/api/v1/chat/${FIXTURE_CONVERSATION_ID}/jobs/stop`
+    )
   })
 })

@@ -3,7 +3,6 @@ import type { LlmModelReference, ToolDefinition } from "@lys/share"
 import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import type { ToolCallPolicy } from "../toolApproval/toolCallPolicy"
-import { formatSystemPrompt } from "./agentContext"
 import FindToolsTool, {
   FIND_TOOLS_DEFINITION,
   formatToolRoutingNote,
@@ -12,14 +11,14 @@ import FindToolsTool, {
 } from "./findToolsTool"
 import ReplyToolOffer from "./replyToolOffer"
 import { buildAgentToolset, type AgentToolset } from "./toolCallRound"
-import type { UnofferedTools } from "./unofferedTools"
 
 /**
  * How a turn offers its client, built-in, and MCP tools.
  *
  * @remarks `status` selects the variant. A routed turn offers them only
  * once Armitage, the tool keeper, finds them through `find_tools`; its
- * direct and state tools are offered from the first round either way.
+ * direct, state, and delegation tools are offered from the first round
+ * either way.
  */
 export type ToolRouting =
   | Readonly<{
@@ -42,7 +41,10 @@ export type OfferedDefinitionsInput = Readonly<{
    * offer order.
    */
   tools: readonly ToolDefinition[]
-  /** Definitions of the agent's state tools; empty when none is offered. */
+  /**
+   * Definitions of the agent's state tools, followed by its delegation
+   * tools; empty when none is offered.
+   */
   agentStateTools: readonly ToolDefinition[]
   /** How the turn offers `tools`. */
   routing: ToolRouting
@@ -128,31 +130,29 @@ export function calculateToolRouting(
 /**
  * Formats the system prompt every round of a turn sends.
  *
- * @param systemPrompt - The agent's own instructions.
- * @param unofferedTools - What the request names about the tools the turn
- * does not offer.
+ * @param systemPrompt - The agent's instructions with the notes about the
+ * tools the turn does not offer and about its job, as
+ * `formatSystemPrompt` formats them.
  * @param routing - How the turn offers its tools.
- * @returns The prompt {@link formatSystemPrompt} formats, followed for a
- * routed turn by a blank line and the note telling the model to call
+ * @returns The prompt unchanged for a direct turn; for a routed turn, the
+ * prompt followed by a blank line and the note telling the model to call
  * `find_tools`.
  */
 export function formatRoutedSystemPrompt(
   systemPrompt: string,
-  unofferedTools: UnofferedTools,
   routing: ToolRouting
 ): string {
-  const formatted = formatSystemPrompt(systemPrompt, unofferedTools)
-  if (routing.status === "direct") return formatted
-  return `${formatted}\n\n${formatToolRoutingNote(routing.toolCount)}`
+  if (routing.status === "direct") return systemPrompt
+  return `${systemPrompt}\n\n${formatToolRoutingNote(routing.toolCount)}`
 }
 
 /**
  * Lists the definitions the first round of a turn offers.
  *
- * @param input - The turn's direct, client, built-in, MCP, and state tool
- * definitions, and how it offers them.
+ * @param input - The turn's direct, client, built-in, MCP, state, and
+ * delegation tool definitions, and how it offers them.
  * @returns The direct tools, then the turn's tools or, for a routed turn,
- * `find_tools` in their place, then the state tools.
+ * `find_tools` in their place, then the state and delegation tools.
  */
 export function listOfferedDefinitions(
   input: OfferedDefinitionsInput
@@ -171,14 +171,14 @@ export function listOfferedDefinitions(
  *
  * @param turn - The turn's tools, its conversation, its model, whether the
  * model is trained for tool use, and its controls.
- * @param agentStateTools - The agent's state tools for the turn; empty when
- * none is offered.
+ * @param agentStateTools - The agent's state tools for the turn, followed
+ * by its delegation tools; empty when none is offered.
  * @param keeper - Keeper `find_tools` asks; lent for the reply.
  * @returns For a routed turn, a toolset that adds `find_tools`, which runs
  * without approval, after the direct tools, and an offer of the direct
- * tools, `find_tools`, and the state tools; otherwise an offer of every
- * tool and no `find_tools`. The routed reply's other tools stay in its
- * toolset, so each tool `find_tools` finds is offered once
+ * tools, `find_tools`, and the state and delegation tools; otherwise an
+ * offer of every tool and no `find_tools`. The routed reply's other tools
+ * stay in its toolset, so each tool `find_tools` finds is offered once
  * {@link addFoundTools} adds it, and each call of it passes the reply's
  * checks and gate.
  * @throws If two tools share a name, as {@link buildAgentToolset} throws.
@@ -242,8 +242,8 @@ type TurnKeptTools = Pick<
  * @param turn - The turn's client, built-in, and MCP tools.
  * @param directTools - Backend tools offered in every round, in offer
  * order: the turn's own, with `find_tools` after them for a routed turn.
- * @param agentStateTools - The agent's state tools for the turn; empty when
- * none is offered.
+ * @param agentStateTools - The agent's state tools for the turn, followed
+ * by its delegation tools; empty when none is offered.
  * @returns The toolset, as {@link buildAgentToolset} orders it.
  * @throws If two tools share a name, as {@link buildAgentToolset} throws.
  */

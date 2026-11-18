@@ -2,19 +2,24 @@ import { ARMITAGE_AGENT_CODE } from "@lys/share"
 
 /**
  * Role of an agent: `leader` for the built-in agents that answer chats, which
- * see every agent; `member` for the stored agents, which see only
- * themselves; and `tool-keeper` for Armitage, which searches tools and sees
- * no agent.
+ * see every agent and give work to other agents; `member` for the stored
+ * agents, which see only themselves and take that work; and `tool-keeper`
+ * for Armitage, which searches tools and sees no agent.
  */
 export type AgentRole = "leader" | "member" | "tool-keeper"
 
 /**
- * What an agent may learn about agents: `read-own-state` its own state,
- * `find-agents` which agents exist, and `read-any-state` another agent's
- * state.
+ * What an agent may learn about agents and do with them: `read-own-state`
+ * read its own state, `find-agents` learn which agents exist,
+ * `read-any-state` read another agent's state, `delegate-work` give work to
+ * another agent, and `take-work` be given work by one.
  */
 export type AgentPermission =
-  "read-own-state" | "find-agents" | "read-any-state"
+  | "read-own-state"
+  | "find-agents"
+  | "read-any-state"
+  | "delegate-work"
+  | "take-work"
 
 /** What decides an agent's role: its code and its kind. */
 export type AgentRoleSource = Readonly<{
@@ -32,16 +37,21 @@ export type AgentIdentity = Readonly<{
   role: AgentRole
 }>
 
-/** Permissions of a leader: its own state, which agents exist, and theirs. */
+/**
+ * Permissions of a leader: its own state, which agents exist, and theirs,
+ * and giving work to other agents.
+ */
 const LEADER_PERMISSIONS: readonly AgentPermission[] = Object.freeze([
   "read-own-state",
   "find-agents",
-  "read-any-state"
+  "read-any-state",
+  "delegate-work"
 ])
 
-/** Permissions of a member: its own state only. */
+/** Permissions of a member: its own state, and being given work. */
 const MEMBER_PERMISSIONS: readonly AgentPermission[] = Object.freeze([
-  "read-own-state"
+  "read-own-state",
+  "take-work"
 ])
 
 /** Permissions of the tool keeper: none. */
@@ -74,8 +84,7 @@ export function calculateAgentRole(agent: AgentRoleSource): AgentRole {
  * Tells whether a role grants a permission.
  * @param role - Role of the agent that asks.
  * @param permission - What it asks to do.
- * @returns True when {@link AGENT_ROLE_PERMISSIONS} lists the permission for
- * the role.
+ * @returns True when the role's permissions include the permission.
  */
 export function hasAgentPermission(
   role: AgentRole,

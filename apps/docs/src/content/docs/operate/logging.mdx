@@ -253,6 +253,31 @@ password.
 | `The email account check was ended because the backend is closing`                                   | `warn`  | `failure`                               | The backend closed while a check ran, and killed it, or a check arrived after it closed and was not run                                                                                                                                                                                                                                                                                                                     |
 | `The email server's account check failed`                                                            | `error` | `failure`, and `err` for `start-failed` | The server could not be started (`start-failed`, with Node's error as `err`, such as for a file that is not a program or no file descriptor left), did not end within one minute (`timed-out`, with the error lines it wrote before it was killed), ended without a report (`exited`, with how it ended and its own error lines), or printed something that is not a report (`unreadable-output`, with its own error lines) |
 
+### Delegation entries
+
+The backend logs what happens in [delegation](/architecture/backend/#delegation).
+Each entry names the main conversation in `conversationId`, the parent of
+the jobs, except a stop's entry, which names the conversation the stop was
+for: the job's own for `stop_job`, otherwise the conversation of the
+stopped reply, of the jobs-stop route, or of the deletion. No entry holds
+the title or the instructions of a job message, a progress note, or the text
+of a report.
+
+| Message                               | Level  | Other fields                                  | When                                                                                                                                                                                                                                                                     |
+| ------------------------------------- | ------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `An agent gave work to another agent` | `info` | `jobId`, `jobNumber`, `agentCode`, `isNewJob` | A `delegate_work` call's job message was stored and the job's reply started                                                                                                                                                                                              |
+| `A job message was refused`           | `warn` | `agentCode`, `jobNumber`, `reason`            | A job message failed a check; `jobNumber` is null when the call asked for a new job, and `reason` is the refusal, such as `limit-reached` or `job-is-working`                                                                                                            |
+| `A job report was stored`             | `info` | `jobId`, `jobNumber`, `reportKind`            | A progress note or an end report was stored for the delegator                                                                                                                                                                                                            |
+| `A wake-up turn started`              | `info` | `assistantMessageId`, `reportCount`           | Reports that wake the delegator were waiting and a wake-up turn started to deliver them                                                                                                                                                                                  |
+| `A wake-up turn did not start`        | `info` | `reason`                                      | Such reports were waiting, but a reply of the conversation streams (`reply-streaming`), no wake settings are kept (`no-wake-settings`), the backend shuts down (`shutting-down`), or the agent cannot be loaded (`agent-missing`); not logged for a deleted conversation |
+| `Jobs were asked to stop`             | `info` | `requester`, `stoppedReplyCount`              | `stop_job` stopped a job (`delegator`), or the person's Stop, the jobs-stop route, or deleting a conversation stopped replies (`person`); `stoppedReplyCount` may be 0                                                                                                   |
+| `Activity stream connected`           | `info` | the request's fields                          | A client opened `GET /api/v1/activity/events`                                                                                                                                                                                                                            |
+| `Activity stream closed`              | `info` | the request's fields                          | That stream closed                                                                                                                                                                                                                                                       |
+
+- A failure while writing an end report or starting a wake-up turn when a
+  reply ends is logged as `Conversation task failed` at level `error`, with
+  what was thrown in `err`.
+
 vmo's output is not kept in a release build
 ([#229](https://github.com/w3lt/lys/issues/229)).
 

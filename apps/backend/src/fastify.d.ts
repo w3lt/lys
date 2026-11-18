@@ -1,9 +1,18 @@
 /// <reference types="fastify" />
 
+import type { ToolDefinition } from "@lys/share"
+import type ActivityHub from "./modules/activity/activityHub"
 import type AgentRuntimeService from "./modules/agent/agentRuntimeService"
 import type AgentService from "./modules/agent/agentService"
 import type AttachmentFileStore from "./modules/attachment/attachmentFileStore"
 import type ChatService from "./modules/chat/chatService"
+import type ReplyGenerationRegistry from "./modules/chat/replyGenerationRegistry"
+import type { StopReply } from "./modules/chat/replyStop"
+import type { StartTurn, StartTurnOptions } from "./modules/chat/turnStart"
+import type {
+  ListWorkingReplies,
+  StopDeletedReplies
+} from "./modules/conversation/capabilities"
 import type StoredConversationHistoryEditor from "./modules/conversation/historyEditor"
 import type StoredConversationHistoryReader from "./modules/conversation/historyReader"
 import type StoredReplyParts from "./modules/conversation/replyParts"
@@ -45,8 +54,13 @@ declare module "fastify" {
      * learn about themselves and each other.
      */
     agentRuntimeService: AgentRuntimeService
-    /** Every tool the backend runs, in the order Settings lists them. */
+    /** Every built-in tool, in the order Settings lists them. */
     builtInTools: readonly BuiltInToolEntry[]
+    /**
+     * Definitions of the agent tools Settings lists after the built-in
+     * tools: `delegate_work` only.
+     */
+    listedAgentTools: readonly ToolDefinition[]
     /**
      * Application-scoped lookup of the web search tool and checks of the
      * saved Tavily key.
@@ -77,5 +91,60 @@ declare module "fastify" {
      * attachments directory.
      */
     attachmentFileStore: AttachmentFileStore
+    /**
+     * Application-scoped registry of every running reply generation, which
+     * the application disposes before its HTTP server closes.
+     */
+    replyGenerations: ReplyGenerationRegistry
+    /**
+     * Starts the generation of one stored turn and registers it with the
+     * application's reply generation registry.
+     */
+    startTurn: StartTurn
+    /**
+     * Application-scoped hub of the activity streams, which tells every
+     * stream what the backend started; the application disposes of it
+     * before it disposes the reply generation registry.
+     */
+    activityHub: ActivityHub
+    /**
+     * Hook through which each turn a person starts takes part in
+     * delegation, told that the turn starts, as the application's
+     * delegation runtime handles it.
+     */
+    handleTurnStarted: StartTurnOptions["handleTurnStarted"]
+    /**
+     * Hook that creates the part in delegation of each turn a person
+     * starts, as the application's delegation runtime creates it.
+     */
+    createTurnDelegation: StartTurnOptions["createTurnDelegation"]
+    /**
+     * Hook told that the reply of each turn a person starts ended, as the
+     * application's delegation runtime handles it.
+     */
+    handleReplyEnded: StartTurnOptions["handleReplyEnded"]
+    /**
+     * Stops a reply for the person, with every working job below its
+     * conversation, as the application's delegation runtime stops replies.
+     */
+    stopReply: StopReply
+    /**
+     * Stops every working job below a conversation for the person, as the
+     * application's delegation runtime stops replies, and resolves once each
+     * stopped reply reached its stored final state.
+     */
+    stopConversationJobs: (conversationId: string) => Promise<void>
+    /**
+     * Lists the working replies of a conversation and of its jobs before the
+     * delete route deletes it, as the application's delegation runtime
+     * finds them.
+     */
+    listWorkingReplies: ListWorkingReplies
+    /**
+     * Cancels the work listed before a conversation was deleted, once the
+     * delete succeeded, as the application's delegation runtime ends
+     * generations.
+     */
+    stopDeletedReplies: StopDeletedReplies
   }
 }

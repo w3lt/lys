@@ -178,7 +178,7 @@ const TEXT_MARKS = new RegExp(
  * {@link formatReference} drops.
  *
  * @remarks Built from the renderer's own {@link CITATION_MARKER_PATTERN} by
- * replacing its `\\[` and `\\]`, which that pattern's source writes so.
+ * replacing the `\[` and `\]` that its source writes.
  */
 const LITERAL_CITATION_MARKER = new RegExp(
   [
@@ -267,23 +267,25 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * they become final.
  *
  * @remarks The text is what the renderer shows, spoken: code blocks, math,
- * tables, images, bare URLs, and citation markers like `[1]`, by the renderer's
- * own pattern, are not words, so they are not spoken; inline code is read as
- * words; formatting is dropped; a link is spoken by its text, and a bare URL,
- * in a link's text or not, is not spoken; each paragraph, heading, and list
- * item ends a sentence. A reference reads the same before its definition
- * arrives as after: a link by its text; a citation marker, an image, and a
- * footnote reference not at all; a bracket or a `!` an escape or a character
- * reference writes is never reference syntax, though a citation marker it
- * writes is still dropped, as the renderer still shows one. A citation marker
- * is dropped wherever it stands outside code, a link's text included, where the
- * renderer shows it as text. An unclosed code fence holds the rest of the text
- * back until it closes. A paragraph or heading still being written waits until
- * it ends when it holds a `|`, because its next line may turn it into a table
- * header, or when it starts with a label in brackets and a colon, because a
- * closing title quote may turn it into a link definition; and from its first
- * `$` or `![` outside code on, because a later `$` may turn that text into
- * inline math and the `![` may begin an image.
+ * tables, images, bare URLs, and citation markers like `[1]`, found by the
+ * renderer's own pattern, are not words, so they are not spoken; inline code is
+ * read as words; formatting is dropped; a link is spoken by its text, and a
+ * bare URL, in a link's text or not, is not spoken; each paragraph, heading,
+ * and list item ends a sentence. A reference reads the same before its
+ * definition arrives as after: a link by its text; a citation marker, an image,
+ * and a footnote reference not at all; a bracket or a `!` an escape or a
+ * character reference writes is never reference syntax, though a citation
+ * marker it writes is still dropped, as the renderer still shows one, unless
+ * its other bracket opens or closes a reference, as in `[see \[1]`, where it
+ * reads as that reference's text, the same before the definition arrives as
+ * after. A citation marker is dropped wherever it stands outside code, a link's
+ * text included, where the renderer shows it as text. An unclosed code fence
+ * holds the rest of the text back until it closes. A paragraph or heading still
+ * being written waits until it ends when it holds a `|`, because its next line
+ * may turn it into a table header, or when it starts with a label in brackets
+ * and a colon, because a closing title quote may turn it into a link
+ * definition; and from its first `$` or `![` outside code on, because a later
+ * `$` may turn that text into inline math and the `![` may begin an image.
  *
  * A sentence is final once a later sentence holding a letter follows it, a
  * line break ends it, or its text part ends, so a period inside a number, a
@@ -775,8 +777,9 @@ function formatInlineCode(code: string): string {
  * Reads reference syntax in a block's text as a defined reference reads: a
  * full or collapsed link reference by its text, and a citation marker, an
  * image, or a footnote reference not at all. A shortcut link reference,
- * `[text]`, keeps its brackets, which are not words, so it already reads as
- * the link does.
+ * `[text]`, keeps its brackets, as {@link SHORTCUT_OPEN_BRACKET} and
+ * {@link SHORTCUT_CLOSE_BRACKET}, which {@link formatBlockText} turns back;
+ * brackets are not words, so it already reads as the link does.
  *
  * @param text - A block's text, or the text a reference's brackets enclose.
  * @returns The text with each reference read.

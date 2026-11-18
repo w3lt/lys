@@ -9,10 +9,10 @@ private let framesPerSentence = 2
 private let samplesPerFrame = 1_920
 
 /// Thrown when a synthesis fails inside the fake engine.
-private struct FakeSynthesisFailure: Error {}
+private struct FakeSynthesisError: Error {}
 
 /// Fake speech session: emits a fixed number of frames as soon as a
-/// sentence is enqueued, and ends its frames on `finish`, or fails synthesis
+/// sentence is added, and ends its frames on `closeText()`, or fails synthesis
 /// then when configured to.
 ///
 /// Concurrency model: serialized. The cancelled flag is read and written
@@ -31,7 +31,7 @@ private final class FakeSpeechSession: SpeechSession, @unchecked Sendable {
 
     /// Creates a session that has produced no frames.
     ///
-    /// - Parameter failSynthesis: Whether `finish` fails the frame stream
+    /// - Parameter failSynthesis: Whether `closeText()` fails the frame stream
     ///   instead of ending it, with no frame produced before.
     init(failSynthesis: Bool) {
         self.failSynthesis = failSynthesis
@@ -46,7 +46,7 @@ private final class FakeSpeechSession: SpeechSession, @unchecked Sendable {
     /// Emits the sentence's frames at once, unless synthesis fails.
     ///
     /// The sentence itself is not read: every sentence yields the same frames.
-    func enqueue(_: String) {
+    func addText(_: String) {
         guard !failSynthesis else { return }
         for _ in 0 ..< framesPerSentence {
             continuation.yield([Float](repeating: 0.5, count: samplesPerFrame))
@@ -54,9 +54,9 @@ private final class FakeSpeechSession: SpeechSession, @unchecked Sendable {
     }
 
     /// Ends the frame stream, or fails it when synthesis fails.
-    func finish() {
+    func closeText() {
         if failSynthesis {
-            continuation.finish(throwing: FakeSynthesisFailure())
+            continuation.finish(throwing: FakeSynthesisError())
         } else {
             continuation.finish()
         }
@@ -105,14 +105,14 @@ private final class FakeSpeechEngine: SpeechEngine, @unchecked Sendable {
     }
 
     /// Marks the models as loaded.
-    func warmUp() async throws {
+    func loadModels() async throws {
         lock.withLock { ready = true }
     }
 
     /// Makes and keeps one fake session.
     ///
     /// - Returns: The new session.
-    func makeSession() async throws -> any SpeechSession {
+    func startSession() async throws -> any SpeechSession {
         let session = FakeSpeechSession(failSynthesis: failSynthesis)
         lock.withLock { sessions.append(session) }
         return session
@@ -131,7 +131,7 @@ private enum ReceivedMessage: Equatable {
 
 /// Thrown when the server ended the connection before the message a test
 /// waited for.
-private struct ConnectionEnded: Error {}
+private struct ConnectionEndedError: Error {}
 
 /// One server frame parsed from the received bytes.
 private struct ParsedFrame {
@@ -166,7 +166,7 @@ private final class TestSpeechClient: @unchecked Sendable {
     private var handshakeStatus: Int?
     /// Every message received, in order.
     private var inbox: [ReceivedMessage] = []
-    /// How many messages ``receive(within:)`` returned.
+    /// How many messages ``readMessage(within:)`` returned.
     private var handedOut = 0
     /// Whether the server ended the connection or receiving failed.
     private var ended = false
@@ -189,7 +189,7 @@ private final class TestSpeechClient: @unchecked Sendable {
             head += "Origin: \(origin)\r\n"
         }
         sendBytes(Data((head + "\r\n").utf8))
-        receiveNext()
+        readNextBytes()
     }
 
     /// Whether the server accepted the handshake.
@@ -232,12 +232,12 @@ private final class TestSpeechClient: @unchecked Sendable {
     ///
     /// - Parameter seconds: Longest wait for the message.
     /// - Returns: The message.
-    /// - Throws: ``TimedOut`` when no message arrived in time;
-    ///   ``ConnectionEnded`` when the connection ended before it.
-    func receive(within seconds: Double = 2) async throws -> ReceivedMessage {
+    /// - Throws: ``TimedOutError`` when no message arrived in time;
+    ///   ``ConnectionEndedError`` when the connection ended before it.
+    func readMessage(within seconds: Double = 2) async throws -> ReceivedMessage {
         try await waitUntil(within: seconds) { hasMessageOrEnded }
         return try lock.withLock { () throws -> ReceivedMessage in
-            guard handedOut < inbox.count else { throw ConnectionEnded() }
+            guard handedOut < inbox.count else { throw ConnectionEndedError() }
             handedOut += 1
             return inbox[handedOut - 1]
         }
@@ -247,18 +247,18 @@ private final class TestSpeechClient: @unchecked Sendable {
     ///
     /// - Parameter seconds: Longest wait for each message.
     /// - Returns: The close message.
-    /// - Throws: ``TimedOut`` when a message did not arrive in time;
-    ///   ``ConnectionEnded`` when the connection ended before the close.
-    func receiveClose(within seconds: Double = 2) async throws -> ReceivedMessage {
+    /// - Throws: ``TimedOutError`` when a message did not arrive in time;
+    ///   ``ConnectionEndedError`` when the connection ended before the close.
+    func readClose(within seconds: Double = 2) async throws -> ReceivedMessage {
         while true {
-            let message = try await receive(within: seconds)
+            let message = try await readMessage(within: seconds)
             if case .close = message { return message }
         }
     }
 
     /// Stops reading once the receive already pending completes, so the
     /// server's sends back up as they do towards a peer that stopped reading.
-    func pauseReading() {
+    func stopReading() {
         lock.withLock { isReadingPaused = true }
     }
 
@@ -273,7 +273,7 @@ private final class TestSpeechClient: @unchecked Sendable {
     }
 
     /// Receives the next bytes and parses them, until the connection ends.
-    private func receiveNext() {
+    private func readNextBytes() {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] content, _, isComplete, error in
             guard let self else { return }
             let isEnd = isComplete || error != nil
@@ -284,7 +284,7 @@ private final class TestSpeechClient: @unchecked Sendable {
                 return (replies, isReadingPaused)
             }
             replies.forEach(sendBytes)
-            if !isEnd && !isPaused { self.receiveNext() }
+            if !isEnd && !isPaused { self.readNextBytes() }
         }
     }
 
@@ -433,7 +433,7 @@ struct SpeechHandshakeTests {
         ] as [(Bool, [(String, String)], Bool)]
     )
     func acceptsOnlyReadyPeersWithoutOrigin(isReady: Bool, headers: [(String, String)], expected: Bool) {
-        #expect(SpeechSocketServer.acceptsHandshake(headers: headers.map { (name: $0.0, value: $0.1) }, isReady: isReady) == expected)
+        #expect(SpeechSocketServer.canAcceptHandshake(headers: headers.map { (name: $0.0, value: $0.1) }, isReady: isReady) == expected)
     }
 
     /// Verifies the listener refuses a browser's handshake, which carries an
@@ -482,7 +482,7 @@ struct SpeechHandshakeTests {
 
         first.sendText(#"{"type":"speak"}"#)
         first.sendText(#"{"type":"text","text":"One."}"#)
-        guard case .binary = try await first.receive() else {
+        guard case .binary = try await first.readMessage() else {
             Issue.record("Expected the open connection to keep speaking")
             return
         }
@@ -504,7 +504,7 @@ extension SpeechHandshakeTests {
         defer { idle.cancel() }
         do {
             _ = try await idle.readToEnd(within: 2)
-        } catch is TimedOut {
+        } catch is TimedOutError {
             Issue.record("Expected the server to cancel the idle connection")
             return
         } catch {
@@ -531,7 +531,7 @@ extension SpeechHandshakeTests {
         try await Task.sleep(for: .milliseconds(500))
         client.sendText(#"{"type":"speak"}"#)
         client.sendText(#"{"type":"text","text":"One."}"#)
-        guard case .binary = try await client.receive() else {
+        guard case .binary = try await client.readMessage() else {
             Issue.record("Expected the quiet socket to keep speaking")
             return
         }
@@ -554,14 +554,14 @@ struct SpeechSocketFlowTests {
         client.sendText(#"{"type":"finish"}"#)
 
         for _ in 0 ..< (2 * framesPerSentence) {
-            let message = try await client.receive()
+            let message = try await client.readMessage()
             guard case .binary(let frame) = message else {
                 Issue.record("Expected a binary frame, got \(message)")
                 return
             }
             #expect(frame.count == samplesPerFrame * 2)
         }
-        let close = try await client.receive()
+        let close = try await client.readMessage()
         #expect(close == .close(1000))
     }
 
@@ -582,13 +582,13 @@ struct SpeechSocketFlowTests {
         first.sendText(#"{"type":"text","text":"Long one."}"#)
         // A first frame proves the older speech is the active one before the
         // newer one starts.
-        guard case .binary = try await first.receive() else {
+        guard case .binary = try await first.readMessage() else {
             Issue.record("Expected the older speech to start speaking")
             return
         }
         second.sendText(#"{"type":"speak"}"#)
 
-        let superseded = try await first.receiveClose()
+        let superseded = try await first.readClose()
         #expect(superseded == .close(1001))
         try await waitUntil { engine.madeSessions.first?.isCancelled == true }
     }
@@ -602,7 +602,7 @@ struct SpeechSocketFlowTests {
         let client = TestSpeechClient(port: server.port)
         client.sendText(#"{"type":"speak"}"#)
         client.sendText(#"{"type":"text","text":"One."}"#)
-        guard case .binary = try await client.receive() else {
+        guard case .binary = try await client.readMessage() else {
             Issue.record("Expected the speech to start speaking")
             return
         }
@@ -621,7 +621,7 @@ struct SpeechSocketFlowTests {
         let client = TestSpeechClient(port: server.port)
         defer { client.cancel() }
         try await waitUntil { client.isOpen }
-        client.pauseReading()
+        client.stopReading()
         client.sendText(#"{"type":"speak"}"#)
         for _ in 0..<200 {
             client.sendText(#"{"type":"text","text":"One."}"#)
@@ -643,7 +643,7 @@ struct SpeechSocketFlowTests {
         defer { client.cancel() }
         client.sendText(#"{"type":"text","text":"One."}"#)
 
-        let close = try await client.receive()
+        let close = try await client.readMessage()
         #expect(close == .close(1002))
     }
 
@@ -656,7 +656,7 @@ struct SpeechSocketFlowTests {
         defer { client.cancel() }
         client.sendBinary()
 
-        let close = try await client.receive()
+        let close = try await client.readMessage()
         #expect(close == .close(1003))
     }
 
@@ -670,7 +670,7 @@ struct SpeechSocketFlowTests {
         defer { client.cancel() }
         client.sendInvalidText()
 
-        let close = try await client.receive()
+        let close = try await client.readMessage()
         #expect(close == .close(1002))
     }
 
@@ -683,7 +683,7 @@ struct SpeechSocketFlowTests {
         defer { client.cancel() }
         client.sendText(#"{"type":"mystery"}"#)
 
-        let close = try await client.receive()
+        let close = try await client.readMessage()
         #expect(close == .close(1002))
     }
 
@@ -698,7 +698,7 @@ struct SpeechSocketFlowTests {
         client.sendText(#"{"type":"text","text":"One."}"#)
         client.sendText(#"{"type":"finish"}"#)
 
-        let close = try await client.receive()
+        let close = try await client.readMessage()
         #expect(close == .close(1011))
     }
 }

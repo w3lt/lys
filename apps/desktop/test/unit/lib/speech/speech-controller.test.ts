@@ -30,7 +30,7 @@ const CLIENT_CLOSE = 1005
  * @param reply - The streaming reply.
  * @param beganAsNewTurn - Whether the person asked for it.
  */
-function streaming(
+function buildStreamingObservation(
   reply: SpeechReply = REPLY,
   beganAsNewTurn = true
 ): SpeechObservation {
@@ -43,7 +43,7 @@ function streaming(
  * @param reply - The settled reply.
  * @param status - How it ended.
  */
-function settled(
+function buildSettledObservation(
   reply: SpeechReply = REPLY,
   status: "completed" | "interrupted" | "failed" = "completed"
 ): SpeechObservation {
@@ -68,33 +68,33 @@ type FakeSocket = {
 
 /** A fake player that records what it was asked. */
 type FakePlayer = {
-  /** Frames enqueued, in order. */
-  readonly enqueued: Uint8Array[]
+  /** Frames added, in order. */
+  readonly addedFrames: Uint8Array[]
   /** How many times `stop` ran. */
   stops: number
-  /** How many times `resume` ran. */
-  resumes: number
+  /** How many times `start` ran. */
+  starts: number
   /** Whether `close` ran. */
   isClosed: boolean
-  enqueue: (frame: Uint8Array) => void
+  addFrame: (frame: Uint8Array) => void
   stop: () => void
-  resume: () => void
+  start: () => void
   close: () => void
 }
 
 /** Creates a fake player. */
 function createFakePlayer(): FakePlayer {
   const player: FakePlayer = {
-    enqueued: [],
+    addedFrames: [],
     stops: 0,
-    resumes: 0,
+    starts: 0,
     isClosed: false,
-    enqueue: (frame) => player.enqueued.push(frame),
+    addFrame: (frame) => player.addedFrames.push(frame),
     stop: () => {
       player.stops += 1
     },
-    resume: () => {
-      player.resumes += 1
+    start: () => {
+      player.starts += 1
     },
     close: () => {
       player.isClosed = true
@@ -150,15 +150,15 @@ function createHarness(): Harness {
   const controller = new SpeechController({
     isFocused: () => world.focused,
     isVoiceReady: () => world.voiceReady,
-    speechPath: (reply, from) => `${reply.replyId}/speech?from=${from}`,
-    notificationPath: (reply) => `${reply.replyId}/notification`,
+    buildSpeechPath: (reply, from) => `${reply.replyId}/speech?from=${from}`,
+    buildNotificationPath: (reply) => `${reply.replyId}/notification`,
     openSocket: (path, handlers) => {
       const socket = createFakeSocket(path, handlers)
       sockets.push(socket)
       return socket
     },
     createPlayer: () => player,
-    recheckVoice: () => {
+    updateVoiceServerInfo: () => {
       rechecks.count += 1
     }
   })
@@ -171,62 +171,62 @@ function createHarness(): Harness {
  * @param harness - The harness.
  * @param index - Position in opening order; the last one by default.
  */
-function socketAt(harness: Harness, index = -1): FakeSocket {
+function getSocketAt(harness: Harness, index = -1): FakeSocket {
   const socket = harness.sockets.at(index)
   if (socket === undefined) throw new Error("no such socket was opened")
   return socket
 }
 
 /** The paths of every socket opened, in order. */
-function openedPaths(harness: Harness): string[] {
+function listOpenedPaths(harness: Harness): string[] {
   return harness.sockets.map((socket) => socket.path)
 }
 
 describe("speech controller: when she reads", () => {
   it("reads a reply the person asked for from its first word", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    expect(openedPaths(harness)).toEqual(["reply-1/speech?from=start"])
-    socketAt(harness).pushAudio(PCM)
-    expect(harness.player.enqueued).toEqual([PCM])
+    harness.controller.update(buildStreamingObservation())
+    expect(listOpenedPaths(harness)).toEqual(["reply-1/speech?from=start"])
+    getSocketAt(harness).pushAudio(PCM)
+    expect(harness.player.addedFrames).toEqual([PCM])
   })
 
   it("joins a reply the view did not start at the sentence being written", () => {
     const harness = createHarness()
-    harness.controller.update(streaming(REPLY, false))
-    expect(openedPaths(harness)).toEqual(["reply-1/speech?from=current"])
+    harness.controller.update(buildStreamingObservation(REPLY, false))
+    expect(listOpenedPaths(harness)).toEqual(["reply-1/speech?from=current"])
   })
 
   it("waits silently while the window is not focused, and joins on focus", () => {
     const harness = createHarness()
     harness.world.focused = false
-    harness.controller.update(streaming())
+    harness.controller.update(buildStreamingObservation())
     expect(harness.sockets).toHaveLength(0)
     harness.world.focused = true
-    harness.controller.update(streaming(REPLY, false))
-    expect(openedPaths(harness)).toEqual(["reply-1/speech?from=current"])
+    harness.controller.update(buildStreamingObservation(REPLY, false))
+    expect(listOpenedPaths(harness)).toEqual(["reply-1/speech?from=current"])
   })
 
   it("waits while voice is not ready, and joins once it is", () => {
     const harness = createHarness()
     harness.world.voiceReady = false
-    harness.controller.update(streaming())
+    harness.controller.update(buildStreamingObservation())
     expect(harness.sockets).toHaveLength(0)
     harness.world.voiceReady = true
-    harness.controller.update(streaming(REPLY, false))
-    expect(openedPaths(harness)).toEqual(["reply-1/speech?from=current"])
+    harness.controller.update(buildStreamingObservation(REPLY, false))
+    expect(listOpenedPaths(harness)).toEqual(["reply-1/speech?from=current"])
   })
 
   it("closes the socket and waits when focus is lost before anything was said", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    const first = socketAt(harness)
+    harness.controller.update(buildStreamingObservation())
+    const first = getSocketAt(harness)
     harness.world.focused = false
-    harness.controller.update(streaming(REPLY, false))
+    harness.controller.update(buildStreamingObservation(REPLY, false))
     expect(first.isClosed).toBe(true)
     harness.world.focused = true
-    harness.controller.update(streaming(REPLY, false))
-    expect(openedPaths(harness)).toEqual([
+    harness.controller.update(buildStreamingObservation(REPLY, false))
+    expect(listOpenedPaths(harness)).toEqual([
       "reply-1/speech?from=start",
       "reply-1/speech?from=current"
     ])
@@ -234,16 +234,16 @@ describe("speech controller: when she reads", () => {
 
   it("reads on to the end when focus is lost while reading", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    const socket = socketAt(harness)
+    harness.controller.update(buildStreamingObservation())
+    const socket = getSocketAt(harness)
     socket.pushAudio(PCM)
     harness.world.focused = false
-    harness.controller.update(streaming(REPLY, false))
+    harness.controller.update(buildStreamingObservation(REPLY, false))
     socket.pushAudio(PCM)
-    harness.controller.update(settled())
+    harness.controller.update(buildSettledObservation())
     socket.pushAudio(PCM)
     expect(socket.isClosed).toBe(false)
-    expect(harness.player.enqueued).toHaveLength(3)
+    expect(harness.player.addedFrames).toHaveLength(3)
     expect(harness.sockets).toHaveLength(1)
     socket.serverClose(1000)
     expect(harness.player.stops).toBe(0)
@@ -251,12 +251,12 @@ describe("speech controller: when she reads", () => {
 
   it("keeps a focused reply's socket open after done until the backend's 1000", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    const socket = socketAt(harness)
-    harness.controller.update(settled())
+    harness.controller.update(buildStreamingObservation())
+    const socket = getSocketAt(harness)
+    harness.controller.update(buildSettledObservation())
     expect(socket.isClosed).toBe(false)
     socket.pushAudio(PCM)
-    expect(harness.player.enqueued).toEqual([PCM])
+    expect(harness.player.addedFrames).toEqual([PCM])
     socket.serverClose(1000)
     expect(harness.player.stops).toBe(0)
     expect(harness.sockets).toHaveLength(1)
@@ -264,43 +264,43 @@ describe("speech controller: when she reads", () => {
 
   it("says one notification line for a reply that ended in the background before anything was said", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    const speech = socketAt(harness)
+    harness.controller.update(buildStreamingObservation())
+    const speech = getSocketAt(harness)
     harness.world.focused = false
-    harness.controller.update(settled())
+    harness.controller.update(buildSettledObservation())
     expect(speech.isClosed).toBe(true)
-    expect(openedPaths(harness)).toEqual([
+    expect(listOpenedPaths(harness)).toEqual([
       "reply-1/speech?from=start",
       "reply-1/notification"
     ])
-    socketAt(harness).pushAudio(PCM)
-    expect(harness.player.enqueued).toEqual([PCM])
-    harness.controller.update(settled())
+    getSocketAt(harness).pushAudio(PCM)
+    expect(harness.player.addedFrames).toEqual([PCM])
+    harness.controller.update(buildSettledObservation())
     expect(harness.sockets).toHaveLength(2)
   })
 
   it("notifies for a reply that streamed and ended entirely in the background", () => {
     const harness = createHarness()
     harness.world.focused = false
-    harness.controller.update(streaming())
-    harness.controller.update(settled())
-    harness.controller.update(settled())
-    expect(openedPaths(harness)).toEqual(["reply-1/notification"])
+    harness.controller.update(buildStreamingObservation())
+    harness.controller.update(buildSettledObservation())
+    harness.controller.update(buildSettledObservation())
+    expect(listOpenedPaths(harness)).toEqual(["reply-1/notification"])
   })
 
   it("does not notify for a reply part of which was said", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    socketAt(harness).pushAudio(PCM)
+    harness.controller.update(buildStreamingObservation())
+    getSocketAt(harness).pushAudio(PCM)
     harness.world.focused = false
-    harness.controller.update(settled())
-    expect(openedPaths(harness)).toEqual(["reply-1/speech?from=start"])
+    harness.controller.update(buildSettledObservation())
+    expect(listOpenedPaths(harness)).toEqual(["reply-1/speech?from=start"])
   })
 
   it("does nothing for a reply it never saw stream", () => {
     const harness = createHarness()
     harness.world.focused = false
-    harness.controller.update(settled())
+    harness.controller.update(buildSettledObservation())
     expect(harness.sockets).toHaveLength(0)
   })
 
@@ -308,10 +308,10 @@ describe("speech controller: when she reads", () => {
     "stops at once when the reply is %s",
     (status) => {
       const harness = createHarness()
-      harness.controller.update(streaming())
-      const socket = socketAt(harness)
+      harness.controller.update(buildStreamingObservation())
+      const socket = getSocketAt(harness)
       socket.pushAudio(PCM)
-      harness.controller.update(settled(REPLY, status))
+      harness.controller.update(buildSettledObservation(REPLY, status))
       expect(socket.isClosed).toBe(true)
       expect(harness.player.stops).toBe(1)
       expect(harness.sockets).toHaveLength(1)
@@ -320,24 +320,24 @@ describe("speech controller: when she reads", () => {
 
   it("stops at once when a new message is sent or the conversation is switched", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    const socket = socketAt(harness)
+    harness.controller.update(buildStreamingObservation())
+    const socket = getSocketAt(harness)
     socket.pushAudio(PCM)
     harness.controller.update(NONE)
     expect(socket.isClosed).toBe(true)
     expect(harness.player.stops).toBe(1)
     socket.pushAudio(PCM)
-    expect(harness.player.enqueued).toHaveLength(1)
+    expect(harness.player.addedFrames).toHaveLength(1)
   })
 
   it("replaces the open reply when another reply streams", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    const first = socketAt(harness)
-    harness.controller.update(streaming(REPLY_2))
+    harness.controller.update(buildStreamingObservation())
+    const first = getSocketAt(harness)
+    harness.controller.update(buildStreamingObservation(REPLY_2))
     expect(first.isClosed).toBe(true)
     expect(harness.player.stops).toBe(1)
-    expect(openedPaths(harness)).toEqual([
+    expect(listOpenedPaths(harness)).toEqual([
       "reply-1/speech?from=start",
       "reply-2/speech?from=start"
     ])
@@ -345,16 +345,16 @@ describe("speech controller: when she reads", () => {
 
   it("stops at once when voice stops, and joins again once voice is ready", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    const first = socketAt(harness)
+    harness.controller.update(buildStreamingObservation())
+    const first = getSocketAt(harness)
     first.pushAudio(PCM)
     harness.world.voiceReady = false
-    harness.controller.update(streaming(REPLY, false))
+    harness.controller.update(buildStreamingObservation(REPLY, false))
     expect(first.isClosed).toBe(true)
     expect(harness.player.stops).toBe(1)
     harness.world.voiceReady = true
-    harness.controller.update(streaming(REPLY, false))
-    expect(openedPaths(harness)).toEqual([
+    harness.controller.update(buildStreamingObservation(REPLY, false))
+    expect(listOpenedPaths(harness)).toEqual([
       "reply-1/speech?from=start",
       "reply-1/speech?from=current"
     ])
@@ -362,42 +362,44 @@ describe("speech controller: when she reads", () => {
 
   it("drops audio still queued after a 1000 close when voice stops", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    const socket = socketAt(harness)
+    harness.controller.update(buildStreamingObservation())
+    const socket = getSocketAt(harness)
     socket.pushAudio(PCM)
-    harness.controller.update(settled())
+    harness.controller.update(buildSettledObservation())
     socket.serverClose(1000)
     expect(harness.player.stops).toBe(0)
     harness.world.voiceReady = false
-    harness.controller.update(settled())
+    harness.controller.update(buildSettledObservation())
     expect(harness.player.stops).toBe(1)
   })
 
   it("drops audio still queued after a 1000 close once another conversation's reply is shown", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    const socket = socketAt(harness)
+    harness.controller.update(buildStreamingObservation())
+    const socket = getSocketAt(harness)
     socket.pushAudio(PCM)
-    harness.controller.update(settled())
+    harness.controller.update(buildSettledObservation())
     socket.serverClose(1000)
-    harness.controller.update(settled())
+    harness.controller.update(buildSettledObservation())
     expect(harness.player.stops).toBe(0)
-    harness.controller.update(settled(OTHER_CONVERSATION_REPLY))
+    harness.controller.update(buildSettledObservation(OTHER_CONVERSATION_REPLY))
     expect(harness.player.stops).toBe(1)
-    harness.controller.update(settled(OTHER_CONVERSATION_REPLY))
+    harness.controller.update(buildSettledObservation(OTHER_CONVERSATION_REPLY))
     expect(harness.player.stops).toBe(1)
   })
 
   it("drops audio still queued after a 1000 close once another reply streams", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    const socket = socketAt(harness)
+    harness.controller.update(buildStreamingObservation())
+    const socket = getSocketAt(harness)
     socket.pushAudio(PCM)
-    harness.controller.update(settled())
+    harness.controller.update(buildSettledObservation())
     socket.serverClose(1000)
-    harness.controller.update(streaming(OTHER_CONVERSATION_REPLY, false))
+    harness.controller.update(
+      buildStreamingObservation(OTHER_CONVERSATION_REPLY, false)
+    )
     expect(harness.player.stops).toBe(1)
-    expect(socketAt(harness).path).toBe("reply-3/speech?from=current")
+    expect(getSocketAt(harness).path).toBe("reply-3/speech?from=current")
   })
 })
 
@@ -406,25 +408,25 @@ describe("speech controller: sockets that close on their own", () => {
     "stops playback on %i and does not reopen on chat updates",
     (code) => {
       const harness = createHarness()
-      harness.controller.update(streaming())
-      socketAt(harness).pushAudio(PCM)
-      socketAt(harness).serverClose(code)
+      harness.controller.update(buildStreamingObservation())
+      getSocketAt(harness).pushAudio(PCM)
+      getSocketAt(harness).serverClose(code)
       expect(harness.player.stops).toBe(1)
-      harness.controller.update(streaming(REPLY, false))
-      harness.controller.update(streaming(REPLY, false))
+      harness.controller.update(buildStreamingObservation(REPLY, false))
+      harness.controller.update(buildStreamingObservation(REPLY, false))
       expect(harness.sockets).toHaveLength(1)
     }
   )
 
   it("joins again when the window regains focus after a failed socket", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    socketAt(harness).serverClose(4503)
+    harness.controller.update(buildStreamingObservation())
+    getSocketAt(harness).serverClose(4503)
     harness.world.focused = false
-    harness.controller.update(streaming(REPLY, false))
+    harness.controller.update(buildStreamingObservation(REPLY, false))
     harness.world.focused = true
-    harness.controller.update(streaming(REPLY, false))
-    expect(openedPaths(harness)).toEqual([
+    harness.controller.update(buildStreamingObservation(REPLY, false))
+    expect(listOpenedPaths(harness)).toEqual([
       "reply-1/speech?from=start",
       "reply-1/speech?from=current"
     ])
@@ -437,20 +439,20 @@ describe("speech controller: sockets that close on their own", () => {
     [1000, 0]
   ])("asks to recheck voice after %i: %i times", (code, expected) => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    socketAt(harness).serverClose(code)
+    harness.controller.update(buildStreamingObservation())
+    getSocketAt(harness).serverClose(code)
     expect(harness.rechecks.count).toBe(expected)
   })
 
   it("ignores audio and closes from a socket it already closed", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    const first = socketAt(harness)
+    harness.controller.update(buildStreamingObservation())
+    const first = getSocketAt(harness)
     harness.controller.update(NONE)
     first.isClosed = false
     first.pushAudio(PCM)
     first.serverClose(4503)
-    expect(harness.player.enqueued).toHaveLength(0)
+    expect(harness.player.addedFrames).toHaveLength(0)
     expect(harness.rechecks.count).toBe(0)
   })
 })
@@ -459,9 +461,9 @@ describe("speech controller: the notification socket", () => {
   /** Opens a notification for REPLY and returns its socket. */
   function openNotification(harness: Harness): FakeSocket {
     harness.world.focused = false
-    harness.controller.update(streaming())
-    harness.controller.update(settled())
-    const socket = socketAt(harness)
+    harness.controller.update(buildStreamingObservation())
+    harness.controller.update(buildSettledObservation())
+    const socket = getSocketAt(harness)
     expect(socket.path).toBe("reply-1/notification")
     return socket
   }
@@ -479,7 +481,7 @@ describe("speech controller: the notification socket", () => {
     const notification = openNotification(harness)
     notification.pushAudio(PCM)
     notification.serverClose(1000)
-    harness.controller.update(settled(OTHER_CONVERSATION_REPLY))
+    harness.controller.update(buildSettledObservation(OTHER_CONVERSATION_REPLY))
     expect(harness.player.stops).toBe(1)
   })
 
@@ -505,19 +507,19 @@ describe("speech controller: the notification socket", () => {
     const harness = createHarness()
     const notification = openNotification(harness)
     harness.world.focused = true
-    harness.controller.update(streaming(REPLY_2))
+    harness.controller.update(buildStreamingObservation(REPLY_2))
     expect(notification.isClosed).toBe(true)
     expect(harness.player.stops).toBe(1)
     notification.isClosed = false
     notification.pushAudio(PCM)
-    expect(harness.player.enqueued).toHaveLength(0)
+    expect(harness.player.addedFrames).toHaveLength(0)
   })
 
   it("closes the notification when voice stops", () => {
     const harness = createHarness()
     const notification = openNotification(harness)
     harness.world.voiceReady = false
-    harness.controller.update(settled())
+    harness.controller.update(buildSettledObservation())
     expect(notification.isClosed).toBe(true)
   })
 })
@@ -525,12 +527,12 @@ describe("speech controller: the notification socket", () => {
 describe("speech controller: close", () => {
   it("closes the sockets and the player, and ignores later updates", () => {
     const harness = createHarness()
-    harness.controller.update(streaming())
-    const socket = socketAt(harness)
+    harness.controller.update(buildStreamingObservation())
+    const socket = getSocketAt(harness)
     harness.controller.close()
     expect(socket.isClosed).toBe(true)
     expect(harness.player.isClosed).toBe(true)
-    harness.controller.update(streaming(REPLY_2))
+    harness.controller.update(buildStreamingObservation(REPLY_2))
     expect(harness.sockets).toHaveLength(1)
     harness.controller.close()
   })
@@ -538,20 +540,20 @@ describe("speech controller: close", () => {
   it("closes an open notification", () => {
     const harness = createHarness()
     harness.world.focused = false
-    harness.controller.update(streaming())
-    harness.controller.update(settled())
-    const notification = socketAt(harness)
+    harness.controller.update(buildStreamingObservation())
+    harness.controller.update(buildSettledObservation())
+    const notification = getSocketAt(harness)
     harness.controller.close()
     expect(notification.isClosed).toBe(true)
   })
 
-  it("resumes the player only while voice is ready", () => {
+  it("starts the player only while voice is ready", () => {
     const harness = createHarness()
     harness.world.voiceReady = false
     harness.controller.update(NONE)
-    expect(harness.player.resumes).toBe(0)
+    expect(harness.player.starts).toBe(0)
     harness.world.voiceReady = true
     harness.controller.update(NONE)
-    expect(harness.player.resumes).toBe(1)
+    expect(harness.player.starts).toBe(1)
   })
 })

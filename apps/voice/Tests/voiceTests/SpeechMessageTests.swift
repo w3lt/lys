@@ -15,7 +15,7 @@ struct SpeechMessageTests {
         ] as [(String, SpeechMessage)]
     )
     func decodesClientMessages(json: String, expected: SpeechMessage) {
-        #expect(decodeSpeechMessage(json) == expected)
+        #expect(parseSpeechMessage(json) == expected)
     }
 
     /// Verifies malformed messages are refused, so the connection can answer
@@ -33,6 +33,6 @@ struct SpeechMessageTests {
         ]
     )
     func refusesMalformedMessages(json: String) {
-        #expect(decodeSpeechMessage(json) == nil)
+        #expect(parseSpeechMessage(json) == nil)
     }
 }

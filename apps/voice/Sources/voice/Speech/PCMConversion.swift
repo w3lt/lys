@@ -17,7 +17,7 @@ enum PCMConversion {
     ///
     /// - Parameter samples: Floating-point samples, nominally within `[-1, 1]`.
     /// - Returns: Twice as many bytes as there are samples.
-    static func littleEndianPCM16(from samples: [Float]) -> Data {
+    static func buildLittleEndianPCM16(from samples: [Float]) -> Data {
         var data = Data(capacity: samples.count * 2)
         for sample in samples {
             let clamped = min(1, max(-1, sample))

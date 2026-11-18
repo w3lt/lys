@@ -4,7 +4,7 @@ import Synchronization
 
 /// Speech engine backed by FluidAudio's PocketTTS (English, fp16).
 ///
-/// `warmUp()` downloads the models on first use (about 800 MB) into the
+/// `loadModels()` downloads the models on first use (about 800 MB) into the
 /// models directory and loads them; until it returns, ``isReady`` is `false`
 /// and the WebSocket server refuses speech connections. The voice is the
 /// cloned voice stored next to the executable as `lys-voice.bin` when one is
@@ -18,7 +18,7 @@ final class PocketTtsSpeechEngine: SpeechEngine, @unchecked Sendable {
     private let clonedVoice: PocketTtsVoiceData?
     /// FluidAudio's manager, which owns the models and makes sessions.
     private let manager: PocketTtsManager
-    /// Whether ``warmUp()`` loaded the models.
+    /// Whether ``loadModels()`` loaded the models.
     private let ready = Mutex(false)
 
     /// Creates the engine without touching the models or the network.
@@ -51,7 +51,7 @@ final class PocketTtsSpeechEngine: SpeechEngine, @unchecked Sendable {
     /// Downloads and loads the models, then reports the engine as ready.
     ///
     /// - Throws: The error that stopped loading; the engine stays not ready.
-    func warmUp() async throws {
+    func loadModels() async throws {
         try await manager.initialize()
         ready.withLock { $0 = true }
     }
@@ -61,7 +61,7 @@ final class PocketTtsSpeechEngine: SpeechEngine, @unchecked Sendable {
 
     /// Starts a session speaking with the cloned voice when one is loaded,
     /// and with the preset voice otherwise.
-    func makeSession() async throws -> any SpeechSession {
+    func startSession() async throws -> any SpeechSession {
         let session: PocketTtsSession
         if let clonedVoice {
             session = try await manager.makeSession(voiceData: clonedVoice)
@@ -108,10 +108,10 @@ private final class PocketTtsSpeechSession: SpeechSession, @unchecked Sendable {
     /// Queues one sentence on the PocketTTS session.
     ///
     /// - Parameter text: Sentence to speak.
-    func enqueue(_ text: String) { session.enqueue(text) }
+    func addText(_ text: String) { session.enqueue(text) }
 
     /// Tells the PocketTTS session that no more text follows.
-    func finish() { session.finish() }
+    func closeText() { session.finish() }
 
     /// Cancels the PocketTTS session, which ends its frames.
     func cancel() async { await session.cancel() }

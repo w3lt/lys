@@ -4,11 +4,11 @@
  * {@link VOICE_AUDIO_SAMPLE_RATE_HZ}, one channel.
  *
  * @remarks The player owns one output, over an {@link AudioContext} in the
- * application, created on the first resume or frame. Frames are decoded to
+ * application, created on the first start or frame. Frames are decoded to
  * float and scheduled back to back; a frame that arrives after its turn is
  * late and plays late, which is the best a player without a buffer can do.
  * `stop()` ends every scheduled frame and forgets the timeline, so the next
- * frame starts at once. The output is resumed on each resume and each frame,
+ * frame starts at once. The output is resumed on each start and each frame,
  * because a context created before a user gesture starts out suspended.
  * `close()` releases the output for good.
  */
@@ -28,7 +28,7 @@ export type PcmPlayer = {
    *
    * @param frame - Raw bytes; must hold whole 16-bit little-endian samples.
    */
-  enqueue: (frame: PcmFrame) => void
+  addFrame: (frame: PcmFrame) => void
   /** Stops every scheduled frame and forgets the timeline. */
   stop: () => void
   /**
@@ -36,7 +36,7 @@ export type PcmPlayer = {
    * as one blocked before the first user gesture; does nothing once the
    * player is closed.
    */
-  resume: () => void
+  start: () => void
   /** Stops every scheduled frame and closes the audio context; idempotent. */
   close: () => void
 }
@@ -47,7 +47,7 @@ export type PcmPlayer = {
  * @param frame - Raw bytes, two per sample, little-endian.
  * @returns The decoded samples; a trailing odd byte is dropped.
  */
-export function decodePcm16Le(frame: Uint8Array): Float32Array<ArrayBuffer> {
+export function parsePcm16Le(frame: Uint8Array): Float32Array<ArrayBuffer> {
   const sampleCount = Math.floor(
     frame.byteLength / VOICE_AUDIO_BYTES_PER_SAMPLE
   )
@@ -71,7 +71,7 @@ export type ScheduledPcm = Readonly<{
 /** Audio output the player schedules decoded samples on. */
 export type PcmOutput = Readonly<{
   /** Reads the output's clock, in seconds. */
-  currentTime: () => number
+  getCurrentTime: () => number
   /**
    * Schedules mono samples to play at a time of the output's clock.
    *
@@ -80,13 +80,13 @@ export type PcmOutput = Readonly<{
    * @param onEnded - Called once they ended or were stopped.
    * @returns The scheduled stretch.
    */
-  play: (
+  startStretch: (
     samples: Float32Array<ArrayBuffer>,
     startAt: number,
     onEnded: () => void
   ) => ScheduledPcm
   /** Asks a suspended output to resume. */
-  resume: () => void
+  start: () => void
   /** Releases the output for good. */
   close: () => void
 }>
@@ -96,12 +96,12 @@ export type PcmOutput = Readonly<{
  *
  * @param context - The output's context.
  * @remarks A refused resume leaves the context suspended, and the next
- * resume or frame asks again.
+ * start or frame asks again.
  */
-function resumeSuspended(context: AudioContext): void {
+function startSuspendedContext(context: AudioContext): void {
   if (context.state !== "suspended") return
   context.resume().catch(() => {
-    // Still suspended; the next resume or frame asks again.
+    // Still suspended; the next start or frame asks again.
   })
 }
 
@@ -114,8 +114,8 @@ function resumeSuspended(context: AudioContext): void {
  */
 export function createAudioContextOutput(context: AudioContext): PcmOutput {
   return Object.freeze({
-    currentTime: () => context.currentTime,
-    play: (
+    getCurrentTime: () => context.currentTime,
+    startStretch: (
       samples: Float32Array<ArrayBuffer>,
       startAt: number,
       onEnded: () => void
@@ -142,8 +142,8 @@ export function createAudioContextOutput(context: AudioContext): PcmOutput {
         }
       })
     },
-    resume: () => {
-      resumeSuspended(context)
+    start: () => {
+      startSuspendedContext(context)
     },
     close: () => {
       context.close().catch(() => {
@@ -158,7 +158,7 @@ export function createAudioContextOutput(context: AudioContext): PcmOutput {
  *
  * @param createOutput - Factory for the output, injectable for tests;
  * defaults to one over a new platform `AudioContext`.
- * @returns The player. Nothing is created until the first resume or frame.
+ * @returns The player. Nothing is created until the first start or frame.
  */
 export function createPcmPlayer(
   createOutput: () => PcmOutput = () =>
@@ -174,7 +174,7 @@ export function createPcmPlayer(
    *
    * @returns The output.
    */
-  function audioOutput(): PcmOutput {
+  function loadAudioOutput(): PcmOutput {
     output ??= createOutput()
     return output
   }
@@ -188,22 +188,22 @@ export function createPcmPlayer(
   }
 
   return {
-    enqueue(frame: PcmFrame): void {
+    addFrame(frame: PcmFrame): void {
       if (isClosed) return
-      const audio = audioOutput()
-      audio.resume()
-      const samples = decodePcm16Le(frame)
+      const audio = loadAudioOutput()
+      audio.start()
+      const samples = parsePcm16Le(frame)
       if (samples.length === 0) return
-      const startAt = Math.max(audio.currentTime(), nextStartTime)
-      const stretch = audio.play(samples, startAt, () => {
+      const startAt = Math.max(audio.getCurrentTime(), nextStartTime)
+      const stretch = audio.startStretch(samples, startAt, () => {
         scheduled.delete(stretch)
       })
       nextStartTime = startAt + stretch.duration
       scheduled.add(stretch)
     },
     stop,
-    resume(): void {
-      if (!isClosed) audioOutput().resume()
+    start(): void {
+      if (!isClosed) loadAudioOutput().start()
     },
     close(): void {
       if (isClosed) return

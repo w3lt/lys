@@ -529,7 +529,7 @@ describe("createVoiceRuntimeSlice", () => {
     })
   })
 
-  describe("checkVoice", () => {
+  describe("updateVoiceServerInfo", () => {
     /** State of a voice shown as running. */
     const SHOWN_RUNNING: VoiceServerInfo = Object.freeze({
       status: "running",
@@ -551,7 +551,9 @@ describe("createVoiceRuntimeSlice", () => {
       startNativeHostFake({ get_voice_status: () => STOPPED_VOICE })
       const store = createRunningVoiceStore()
 
-      await expect(store.getState().checkVoice()).resolves.toBeUndefined()
+      await expect(
+        store.getState().updateVoiceServerInfo()
+      ).resolves.toBeUndefined()
 
       expect(store.getState().voiceServerInfo).toEqual({
         status: "stopped",
@@ -566,7 +568,7 @@ describe("createVoiceRuntimeSlice", () => {
       })
       const store = createRunningVoiceStore()
 
-      await store.getState().checkVoice()
+      await store.getState().updateVoiceServerInfo()
 
       expect(store.getState().voiceServerInfo).toEqual({
         status: "unresponsive",
@@ -581,7 +583,7 @@ describe("createVoiceRuntimeSlice", () => {
       })
       const store = createRunningVoiceStore()
 
-      await store.getState().checkVoice()
+      await store.getState().updateVoiceServerInfo()
 
       expect(store.getState().voiceServerInfo.status).toBe("unresponsive")
     })
@@ -595,7 +597,7 @@ describe("createVoiceRuntimeSlice", () => {
       const listener = vi.fn()
       store.subscribe(listener)
 
-      await store.getState().checkVoice()
+      await store.getState().updateVoiceServerInfo()
 
       expect(listener).not.toHaveBeenCalled()
       expect(store.getState().voiceServerInfo).toBe(SHOWN_RUNNING)
@@ -605,7 +607,7 @@ describe("createVoiceRuntimeSlice", () => {
       const host = startNativeHostFake({})
       const store = createVoiceRuntimeStore()
 
-      await store.getState().checkVoice()
+      await store.getState().updateVoiceServerInfo()
 
       expect(listCommandNames(host)).toEqual([])
       expect(store.getState().voiceServerInfo.status).toBe("stopped")
@@ -616,7 +618,7 @@ describe("createVoiceRuntimeSlice", () => {
       startNativeHostFake({ get_voice_status: () => status.promise })
       const store = createRunningVoiceStore()
 
-      const check = store.getState().checkVoice()
+      const check = store.getState().updateVoiceServerInfo()
       store.setState({
         voiceServerInfo: Object.freeze({ status: "stopping", problem: null })
       })

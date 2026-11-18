@@ -18,7 +18,7 @@ const NOTIFICATION_LINES: readonly string[] = Object.freeze([
  * @param random - Source of randomness in [0, 1), defaults to crypto.
  * @returns One of {@link NOTIFICATION_LINES}, uniformly at random.
  */
-export function pickNotificationLine(
+export function getNotificationLine(
   random: () => number = () =>
     randomInt(NOTIFICATION_LINES.length) / NOTIFICATION_LINES.length
 ): string {

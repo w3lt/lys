@@ -46,11 +46,11 @@ export type VoiceSpeechHandlers = Readonly<{
 /** One speech with the voice service, from the backend's point of view. */
 export type VoiceSpeech = Readonly<{
   /** Tells voice to begin a speech, closing any older speech. */
-  speak: () => void
+  start: () => void
   /** Queues one sentence for synthesis. */
-  speakText: (text: string) => void
+  sendText: (text: string) => void
   /** Signals that no more text follows; voice closes the socket when done. */
-  finish: () => void
+  sendFinish: () => void
   /** Hangs up, cancelling the speech; idempotent. */
   cancel: () => void
 }>
@@ -81,7 +81,7 @@ export class VoiceUnavailableError extends Error {
  * @param data - Raw frame payload, in any binary wrapping; text frames are
  * ignored.
  */
-function forwardAudioFrame(handlers: VoiceSpeechHandlers, data: unknown): void {
+function sendAudioFrame(handlers: VoiceSpeechHandlers, data: unknown): void {
   if (Buffer.isBuffer(data)) {
     handlers.onAudio(data)
     return
@@ -148,13 +148,13 @@ class VoiceHandshake {
 
   /** Fails a handshake the socket reported an error for. */
   readonly #handleError = (): void => {
-    this.#fail("voice refused the connection")
+    this.#rejectHandshake("voice refused the connection")
   }
 
   /** Gives up on a handshake voice did not answer in time. */
   readonly #handleTimeout = (): void => {
     if (this.#state !== "dialing") return
-    this.#fail("voice did not answer the connection in time")
+    this.#rejectHandshake("voice did not answer the connection in time")
     this.#socket.close()
   }
 
@@ -164,8 +164,7 @@ class VoiceHandshake {
    * @param event - Message event of the voice socket.
    */
   readonly #handleMessage = (event: MessageEvent): void => {
-    if (this.#state === "accepted")
-      forwardAudioFrame(this.#handlers, event.data)
+    if (this.#state === "accepted") sendAudioFrame(this.#handlers, event.data)
   }
 
   /**
@@ -175,7 +174,7 @@ class VoiceHandshake {
    */
   readonly #handleClose = (event: CloseEvent): void => {
     if (this.#state === "dialing")
-      this.#fail("voice closed the connection before speaking")
+      this.#rejectHandshake("voice closed the connection before speaking")
     else if (this.#state === "accepted") this.#handlers.onClose(event.code)
   }
 
@@ -184,7 +183,7 @@ class VoiceHandshake {
    *
    * @param message - What went wrong, for the log.
    */
-  #fail(message: string): void {
+  #rejectHandshake(message: string): void {
     if (this.#state !== "dialing") return
     this.#state = "failed"
     clearTimeout(this.#timeout)
@@ -201,7 +200,7 @@ class VoiceHandshake {
  * @throws {VoiceUnavailableError} If voice refuses or closes the handshake,
  * or does not answer it within two seconds.
  */
-export function connectVoiceSpeech(
+export function openVoiceSpeech(
   handlers: VoiceSpeechHandlers,
   url: string = VOICE_SPEECH_URL
 ): Promise<VoiceSpeech> {
@@ -216,13 +215,13 @@ export function connectVoiceSpeech(
  * open.
  */
 function createVoiceSpeech(socket: WebSocket): VoiceSpeech {
-  const send = (message: object): void => {
+  const sendMessage = (message: object): void => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message))
   }
   return Object.freeze({
-    speak: () => send({ type: "speak" }),
-    speakText: (text: string) => send({ type: "text", text }),
-    finish: () => send({ type: "finish" }),
+    start: () => sendMessage({ type: "speak" }),
+    sendText: (text: string) => sendMessage({ type: "text", text }),
+    sendFinish: () => sendMessage({ type: "finish" }),
     cancel: () => {
       if (socket.readyState === socket.OPEN) socket.close()
     }

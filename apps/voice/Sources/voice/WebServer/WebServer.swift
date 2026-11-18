@@ -37,7 +37,7 @@ private final class ConnectionSlots: @unchecked Sendable {
     }
 
     /// Takes one slot, or returns `false` when none is free.
-    func acquire() -> Bool {
+    func addConnection() -> Bool {
         lock.lock()
         defer { lock.unlock() }
         guard available > 0 else { return false }
@@ -46,7 +46,7 @@ private final class ConnectionSlots: @unchecked Sendable {
     }
 
     /// Releases one slot.
-    func release() {
+    func removeConnection() {
         lock.lock()
         available += 1
         lock.unlock()
@@ -210,13 +210,13 @@ final class WebServer: Sendable {
         for await event in events {
             switch event {
             case .connectionAccepted(let connection):
-                guard slots.acquire() else {
+                guard slots.addConnection() else {
                     print("WebServer dropped connection \(connection.endpoint): \(maxConnections) connections are already open")
                     connection.cancel()
                     continue
                 }
                 group.addTask {
-                    defer { slots.release() }
+                    defer { slots.removeConnection() }
                     await self.handleConnection(connection)
                 }
             case .listenerFailed(let error):

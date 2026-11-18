@@ -31,7 +31,7 @@ final class SpeechHub: Sendable {
     ///   - supersede: Closure that closes the speech's socket and stops its
     ///     synthesis; called synchronously for the speech being replaced, if
     ///     any.
-    func begin(id: UUID, supersede: @escaping @Sendable () -> Void) {
+    func register(id: UUID, supersede: @escaping @Sendable () -> Void) {
         let previous = active.withLock { current -> Entry? in
             let previous = current
             current = Entry(id: id, supersede: supersede)
@@ -43,7 +43,7 @@ final class SpeechHub: Sendable {
     /// Removes the speech `id` if it is the active one.
     ///
     /// - Parameter id: Identity the speech was registered with.
-    func end(_ id: UUID) {
+    func remove(_ id: UUID) {
         active.withLock { current in
             if current?.id == id {
                 current = nil

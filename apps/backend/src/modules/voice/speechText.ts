@@ -47,16 +47,16 @@ const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkMath)
 const sentenceSegmenter = new Intl.Segmenter("en", { granularity: "sentence" })
 
 /** Characters that terminate a spoken sentence, followed by optional closers. */
-const SENTENCE_END_PATTERN = /[.!?…]["'”’)\]]*$/
-
-/** Any letter, in any script. */
-const LETTER_PATTERN = /\p{L}/u
-
 /**
  * The citation markers the renderer links, such as `[1]`; a copy of the
  * shared pattern, because that one is frozen.
  */
 const CITATION_MARKERS = new RegExp(CITATION_MARKER_PATTERN.source, "g")
+
+const SENTENCE_END_PATTERN = /[.!?…]["'”’)\]]*$/
+
+/** Any letter, in any script. */
+const LETTER_PATTERN = /\p{L}/u
 
 /** One whole citation marker, such as `[1]`. */
 const WHOLE_CITATION_MARKER = new RegExp(`^${CITATION_MARKER_PATTERN.source}$`)
@@ -95,7 +95,7 @@ const HIGH_SURROGATE_PATTERN = /^[\uD800-\uDBFF]$/u
  * @returns The sentence when it fits, or its pieces in order; never a piece
  * that splits a surrogate pair.
  */
-export function splitForVoice(sentence: string): string[] {
+export function buildVoiceTextPieces(sentence: string): string[] {
   const pieces: string[] = []
   let rest = sentence
   while (rest.length > MAX_SPOKEN_PIECE_LENGTH) {
@@ -156,7 +156,7 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * A sentence is final once a later sentence holding a letter follows it, a
  * line break ends it, or its text part ends, so a period inside a number, a
  * version, or an abbreviation, such as `$3.50`, never ends a sentence
- * early; `finish()` hands out the rest, however short. A sentence is handed
+ * early; `close()` hands out the rest, however short. A sentence is handed
  * out at most once and never taken back. When more text changes how earlier
  * text reads, such as a line that turns into a table header, the buffer
  * resumes after the last handed-out sentence still present, so no later
@@ -199,9 +199,9 @@ export class SpeechSentenceBuffer {
   public loadSnapshot(snapshot: SpeechSnapshot): string[] {
     this.#markdown = snapshot.text
     this.#lastBlock = snapshot.lastTextPart
-    if (this.#start === "start") return this.#drain()
-    const segments = this.#segments()
-    this.#take(segments, this.#finalCount(segments))
+    if (this.#start === "start") return this.#addFinalSentences()
+    const segments = this.#buildSegments()
+    this.#addHandedOutSentences(segments, this.#calculateFinalCount(segments))
     return []
   }
 
@@ -212,10 +212,10 @@ export class SpeechSentenceBuffer {
    * content after the blank line that separates it from the text before.
    * @returns The sentences the fragment made final, in order.
    */
-  public push(fragment: string): string[] {
+  public addFragment(fragment: string): string[] {
     this.#markdown += fragment
     this.#lastBlock = "open"
-    return this.#drain()
+    return this.#addFinalSentences()
   }
 
   /**
@@ -224,9 +224,9 @@ export class SpeechSentenceBuffer {
    *
    * @returns The sentences the part's end made final, in order.
    */
-  public endTextPart(): string[] {
+  public closeTextPart(): string[] {
     this.#lastBlock = "closed"
-    return this.#drain()
+    return this.#addFinalSentences()
   }
 
   /**
@@ -235,10 +235,10 @@ export class SpeechSentenceBuffer {
    * @returns The rest of the text's sentences, in order; empty on a later
    * call.
    */
-  public finish(): string[] {
+  public close(): string[] {
     this.#lastBlock = "closed"
-    const segments = this.#segments()
-    return this.#take(segments, segments.length)
+    const segments = this.#buildSegments()
+    return this.#addHandedOutSentences(segments, segments.length)
   }
 
   /**
@@ -246,11 +246,11 @@ export class SpeechSentenceBuffer {
    *
    * @returns The sentences of the plain text, in order.
    */
-  #segments(): SentenceSegment[] {
-    const plain = toPlainText(this.#markdown, this.#lastBlock)
+  #buildSegments(): SentenceSegment[] {
+    const plain = formatSpeechText(this.#markdown, this.#lastBlock)
     return [...sentenceSegmenter.segment(plain)].map(({ segment }) => ({
       text: segment.replace(/\s+/g, " ").trim(),
-      endsLine: endsWithLineBreak(segment)
+      endsLine: hasTrailingLineBreak(segment)
     }))
   }
 
@@ -260,7 +260,7 @@ export class SpeechSentenceBuffer {
    * @param segments - The sentences of the current text.
    * @returns How many leading sentences are final.
    */
-  #finalCount(segments: readonly SentenceSegment[]): number {
+  #calculateFinalCount(segments: readonly SentenceSegment[]): number {
     if (this.#lastBlock === "closed") return segments.length
     let count = 0
     for (const [index, segment] of segments.entries()) {
@@ -277,9 +277,12 @@ export class SpeechSentenceBuffer {
    *
    * @returns The newly final sentences, in order.
    */
-  #drain(): string[] {
-    const segments = this.#segments()
-    return this.#take(segments, this.#finalCount(segments))
+  #addFinalSentences(): string[] {
+    const segments = this.#buildSegments()
+    return this.#addHandedOutSentences(
+      segments,
+      this.#calculateFinalCount(segments)
+    )
   }
 
   /**
@@ -289,7 +292,10 @@ export class SpeechSentenceBuffer {
    * @param end - Index of the first sentence not to hand out.
    * @returns The sentences handed out, in order; empty ones are skipped.
    */
-  #take(segments: readonly SentenceSegment[], end: number): string[] {
+  #addHandedOutSentences(
+    segments: readonly SentenceSegment[],
+    end: number
+  ): string[] {
     const start = this.#findResumeIndex(segments)
     const fresh: string[] = []
     for (const [offset, segment] of segments.slice(start, end).entries()) {
@@ -297,7 +303,7 @@ export class SpeechSentenceBuffer {
       fresh.push(segment.text)
       this.#handedOut.push({
         index: start + offset,
-        key: toSentenceKey(segment.text)
+        key: calculateSentenceKey(segment.text)
       })
     }
     return fresh
@@ -316,7 +322,8 @@ export class SpeechSentenceBuffer {
       if (handed === undefined) break
       const found = segments.findLastIndex(
         (segment, index) =>
-          index <= handed.index && toSentenceKey(segment.text) === handed.key
+          index <= handed.index &&
+          calculateSentenceKey(segment.text) === handed.key
       )
       if (found !== -1) return found + 1
     }
@@ -339,7 +346,7 @@ type HandedSentence = Readonly<{
  * @returns Its letters and digits in lower case, or the sentence itself
  * when it has none.
  */
-function toSentenceKey(text: string): string {
+function calculateSentenceKey(text: string): string {
   const key = text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")
   return key === "" ? text : key
 }
@@ -359,7 +366,7 @@ type SentenceSegment = Readonly<{
  * @param segment - One segment as the sentence segmenter returned it.
  * @returns Whether the segment ends a line.
  */
-function endsWithLineBreak(segment: string): boolean {
+function hasTrailingLineBreak(segment: string): boolean {
   return segment.slice(segment.trimEnd().length).includes("\n")
 }
 
@@ -372,11 +379,11 @@ function endsWithLineBreak(segment: string): boolean {
  * block, and a closed last one, ends with sentence punctuation.
  * @returns The plain text.
  */
-function toPlainText(markdown: string, lastBlock: LastBlock): string {
+function formatSpeechText(markdown: string, lastBlock: LastBlock): string {
   const tree = parseWithoutDefinitions(markdown)
   if (lastBlock === "open") removeReparsableText(tree)
   const blocks: string[] = []
-  for (const child of tree.children) collectBlock(child, blocks)
+  for (const child of tree.children) addBlocks(child, blocks)
   return blocks
     .map((block, index) =>
       (index < blocks.length - 1 || lastBlock === "closed") &&
@@ -432,7 +439,7 @@ function removeReparsableLeaf(
   container: BlockContainer,
   leaf: Paragraph | Heading
 ): void {
-  if (inlineChildren(leaf).includes("|")) {
+  if (formatInlineChildren(leaf).includes("|")) {
     container.children.pop()
     return
   }
@@ -474,7 +481,7 @@ function removeTextFromReparsableMark(node: Root | RootContent): boolean {
  * @param text - Inline text of one block.
  * @returns The cleaned text, possibly empty.
  */
-function cleanInline(text: string): string {
+function formatBlockText(text: string): string {
   return text
     .replace(CITATION_MARKERS, "")
     .replace(/\s+/g, " ")
@@ -533,14 +540,14 @@ function listDefinitionRanges(node: Root | RootContent): SourceRange[] {
  * @returns The words the node reads as; empty for content that is not
  * spoken.
  */
-function inline(node: Root | RootContent): string {
+function formatInlineText(node: Root | RootContent): string {
   switch (node.type) {
     case "text":
       return formatReferenceSyntax(node.value)
     case "inlineCode":
       return node.value
     case "link":
-      return linkText(inlineChildren(node), node.url)
+      return formatLinkText(formatInlineChildren(node), node.url)
     case "image":
     case "inlineMath":
     case "html":
@@ -548,7 +555,7 @@ function inline(node: Root | RootContent): string {
     case "break":
       return " "
     default:
-      return inlineChildren(node)
+      return formatInlineChildren(node)
   }
 }
 
@@ -613,14 +620,14 @@ function isCitationMarkerLabel(label: string): boolean {
  * @param url - Where the link points.
  * @returns The label, or nothing when the label is the URL itself.
  */
-function linkText(label: string, url: string): string {
-  const normalize = (value: string) =>
+function formatLinkText(label: string, url: string): string {
+  const formatForComparison = (value: string) =>
     value
       .trim()
       .toLowerCase()
       .replace(/^https?:\/\//, "")
       .replace(/\/$/, "")
-  return normalize(label) === normalize(url) ? "" : label
+  return formatForComparison(label) === formatForComparison(url) ? "" : label
 }
 
 /**
@@ -629,9 +636,9 @@ function linkText(label: string, url: string): string {
  * @param node - Node whose children to render.
  * @returns The children's words; empty for a node without children.
  */
-function inlineChildren(node: Root | RootContent): string {
+function formatInlineChildren(node: Root | RootContent): string {
   if (!("children" in node)) return ""
-  return node.children.map((child) => inline(child)).join("")
+  return node.children.map((child) => formatInlineText(child)).join("")
 }
 
 /**
@@ -640,8 +647,8 @@ function inlineChildren(node: Root | RootContent): string {
  * @param blocks - Blocks collected so far; receives the new one.
  * @param text - The block's inline text.
  */
-function pushBlock(blocks: string[], text: string): void {
-  const cleaned = cleanInline(text)
+function addBlockText(blocks: string[], text: string): void {
+  const cleaned = formatBlockText(text)
   if (cleaned !== "") blocks.push(cleaned)
 }
 
@@ -652,13 +659,13 @@ function pushBlock(blocks: string[], text: string): void {
  * @param node - The list item.
  * @param blocks - Blocks collected so far; receives the item's.
  */
-function collectListItem(node: ListItem, blocks: string[]): void {
+function addListItemBlocks(node: ListItem, blocks: string[]): void {
   const parts: string[] = []
   for (const child of node.children) {
-    if (isBlockChild(child)) collectBlock(child, blocks)
-    else parts.push(inline(child))
+    if (isBlockChild(child)) addBlocks(child, blocks)
+    else parts.push(formatInlineText(child))
   }
-  if (parts.length > 0) pushBlock(blocks, parts.join(" "))
+  if (parts.length > 0) addBlockText(blocks, parts.join(" "))
 }
 
 /**
@@ -668,20 +675,20 @@ function collectListItem(node: ListItem, blocks: string[]): void {
  * @param blocks - Blocks collected so far; receives the subtree's, in
  * order.
  */
-function collectBlock(node: RootContent, blocks: string[]): void {
+function addBlocks(node: RootContent, blocks: string[]): void {
   switch (node.type) {
     case "paragraph":
     case "heading":
-      pushBlock(blocks, inlineChildren(node))
+      addBlockText(blocks, formatInlineChildren(node))
       return
     case "listItem":
-      collectListItem(node, blocks)
+      addListItemBlocks(node, blocks)
       return
     default:
       break
   }
   if (SPOKEN_SILENCED.has(node.type) || !("children" in node)) return
-  for (const child of node.children) collectBlock(child, blocks)
+  for (const child of node.children) addBlocks(child, blocks)
 }
 
 /**

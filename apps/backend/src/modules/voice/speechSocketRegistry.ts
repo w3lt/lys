@@ -31,7 +31,7 @@ export class SpeechSocketRegistry {
    * @param socket - Socket that closed; a socket already replaced by a newer
    * one is ignored.
    */
-  public unregister(socket: WebSocket): void {
+  public remove(socket: WebSocket): void {
     if (this.#current === socket) this.#current = undefined
   }
 }

@@ -9,7 +9,7 @@ struct EndpointTests {
     /// Verifies `GET /health` answers `200 ok` while the models are loaded.
     @Test("GET /health answers ok when the models are ready")
     func answersOkWhenReady() async throws {
-        let router = try Router(routes: [.health(isReady: { true })])
+        let router = try Router(routes: [.buildHealth(isReady: { true })])
 
         let response = await router.handleRequest(HTTPRequest(method: .get, path: "/health", query: []))
 
@@ -22,7 +22,7 @@ struct EndpointTests {
     /// yet, so the backend reports voice as not ready.
     @Test("GET /health answers service unavailable until the models are ready")
     func answersUnavailableUntilReady() async throws {
-        let router = try Router(routes: [.health(isReady: { false })])
+        let router = try Router(routes: [.buildHealth(isReady: { false })])
 
         let response = await router.handleRequest(HTTPRequest(method: .get, path: "/health", query: []))
 

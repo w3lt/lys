@@ -3,7 +3,7 @@ import fastifyWebsocket from "@fastify/websocket"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import type { WebSocket as ServerSocket } from "ws"
 import {
-  connectVoiceSpeech,
+  openVoiceSpeech,
   isVoiceReady,
   VoiceUnavailableError,
   type VoiceSpeechHandlers
@@ -121,15 +121,15 @@ describe("isVoiceReady", () => {
   })
 })
 
-describe("connectVoiceSpeech", () => {
+describe("openVoiceSpeech", () => {
   it("sends the speech messages and relays frames and the close", async () => {
     const voice = await startFakeVoice()
     const handlers = createRecordingHandlers()
-    const speech = await connectVoiceSpeech(handlers, voice.url)
+    const speech = await openVoiceSpeech(handlers, voice.url)
     const socket = await voice.connected
-    speech.speak()
-    speech.speakText("Hello there.")
-    speech.finish()
+    speech.start()
+    speech.sendText("Hello there.")
+    speech.sendFinish()
     await vi.waitFor(() => expect(voice.messages).toHaveLength(3))
     expect(voice.messages).toEqual([
       { type: "speak" },
@@ -145,10 +145,7 @@ describe("connectVoiceSpeech", () => {
 
   it("hangs up on cancel", async () => {
     const voice = await startFakeVoice()
-    const speech = await connectVoiceSpeech(
-      createRecordingHandlers(),
-      voice.url
-    )
+    const speech = await openVoiceSpeech(createRecordingHandlers(), voice.url)
     await voice.connected
     speech.cancel()
     await expect(voice.closed).resolves.toBeUndefined()
@@ -157,9 +154,9 @@ describe("connectVoiceSpeech", () => {
   it("fails with VoiceUnavailableError when voice refuses the handshake", async () => {
     const voice = await startFakeVoice("refuse")
     const handlers = createRecordingHandlers()
-    await expect(
-      connectVoiceSpeech(handlers, voice.url)
-    ).rejects.toBeInstanceOf(VoiceUnavailableError)
+    await expect(openVoiceSpeech(handlers, voice.url)).rejects.toBeInstanceOf(
+      VoiceUnavailableError
+    )
     expect(handlers.closeCodes).toEqual([])
   })
 
@@ -170,7 +167,7 @@ describe("connectVoiceSpeech", () => {
       vi.useRealTimers()
     })
     const handlers = createRecordingHandlers()
-    const speech = connectVoiceSpeech(handlers, `ws://127.0.0.1:${port}/`)
+    const speech = openVoiceSpeech(handlers, `ws://127.0.0.1:${port}/`)
     await vi.waitFor(() => expect(sockets).toHaveLength(1))
     vi.advanceTimersByTime(2_000)
     await expect(speech).rejects.toBeInstanceOf(VoiceUnavailableError)

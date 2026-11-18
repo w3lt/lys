@@ -15,7 +15,7 @@ enum SpeechMessage: Equatable {
 /// Returns `nil` for malformed JSON, an unknown `type`, a `text` message
 /// without a non-empty `text` string, or extra non-JSON payloads; the
 /// connection closes with the protocol-error code when this returns `nil`.
-func decodeSpeechMessage(_ body: String) -> SpeechMessage? {
+func parseSpeechMessage(_ body: String) -> SpeechMessage? {
     guard let data = body.data(using: .utf8),
           let object = try? JSONSerialization.jsonObject(with: data),
           let message = object as? [String: Any],

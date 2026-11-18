@@ -97,7 +97,7 @@ export type VoiceRuntimeSlice = {
    * shown as running; never rejects. Nothing is published when voice still
    * answers, or when a start or stop took over meanwhile.
    */
-  readonly checkVoice: () => Promise<void>
+  readonly updateVoiceServerInfo: () => Promise<void>
 }
 
 /** Published while a stop waits for voice. */
@@ -275,8 +275,8 @@ export function createVoiceRuntimeSlice(
     }
   }
 
-  /** Implements {@link VoiceRuntimeSlice.checkVoice}. */
-  async function checkVoice(): Promise<void> {
+  /** Implements {@link VoiceRuntimeSlice.updateVoiceServerInfo}. */
+  async function updateVoiceServerInfo(): Promise<void> {
     const shown = get().voiceServerInfo
     if (shown.status !== "running") return
     const info = await readRunningVoiceServerInfo()
@@ -284,5 +284,10 @@ export function createVoiceRuntimeSlice(
     set({ voiceServerInfo: info })
   }
 
-  return { voiceServerInfo: STOPPED_VOICE, startVoice, stopVoice, checkVoice }
+  return {
+    voiceServerInfo: STOPPED_VOICE,
+    startVoice,
+    stopVoice,
+    updateVoiceServerInfo
+  }
 }

@@ -27,15 +27,15 @@ struct voice {
             .appendingPathComponent("models", isDirectory: true)
         let engine = PocketTtsSpeechEngine(
             modelsDirectory: modelsDirectory,
-            clonedVoiceFile: clonedVoiceURL()
+            clonedVoiceFile: findClonedVoiceURL()
         )
         do {
-            let router = try Router(routes: [.health(isReady: { engine.isReady })])
+            let router = try Router(routes: [.buildHealth(isReady: { engine.isReady })])
             let httpServer = WebServer(router: router)
             let socketServer = SpeechSocketServer(engine: engine)
             try await withThrowingTaskGroup(of: MainChild.self) { group in
                 group.addTask {
-                    await warmModels(engine)
+                    await loadEngineModels(engine)
                     return .warmUp
                 }
                 group.addTask {
@@ -68,7 +68,7 @@ struct voice {
     /// `PocketTtsManager.cloneVoiceToFile`, is loaded at startup instead of
     /// the preset `alba`. The file sits next to the `voice` binary, so an
     /// installed release carries it when Lys ships one.
-    private static func clonedVoiceURL() -> URL? {
+    private static func findClonedVoiceURL() -> URL? {
         let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
         let candidate = executable.deletingLastPathComponent().appendingPathComponent("lys-voice.bin")
         return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
@@ -80,9 +80,9 @@ struct voice {
 /// loads them.
 ///
 /// - Parameter engine: Engine whose models are loaded.
-private func warmModels(_ engine: SpeechEngine) async {
+private func loadEngineModels(_ engine: SpeechEngine) async {
     do {
-        try await engine.warmUp()
+        try await engine.loadModels()
         print("voice: models ready")
     } catch {
         FileHandle.standardError.write(Data("voice: could not load the speech models: \(error)\n".utf8))

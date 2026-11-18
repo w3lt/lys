@@ -117,7 +117,7 @@ class FakeWebSocket {
    * @param type - Event type.
    * @param event - The event.
    */
-  public emit(type: string, event: unknown): void {
+  public sendEvent(type: string, event: unknown): void {
     for (const listener of this.#listeners.get(type) ?? []) listener(event)
   }
 }
@@ -182,7 +182,7 @@ const REPLY_PATH = `/api/v1/chat/${FIXTURE_CONVERSATION_ID}/replies/${REPLY_ID}`
  *
  * @param reply - The reply, streaming or ended.
  */
-function showConversation(reply: ConversationMessage): void {
+function updateShownConversation(reply: ConversationMessage): void {
   useChatViewStore.setState({
     conversation: createStoredChatViewConversation(
       buildConversation(FIXTURE_CONVERSATION_ID, "Trip", [
@@ -194,12 +194,12 @@ function showConversation(reply: ConversationMessage): void {
 }
 
 /** Moves the request to `awaiting-turn`, as sending a message does. */
-function awaitTurn(): void {
+function updateRequestAwaitingTurn(): void {
   useChatViewStore.setState({ request: { status: "awaiting-turn", token: 1 } })
 }
 
 /** Moves the request to `reply-streaming` for the reply. */
-function streamReply(): void {
+function updateRequestStreaming(): void {
   useChatViewStore.setState({
     request: {
       status: "reply-streaming",
@@ -210,7 +210,7 @@ function streamReply(): void {
 }
 
 /** Moves the request to `reply-completed` for the reply. */
-function completeReply(): void {
+function updateRequestCompleted(): void {
   useChatViewStore.setState({
     request: {
       status: "reply-completed",
@@ -221,12 +221,12 @@ function completeReply(): void {
 }
 
 /** Returns the request to `idle`, as the store does once the stream ends. */
-function settleRequest(): void {
+function resetRequest(): void {
   useChatViewStore.setState({ request: { status: "idle" } })
 }
 
 /** The URLs of every socket opened, in order. */
-function openedUrls(): string[] {
+function listOpenedUrls(): string[] {
   return FakeWebSocket.opened.map((socket) => socket.url)
 }
 
@@ -235,14 +235,14 @@ function openedUrls(): string[] {
  *
  * @param index - Position in opening order; the last one by default.
  */
-function socketAt(index = -1): FakeWebSocket {
+function getSocketAt(index = -1): FakeWebSocket {
   const socket = FakeWebSocket.opened.at(index)
   if (socket === undefined) throw new Error("no such socket was opened")
   return socket
 }
 
 /** Loses the window's focus, as Tauri reports it. */
-function blurWindow(): void {
+function sendWindowBlur(): void {
   for (const listener of fakeWindow.listeners) listener({ payload: false })
 }
 
@@ -291,21 +291,21 @@ describe("startSpeech", () => {
   it("reads a reply the person asked for from its first word", async () => {
     startSpeechForTest()
     await waitForMicrotasks()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    awaitTurn()
-    streamReply()
-    expect(openedUrls()).toEqual([
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestAwaitingTurn()
+    updateRequestStreaming()
+    expect(listOpenedUrls()).toEqual([
       `${SOCKET_BASE}${REPLY_PATH}/speech?from=start`
     ])
-    expect(socketAt().binaryType).toBe("arraybuffer")
+    expect(getSocketAt().binaryType).toBe("arraybuffer")
   })
 
   it("joins a reply that was already streaming at the sentence being written", async () => {
     startSpeechForTest()
     await waitForMicrotasks()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    streamReply()
-    expect(openedUrls()).toEqual([
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestStreaming()
+    expect(listOpenedUrls()).toEqual([
       `${SOCKET_BASE}${REPLY_PATH}/speech?from=current`
     ])
   })
@@ -313,81 +313,87 @@ describe("startSpeech", () => {
   it("stops when the person sends a new message", async () => {
     startSpeechForTest()
     await waitForMicrotasks()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    streamReply()
-    awaitTurn()
-    expect(socketAt().isClosed).toBe(true)
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestStreaming()
+    updateRequestAwaitingTurn()
+    expect(getSocketAt().isClosed).toBe(true)
   })
 
   it("stops when the conversation is closed", async () => {
     startSpeechForTest()
     await waitForMicrotasks()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    streamReply()
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestStreaming()
     useChatViewStore.setState({ conversation: undefined })
-    expect(socketAt().isClosed).toBe(true)
+    expect(getSocketAt().isClosed).toBe(true)
   })
 
   it("stops at once when the reply was interrupted", async () => {
     startSpeechForTest()
     await waitForMicrotasks()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    streamReply()
-    showConversation(buildEndedAssistantMessage(3, "Hello", "interrupted"))
-    completeReply()
-    expect(socketAt().isClosed).toBe(true)
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestStreaming()
+    updateShownConversation(
+      buildEndedAssistantMessage(3, "Hello", "interrupted")
+    )
+    updateRequestCompleted()
+    expect(getSocketAt().isClosed).toBe(true)
     expect(FakeWebSocket.opened).toHaveLength(1)
   })
 
   it("says the notification line for a reply that completed in the background", async () => {
     startSpeechForTest()
     await waitForMicrotasks()
-    blurWindow()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    awaitTurn()
-    streamReply()
-    showConversation(buildCompletedAssistantMessage(3, "Hello."))
-    completeReply()
-    expect(openedUrls()).toEqual([`${SOCKET_BASE}${REPLY_PATH}/notification`])
+    sendWindowBlur()
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestAwaitingTurn()
+    updateRequestStreaming()
+    updateShownConversation(buildCompletedAssistantMessage(3, "Hello."))
+    updateRequestCompleted()
+    expect(listOpenedUrls()).toEqual([
+      `${SOCKET_BASE}${REPLY_PATH}/notification`
+    ])
   })
 
   it("keeps reading a completed reply after the request returns to idle", async () => {
     startSpeechForTest()
     await waitForMicrotasks()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    awaitTurn()
-    streamReply()
-    socketAt().emit("message", { data: new ArrayBuffer(4) })
-    showConversation(buildCompletedAssistantMessage(3, "Hello."))
-    completeReply()
-    settleRequest()
-    expect(socketAt().isClosed).toBe(false)
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestAwaitingTurn()
+    updateRequestStreaming()
+    getSocketAt().sendEvent("message", { data: new ArrayBuffer(4) })
+    updateShownConversation(buildCompletedAssistantMessage(3, "Hello."))
+    updateRequestCompleted()
+    resetRequest()
+    expect(getSocketAt().isClosed).toBe(false)
     expect(FakeWebSocket.opened).toHaveLength(1)
   })
 
   it("keeps the notification line after the request returns to idle", async () => {
     startSpeechForTest()
     await waitForMicrotasks()
-    blurWindow()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    awaitTurn()
-    streamReply()
-    showConversation(buildCompletedAssistantMessage(3, "Hello."))
-    completeReply()
-    settleRequest()
-    expect(openedUrls()).toEqual([`${SOCKET_BASE}${REPLY_PATH}/notification`])
-    expect(socketAt().isClosed).toBe(false)
+    sendWindowBlur()
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestAwaitingTurn()
+    updateRequestStreaming()
+    updateShownConversation(buildCompletedAssistantMessage(3, "Hello."))
+    updateRequestCompleted()
+    resetRequest()
+    expect(listOpenedUrls()).toEqual([
+      `${SOCKET_BASE}${REPLY_PATH}/notification`
+    ])
+    expect(getSocketAt().isClosed).toBe(false)
   })
 
   it("stops a completed reply's speech once another conversation is shown", async () => {
     startSpeechForTest()
     await waitForMicrotasks()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    awaitTurn()
-    streamReply()
-    showConversation(buildCompletedAssistantMessage(3, "Hello."))
-    completeReply()
-    settleRequest()
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestAwaitingTurn()
+    updateRequestStreaming()
+    updateShownConversation(buildCompletedAssistantMessage(3, "Hello."))
+    updateRequestCompleted()
+    resetRequest()
     useChatViewStore.setState({
       conversation: createStoredChatViewConversation(
         buildConversation(createFixtureUuidV7(9), "Other", [
@@ -396,7 +402,7 @@ describe("startSpeech", () => {
         ])
       )
     })
-    expect(socketAt().isClosed).toBe(true)
+    expect(getSocketAt().isClosed).toBe(true)
     expect(FakeWebSocket.opened).toHaveLength(1)
   })
 
@@ -406,12 +412,12 @@ describe("startSpeech", () => {
     })
     startSpeechForTest()
     await waitForMicrotasks()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    streamReply()
-    socketAt().emit("message", { data: "text" })
-    socketAt().emit("message", { data: new ArrayBuffer(4) })
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestStreaming()
+    getSocketAt().sendEvent("message", { data: "text" })
+    getSocketAt().sendEvent("message", { data: new ArrayBuffer(4) })
     expect(FakeAudioContext.started).toBe(1)
-    socketAt().emit("close", { code: 4503 })
+    getSocketAt().sendEvent("close", { code: 4503 })
     await vi.waitFor(() =>
       expect(useLysStore.getState().voiceServerInfo.status).toBe("stopped")
     )
@@ -423,12 +429,12 @@ describe("startSpeech", () => {
   it("closes the socket and stops following once cleaned up", async () => {
     const stop = startSpeechForTest()
     await waitForMicrotasks()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    streamReply()
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestStreaming()
     stop()
-    expect(socketAt().isClosed).toBe(true)
-    awaitTurn()
-    streamReply()
+    expect(getSocketAt().isClosed).toBe(true)
+    updateRequestAwaitingTurn()
+    updateRequestStreaming()
     expect(FakeWebSocket.opened).toHaveLength(1)
     expect(fakeWindow.unlistens).toBe(1)
   })
@@ -450,10 +456,10 @@ describe("startSpeech", () => {
     fakeWindow.listening = Promise.reject(new Error("no focus events"))
     startSpeechForTest()
     await waitForMicrotasks()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    awaitTurn()
-    streamReply()
-    expect(openedUrls()).toEqual([
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestAwaitingTurn()
+    updateRequestStreaming()
+    expect(listOpenedUrls()).toEqual([
       `${SOCKET_BASE}${REPLY_PATH}/speech?from=start`
     ])
   })
@@ -464,11 +470,11 @@ describe("startSpeech", () => {
     const reportError = vi.fn()
     vi.stubGlobal("reportError", reportError)
     startSpeechForTest()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    awaitTurn()
-    streamReply()
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestAwaitingTurn()
+    updateRequestStreaming()
     const failure = new Error("close failed")
-    socketAt().closeFailure = failure
+    getSocketAt().closeFailure = failure
     focused.resolve(false)
     await waitForMicrotasks()
     expect(reportError).toHaveBeenCalledWith(failure)
@@ -496,8 +502,8 @@ describe("startSpeech", () => {
     stop()
     focused.resolve(true)
     await waitForMicrotasks()
-    showConversation(buildStreamingAssistantMessage(3, "Hello"))
-    streamReply()
+    updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+    updateRequestStreaming()
     expect(FakeWebSocket.opened).toHaveLength(0)
   })
 })

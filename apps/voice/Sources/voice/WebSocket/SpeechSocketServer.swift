@@ -76,7 +76,7 @@ final class SpeechSocketServer: Sendable {
     ///   fails; accepted connections are cancelled before the error is thrown.
     func start(onReady: (@Sendable (NWEndpoint.Port) -> Void)? = nil) async throws {
         guard !Task.isCancelled else { return }
-        let listener = try makeListener()
+        let listener = try createListener()
         let (events, continuation) = AsyncStream.makeStream(of: ListenerEvent.self)
         defer {
             listener.cancel()
@@ -113,7 +113,7 @@ final class SpeechSocketServer: Sendable {
     /// backend's client does not — is refused so no web page can ask voice to
     /// speak. A handshake while the models are not loaded is refused; the
     /// backend reports the refusal to the desktop as voice not ready.
-    static func acceptsHandshake(headers: [(name: String, value: String)], isReady: Bool) -> Bool {
+    static func canAcceptHandshake(headers: [(name: String, value: String)], isReady: Bool) -> Bool {
         guard isReady else { return false }
         return !headers.contains(where: { $0.name.lowercased() == "origin" })
     }
@@ -126,14 +126,14 @@ final class SpeechSocketServer: Sendable {
     ///
     /// - Returns: A listener that has not been started.
     /// - Throws: `NWError` when Network.framework rejects the parameters.
-    private func makeListener() throws -> NWListener {
+    private func createListener() throws -> NWListener {
         let websocket = NWProtocolWebSocket.Options()
         websocket.autoReplyPing = true
         websocket.maximumMessageSize = SpeechConnection.maximumMessageSize
         let engine = self.engine
         websocket.setClientRequestHandler(DispatchQueue(label: "voice.WebSocketHandshake")) { _, headers in
             let isReady = engine.isReady
-            let accept = Self.acceptsHandshake(headers: headers, isReady: isReady)
+            let accept = Self.canAcceptHandshake(headers: headers, isReady: isReady)
             if !accept {
                 let reason = isReady ? "it carries an Origin header" : "the models are not loaded"
                 print("voice: refused a speech handshake: \(reason)")

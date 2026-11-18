@@ -2,21 +2,21 @@ import Foundation
 import Network
 
 /// Thrown when an operation under test exceeds its allotted time.
-struct TimedOut: Error {}
+struct TimedOutError: Error {}
 
 /// Thrown when a test server stopped before its listener became ready.
-struct ServerEnded: Error {}
+struct ServerEndedError: Error {}
 
 /// Polls `condition` every 10 ms until it holds.
 ///
 /// - Parameters:
 ///   - seconds: Longest wait.
 ///   - condition: State the test waits for.
-/// - Throws: ``TimedOut`` when `condition` still fails at the deadline.
+/// - Throws: ``TimedOutError`` when `condition` still fails at the deadline.
 func waitUntil(within seconds: Double = 2, _ condition: () -> Bool) async throws {
     let deadline = ContinuousClock.now + .seconds(seconds)
     while !condition() {
-        guard ContinuousClock.now < deadline else { throw TimedOut() }
+        guard ContinuousClock.now < deadline else { throw TimedOutError() }
         try await Task.sleep(for: .milliseconds(10))
     }
 }
@@ -37,7 +37,7 @@ final class PortSignal: @unchecked Sendable {
     ///
     /// - Parameter outcome: The bound port, or the error that stopped the
     ///   server.
-    func signal(_ outcome: Result<UInt16, any Error>) {
+    func resolve(_ outcome: Result<UInt16, any Error>) {
         let waiter = lock.withLock { () -> CheckedContinuation<UInt16, any Error>? in
             guard self.outcome == nil else { return nil }
             self.outcome = outcome
@@ -80,16 +80,16 @@ final class LoopbackServer {
     ///
     /// - Parameter start: Runs the server until cancelled, calling its
     ///   argument with the bound port once the listener is ready.
-    /// - Throws: The server's error, or ``ServerEnded``, when it stops before
+    /// - Throws: The server's error, or ``ServerEndedError``, when it stops before
     ///   its listener is ready.
     func start(_ start: @escaping @Sendable (@escaping @Sendable (NWEndpoint.Port) -> Void) async throws -> Void) async throws {
         let ready = PortSignal()
         task = Task {
             do {
-                try await start { ready.signal(.success($0.rawValue)) }
-                ready.signal(.failure(ServerEnded()))
+                try await start { ready.resolve(.success($0.rawValue)) }
+                ready.resolve(.failure(ServerEndedError()))
             } catch {
-                ready.signal(.failure(error))
+                ready.resolve(.failure(error))
             }
         }
         port = try await ready.wait()
@@ -114,7 +114,7 @@ final class ConnectionStates: @unchecked Sendable {
     /// Records `state` as the latest one.
     ///
     /// - Parameter state: State the connection reported.
-    func record(_ state: NWConnection.State) {
+    func update(_ state: NWConnection.State) {
         lock.withLock { latest = state }
     }
 
@@ -154,7 +154,7 @@ final class TestTCPClient: @unchecked Sendable {
     init(port: UInt16) {
         connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
         let states = self.states
-        connection.stateUpdateHandler = { states.record($0) }
+        connection.stateUpdateHandler = { states.update($0) }
         connection.start(queue: DispatchQueue(label: "test.tcp"))
     }
 
@@ -181,7 +181,7 @@ final class TestTCPClient: @unchecked Sendable {
     ///
     /// - Parameter seconds: Longest wait for the end of the stream.
     /// - Returns: Every byte the server sent.
-    /// - Throws: ``TimedOut`` when the stream did not end in time; the
+    /// - Throws: ``TimedOutError`` when the stream did not end in time; the
     ///   connection's `NWError` when receiving fails.
     func readToEnd(within seconds: Double = 2) async throws -> Data {
         try await withThrowingTaskGroup(of: Data?.self) { group in
@@ -193,7 +193,7 @@ final class TestTCPClient: @unchecked Sendable {
             defer { group.cancelAll() }
             guard let received = try await group.next() ?? nil else {
                 connection.cancel()
-                throw TimedOut()
+                throw TimedOutError()
             }
             return received
         }

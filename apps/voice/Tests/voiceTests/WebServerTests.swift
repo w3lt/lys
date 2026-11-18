@@ -12,7 +12,7 @@ import Testing
 /// - Returns: The running server; the test stops it.
 /// - Throws: The router's or the listener's error.
 private func startWebServer(maxConnections: Int, headTimeout: Duration) async throws -> LoopbackServer {
-    let router = try Router(routes: [.health(isReady: { true })])
+    let router = try Router(routes: [.buildHealth(isReady: { true })])
     let server = WebServer(router: router, port: .any, maxConnections: maxConnections, headTimeout: headTimeout)
     let loopback = LoopbackServer()
     try await loopback.start { onReady in try await server.start(onReady: onReady) }
@@ -53,7 +53,7 @@ struct WebServerTests {
         do {
             let dropped = try await second.readToEnd()
             #expect(dropped.isEmpty)
-        } catch is TimedOut {
+        } catch is TimedOutError {
             Issue.record("The connection beyond the cap was kept open")
         } catch {
             // A reset also shows the drop.

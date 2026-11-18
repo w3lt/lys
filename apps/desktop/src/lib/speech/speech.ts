@@ -29,35 +29,35 @@ import { createPcmPlayer } from "./pcm-player"
  * on every change; never called after the cleanup ran.
  * @returns The cleanup, which stops following.
  */
-function trackFocus(onChange: (focused: boolean) => void): () => void {
+function followWindowFocus(onChange: (focused: boolean) => void): () => void {
   try {
     const currentWindow = getCurrentWindow()
     let unlisten: (() => void) | undefined
     let disposed = false
-    const publish = (focused: boolean): void => {
+    const sendFocus = (focused: boolean): void => {
       if (!disposed) onChange(focused)
     }
     // Only the window's own rejection means unknown focus. A failure of the
-    // speech update that `publish` runs goes to the platform's
+    // speech update that `sendFocus` runs goes to the platform's
     // `reportError`, as an uncaught one does, since the desktop has no
     // logger.
     currentWindow
       .isFocused()
-      .then(publish, () => {
+      .then(sendFocus, () => {
         // The window never reported; the default stands.
       })
       .catch((error: unknown) => {
         reportError(error)
       })
-    const rememberUnlisten = (unlistenFocus: () => void): void => {
+    const handleFocusListenerRegistered = (unlistenFocus: () => void): void => {
       if (disposed) unlistenFocus()
       else unlisten = unlistenFocus
     }
     currentWindow
       .onFocusChanged(({ payload }) => {
-        publish(payload)
+        sendFocus(payload)
       })
-      .then(rememberUnlisten, () => {
+      .then(handleFocusListenerRegistered, () => {
         // Focus events are unavailable; focus stays at its last value.
       })
       .catch((error: unknown) => {
@@ -68,17 +68,17 @@ function trackFocus(onChange: (focused: boolean) => void): () => void {
       unlisten?.()
     }
   } catch {
-    const onFocus = () => {
+    const handleWindowFocus = () => {
       onChange(true)
     }
-    const onBlur = () => {
+    const handleWindowBlur = () => {
       onChange(false)
     }
-    window.addEventListener("focus", onFocus)
-    window.addEventListener("blur", onBlur)
+    window.addEventListener("focus", handleWindowFocus)
+    window.addEventListener("blur", handleWindowBlur)
     return () => {
-      window.removeEventListener("focus", onFocus)
-      window.removeEventListener("blur", onBlur)
+      window.removeEventListener("focus", handleWindowFocus)
+      window.removeEventListener("blur", handleWindowBlur)
     }
   }
 }
@@ -88,7 +88,7 @@ function trackFocus(onChange: (focused: boolean) => void): () => void {
  *
  * @returns The backend URL with `http` replaced by `ws`.
  */
-function webSocketOrigin(): string {
+function buildWebSocketOrigin(): string {
   return useLysStore.getState().backendUrl.replace(/^http/, "ws")
 }
 
@@ -101,7 +101,7 @@ function webSocketOrigin(): string {
  * @param query - Query string without its `?`, if any.
  * @returns The path, with the query appended.
  */
-function speechPath(
+function buildSpeechRoutePath(
   template: string,
   reply: SpeechReply,
   query?: string
@@ -155,7 +155,7 @@ function buildObservation(
       status
     }
   }
-  if (request.status === "idle") return observeLastReply(conversation)
+  if (request.status === "idle") return followLastReply(conversation)
   return { kind: "none" }
 }
 
@@ -167,7 +167,7 @@ function buildObservation(
  * @returns `settled` when its last message is a reply in a final state, and
  * `none` otherwise.
  */
-function observeLastReply(
+function followLastReply(
   conversation: ChatViewConversation
 ): SpeechObservation {
   const last = conversation.messages.at(-1)
@@ -186,7 +186,7 @@ function observeLastReply(
  * @param event - The message event the socket received.
  * @param handlers - The controller's socket handlers.
  */
-function forwardBinaryFrame(
+function sendBinaryFrame(
   event: MessageEvent,
   handlers: { onAudio: (frame: Uint8Array) => void }
 ): void {
@@ -206,22 +206,23 @@ function forwardBinaryFrame(
 export function startSpeech(): () => void {
   const isVoiceReady = (): boolean =>
     useLysStore.getState().voiceServerInfo.status === "running"
-  const recheckVoice = (): void => {
-    void useLysStore.getState().checkVoice()
+  const updateVoiceServerInfo = (): void => {
+    void useLysStore.getState().updateVoiceServerInfo()
   }
 
   let focused = true
   const controller = new SpeechController({
     isFocused: () => focused,
     isVoiceReady,
-    speechPath: (reply, from) =>
-      speechPath(chatSpeechApi.path, reply, `from=${from}`),
-    notificationPath: (reply) => speechPath(chatNotificationApi.path, reply),
+    buildSpeechPath: (reply, from) =>
+      buildSpeechRoutePath(chatSpeechApi.path, reply, `from=${from}`),
+    buildNotificationPath: (reply) =>
+      buildSpeechRoutePath(chatNotificationApi.path, reply),
     openSocket: (path, handlers) => {
-      const socket = new WebSocket(`${webSocketOrigin()}${path}`)
+      const socket = new WebSocket(`${buildWebSocketOrigin()}${path}`)
       socket.binaryType = "arraybuffer"
       socket.addEventListener("message", (event) => {
-        forwardBinaryFrame(event, handlers)
+        sendBinaryFrame(event, handlers)
       })
       socket.addEventListener("close", (event) => {
         handlers.onClose(event.code)
@@ -230,27 +231,27 @@ export function startSpeech(): () => void {
       return { close: () => socket.close() }
     },
     createPlayer: () => createPcmPlayer(),
-    recheckVoice
+    updateVoiceServerInfo
   })
 
   const update = (previousRequestStatus?: string): void => {
     controller.update(buildObservation(previousRequestStatus))
   }
 
-  const unsubscribeChat = useChatViewStore.subscribe(
+  const stopFollowingChat = useChatViewStore.subscribe(
     (_state, previousState) => {
       update(previousState.request.status)
     }
   )
   type LysStoreState = ReturnType<typeof useLysStore.getState>
-  const onVoiceChange = (
+  const handleVoiceChange = (
     state: LysStoreState,
     previousState: LysStoreState
   ): void => {
     if (state.voiceServerInfo !== previousState.voiceServerInfo) update()
   }
-  const unsubscribeVoice = useLysStore.subscribe(onVoiceChange)
-  const stopTrackingFocus = trackFocus((value) => {
+  const stopFollowingVoice = useLysStore.subscribe(handleVoiceChange)
+  const stopFollowingFocus = followWindowFocus((value) => {
     focused = value
     update(useChatViewStore.getState().request.status)
   })
@@ -258,9 +259,9 @@ export function startSpeech(): () => void {
   update()
 
   return () => {
-    stopTrackingFocus()
-    unsubscribeVoice()
-    unsubscribeChat()
+    stopFollowingFocus()
+    stopFollowingVoice()
+    stopFollowingChat()
     controller.close()
   }
 }

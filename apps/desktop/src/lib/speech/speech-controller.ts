@@ -66,11 +66,11 @@ export type SpeechObservation =
 /** Player of decoded PCM frames, as `PcmPlayer` implements it. */
 export type SpeechPlayer = Readonly<{
   /** Queues one frame of raw PCM for playback. */
-  enqueue: (frame: Uint8Array) => void
+  addFrame: (frame: Uint8Array) => void
   /** Stops every queued frame at once. */
   stop: () => void
   /** Asks the audio context to resume, such as after a user gesture. */
-  resume: () => void
+  start: () => void
   /** Stops every queued frame and releases the audio context. */
   close: () => void
 }>
@@ -96,9 +96,9 @@ export type SpeechControllerDeps = Readonly<{
   /** Whether voice answers its health route. */
   isVoiceReady: () => boolean
   /** Builds the path of the speech socket for a reply. */
-  speechPath: (reply: SpeechReply, from: "start" | "current") => string
+  buildSpeechPath: (reply: SpeechReply, from: "start" | "current") => string
   /** Builds the path of the notification socket for a reply. */
-  notificationPath: (reply: SpeechReply) => string
+  buildNotificationPath: (reply: SpeechReply) => string
   /** Opens one speech or notification socket. */
   openSocket: (path: string, handlers: SpeechSocketHandlers) => SpeechSocket
   /** Creates the PCM player, which the controller then owns. */
@@ -107,7 +107,7 @@ export type SpeechControllerDeps = Readonly<{
    * Asks the application to read voice's status again, after a socket closed
    * because voice was unavailable or failed.
    */
-  recheckVoice: () => void
+  updateVoiceServerInfo: () => void
 }>
 
 /** Most settled replies to remember, so the settle logic runs once each. */
@@ -217,22 +217,22 @@ export class SpeechController {
     }
     this.#wasFocused = focused
     this.#wasVoiceReady = voiceReady
-    if (!voiceReady) this.#silenceForVoice()
+    if (!voiceReady) this.#stopUntilVoiceReady()
     switch (observation.kind) {
       case "streaming":
-        this.#onStreaming(observation, context)
+        this.#handleStreamingReply(observation, context)
         break
       case "settled":
-        this.#onSettled(observation, focused)
+        this.#handleSettledReply(observation, focused)
         break
       case "none":
-        this.#silence()
+        this.#stopSpeechAndNotification()
         this.#waiting = null
         break
     }
     // A person may send a message from an unfocused window; resuming the
     // audio context here covers any gesture that got this far.
-    if (voiceReady) this.#player.resume()
+    if (voiceReady) this.#player.start()
   }
 
   /** Stops any speech and notification, releases the player, and ends. */
@@ -251,12 +251,12 @@ export class SpeechController {
    * @param observation - The streaming reply and how it began.
    * @param context - What this update sees of the world.
    */
-  #onStreaming(
+  #handleStreamingReply(
     observation: Extract<SpeechObservation, { kind: "streaming" }>,
     context: UpdateContext
   ): void {
     const { reply } = observation
-    this.#dropForeign(reply)
+    this.#stopForeignReply(reply)
     if (this.#notification !== null) {
       this.#closeNotification()
       this.#stopAudio()
@@ -271,7 +271,7 @@ export class SpeechController {
     }
 
     if (this.#waiting?.reply.replyId === reply.replyId) {
-      this.#joinWaiting(this.#waiting, context)
+      this.#startWaitedReply(this.#waiting, context)
       return
     }
 
@@ -291,7 +291,7 @@ export class SpeechController {
    *
    * @param reply - The reply the view shows now.
    */
-  #dropForeign(reply: SpeechReply): void {
+  #stopForeignReply(reply: SpeechReply): void {
     if (this.#open !== null && this.#open.reply.replyId !== reply.replyId) {
       this.#closeOpen()
       this.#stopAudio()
@@ -316,7 +316,7 @@ export class SpeechController {
    * @param waiting - The waited-for reply.
    * @param context - What this update sees of the world.
    */
-  #joinWaiting(waiting: WaitingSpeech, context: UpdateContext): void {
+  #startWaitedReply(waiting: WaitingSpeech, context: UpdateContext): void {
     if (!context.focused || !context.voiceReady) return
     if (waiting.needsTrigger && !context.isJoinTrigger) return
     this.#waiting = null
@@ -331,16 +331,16 @@ export class SpeechController {
    * @param observation - The settled reply and its status.
    * @param focused - Whether the window has focus.
    */
-  #onSettled(
+  #handleSettledReply(
     observation: Extract<SpeechObservation, { kind: "settled" }>,
     focused: boolean
   ): void {
     const { reply, status } = observation
-    this.#dropForeign(reply)
-    const isNewSettlement = this.#rememberSettled(reply, status)
+    this.#stopForeignReply(reply)
+    const isNewSettlement = this.#addSettledReply(reply, status)
     if (status === "completed")
-      this.#onCompleted(reply, isNewSettlement, focused)
-    else if (isNewSettlement) this.#onStoppedOrFailed(reply)
+      this.#handleCompletedReply(reply, isNewSettlement, focused)
+    else if (isNewSettlement) this.#handleStoppedOrFailedReply(reply)
   }
 
   /**
@@ -349,10 +349,10 @@ export class SpeechController {
    *
    * @param reply - The reply that stopped or failed.
    */
-  #onStoppedOrFailed(reply: SpeechReply): void {
+  #handleStoppedOrFailedReply(reply: SpeechReply): void {
     const isOpen = this.#open?.reply.replyId === reply.replyId
     if (!isOpen && this.#waiting?.reply.replyId !== reply.replyId) return
-    this.#silence()
+    this.#stopSpeechAndNotification()
     this.#waiting = null
   }
 
@@ -365,7 +365,7 @@ export class SpeechController {
    * completed.
    * @param focused - Whether the window has focus.
    */
-  #onCompleted(
+  #handleCompletedReply(
     reply: SpeechReply,
     isNewSettlement: boolean,
     focused: boolean
@@ -376,14 +376,14 @@ export class SpeechController {
       // closes the socket with 1000 once its final frame is sent.
       if (open.frames > 0 || focused) return
       // It ended in the background before anything was said.
-      this.#silence()
-      this.#notify(reply)
+      this.#stopSpeechAndNotification()
+      this.#openNotification(reply)
       return
     }
     if (!isNewSettlement || this.#waiting?.reply.replyId !== reply.replyId)
       return
     this.#waiting = null
-    if (!focused) this.#notify(reply)
+    if (!focused) this.#openNotification(reply)
   }
 
   /**
@@ -394,7 +394,7 @@ export class SpeechController {
    * @param status - How it settled.
    * @returns Whether the settlement is new.
    */
-  #rememberSettled(reply: SpeechReply, status: string): boolean {
+  #addSettledReply(reply: SpeechReply, status: string): boolean {
     const key = `${reply.conversationId}:${reply.replyId}:${status}`
     if (this.#settledReplies.includes(key)) return false
     this.#settledReplies.push(key)
@@ -411,15 +411,15 @@ export class SpeechController {
    * Stops everything audible once voice is not ready, keeping the reply
    * spoken so far as waited for, to join once voice is ready again.
    */
-  #silenceForVoice(): void {
+  #stopUntilVoiceReady(): void {
     if (this.#open !== null) {
       this.#waiting = { reply: this.#open.reply, needsTrigger: true }
     }
-    this.#silence()
+    this.#stopSpeechAndNotification()
   }
 
   /** Closes both sockets and drops every queued frame. */
-  #silence(): void {
+  #stopSpeechAndNotification(): void {
     this.#closeOpen()
     this.#closeNotification()
     this.#stopAudio()
@@ -433,7 +433,7 @@ export class SpeechController {
    */
   #addAudioFrame(reply: SpeechReply, frame: Uint8Array): void {
     this.#audibleReplyId = reply.replyId
-    this.#player.enqueue(frame)
+    this.#player.addFrame(frame)
   }
 
   /** Drops every queued frame. */
@@ -449,19 +449,22 @@ export class SpeechController {
    * @param from - Where to start; `start` reads from the first word.
    */
   #startSpeech(reply: SpeechReply, from: "start" | "current"): void {
-    const socket = this.#deps.openSocket(this.#deps.speechPath(reply, from), {
-      onAudio: (frame) => {
-        if (this.#open?.socket !== socket) return
-        this.#open.frames += 1
-        this.#addAudioFrame(reply, frame)
-      },
-      onClose: (code) => {
-        if (this.#open?.socket !== socket) return
-        this.#open = null
-        this.#waiting = { reply, needsTrigger: true }
-        this.#handleClose(code)
+    const socket = this.#deps.openSocket(
+      this.#deps.buildSpeechPath(reply, from),
+      {
+        onAudio: (frame) => {
+          if (this.#open?.socket !== socket) return
+          this.#open.frames += 1
+          this.#addAudioFrame(reply, frame)
+        },
+        onClose: (code) => {
+          if (this.#open?.socket !== socket) return
+          this.#open = null
+          this.#waiting = { reply, needsTrigger: true }
+          this.#handleClose(code)
+        }
       }
-    })
+    )
     this.#open = { reply, socket, frames: 0 }
   }
 
@@ -470,19 +473,22 @@ export class SpeechController {
    *
    * @param reply - The reply to announce.
    */
-  #notify(reply: SpeechReply): void {
+  #openNotification(reply: SpeechReply): void {
     this.#closeNotification()
-    const socket = this.#deps.openSocket(this.#deps.notificationPath(reply), {
-      onAudio: (frame) => {
-        if (this.#notification?.socket === socket)
-          this.#addAudioFrame(reply, frame)
-      },
-      onClose: (code) => {
-        if (this.#notification?.socket !== socket) return
-        this.#notification = null
-        this.#handleClose(code)
+    const socket = this.#deps.openSocket(
+      this.#deps.buildNotificationPath(reply),
+      {
+        onAudio: (frame) => {
+          if (this.#notification?.socket === socket)
+            this.#addAudioFrame(reply, frame)
+        },
+        onClose: (code) => {
+          if (this.#notification?.socket !== socket) return
+          this.#notification = null
+          this.#handleClose(code)
+        }
       }
-    })
+    )
     this.#notification = { reply, socket }
   }
 
@@ -497,7 +503,7 @@ export class SpeechController {
     if (code === SPEECH_CLOSE_COMPLETE) return
     this.#stopAudio()
     if (code === SPEECH_CLOSE_VOICE_UNAVAILABLE || code === SPEECH_CLOSE_FAILED)
-      this.#deps.recheckVoice()
+      this.#deps.updateVoiceServerInfo()
   }
 
   /** Closes the speech socket, if any, without touching queued audio. */

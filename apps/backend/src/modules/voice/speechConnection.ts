@@ -19,12 +19,12 @@ import type { ConversationReader } from "../conversation/capabilities"
 import type { SpeechSocketRegistry } from "./speechSocketRegistry"
 import {
   VoiceUnavailableError,
-  type connectVoiceSpeech,
+  type openVoiceSpeech,
   type VoiceSpeech
 } from "./voiceClient"
 import {
   SpeechSentenceBuffer,
-  splitForVoice,
+  buildVoiceTextPieces,
   type SpeechSnapshot,
   type SpeechStart
 } from "./speechText"
@@ -77,7 +77,7 @@ export type SpeechConnectionDependencies = Readonly<{
    */
   isReady: () => Promise<boolean>
   /** Opens one speech at voice. */
-  connect: typeof connectVoiceSpeech
+  connect: typeof openVoiceSpeech
 }>
 
 /** What one speech socket connection needs. */
@@ -120,7 +120,7 @@ export async function handleSpeechConnection(
   const { socket, request, deps, log } = options
   deps.registry.register(socket)
   socket.on("close", (code: number) => {
-    deps.registry.unregister(socket)
+    deps.registry.remove(socket)
     log.info({ code }, "Speech socket closed")
   })
   socket.on("error", (error: Error) => {
@@ -303,7 +303,7 @@ type SpeechSessionOptions = Readonly<{
   /** What to speak and from where. */
   request: SpeechRequest
   /** Opens the speech at voice. */
-  connect: typeof connectVoiceSpeech
+  connect: typeof openVoiceSpeech
   /** Logger of the request that opened the socket. */
   log: FastifyBaseLogger
 }>
@@ -329,7 +329,7 @@ class SpeechSession {
   /** What to speak and from where. */
   readonly #request: SpeechRequest
   /** Opens the speech at voice. */
-  readonly #connect: typeof connectVoiceSpeech
+  readonly #connect: typeof openVoiceSpeech
   /** Logger of the request that opened the socket. */
   readonly #log: FastifyBaseLogger
   /** Hands out the sentences to speak; the snapshot seeds it. */
@@ -392,23 +392,23 @@ class SpeechSession {
     if (this.#request.kind === "reply")
       this.#generation?.openSubscription(this.#subscription)
 
-    const voice = await this.#connectVoice()
+    const voice = await this.#openVoiceSpeech()
     if (voice === undefined) return
     if (!isOpen(this.#socket)) {
       voice.cancel()
       return
     }
     this.#voice = voice
-    voice.speak()
+    voice.start()
     if (this.#request.kind === "notification") {
-      voice.speakText(this.#request.line)
-      voice.finish()
+      voice.sendText(this.#request.line)
+      voice.sendFinish()
       return
     }
-    this.#speak(this.#buffer.loadSnapshot(this.#stored.snapshot))
+    this.#sendSentences(this.#buffer.loadSnapshot(this.#stored.snapshot))
     if (this.#generation === undefined) {
-      this.#speak(this.#buffer.finish())
-      voice.finish()
+      this.#sendSentences(this.#buffer.close())
+      voice.sendFinish()
       return
     }
     this.#isLive = true
@@ -471,10 +471,10 @@ class SpeechSession {
    * @returns The speech, or undefined once the socket was closed with
    * `4503` for a refused handshake or `1011` for any other failure.
    */
-  async #connectVoice(): Promise<VoiceSpeech | undefined> {
+  async #openVoiceSpeech(): Promise<VoiceSpeech | undefined> {
     try {
       return await this.#connect({
-        onAudio: (pcm) => this.#forwardAudio(pcm),
+        onAudio: (pcm) => this.#sendAudioFrame(pcm),
         onClose: this.#relayVoiceClose
       })
     } catch (error) {
@@ -495,11 +495,11 @@ class SpeechSession {
    *
    * @param sentences - Sentences to speak, in order.
    */
-  #speak(sentences: readonly string[]): void {
+  #sendSentences(sentences: readonly string[]): void {
     for (const piece of sentences.flatMap((sentence) =>
-      splitForVoice(sentence)
+      buildVoiceTextPieces(sentence)
     )) {
-      this.#voice?.speakText(piece)
+      this.#voice?.sendText(piece)
     }
   }
 
@@ -509,7 +509,7 @@ class SpeechSession {
    *
    * @param pcm - Raw PCM bytes of the frame.
    */
-  #forwardAudio(pcm: Buffer): void {
+  #sendAudioFrame(pcm: Buffer): void {
     if (!isOpen(this.#socket)) return
     const bufferedBytes = this.#socket.bufferedAmount
     if (bufferedBytes > MAX_BUFFERED_BYTES) {
@@ -531,25 +531,25 @@ class SpeechSession {
       case "reply-part": {
         const part = event.part
         if (part.kind !== "text") {
-          this.#speak(this.#buffer.endTextPart())
+          this.#sendSentences(this.#buffer.closeTextPart())
           return
         }
         this.#textPartIds.add(part.id)
         const separator = this.#hasText ? "\n\n" : ""
         this.#hasText = true
-        this.#speak(this.#buffer.push(separator + part.content))
+        this.#sendSentences(this.#buffer.addFragment(separator + part.content))
         return
       }
       case "reply-part-delta": {
         if (!this.#textPartIds.has(event.partId)) return
         this.#hasText = true
-        this.#speak(this.#buffer.push(event.content))
+        this.#sendSentences(this.#buffer.addFragment(event.content))
         return
       }
       case "done": {
         this.#hasReplyEnded = true
-        this.#speak(this.#buffer.finish())
-        this.#voice?.finish()
+        this.#sendSentences(this.#buffer.close())
+        this.#voice?.sendFinish()
         this.#subscription.close()
         return
       }

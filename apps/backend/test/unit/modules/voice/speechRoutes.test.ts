@@ -123,20 +123,20 @@ class FakeVoiceSpeech implements VoiceSpeech {
     this.#onClose = handlers.onClose
   }
 
-  public speak(): void {
+  public start(): void {
     this.speakCalled = true
   }
-  public speakText(text: string): void {
+  public sendText(text: string): void {
     this.spoken.push(text)
   }
-  public finish(): void {
+  public sendFinish(): void {
     this.finishCalled = true
   }
   public cancel(): void {
     this.cancelled = true
   }
   /** Plays one audio frame to the socket, as voice does. */
-  public emitAudio(pcm: Buffer): void {
+  public sendAudio(pcm: Buffer): void {
     this.#onAudio?.(pcm)
   }
   /** Ends the voice socket with a code, as voice does. */
@@ -157,7 +157,7 @@ type FakeVoice = Readonly<{
 }>
 
 /** Records one binary frame towards the list. */
-function recordBinaryFrame(frames: Buffer[], source: unknown): void {
+function addBinaryFrame(frames: Buffer[], source: unknown): void {
   if (source instanceof ArrayBuffer) frames.push(Buffer.from(source))
 }
 
@@ -183,7 +183,7 @@ type TestSocket = Readonly<{
 }>
 
 /** Listens on an ephemeral port and returns its base URL. */
-async function listen(app: FastifyInstance): Promise<string> {
+async function startServer(app: FastifyInstance): Promise<string> {
   await app.listen({ port: 0, host: "127.0.0.1" })
   const address = app.server.address()
   const port =
@@ -199,7 +199,7 @@ function openTestSocket(baseUrl: string, path: string): TestSocket {
     ws = new WebSocket(`${baseUrl}${path}`)
     ws.binaryType = "arraybuffer"
     ws.addEventListener("message", (event) => {
-      recordBinaryFrame(frames, event.data)
+      addBinaryFrame(frames, event.data)
     })
     ws.addEventListener("close", (event) => resolve(event.code))
     ws.addEventListener("error", () => reject(new Error("WebSocket error")))
@@ -240,7 +240,7 @@ async function createVoiceRoutesApp(options: VoiceRoutesAppOptions) {
     ...(options.connect === undefined ? {} : { connect: options.connect })
   }
   await registerVoiceRoutes(testFastify.app, voiceOptions)
-  const baseUrl = await listen(testFastify.app)
+  const baseUrl = await startServer(testFastify.app)
   return { ...testFastify, generations, getConversation, baseUrl }
 }
 
@@ -373,7 +373,7 @@ describe("speech routes", () => {
     await vi.waitFor(() => expect(fake.speeches[0]?.speakCalled).toBe(true))
     expect(fake.speeches[0]?.spoken).toEqual(["All done."])
     expect(fake.speeches[0]?.finishCalled).toBe(true)
-    fake.speeches[0]?.emitAudio(Buffer.from([1, 2, 3, 4]))
+    fake.speeches[0]?.sendAudio(Buffer.from([1, 2, 3, 4]))
     fake.speeches[0]?.closeFromVoice(1000)
     await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_COMPLETE)
     expect(socket.frames).toHaveLength(1)
@@ -461,7 +461,7 @@ describe("speech routes", () => {
     expect(fake.speeches[0]?.spoken[0]).toMatch(
       /^(Master, your response is ready\.|Master, I've finished my answer\.|Your answer is waiting for you, Master\.|I'm done, Master\. Come and see\.)$/
     )
-    fake.speeches[0]?.emitAudio(Buffer.from([9]))
+    fake.speeches[0]?.sendAudio(Buffer.from([9]))
     fake.speeches[0]?.closeFromVoice(1000)
     await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_COMPLETE)
     expect(socket.frames).toHaveLength(1)
@@ -800,7 +800,7 @@ describe("speech sockets over their lifecycle", () => {
     await vi.waitFor(() => expect(fake.speeches[0]?.finishCalled).toBe(true))
     const frame = Buffer.alloc(64 * 1024)
     for (let count = 0; count < 160; count += 1)
-      fake.speeches[0]?.emitAudio(frame)
+      fake.speeches[0]?.sendAudio(frame)
     await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_TOO_SLOW)
     expect(fake.speeches[0]?.cancelled).toBe(true)
   })

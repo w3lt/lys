@@ -9,7 +9,7 @@ extension Route {
     /// response carries no health detail beyond the one word.
     ///
     /// - Parameter isReady: Reads whether the models are loaded.
-    static func health(isReady: @escaping @Sendable () -> Bool) -> Route {
+    static func buildHealth(isReady: @escaping @Sendable () -> Bool) -> Route {
         Route(method: .get, path: "/health") { _ in
             isReady()
                 ? HTTPResponse(status: .ok, text: "ok\n")

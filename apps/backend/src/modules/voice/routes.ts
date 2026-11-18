@@ -12,13 +12,13 @@ import type {
 } from "fastify"
 import type { WebSocket } from "ws"
 import { isAllowedOrigin } from "../../httpOrigins"
-import { pickNotificationLine } from "./notificationLines"
+import { getNotificationLine } from "./notificationLines"
 import { SpeechSocketRegistry } from "./speechSocketRegistry"
 import {
   handleSpeechConnection,
   type SpeechConnectionDependencies
 } from "./speechConnection"
-import { connectVoiceSpeech, isVoiceReady } from "./voiceClient"
+import { openVoiceSpeech, isVoiceReady } from "./voiceClient"
 
 /** Problem Details media type of the origin refusal. */
 const PROBLEM_MEDIA_TYPE = "application/problem+json"
@@ -28,7 +28,7 @@ export type SpeechRouteOptions = Readonly<{
   /** Probe whether voice is ready; defaults to the real health check. */
   isReady?: () => Promise<boolean>
   /** Open a speech at voice; defaults to the real connection. */
-  connect?: typeof connectVoiceSpeech
+  connect?: typeof openVoiceSpeech
 }>
 
 /**
@@ -74,7 +74,7 @@ function createSpeechDependencies(
     generations: app.replyGenerations,
     registry: new SpeechSocketRegistry(),
     isReady: options.isReady ?? isVoiceReady,
-    connect: options.connect ?? connectVoiceSpeech
+    connect: options.connect ?? openVoiceSpeech
   })
 }
 
@@ -98,7 +98,7 @@ function registerSpeechSocketRoutes(
       params: chatSpeechApi.params,
       querystring: chatSpeechApi.querystring
     },
-    preValidation: refuseForeignOrigins,
+    preValidation: handleSocketPreValidation,
     handler: (socket: WebSocket, request: FastifyRequest<ChatSpeechApiRoute>) =>
       handleSpeechConnection({
         socket,
@@ -114,7 +114,7 @@ function registerSpeechSocketRoutes(
     url: chatNotificationApi.path,
     websocket: true,
     schema: { params: chatNotificationApi.params },
-    preValidation: refuseForeignOrigins,
+    preValidation: handleSocketPreValidation,
     handler: (
       socket: WebSocket,
       request: FastifyRequest<ChatNotificationApiRoute>
@@ -122,7 +122,7 @@ function registerSpeechSocketRoutes(
       handleSpeechConnection({
         socket,
         target: request.params,
-        request: { kind: "notification", line: pickNotificationLine() },
+        request: { kind: "notification", line: getNotificationLine() },
         deps,
         log: createSpeechLog(request)
       })
@@ -154,7 +154,7 @@ function createSpeechLog(
  * socket; requests without an `Origin`, such as ones from local processes,
  * are allowed, as with the HTTP routes.
  */
-function refuseForeignOrigins(
+function handleSocketPreValidation(
   request: FastifyRequest,
   reply: FastifyReply,
   done: (error?: Error) => void

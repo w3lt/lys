@@ -7,10 +7,10 @@ import Foundation
 /// stops synthesis; the frames already handed out remain valid.
 protocol SpeechSession: Sendable {
     /// Queues one sentence (or any text unit) to be spoken.
-    func enqueue(_ text: String)
+    func addText(_ text: String)
     /// Signals that no more text follows; the frame stream ends once
     /// everything enqueued has been synthesized.
-    func finish()
+    func closeText()
     /// Abandons the speech immediately and ends the frame stream.
     func cancel() async
     /// The synthesized 24 kHz mono audio frames, in order.
@@ -27,12 +27,12 @@ protocol SpeechEngine: Sendable {
     ///
     /// - Throws: The error that stopped model loading; the engine stays not
     ///   ready and the caller keeps refusing speech until it succeeds.
-    func warmUp() async throws
+    func loadModels() async throws
     /// Whether the models are loaded and speech can start.
     var isReady: Bool { get }
     /// Starts one speech session.
     ///
     /// - Throws: The error that stopped session creation, for example the
     ///   models failing to load.
-    func makeSession() async throws -> any SpeechSession
+    func startSession() async throws -> any SpeechSession
 }

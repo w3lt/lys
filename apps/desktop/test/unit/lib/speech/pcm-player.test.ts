@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest"
 import {
   createPcmPlayer,
-  decodePcm16Le,
+  parsePcm16Le,
   type PcmOutput
 } from "@/lib/speech/pcm-player"
 
-describe("decodePcm16Le", () => {
+describe("parsePcm16Le", () => {
   it("decodes little-endian 16-bit samples to floats in [-1, 1)", () => {
     // 0x0000, 0x7FFF (max), 0x8000 (min), 0xFFFF (-1)
     const frame = new Uint8Array([
       0x00, 0x00, 0xff, 0x7f, 0x00, 0x80, 0xff, 0xff
     ])
 
-    const samples = decodePcm16Le(frame)
+    const samples = parsePcm16Le(frame)
 
     expect(samples).toHaveLength(4)
     expect(samples[0]).toBe(0)
@@ -24,11 +24,11 @@ describe("decodePcm16Le", () => {
   it("drops a trailing odd byte", () => {
     const frame = new Uint8Array([0x34, 0x12, 0x99])
 
-    expect([...decodePcm16Le(frame)]).toEqual([0x1234 / 32768])
+    expect([...parsePcm16Le(frame)]).toEqual([0x1234 / 32768])
   })
 
   it("decodes nothing for an empty frame", () => {
-    expect(decodePcm16Le(new Uint8Array(0))).toHaveLength(0)
+    expect(parsePcm16Le(new Uint8Array(0))).toHaveLength(0)
   })
 })
 
@@ -50,8 +50,8 @@ type FakeOutput = PcmOutput & {
   readonly played: PlayedStretch[]
   /** The fake clock, in seconds. */
   clock: number
-  /** How many times `resume` ran. */
-  resumes: number
+  /** How many times `start` ran. */
+  starts: number
   /** Whether `close` ran. */
   isClosed: boolean
 }
@@ -61,10 +61,10 @@ function createFakeOutput(): FakeOutput {
   const output: FakeOutput = {
     played: [],
     clock: 0,
-    resumes: 0,
+    starts: 0,
     isClosed: false,
-    currentTime: () => output.clock,
-    play: (samples, startAt, onEnded) => {
+    getCurrentTime: () => output.clock,
+    startStretch: (samples, startAt, onEnded) => {
       const stretch: PlayedStretch = {
         samples,
         startAt,
@@ -79,8 +79,8 @@ function createFakeOutput(): FakeOutput {
         }
       }
     },
-    resume: () => {
-      output.resumes += 1
+    start: () => {
+      output.starts += 1
     },
     close: () => {
       output.isClosed = true
@@ -90,52 +90,52 @@ function createFakeOutput(): FakeOutput {
 }
 
 /** A frame of `sampleCount` silent samples. */
-function silentFrame(sampleCount: number): Uint8Array {
+function buildSilentFrame(sampleCount: number): Uint8Array {
   return new Uint8Array(sampleCount * 2)
 }
 
 describe("createPcmPlayer", () => {
-  it("creates nothing until the first resume or frame", () => {
+  it("creates nothing until the first start or frame", () => {
     let created = 0
     const player = createPcmPlayer(() => {
       created += 1
       return createFakeOutput()
     })
     expect(created).toBe(0)
-    player.resume()
-    player.enqueue(silentFrame(1))
+    player.start()
+    player.addFrame(buildSilentFrame(1))
     expect(created).toBe(1)
   })
 
   it("schedules frames back to back and starts a late frame at once", () => {
     const output = createFakeOutput()
     const player = createPcmPlayer(() => output)
-    player.enqueue(silentFrame(12_000))
-    player.enqueue(silentFrame(24_000))
+    player.addFrame(buildSilentFrame(12_000))
+    player.addFrame(buildSilentFrame(24_000))
     output.clock = 5
-    player.enqueue(silentFrame(12_000))
+    player.addFrame(buildSilentFrame(12_000))
     expect(output.played.map((stretch) => stretch.startAt)).toEqual([0, 0.5, 5])
   })
 
   it("decodes each frame's samples", () => {
     const output = createFakeOutput()
     const player = createPcmPlayer(() => output)
-    player.enqueue(new Uint8Array([0x00, 0x80, 0x00, 0x00]))
+    player.addFrame(new Uint8Array([0x00, 0x80, 0x00, 0x00]))
     expect([...(output.played[0]?.samples ?? [])]).toEqual([-1, 0])
   })
 
   it("schedules nothing for a frame without a whole sample", () => {
     const output = createFakeOutput()
     const player = createPcmPlayer(() => output)
-    player.enqueue(new Uint8Array([1]))
+    player.addFrame(new Uint8Array([1]))
     expect(output.played).toHaveLength(0)
   })
 
   it("stops every scheduled frame and starts the next one at once", () => {
     const output = createFakeOutput()
     const player = createPcmPlayer(() => output)
-    player.enqueue(silentFrame(24_000))
-    player.enqueue(silentFrame(24_000))
+    player.addFrame(buildSilentFrame(24_000))
+    player.addFrame(buildSilentFrame(24_000))
     output.played[0]?.end()
     player.stop()
     expect(output.played.map((stretch) => stretch.isStopped)).toEqual([
@@ -143,30 +143,30 @@ describe("createPcmPlayer", () => {
       true
     ])
     output.clock = 0.25
-    player.enqueue(silentFrame(24_000))
+    player.addFrame(buildSilentFrame(24_000))
     expect(output.played[2]?.startAt).toBe(0.25)
   })
 
-  it("resumes the output on every resume and frame", () => {
+  it("resumes the output on every start and frame", () => {
     const output = createFakeOutput()
     const player = createPcmPlayer(() => output)
-    player.resume()
-    player.enqueue(silentFrame(1))
-    expect(output.resumes).toBe(2)
+    player.start()
+    player.addFrame(buildSilentFrame(1))
+    expect(output.starts).toBe(2)
   })
 
   it("closes the output once, stopping its frames, and ignores later frames", () => {
     const output = createFakeOutput()
     const player = createPcmPlayer(() => output)
-    player.enqueue(silentFrame(24_000))
+    player.addFrame(buildSilentFrame(24_000))
     player.close()
     player.close()
     expect(output.isClosed).toBe(true)
     expect(output.played[0]?.isStopped).toBe(true)
-    player.enqueue(silentFrame(24_000))
-    player.resume()
+    player.addFrame(buildSilentFrame(24_000))
+    player.start()
     expect(output.played).toHaveLength(1)
-    expect(output.resumes).toBe(1)
+    expect(output.starts).toBe(1)
   })
 
   it("closes nothing when it never created its output", () => {

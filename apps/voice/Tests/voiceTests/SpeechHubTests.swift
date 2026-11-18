@@ -23,7 +23,7 @@ struct SpeechHubTests {
         /// Records that the speech `id` was superseded.
         ///
         /// - Parameter id: Identity of the superseded speech.
-        func record(_ id: UUID) {
+        func add(_ id: UUID) {
             lock.withLock { recorded.append(id) }
         }
     }
@@ -36,8 +36,8 @@ struct SpeechHubTests {
         let first = UUID()
         let second = UUID()
 
-        hub.begin(id: first) { recorder.record(first) }
-        hub.begin(id: second) { recorder.record(second) }
+        hub.register(id: first) { recorder.add(first) }
+        hub.register(id: second) { recorder.add(second) }
 
         #expect(recorder.calls == [first])
     }
@@ -50,9 +50,9 @@ struct SpeechHubTests {
         let first = UUID()
         let second = UUID()
 
-        hub.begin(id: first) { recorder.record(first) }
-        hub.end(first)
-        hub.begin(id: second) { recorder.record(second) }
+        hub.register(id: first) { recorder.add(first) }
+        hub.remove(first)
+        hub.register(id: second) { recorder.add(second) }
 
         #expect(recorder.calls.isEmpty)
     }
@@ -67,11 +67,11 @@ struct SpeechHubTests {
         let second = UUID()
         let third = UUID()
 
-        hub.begin(id: first) { recorder.record(first) }
-        hub.begin(id: second) { recorder.record(second) }
-        hub.end(first)
-        hub.end(second)
-        hub.begin(id: third) { recorder.record(third) }
+        hub.register(id: first) { recorder.add(first) }
+        hub.register(id: second) { recorder.add(second) }
+        hub.remove(first)
+        hub.remove(second)
+        hub.register(id: third) { recorder.add(third) }
 
         #expect(recorder.calls == [first])
     }

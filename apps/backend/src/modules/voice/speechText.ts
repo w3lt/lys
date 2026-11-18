@@ -44,9 +44,6 @@ const SENTENCE_END_PATTERN = /[.!?…]["'”’)\]]*$/
 /** Any letter, in any script. */
 const LETTER_PATTERN = /\p{L}/u
 
-/** A line break, which always ends a sentence. */
-const LINE_BREAK_PATTERN = /\n\s*$/
-
 /**
  * The citation markers the renderer links, such as `[1]`; a copy of the
  * shared pattern, because that one is frozen.
@@ -223,7 +220,7 @@ export class SpeechSentenceBuffer {
     const plain = toPlainText(this.#markdown, this.#lastBlock)
     return [...sentenceSegmenter.segment(plain)].map(({ segment }) => ({
       text: segment.replace(/\s+/g, " ").trim(),
-      endsLine: LINE_BREAK_PATTERN.test(segment)
+      endsLine: endsWithLineBreak(segment)
     }))
   }
 
@@ -324,6 +321,17 @@ type SentenceSegment = Readonly<{
   /** Whether a line break ends it, which no later text can undo. */
   endsLine: boolean
 }>
+
+/**
+ * Whether a line break is among a segment's trailing whitespace; a line
+ * break always ends a sentence.
+ *
+ * @param segment - One segment as the sentence segmenter returned it.
+ * @returns Whether the segment ends a line.
+ */
+function endsWithLineBreak(segment: string): boolean {
+  return segment.slice(segment.trimEnd().length).includes("\n")
+}
 
 /**
  * Converts reply markdown to the plain text voice speaks, one block per

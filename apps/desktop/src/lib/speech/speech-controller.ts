@@ -12,7 +12,7 @@
  * | The window loses focus before anything was said | The socket closes and the controller waits silently. |
  * | The window loses focus while reading | Reads on to the end. |
  * | Silent mid-reply, and the window regains focus, voice becomes ready, or the conversation is opened | Joins at the sentence being written (`from=current`). |
- * | The reply ends with `done` in the background before anything was said | One notification line is spoken. |
+ * | The reply ends with `done` in the background before anything of it was said, while voice is ready | One notification line is spoken. |
  * | The reply ends with `done` while the window is focused | The speech socket stays open until the backend's `1000`. |
  * | The reply stops or fails, a new message is sent, the conversation is switched or closed, or voice stops | Speech and any notification stop at once and unplayed audio is dropped. |
  *
@@ -62,6 +62,9 @@ export type SpeechObservation =
       /** How the reply ended. */
       status: "completed" | "interrupted" | "failed"
     }>
+
+/** How a settled reply ended. */
+type SettledStatus = Extract<SpeechObservation, { kind: "settled" }>["status"]
 
 /** Player of decoded PCM frames, as `PcmPlayer` implements it. */
 export type SpeechPlayer = Readonly<{
@@ -177,6 +180,11 @@ export class SpeechController {
    * stopped; its audio may still play after its socket closed with `1000`.
    */
   #audibleReplyId: string | null = null
+  /**
+   * The last reply any of whose audio arrived, on any of its speech
+   * sockets, so its completion in the background is never announced.
+   */
+  #heardReplyId: string | null = null
   /** Replies already handled as settled, oldest first. */
   readonly #settledReplies: string[] = []
   /** Focus at the previous update; undefined before the first. */
@@ -223,7 +231,7 @@ export class SpeechController {
         this.#handleStreamingReply(observation, context)
         break
       case "settled":
-        this.#handleSettledReply(observation, focused)
+        this.#handleSettledReply(observation, context)
         break
       case "none":
         this.#stopSpeechAndNotification()
@@ -329,17 +337,17 @@ export class SpeechController {
    * Handles a reply that reached its final state.
    *
    * @param observation - The settled reply and its status.
-   * @param focused - Whether the window has focus.
+   * @param context - What this update sees of the world.
    */
   #handleSettledReply(
     observation: Extract<SpeechObservation, { kind: "settled" }>,
-    focused: boolean
+    context: UpdateContext
   ): void {
     const { reply, status } = observation
     this.#stopForeignReply(reply)
     const isNewSettlement = this.#addSettledReply(reply, status)
     if (status === "completed")
-      this.#handleCompletedReply(reply, isNewSettlement, focused)
+      this.#handleCompletedReply(reply, isNewSettlement, context)
     else if (isNewSettlement) this.#handleStoppedOrFailedReply(reply)
   }
 
@@ -358,32 +366,44 @@ export class SpeechController {
 
   /**
    * Lets a reply that completed play out, or notifies for it when it ended
-   * in the background before anything was said.
+   * in the background before anything of it was said.
    *
    * @param reply - The completed reply.
    * @param isNewSettlement - Whether this update is the first to see it
    * completed.
-   * @param focused - Whether the window has focus.
+   * @param context - What this update sees of the world.
    */
   #handleCompletedReply(
     reply: SpeechReply,
     isNewSettlement: boolean,
-    focused: boolean
+    context: UpdateContext
   ): void {
     const open = this.#open
     if (open?.reply.replyId === reply.replyId) {
       // Focused, or part of it was said: the backend speaks the rest and
       // closes the socket with 1000 once its final frame is sent.
-      if (open.frames > 0 || focused) return
-      // It ended in the background before anything was said.
+      if (open.frames > 0 || context.focused) return
+      // It ended in the background before this socket said anything.
       this.#stopSpeechAndNotification()
-      this.#openNotification(reply)
+      this.#notifyUnheardReply(reply, context)
       return
     }
     if (!isNewSettlement || this.#waiting?.reply.replyId !== reply.replyId)
       return
     this.#waiting = null
-    if (!focused) this.#openNotification(reply)
+    if (!context.focused) this.#notifyUnheardReply(reply, context)
+  }
+
+  /**
+   * Announces a reply that completed in the background, unless voice cannot
+   * speak or some of the reply was already said.
+   *
+   * @param reply - The completed reply.
+   * @param context - What this update sees of the world.
+   */
+  #notifyUnheardReply(reply: SpeechReply, context: UpdateContext): void {
+    if (context.voiceReady && this.#heardReplyId !== reply.replyId)
+      this.#openNotification(reply)
   }
 
   /**
@@ -394,7 +414,7 @@ export class SpeechController {
    * @param status - How it settled.
    * @returns Whether the settlement is new.
    */
-  #addSettledReply(reply: SpeechReply, status: string): boolean {
+  #addSettledReply(reply: SpeechReply, status: SettledStatus): boolean {
     const key = `${reply.conversationId}:${reply.replyId}:${status}`
     if (this.#settledReplies.includes(key)) return false
     this.#settledReplies.push(key)
@@ -455,6 +475,7 @@ export class SpeechController {
         onAudio: (frame) => {
           if (this.#open?.socket !== socket) return
           this.#open.frames += 1
+          this.#heardReplyId = reply.replyId
           this.#addAudioFrame(reply, frame)
         },
         onClose: (code) => {

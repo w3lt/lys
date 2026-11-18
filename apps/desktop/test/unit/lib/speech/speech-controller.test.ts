@@ -297,6 +297,67 @@ describe("speech controller: when she reads", () => {
     expect(listOpenedPaths(harness)).toEqual(["reply-1/speech?from=start"])
   })
 
+  it.each([
+    ["while voice is stopped or starting", false],
+    ["while voice is ready", true]
+  ])(
+    "notifies for a reply that completed in the background only while voice is ready: %s",
+    (_state, voiceReady) => {
+      const harness = createHarness()
+      harness.world.voiceReady = voiceReady
+      harness.controller.update(buildStreamingObservation())
+      harness.world.focused = false
+      harness.controller.update(buildStreamingObservation(REPLY, false))
+      harness.controller.update(buildSettledObservation())
+      expect(listOpenedPaths(harness)).toEqual(
+        voiceReady ? ["reply-1/speech?from=start", "reply-1/notification"] : []
+      )
+    }
+  )
+
+  it.each([1008, 1011])(
+    "does not notify for a reply part of which was said before its socket closed with %i",
+    (code) => {
+      const harness = createHarness()
+      harness.controller.update(buildStreamingObservation())
+      getSocketAt(harness).pushAudio(PCM)
+      harness.world.focused = false
+      harness.controller.update(buildStreamingObservation(REPLY, false))
+      getSocketAt(harness).serverClose(code)
+      harness.controller.update(buildSettledObservation())
+      expect(listOpenedPaths(harness)).toEqual(["reply-1/speech?from=start"])
+    }
+  )
+
+  it("does not notify for a reply part of which was said before voice stopped", () => {
+    const harness = createHarness()
+    harness.controller.update(buildStreamingObservation())
+    getSocketAt(harness).pushAudio(PCM)
+    harness.world.focused = false
+    harness.world.voiceReady = false
+    harness.controller.update(buildStreamingObservation(REPLY, false))
+    harness.world.voiceReady = true
+    harness.controller.update(buildSettledObservation())
+    expect(listOpenedPaths(harness)).toEqual(["reply-1/speech?from=start"])
+  })
+
+  it("does not notify for a reply part of which was said on an earlier socket", () => {
+    const harness = createHarness()
+    harness.controller.update(buildStreamingObservation())
+    getSocketAt(harness).pushAudio(PCM)
+    getSocketAt(harness).serverClose(1011)
+    harness.world.focused = false
+    harness.controller.update(buildStreamingObservation(REPLY, false))
+    harness.world.focused = true
+    harness.controller.update(buildStreamingObservation(REPLY, false))
+    harness.world.focused = false
+    harness.controller.update(buildSettledObservation())
+    expect(listOpenedPaths(harness)).toEqual([
+      "reply-1/speech?from=start",
+      "reply-1/speech?from=current"
+    ])
+  })
+
   it("does nothing for a reply it never saw stream", () => {
     const harness = createHarness()
     harness.world.focused = false

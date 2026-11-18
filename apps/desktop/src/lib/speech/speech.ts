@@ -11,7 +11,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { chatNotificationApi, chatSpeechApi } from "@lys/protocol"
 
-import { useChatViewStore } from "@/lib/store/chat-view"
+import { useChatViewStore, type ChatRequestState } from "@/lib/store/chat-view"
 import type { ChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import { useLysStore } from "@/lib/store"
 import {
@@ -127,7 +127,7 @@ function buildSpeechRoutePath(
  * followed it ended, and `none` otherwise.
  */
 function buildObservation(
-  previousRequestStatus: string | undefined
+  previousRequestStatus: ChatRequestState["status"] | undefined
 ): SpeechObservation {
   const { conversation, request } = useChatViewStore.getState()
   if (conversation === undefined) return { kind: "none" }
@@ -238,7 +238,9 @@ export function startSpeech(): () => void {
     updateVoiceServerInfo
   })
 
-  const updateController = (previousRequestStatus?: string): void => {
+  const updateController = (
+    previousRequestStatus?: ChatRequestState["status"]
+  ): void => {
     controller.update(buildObservation(previousRequestStatus))
   }
 

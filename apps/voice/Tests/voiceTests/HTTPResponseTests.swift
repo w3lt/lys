@@ -69,6 +69,7 @@ struct HTTPResponseTests {
             (HTTPRequestError.malformedRequest, HTTPStatus.badRequest),
             (HTTPRequestError.requestHeadTooLarge, HTTPStatus.requestHeaderFieldsTooLarge),
             (HTTPRequestError.unsupportedVersion, HTTPStatus.httpVersionNotSupported),
+            (HTTPRequestError.requestHeadTimeout, HTTPStatus.requestTimeout),
         ]
     )
     func answersRequestErrors(requestError: HTTPRequestError, expectedStatus: HTTPStatus) {

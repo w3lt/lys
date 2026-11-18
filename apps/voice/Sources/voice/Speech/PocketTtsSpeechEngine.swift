@@ -9,10 +9,16 @@ import Synchronization
 /// and the WebSocket server refuses speech connections. The voice is the
 /// cloned voice stored next to the executable as `lys-voice.bin` when one is
 /// present, and the preset voice `alba` otherwise.
+///
+/// Concurrency model: reentrant. The readiness flag is the only state this
+/// class mutates, under its `Mutex`; the PocketTTS manager serializes its
+/// own model loading and sessions.
 final class PocketTtsSpeechEngine: SpeechEngine, @unchecked Sendable {
     /// Cloned voice to speak with, or `nil` for the preset voice.
     private let clonedVoice: PocketTtsVoiceData?
+    /// FluidAudio's manager, which owns the models and makes sessions.
     private let manager: PocketTtsManager
+    /// Whether ``warmUp()`` loaded the models.
     private let ready = Mutex(false)
 
     /// Creates the engine without touching the models or the network.
@@ -50,6 +56,7 @@ final class PocketTtsSpeechEngine: SpeechEngine, @unchecked Sendable {
         ready.withLock { $0 = true }
     }
 
+    /// Whether the models are loaded.
     var isReady: Bool { ready.withLock { $0 } }
 
     /// Starts a session speaking with the cloned voice when one is loaded,
@@ -67,11 +74,20 @@ final class PocketTtsSpeechEngine: SpeechEngine, @unchecked Sendable {
 
 /// Adapts a PocketTTS session to ``SpeechSession``, unwrapping its frames to
 /// raw floating-point samples.
+///
+/// Concurrency model: reentrant. The class holds no mutable state; its
+/// calls forward to the PocketTTS session, and one task forwards its frames.
 private final class PocketTtsSpeechSession: SpeechSession, @unchecked Sendable {
+    /// The adapted PocketTTS session.
     private let session: PocketTtsSession
     /// Frames of the PocketTTS session as raw `[Float]` samples.
     let frames: AsyncThrowingStream<[Float], any Error>
 
+    /// Adapts `session`, starting the task that forwards its frames; ending
+    /// the frame stream cancels that task. A synthesis failure ends the
+    /// stream with its error, which the speech connection logs.
+    ///
+    /// - Parameter session: Session that has not produced frames yet.
     init(session: PocketTtsSession) {
         self.session = session
         self.frames = AsyncThrowingStream { continuation in
@@ -89,7 +105,14 @@ private final class PocketTtsSpeechSession: SpeechSession, @unchecked Sendable {
         }
     }
 
+    /// Queues one sentence on the PocketTTS session.
+    ///
+    /// - Parameter text: Sentence to speak.
     func enqueue(_ text: String) { session.enqueue(text) }
+
+    /// Tells the PocketTTS session that no more text follows.
     func finish() { session.finish() }
+
+    /// Cancels the PocketTTS session, which ends its frames.
     func cancel() async { await session.cancel() }
 }

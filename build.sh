@@ -22,7 +22,6 @@ fi
 swift build -c release --package-path apps/vmo
 VMO_BUILD_DIR=$(swift build -c release --package-path apps/vmo --show-bin-path)
 
-
 # Step 2b: Build the email MCP server Lys ships, in release. It needs the Rust
 # toolchain; the backend starts it from $LYS_HOME/runtime/email/email. Cargo's
 # JSON output names the binary this build produced, wherever CARGO_TARGET_DIR,
@@ -36,8 +35,8 @@ EMAIL_BUILD_BINARY=$(cargo build --release --locked --manifest-path mcps/email/C
 
 # Step 2c: Build voice, Lys's speech server, in release. It runs before
 # anything is installed, so a machine that cannot build it keeps its current
-# install. voice needs the Swift toolchain and builds only on Apple silicon
-# with macOS 26 or later, as vmo does.
+# install. voice needs the Swift toolchain and macOS 15 or later, the platform
+# its package declares.
 swift build -c release --package-path apps/voice
 VOICE_BUILD_DIR=$(swift build -c release --package-path apps/voice --show-bin-path)
 

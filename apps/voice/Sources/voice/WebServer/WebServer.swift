@@ -10,18 +10,25 @@ private enum ListenerEvent: Sendable {
     case listenerFailed(NWError)
 }
 
-/// Owns a router and a local TCP address to serve HTTP/1.1 there, while
-/// answering each connection's one request through the router and closing every
-/// connection it accepts.
-///
-/// Every connection carries one request and one response, then closes.
-/// Concurrency model: reentrant. The server has no mutable state; each
-/// ``start()`` call owns its own listener and connection tasks.
+/// Result of waiting for a request head against its deadline.
+private enum RequestHeadWait: Sendable {
+    /// The head arrived in time.
+    case head(Data)
+    /// The deadline passed first.
+    case timedOut
+}
+
 /// Limits how many connections a server serves at once; extra connections
 /// are closed as soon as they arrive. Guards the loopback listener against a
 /// client queueing more connections than the process can serve.
+///
+/// Concurrency model: serialized. Every read and write of the free slot
+/// count happens under ``lock``, so connection tasks may take and release
+/// slots from any thread.
 private final class ConnectionSlots: @unchecked Sendable {
+    /// Slots not taken by an open connection.
     private var available: Int
+    /// Guards ``available``.
     private let lock = NSLock()
 
     /// - Parameter limit: Most connections served at once.
@@ -46,6 +53,14 @@ private final class ConnectionSlots: @unchecked Sendable {
     }
 }
 
+/// Owns a router and a local TCP address to serve HTTP/1.1 there, while
+/// answering each connection's one request through the router and closing every
+/// connection it accepts.
+///
+/// Every connection carries one request and one response, then closes.
+/// Concurrency model: reentrant. The server has no mutable state; each
+/// ``start(onReady:)`` call owns its own listener, connection tasks, and
+/// connection slots.
 final class WebServer: Sendable {
     /// Default maximum connections served at once.
     static let defaultMaxConnections = 32
@@ -98,10 +113,13 @@ final class WebServer: Sendable {
     /// tasks to end, and returns normally. It returns at once when the task is
     /// already cancelled.
     ///
+    /// - Parameter onReady: Called once with the bound port when the listener
+    ///   is ready to accept connections. Tests use it to synchronize and to
+    ///   learn the port the system chose for port 0.
     /// - Throws: The listener's `NWError` when it cannot be created or fails,
     ///   for example because the port is in use. Open connections are
     ///   cancelled and their tasks have ended before the error is thrown.
-    func start() async throws {
+    func start(onReady: (@Sendable (NWEndpoint.Port) -> Void)? = nil) async throws {
         guard !Task.isCancelled else {
             return
         }
@@ -111,7 +129,10 @@ final class WebServer: Sendable {
             listener.cancel()
             continuation.finish()
         }
-        listener.stateUpdateHandler = { state in
+        listener.stateUpdateHandler = { [weak listener] state in
+            if case .ready = state, let port = listener?.port {
+                onReady?(port)
+            }
             self.handleListenerStateUpdate(state, continuation: continuation)
         }
         listener.newConnectionHandler = { connection in
@@ -171,7 +192,10 @@ final class WebServer: Sendable {
     ///
     /// The stream ends when the calling task is cancelled or the listener is
     /// cancelled. Connections already buffered in the stream still get a task;
-    /// in a cancelled group that task cancels its connection at once.
+    /// in a cancelled group that task cancels its connection at once. Each
+    /// connection takes its slot here, in the order the listener accepted
+    /// them; a connection beyond the cap is closed at once and the drop is
+    /// logged.
     ///
     /// - Parameters:
     ///   - events: Listener events in the order they occurred.
@@ -186,7 +210,15 @@ final class WebServer: Sendable {
         for await event in events {
             switch event {
             case .connectionAccepted(let connection):
-                group.addTask { await self.handleConnection(connection, slots: slots) }
+                guard slots.acquire() else {
+                    print("WebServer dropped connection \(connection.endpoint): \(maxConnections) connections are already open")
+                    connection.cancel()
+                    continue
+                }
+                group.addTask {
+                    defer { slots.release() }
+                    await self.handleConnection(connection)
+                }
             case .listenerFailed(let error):
                 throw error
             }
@@ -195,20 +227,13 @@ final class WebServer: Sendable {
 
     /// Serves one accepted connection from start to close.
     ///
-    /// Connections beyond the configured cap are closed at once. The
-    /// connection is cancelled on every path. Task cancellation cancels it
-    /// at once, which ends a pending read or send. Failures are logged here
-    /// because no caller can act on them: the connection is already lost.
+    /// The connection is cancelled on every path. Task cancellation cancels
+    /// it at once, which ends a pending read or send. Failures are logged
+    /// here because no caller can act on them: the connection is already
+    /// lost.
     ///
-    /// - Parameters:
-    ///   - connection: Accepted connection that has not been started.
-    ///   - slots: Limiter whose slot this connection takes until it closes.
-    private func handleConnection(_ connection: NWConnection, slots: ConnectionSlots) async {
-        guard slots.acquire() else {
-            connection.cancel()
-            return
-        }
-        defer { slots.release() }
+    /// - Parameter connection: Accepted connection that has not been started.
+    private func handleConnection(_ connection: NWConnection) async {
         connection.start(queue: DispatchQueue(label: "WebServer.Connection"))
         defer { connection.cancel() }
         do {
@@ -225,14 +250,18 @@ final class WebServer: Sendable {
     /// Reads the connection's request and sends the one response for it.
     ///
     /// A request that cannot reach a route gets the matching error response.
-    /// Reading the head gives up after ``headTimeout`` and answers 408.
+    /// A head that does not arrive within ``headTimeout`` is answered with
+    /// `408` and the connection is cancelled; the timeout is logged.
     ///
     /// - Parameter connection: Started connection whose request has not been
     ///   read.
     /// - Throws: The connection's `NWError` when receiving or sending fails.
     private func handleRequest(on connection: NWConnection) async throws {
         do {
-            let head = try await readRequestHead(on: connection)
+            guard case .head(let head) = try await readRequestHead(on: connection) else {
+                print("WebServer connection \(connection.endpoint) sent no request head within \(headTimeout)")
+                return
+            }
             let request = try HTTPRequest(parsingHead: head)
             let response = await router.handleRequest(request)
             try await connection.sendResponse(response)
@@ -243,18 +272,31 @@ final class WebServer: Sendable {
 
     /// Reads the request head, waiting at most ``headTimeout`` for it.
     ///
-    /// - Throws: ``HTTPRequestError/requestHeadTimeout`` when the head did
-    ///   not arrive in time; whatever ``readRequestHead()`` reads failure.
-    private func readRequestHead(on connection: NWConnection) async throws -> Data {
-        try await withThrowingTaskGroup(of: Data.self) { group in
-            group.addTask { try await connection.readRequestHead() }
+    /// Task cancellation cannot end a pending read, so at the deadline this
+    /// answers `408 Request Timeout` and cancels the connection, which ends
+    /// the read; only then does it return.
+    ///
+    /// - Parameter connection: Started connection whose request has not been
+    ///   read.
+    /// - Returns: The head, or ``RequestHeadWait/timedOut`` once the timeout
+    ///   was answered and the connection cancelled.
+    /// - Throws: Whatever ``NWConnection/readRequestHead()`` throws when the
+    ///   read fails first; the connection's `NWError` when sending the `408`
+    ///   fails.
+    private func readRequestHead(on connection: NWConnection) async throws -> RequestHeadWait {
+        try await withThrowingTaskGroup(of: RequestHeadWait.self) { group in
+            group.addTask { .head(try await connection.readRequestHead()) }
             group.addTask {
                 try await Task.sleep(for: self.headTimeout)
-                throw HTTPRequestError.requestHeadTimeout
+                return .timedOut
             }
-            let head = try await group.next() ?? Data()
-            group.cancelAll()
-            return head
+            defer { group.cancelAll() }
+            guard case .head(let head) = try await group.next() else {
+                defer { connection.cancel() }
+                try await connection.sendResponse(HTTPResponse(requestError: .requestHeadTimeout))
+                return .timedOut
+            }
+            return .head(head)
         }
     }
 }

@@ -17,7 +17,9 @@ private struct ConnectionBox: @unchecked Sendable {
 /// a close frame: `1000` once everything enqueued was spoken, `1001` when a
 /// newer speech superseded this one, `1002` for a protocol violation,
 /// `1003` for a binary message from the client, and `1011` when synthesis
-/// failed.
+/// failed. A client message may carry at most ``maximumMessageSize`` bytes;
+/// a longer one fails the connection, so the client splits longer text.
+/// Every failure is logged with its cause.
 ///
 /// Concurrency model: one task runs ``run()`` per connection; the receive
 /// loop and the frame pump communicate through a lock-protected state, and
@@ -50,12 +52,23 @@ final class SpeechConnection: @unchecked Sendable {
     /// Most bytes a client text message may carry; sentences are short.
     static let maximumMessageSize = 16 * 1024
 
+    /// The accepted connection.
     private let box: ConnectionBox
+    /// Engine that makes this connection's speech sessions.
     private let engine: any SpeechEngine
+    /// The one active speech across every connection.
     private let hub: SpeechHub
+    /// Guards ``state``.
     private let lock = NSLock()
+    /// The speech this connection drives and its close state.
     private var state = State()
 
+    /// Wraps an accepted connection that has not been started.
+    ///
+    /// - Parameters:
+    ///   - connection: Accepted WebSocket connection.
+    ///   - engine: Engine that makes the speech sessions.
+    ///   - hub: The server's hub, which keeps one speech active at a time.
     init(connection: NWConnection, engine: any SpeechEngine, hub: SpeechHub) {
         self.box = ConnectionBox(connection: connection)
         self.engine = engine
@@ -75,6 +88,10 @@ final class SpeechConnection: @unchecked Sendable {
     }
 
     /// Receives messages until the peer closes or an error occurs.
+    ///
+    /// A receive failure before this side sent its close frame, such as a
+    /// message over ``maximumMessageSize`` or a peer that went away without
+    /// a close frame, is logged before the speech is torn down.
     private func serve() async {
         box.connection.start(queue: DispatchQueue(label: "voice.WebSocket"))
         while true {
@@ -85,7 +102,13 @@ final class SpeechConnection: @unchecked Sendable {
                 message = .failure(error)
             }
             switch message {
-            case .failure, .success(.close):
+            case .failure(let error):
+                if !isCloseSent {
+                    print("voice: speech connection \(box.connection.endpoint) failed: \(error)")
+                }
+                await teardown()
+                return
+            case .success(.close):
                 await teardown()
                 return
             case .success(.text(let body)):
@@ -108,6 +131,10 @@ final class SpeechConnection: @unchecked Sendable {
 
     // MARK: - Message handling
 
+    /// Routes one client text message; an undecodable one is a protocol
+    /// error.
+    ///
+    /// - Parameter body: The message's UTF-8 text.
     private func handleText(_ body: String) async {
         guard let message = decodeSpeechMessage(body) else {
             await initiateClose(.protocolCode(.protocolError))
@@ -180,7 +207,13 @@ final class SpeechConnection: @unchecked Sendable {
         session.finish()
     }
 
-    /// Marks the session finished and closes the socket normally.
+    /// Marks the session finished and closes the socket, normally or with
+    /// the internal-error code.
+    ///
+    /// - Parameters:
+    ///   - id: Identity of the speech that ended; a superseded one is
+    ///     ignored.
+    ///   - failed: Whether synthesis or sending failed.
     private func completeSpeech(id: UUID, failed: Bool) async {
         let isCurrent = lock.withLock { () -> Bool in
             guard state.speechID == id else { return false }
@@ -196,6 +229,15 @@ final class SpeechConnection: @unchecked Sendable {
 
     // MARK: - Frame pump
 
+    /// Starts the task that forwards the session's frames to the socket and
+    /// closes it when the speech ends.
+    ///
+    /// A synthesis or send failure before the socket closed is logged with
+    /// the speech id and closes the socket with `1011`.
+    ///
+    /// - Parameters:
+    ///   - session: The speech's session.
+    ///   - id: Identity of the speech, for the hub.
     private func startPump(session: any SpeechSession, id: UUID) {
         let task = Task { [weak self] in
             guard let self else { return }
@@ -205,12 +247,25 @@ final class SpeechConnection: @unchecked Sendable {
                     if self.isCloseSent { return }
                     try await self.send(PCMConversion.littleEndianPCM16(from: frame), opcode: .binary)
                 }
+                // A cancelled pump ends its frames early; the close that
+                // cancelled it decides the close code.
+                guard !Task.isCancelled else { return }
                 await self.completeSpeech(id: id, failed: false)
             } catch {
+                // A send that fails after this side closed the socket follows
+                // from that close and is not a failure of its own.
+                if !self.isCloseSent {
+                    print("voice: speech \(id) failed: \(error)")
+                }
                 await self.completeSpeech(id: id, failed: true)
             }
         }
-        lock.withLock { state.pumpTask = task }
+        // A pump that already completed its speech cleared the speech; its
+        // handle is not stored, so a close never waits for the pump that
+        // runs it.
+        lock.withLock {
+            if state.speechID == id { state.pumpTask = task }
+        }
     }
 
     // MARK: - Supersede and close
@@ -227,15 +282,24 @@ final class SpeechConnection: @unchecked Sendable {
 
     /// Sends a close frame and tears the speech down.
     ///
-    /// The socket stays open briefly so the peer can observe the close code:
-    /// the receive loop returns on the peer's close or error, and a watchdog
-    /// cancels the socket a grace period later if the peer never answers.
+    /// No frame may follow a close frame, so the pump is stopped first: a
+    /// frame already being sent finishes, and only then is the close frame
+    /// sent. The socket stays open briefly so the peer can observe the close
+    /// code: the receive loop returns on the peer's close or error, and a
+    /// watchdog cancels the socket a grace period later if the peer never
+    /// answers.
+    ///
+    /// - Parameter code: Close code the peer receives.
     private func initiateClose(_ code: NWProtocolWebSocket.CloseCode) async {
-        let sends = lock.withLock { () -> Bool in
-            if state.closeSent { return false }
+        let (sends, pump) = lock.withLock { () -> (Bool, Task<Void, Never>?) in
+            if state.closeSent { return (false, nil) }
             state.closeSent = true
-            return true
+            let pump = state.pumpTask
+            state.pumpTask = nil
+            return (true, pump)
         }
+        pump?.cancel()
+        await pump?.value
         if sends {
             try? await send(nil, opcode: .close, closeCode: code)
         }

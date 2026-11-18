@@ -8,6 +8,10 @@ import Synchronization
 /// backend tears its relay down instead of mistaking it for a finished
 /// speech. Ending a speech removes it; ending an already-superseded speech
 /// does nothing.
+///
+/// Concurrency model: serialized. The active speech is read and replaced
+/// under its `Mutex`; the superseded speech's closure runs after the lock is
+/// released, so it may call back into the hub.
 final class SpeechHub: Sendable {
     /// One active speech: its identity and the closure that supersedes it.
     private struct Entry {
@@ -17,6 +21,7 @@ final class SpeechHub: Sendable {
         let supersede: @Sendable () -> Void
     }
 
+    /// The speech allowed to speak, if any.
     private let active = Mutex<Entry?>(nil)
 
     /// Registers a speech as the active one, superseding the previous one.

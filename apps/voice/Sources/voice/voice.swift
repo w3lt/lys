@@ -1,41 +1,59 @@
 import Foundation
 
+/// Which child of voice's main task group ended.
+private enum MainChild: Sendable {
+    /// The model warm-up, after which voice keeps serving.
+    case warmUp
+    /// A server or the signal wait, whose end stops voice.
+    case service
+}
+
 /// Command-line entry point of voice.
 @main
 struct voice {
-    /// Starts the speech socket server and the `/health` HTTP server, then
+    /// Starts the speech socket server and the `/health` HTTP server, and
     /// loads the PocketTTS models in the background.
     ///
     /// The sockets serve at once; `/health` answers `503` and the speech
     /// socket refuses handshakes until the models are loaded, which happens
-    /// once, here. It prints the error and exits with status 1 when startup
-    /// fails.
+    /// once, here. The servers keep serving after the warm-up ends, whether
+    /// it loaded the models or failed. voice stops on `SIGINT` or `SIGTERM`,
+    /// or when a server stops. It prints the error and exits with status 1
+    /// when startup or a server fails.
     static func main() async {
         let modelsDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".lys", isDirectory: true)
             .appendingPathComponent("voice", isDirectory: true)
             .appendingPathComponent("models", isDirectory: true)
-        let clonedVoiceFile = clonedVoiceURL()
         let engine = PocketTtsSpeechEngine(
             modelsDirectory: modelsDirectory,
-            clonedVoiceFile: clonedVoiceFile
+            clonedVoiceFile: clonedVoiceURL()
         )
-        let ready = SpeechEngineBox(engine: engine)
-
-        let router = (try? Router(routes: [.health(isReady: ready.isReady)])).map { $0 }
         do {
-            guard let router else {
-                FileHandle.standardError.write(Data("voice: could not register routes\n".utf8))
-                exit(1)
-            }
+            let router = try Router(routes: [.health(isReady: { engine.isReady })])
             let httpServer = WebServer(router: router)
             let socketServer = SpeechSocketServer(engine: engine)
-            try await withThrowingTaskGroup(of: Void.self) { group in
-                group.addTask { await warmModels(engine) }
-                group.addTask { try await httpServer.start() }
-                group.addTask { try await socketServer.start() }
-                group.addTask { await waitForSignal(in: [SIGINT, SIGTERM]) }
-                _ = try await group.next()
+            try await withThrowingTaskGroup(of: MainChild.self) { group in
+                group.addTask {
+                    await warmModels(engine)
+                    return .warmUp
+                }
+                group.addTask {
+                    try await httpServer.start()
+                    return .service
+                }
+                group.addTask {
+                    try await socketServer.start()
+                    return .service
+                }
+                group.addTask {
+                    await waitForSignal(in: [SIGINT, SIGTERM])
+                    return .service
+                }
+                var ended = try await group.next()
+                while ended == .warmUp {
+                    ended = try await group.next()
+                }
                 group.cancelAll()
             }
         } catch {
@@ -57,23 +75,11 @@ struct voice {
     }
 }
 
-/// Sendable view of the engine's readiness flag for the `/health` route.
-private final class SpeechEngineBox: @unchecked Sendable {
-    private let engine: SpeechEngine
-
-    init(engine: SpeechEngine) {
-        self.engine = engine
-    }
-
-    /// Whether the models are loaded.
-    func isReady() -> Bool {
-        engine.isReady
-    }
-}
-
 /// Warms the models, reporting failure without stopping the servers; the
 /// health route and the speech socket stay unavailable until a later start
 /// loads them.
+///
+/// - Parameter engine: Engine whose models are loaded.
 private func warmModels(_ engine: SpeechEngine) async {
     do {
         try await engine.warmUp()

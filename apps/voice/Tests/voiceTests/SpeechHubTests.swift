@@ -6,14 +6,25 @@ import Testing
 @Suite("Speech hub")
 struct SpeechHubTests {
     /// Records the supersede calls the hub makes, in order.
+    ///
+    /// Concurrency model: serialized. The calls are read and written under
+    /// ``lock``.
     private final class SupersedeRecorder: @unchecked Sendable {
+        /// Guards ``recorded``.
         private let lock = NSLock()
-        private(set) var calls: [UUID] = []
+        /// Identities of the superseded speeches, in order.
+        private var recorded: [UUID] = []
 
+        /// Identities of the superseded speeches, in order.
+        var calls: [UUID] {
+            lock.withLock { recorded }
+        }
+
+        /// Records that the speech `id` was superseded.
+        ///
+        /// - Parameter id: Identity of the superseded speech.
         func record(_ id: UUID) {
-            lock.lock()
-            calls.append(id)
-            lock.unlock()
+            lock.withLock { recorded.append(id) }
         }
     }
 

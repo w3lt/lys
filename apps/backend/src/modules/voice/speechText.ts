@@ -11,24 +11,45 @@ import type {
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import remarkParse from "remark-parse"
-import { unified } from "unified"
+import { unified, type Data, type Processor } from "unified"
 
 /**
  * Reference syntax found in a block's text, as {@link findReference} reads
  * it.
  */
 type ReferenceSyntax = Readonly<{
-  /** Index of its first character: the `!` of an image, else its `[`. */
+  /**
+   * Index of its first character: the {@link IMAGE_MARK} of an image, else
+   * its `[`.
+   */
   start: number
   /** Index just after its last `]`. */
   end: number
-  /** Whether a `!` marks it as an image. */
+  /** Whether an {@link IMAGE_MARK} right before its `[` makes it an image. */
   isImage: boolean
   /** What its first, possibly nested, brackets enclose. */
   enclosed: string
   /** Whether a label in brackets, possibly empty, follows them. */
   hasLabel: boolean
 }>
+
+/**
+ * An extension of the markdown parser's tree building, as remark plugins
+ * register one.
+ */
+type TreeExtension = Exclude<
+  NonNullable<Data["fromMarkdownExtensions"]>[number],
+  readonly unknown[]
+>
+
+/** A handler the tree building runs when a token of its type ends. */
+type TokenExitHandler = NonNullable<NonNullable<TreeExtension["exit"]>[string]>
+
+/** The tree building's state, which a token handler runs on. */
+type TreeBuildingContext = ThisParameterType<TokenExitHandler>
+
+/** One token of the parsed markdown. */
+type MarkdownToken = Parameters<TokenExitHandler>[0]
 
 /** A block whose last child may be the block still being written. */
 type BlockContainer = Root | Blockquote | List | ListItem
@@ -54,8 +75,25 @@ export type SpeechSnapshot = Readonly<{
   lastTextPart: LastBlock
 }>
 
-/** Parses reply markdown with the renderer's GFM and math syntax. */
-const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkMath)
+/**
+ * The tree-building extension {@link addLiteralSyntaxMarking} registers.
+ */
+const LITERAL_SYNTAX_MARKING: TreeExtension = {
+  exit: {
+    characterEscapeValue: handleCharacterEscapeValueExit,
+    characterReference: handleCharacterReferenceExit
+  }
+}
+
+/**
+ * Parses reply markdown with the renderer's GFM and math syntax, marking
+ * the brackets and `!` that escapes and character references write.
+ */
+const markdownParser = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkMath)
+  .use(addLiteralSyntaxMarking)
 
 /** Shared segmenter for English sentences. */
 const sentenceSegmenter = new Intl.Segmenter("en", { granularity: "sentence" })
@@ -83,27 +121,45 @@ const REPARSABLE_MARK = /\$|!\[/
  */
 const DEFINITION_START = /^\[(?:[^[\]\\]|\\.)+\]:/
 
-/** Opens inline code in a block's text, so its brackets read as written. */
+/** Opens inline code in a block's text, so its URLs read as written. */
 const CODE_START = "\uE000"
 
 /** Closes inline code in a block's text. */
 const CODE_END = "\uE001"
 
-/** Stands for `[` inside inline code until the block is formatted. */
-const CODE_OPEN_BRACKET = "\uE002"
+/**
+ * Stands for a `[` that is never reference syntax, one in inline code or
+ * one an escape or a character reference writes, until the block is
+ * formatted.
+ */
+const LITERAL_OPEN_BRACKET = "\uE002"
 
-/** Stands for `]` inside inline code until the block is formatted. */
-const CODE_CLOSE_BRACKET = "\uE003"
+/** Stands for a `]` that is never reference syntax, as above. */
+const LITERAL_CLOSE_BRACKET = "\uE003"
 
 /**
- * Stands for a `!` right before a `[` in the same text node, the only `!`
- * that may open image syntax; a `!` that ends another node never does.
+ * Stands for a `!` right before a `[` written literally in the same text
+ * node, the only `!` that may open image syntax: a `!` that ends another
+ * node, or that an escape or a character reference writes, never does.
  */
 const IMAGE_MARK = "\uE004"
 
-/** The private-use characters that mark a block's text. */
+/** Stands for a `!` that an escape or a character reference writes. */
+const LITERAL_EXCLAMATION_MARK = "\uE005"
+
+/**
+ * The private-use characters that mark a block's text; the reply's own are
+ * removed before it is parsed.
+ */
 const TEXT_MARKS = new RegExp(
-  `[${CODE_START}${CODE_END}${CODE_OPEN_BRACKET}${CODE_CLOSE_BRACKET}${IMAGE_MARK}]`,
+  `[${[
+    CODE_START,
+    CODE_END,
+    LITERAL_OPEN_BRACKET,
+    LITERAL_CLOSE_BRACKET,
+    IMAGE_MARK,
+    LITERAL_EXCLAMATION_MARK
+  ].join("")}]`,
   "g"
 )
 
@@ -183,20 +239,21 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * Buffers reply markdown and hands out the plain sentences voice speaks, as
  * they become final.
  *
- * @remarks The text is what the renderer shows, spoken: citation markers
- * like `[1]`, code blocks, math, tables, images, and bare URLs are not
- * words, so they are not spoken; inline code is read as words; formatting
- * is dropped; a link is spoken by its text, and a bare URL, in a link's
- * text or not, is not spoken; each paragraph, heading, and list item ends a
- * sentence. A reference reads the same before its definition arrives as
- * after: a link by its text; a citation marker, an image, and a footnote
- * reference not at all. An unclosed code fence holds the rest of the text back until it
- * closes. A paragraph or heading still being written waits until it ends
- * when it holds a `|`, because its next line may turn it into a table
- * header, or when it starts with a label in brackets and a colon, because a
- * closing title quote may turn it into a link definition; and from its
- * first `$` or `![` outside code on, because a later `$` may turn that text
- * into inline math and the `![` may begin an image.
+ * @remarks The text is what the renderer shows, spoken: citation markers like
+ * `[1]`, code blocks, math, tables, images, and bare URLs are not words, so
+ * they are not spoken; inline code is read as words; formatting is dropped; a
+ * link is spoken by its text, and a bare URL, in a link's text or not, is not
+ * spoken; each paragraph, heading, and list item ends a sentence. A reference
+ * reads the same before its definition arrives as after: a link by its text; a
+ * citation marker, an image, and a footnote reference not at all; a bracket or
+ * a `!` an escape or a character reference writes is never syntax. An unclosed
+ * code fence holds the rest of the text back until it closes. A paragraph or
+ * heading still being written waits until it ends when it holds a `|`, because
+ * its next line may turn it into a table header, or when it starts with a label
+ * in brackets and a colon, because a closing title quote may turn it into a
+ * link definition; and from its first `$` or `![` outside code on, because a
+ * later `$` may turn that text into inline math and the `![` may begin an
+ * image.
  *
  * A sentence is final once a later sentence holding a letter follows it, a
  * line break ends it, or its text part ends, so a period inside a number, a
@@ -216,7 +273,7 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
 export class SpeechSentenceBuffer {
   /** The sentences handed out or skipped so far, in order. */
   readonly #handedOut: HandedSentence[] = []
-  /** Raw markdown received so far. */
+  /** Markdown received so far, without the private-use marks it held. */
   #markdown = ""
   /** Whether the text's last block may still grow. */
   #lastBlock: LastBlock = "open"
@@ -242,7 +299,7 @@ export class SpeechSentenceBuffer {
    * none for `current`.
    */
   public loadSnapshot(snapshot: SpeechSnapshot): string[] {
-    this.#markdown = snapshot.text
+    this.#markdown = snapshot.text.replace(TEXT_MARKS, "")
     this.#lastBlock = snapshot.lastTextPart
     if (this.#start === "start") return this.#addFinalSentences()
     const segments = buildSentenceSegments(
@@ -260,7 +317,7 @@ export class SpeechSentenceBuffer {
    * @returns The sentences the fragment made final, in order.
    */
   public addFragment(fragment: string): string[] {
-    this.#markdown += fragment
+    this.#markdown += fragment.replace(TEXT_MARKS, "")
     this.#lastBlock = "open"
     return this.#addFinalSentences()
   }
@@ -487,9 +544,8 @@ function formatSpeechTree(tree: Root, lastBlock: LastBlock): string {
  * when it starts like a link definition, which a closing title quote may
  * complete, and the text from its first reparsable mark outside code on, as
  * {@link REPARSABLE_MARK} defines it. Those sentences wait until the block
- * ends.
- * Handing them out earlier would let the reparse take them back, and the
- * sentence before them would then be spoken again.
+ * ends. Handing them out earlier would let the reparse take them back, and
+ * the sentence before them would then be spoken again.
  *
  * @param root - Parsed reply whose last block may still grow; changed in
  * place.
@@ -591,19 +647,22 @@ function removeTextFromReparsableMark(node: Root | RootContent): boolean {
 /**
  * Cleans one block of inline text: reference syntax outside inline code read
  * as {@link formatReferenceSyntax} reads it, bare URLs outside inline code
- * dropped, whitespace collapsed, and no space left before closing
- * punctuation. Inline code reads as written, so a citation-shaped index such
- * as `arr[1]`, or a URL, stays.
+ * dropped, every marked character turned back into the one it stands for,
+ * whitespace collapsed, and no space left before closing punctuation.
+ * Inline code reads as written, so a citation-shaped index such as
+ * `arr[1]`, or a URL, stays.
  *
- * @param text - Inline text of one block, its inline code marked as
- * {@link formatInlineText} marks it.
+ * @param text - Inline text of one block, marked as {@link formatInlineText}
+ * and the parser mark it: its inline code, its literal brackets and `!`,
+ * and its image marks.
  * @returns The cleaned text, possibly empty.
  */
 function formatBlockText(text: string): string {
   return formatWithoutBareUrls(formatReferenceSyntax(text))
     .replaceAll(IMAGE_MARK, "!")
-    .replaceAll(CODE_OPEN_BRACKET, "[")
-    .replaceAll(CODE_CLOSE_BRACKET, "]")
+    .replaceAll(LITERAL_EXCLAMATION_MARK, "!")
+    .replaceAll(LITERAL_OPEN_BRACKET, "[")
+    .replaceAll(LITERAL_CLOSE_BRACKET, "]")
     .replace(TEXT_MARKS, "")
     .replace(/\s+/g, " ")
     .replace(/ ([.,;:!?)\]])/g, "$1")
@@ -639,9 +698,7 @@ function formatWithoutBareUrls(text: string): string {
 function formatInlineText(node: Root | RootContent): string {
   switch (node.type) {
     case "text":
-      return node.value
-        .replace(TEXT_MARKS, "")
-        .replaceAll("![", `${IMAGE_MARK}[`)
+      return node.value.replaceAll("![", `${IMAGE_MARK}[`)
     case "inlineCode":
       return formatInlineCode(node.value)
     case "linkReference": {
@@ -670,8 +727,8 @@ function formatInlineText(node: Root | RootContent): string {
  */
 function formatInlineCode(code: string): string {
   const stoodIn = code
-    .replaceAll("[", CODE_OPEN_BRACKET)
-    .replaceAll("]", CODE_CLOSE_BRACKET)
+    .replaceAll("[", LITERAL_OPEN_BRACKET)
+    .replaceAll("]", LITERAL_CLOSE_BRACKET)
   return `${CODE_START}${stoodIn}${CODE_END}`
 }
 
@@ -708,7 +765,8 @@ function formatReferenceSyntax(text: string): string {
 /**
  * Finds the reference syntax that starts at an opening bracket.
  *
- * @param text - Text to read.
+ * @param text - A block's text, marked as {@link formatBlockText} receives
+ * it, so a `[` or `]` is syntax and an {@link IMAGE_MARK} opens an image.
  * @param open - Index of a `[` in `text`.
  * @returns The syntax, or undefined when the bracket is never closed.
  */
@@ -857,4 +915,84 @@ function isBlockChild(node: RootContent): boolean {
     node.type === "html" ||
     node.type === "table"
   )
+}
+
+/**
+ * Registers the tree-building extension that marks the brackets and `!`
+ * that an escape or a character reference writes in text, so that they are
+ * never read as reference syntax, as the renderer never reads them.
+ *
+ * @param this - The processor being configured.
+ */
+function addLiteralSyntaxMarking(this: Processor): void {
+  const data = this.data()
+  data.fromMarkdownExtensions ??= []
+  data.fromMarkdownExtensions.push(LITERAL_SYNTAX_MARKING)
+}
+
+/**
+ * Appends the character an escape writes to its text node, as the parser's
+ * own handler does, marked when it is a bracket or a `!`.
+ *
+ * @param this - The tree building, with the text node on top of its stack.
+ * @param token - The escaped character's token.
+ * @throws {Error} If no text node is on the stack, which the parser never
+ * allows.
+ */
+function handleCharacterEscapeValueExit(
+  this: TreeBuildingContext,
+  token: MarkdownToken
+): void {
+  const text = this.stack.pop()
+  if (text?.type !== "text" || text.position === undefined)
+    throw new Error("A character escape ended outside a text node")
+  text.value += formatLiteralSyntaxCharacter(this.sliceSerialize(token))
+  text.position.end = {
+    line: token.end.line,
+    column: token.end.column,
+    offset: token.end.offset
+  }
+}
+
+/**
+ * Ends a character reference's text, as the parser's own handler does,
+ * marking the character it wrote when it is a bracket or a `!`.
+ *
+ * @param this - The tree building, with the text node on top of its stack.
+ * @param token - The character reference's token.
+ * @throws {Error} If no text node is on the stack, which the parser never
+ * allows.
+ * @remarks The reference's character was appended last; no reference to a
+ * bracket or a `!` writes more than that one character.
+ */
+function handleCharacterReferenceExit(
+  this: TreeBuildingContext,
+  token: MarkdownToken
+): void {
+  const text = this.stack.pop()
+  if (text?.type !== "text" || text.position === undefined)
+    throw new Error("A character reference ended outside a text node")
+  const written = text.value.at(-1) ?? ""
+  text.value =
+    text.value.slice(0, text.value.length - written.length) +
+    formatLiteralSyntaxCharacter(written)
+  text.position.end = {
+    line: token.end.line,
+    column: token.end.column,
+    offset: token.end.offset
+  }
+}
+
+/**
+ * Marks a character that is written literally, so that it is never read
+ * as reference syntax.
+ *
+ * @param character - One character as written in the text.
+ * @returns Its stand-in when it is a bracket or a `!`, else the character.
+ */
+function formatLiteralSyntaxCharacter(character: string): string {
+  if (character === "[") return LITERAL_OPEN_BRACKET
+  if (character === "]") return LITERAL_CLOSE_BRACKET
+  if (character === "!") return LITERAL_EXCLAMATION_MARK
+  return character
 }

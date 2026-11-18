@@ -172,6 +172,26 @@ describe("SpeechSentenceBuffer", () => {
     }
   )
 
+  it.each([
+    ["a `$`", "It costs $3 now."],
+    ["an image", "See ![a chart][c] now."]
+  ])(
+    "joins a paragraph being written that holds %s before the sentence being written at that sentence",
+    (_content, earlierSentence) => {
+      const buffer = new SpeechSentenceBuffer("current")
+      expect(
+        buffer.loadSnapshot({
+          text: `Intro here. ${earlierSentence} Then more words. And the`,
+          lastTextPart: "open"
+        })
+      ).toEqual([])
+      expect([...buffer.addFragment(" end. Bye."), ...buffer.close()]).toEqual([
+        "And the end.",
+        "Bye."
+      ])
+    }
+  )
+
   it("joins at the next text part when the snapshot's text part ended", () => {
     const buffer = new SpeechSentenceBuffer("current")
     expect(
@@ -357,6 +377,42 @@ describe("SpeechSentenceBuffer structure changes", () => {
       expect(
         listSpokenWords(listStreamedSentences([...fragments.join("")]))
       ).toEqual(listSpokenWords(expected))
+    }
+  )
+
+  it.each([
+    ["an escape", "\\!"],
+    ["a character reference", "&#33;"]
+  ])(
+    "reads a reference after a `!` that %s writes as a link, not an image",
+    (_writer, exclamationMark) => {
+      const fragments = [
+        `Intro here. See ${exclamationMark}[the docs][d] now.`,
+        " More.\n\nNext paragraph here. And more.",
+        "\n\n[d]: https://x.y\n"
+      ]
+      const expected = [
+        "Intro here.",
+        "See!",
+        "the docs now.",
+        "More.",
+        "Next paragraph here.",
+        "And more."
+      ]
+      expect(listStreamedSentences(fragments)).toEqual(expected)
+      expect(listFinishedSentences(fragments.join(""))).toEqual(expected)
+    }
+  )
+
+  it.each([
+    ["an escape", "!\\[Enter]"],
+    ["a character reference", "!&#91;Enter&#93;"]
+  ])(
+    "speaks a bracket that %s writes after a `!` as text",
+    (_writer, written) => {
+      expect(
+        listSpokenWords(listFinishedSentences(`Press ${written} now. Then go.`))
+      ).toEqual(["Press", "Enter", "now", "Then", "go"])
     }
   )
 

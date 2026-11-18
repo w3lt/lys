@@ -22,6 +22,17 @@ function listStreamedSentences(fragments: readonly string[]): string[] {
   return [...sentences, ...buffer.close()]
 }
 
+/**
+ * Lists the words spoken, in order, without the punctuation and brackets
+ * around them, which are not words.
+ */
+function listSpokenWords(sentences: readonly string[]): string[] {
+  return sentences
+    .join(" ")
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+}
+
 describe("speech text", () => {
   it("ends a plain paragraph with a sentence boundary", () => {
     expect(listFinishedSentences("Hello there")).toEqual(["Hello there."])
@@ -142,6 +153,24 @@ describe("SpeechSentenceBuffer", () => {
     expect(buffer.addFragment("ee. Four.")).toEqual(["Three."])
     expect(buffer.close()).toEqual(["Four."])
   })
+
+  it.each([
+    ["starts like a link definition", "[Note]: first sentence here."],
+    ["holds a pipe", "A | B is first here."]
+  ])(
+    "joins a paragraph being written that %s at the sentence being written",
+    (_shape, firstSentence) => {
+      const buffer = new SpeechSentenceBuffer("current")
+      expect(
+        buffer.loadSnapshot({
+          text: `Intro.\n\n${firstSentence} Second one is be`,
+          lastTextPart: "open"
+        })
+      ).toEqual([])
+      expect(buffer.addFragment("ing written. Third.")).toEqual([])
+      expect(buffer.close()).toEqual(["Second one is being written.", "Third."])
+    }
+  )
 
   it("joins at the next text part when the snapshot's text part ended", () => {
     const buffer = new SpeechSentenceBuffer("current")
@@ -305,6 +334,42 @@ describe("SpeechSentenceBuffer structure changes", () => {
       ])
     }
   )
+
+  it.each([
+    [
+      "a strong span",
+      "Intro here. **Note!**[the docs][d] now.",
+      ["Intro here.", "Note!", "the docs now.", "More text here."]
+    ],
+    [
+      "an emphasis span",
+      "Intro here. _Wow!_[see][d] the note.",
+      ["Intro here.", "Wow!", "see the note.", "More text here."]
+    ]
+  ])(
+    "reads a reference after %s ending in `!` as a link, not an image",
+    (_span, sentence, expected) => {
+      const fragments = [sentence, " More text here.", "\n\n[d]: https://x.y\n"]
+      expect(listStreamedSentences(fragments)).toEqual(expected)
+      expect(listFinishedSentences(fragments.join(""))).toEqual(expected)
+      // Streamed by character, the `[` is text until it closes, and the
+      // sentence before it may end with it; it is not a word.
+      expect(
+        listSpokenWords(listStreamedSentences([...fragments.join("")]))
+      ).toEqual(listSpokenWords(expected))
+    }
+  )
+
+  it("drops an image reference whose definition arrives later", () => {
+    const fragments = [
+      "Intro here. See ![a chart][c] now.",
+      " More here.",
+      "\n\n[c]: https://x.y/c.png\n"
+    ]
+    const expected = ["Intro here.", "See now.", "More here."]
+    expect(listStreamedSentences(fragments)).toEqual(expected)
+    expect(listFinishedSentences(fragments.join(""))).toEqual(expected)
+  })
 
   it("speaks an indented line that directly follows a definition", () => {
     const text = "Hello there.\n\n[a]: http://x\n    Read me now.\n\nBye."

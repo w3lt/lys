@@ -95,14 +95,23 @@ const CODE_OPEN_BRACKET = "\uE002"
 /** Stands for `]` inside inline code until the block is formatted. */
 const CODE_CLOSE_BRACKET = "\uE003"
 
-/** The private-use characters that mark inline code in a block's text. */
-const CODE_MARKS = /[\uE000-\uE003]/g
+/**
+ * Stands for a `!` right before a `[` in the same text node, the only `!`
+ * that may open image syntax; a `!` that ends another node never does.
+ */
+const IMAGE_MARK = "\uE004"
+
+/** The private-use characters that mark a block's text. */
+const TEXT_MARKS = new RegExp(
+  `[${CODE_START}${CODE_END}${CODE_OPEN_BRACKET}${CODE_CLOSE_BRACKET}${IMAGE_MARK}]`,
+  "g"
+)
 
 /**
  * One marked inline code span, captured so that splitting a block's text on
  * it keeps the span at every odd index.
  */
-const CODE_SPAN = /(\uE000[^\uE001]*\uE001)/
+const CODE_SPAN = new RegExp(`(${CODE_START}[^${CODE_END}]*${CODE_END})`)
 
 /**
  * A bare URL, which is not spoken: a scheme or `www.` and everything up to
@@ -236,7 +245,9 @@ export class SpeechSentenceBuffer {
     this.#markdown = snapshot.text
     this.#lastBlock = snapshot.lastTextPart
     if (this.#start === "start") return this.#addFinalSentences()
-    const segments = this.#buildSegments()
+    const segments = buildSentenceSegments(
+      formatUnheldSpeechText(this.#markdown, this.#lastBlock)
+    )
     this.#addHandedOutSentences(segments, this.#calculateFinalCount(segments))
     return []
   }
@@ -283,11 +294,9 @@ export class SpeechSentenceBuffer {
    * @returns The sentences of the plain text, in order.
    */
   #buildSegments(): SentenceSegment[] {
-    const plain = formatSpeechText(this.#markdown, this.#lastBlock)
-    return [...sentenceSegmenter.segment(plain)].map(({ segment }) => ({
-      text: segment.replace(/\s+/g, " ").trim(),
-      endsLine: hasTrailingLineBreak(segment)
-    }))
+    return buildSentenceSegments(
+      formatSpeechText(this.#markdown, this.#lastBlock)
+    )
   }
 
   /**
@@ -396,6 +405,19 @@ type SentenceSegment = Readonly<{
 }>
 
 /**
+ * Splits plain speech text into sentences.
+ *
+ * @param plain - Plain text, one block per line.
+ * @returns The sentences, in order.
+ */
+function buildSentenceSegments(plain: string): SentenceSegment[] {
+  return [...sentenceSegmenter.segment(plain)].map(({ segment }) => ({
+    text: segment.replace(/\s+/g, " ").trim(),
+    endsLine: hasTrailingLineBreak(segment)
+  }))
+}
+
+/**
  * Whether a line break is among a segment's trailing whitespace; a line
  * break always ends a sentence.
  *
@@ -418,6 +440,34 @@ function hasTrailingLineBreak(segment: string): boolean {
 function formatSpeechText(markdown: string, lastBlock: LastBlock): string {
   const tree = markdownParser.parse(markdown)
   if (lastBlock === "open") removeReparsableText(tree, markdown)
+  return formatSpeechTree(tree, lastBlock)
+}
+
+/**
+ * Converts reply markdown to plain text as it reads now, with nothing held
+ * back for a reparse, so that a `current` join skips every sentence before
+ * the one being written, also when that one waits in a held block.
+ *
+ * @param markdown - The text to convert.
+ * @param lastBlock - Whether the last block may still grow.
+ * @returns The plain text.
+ */
+function formatUnheldSpeechText(
+  markdown: string,
+  lastBlock: LastBlock
+): string {
+  return formatSpeechTree(markdownParser.parse(markdown), lastBlock)
+}
+
+/**
+ * Renders a parsed reply as plain speech text, one block per line.
+ *
+ * @param tree - The parsed reply.
+ * @param lastBlock - Whether the last block may still grow; every other
+ * block, and a closed last one, ends with sentence punctuation.
+ * @returns The plain text.
+ */
+function formatSpeechTree(tree: Root, lastBlock: LastBlock): string {
   const blocks: string[] = []
   for (const child of tree.children) addBlocks(child, blocks)
   return blocks
@@ -551,9 +601,10 @@ function removeTextFromReparsableMark(node: Root | RootContent): boolean {
  */
 function formatBlockText(text: string): string {
   return formatWithoutBareUrls(formatReferenceSyntax(text))
+    .replaceAll(IMAGE_MARK, "!")
     .replaceAll(CODE_OPEN_BRACKET, "[")
     .replaceAll(CODE_CLOSE_BRACKET, "]")
-    .replace(CODE_MARKS, "")
+    .replace(TEXT_MARKS, "")
     .replace(/\s+/g, " ")
     .replace(/ ([.,;:!?)\]])/g, "$1")
     .trim()
@@ -580,13 +631,17 @@ function formatWithoutBareUrls(text: string): string {
  *
  * @param node - Inline node, or a node whose children are inline.
  * @returns The words the node reads as; empty for content that is not
- * spoken. Inline code is marked, and its brackets stand in for, so that
- * {@link formatBlockText} reads reference syntax around it only.
+ * spoken. Inline code is marked, with its brackets stood in for, so that
+ * {@link formatBlockText} reads reference syntax around it only, and a `!`
+ * right before a `[` in a text node is marked as the only `!` that may open
+ * an image.
  */
 function formatInlineText(node: Root | RootContent): string {
   switch (node.type) {
     case "text":
-      return node.value.replace(CODE_MARKS, "")
+      return node.value
+        .replace(TEXT_MARKS, "")
+        .replaceAll("![", `${IMAGE_MARK}[`)
     case "inlineCode":
       return formatInlineCode(node.value)
     case "linkReference": {
@@ -668,7 +723,7 @@ function findReference(
     : -1
   const hasLabel =
     labelEnd !== -1 && !text.slice(close + 2, labelEnd).includes("[")
-  const isImage = text[open - 1] === "!"
+  const isImage = text[open - 1] === IMAGE_MARK
   return {
     start: isImage ? open - 1 : open,
     end: hasLabel ? labelEnd + 1 : close + 1,

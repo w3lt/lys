@@ -12,6 +12,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window"
 import { chatNotificationApi, chatSpeechApi } from "@lys/protocol"
 
 import { useChatViewStore } from "@/lib/store/chat-view"
+import type { ChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import { useLysStore } from "@/lib/store"
 import {
   SpeechController,
@@ -110,7 +111,8 @@ function speechPath(
  * call, which is what tells a reply the person asked for from one the view
  * joined; pass `undefined` for the first read.
  * @returns `streaming` while the shown conversation's reply streams,
- * `settled` once it reached a final state, and `none` otherwise.
+ * `settled` once it reached a final state, also after the request that
+ * followed it ended, and `none` otherwise.
  */
 function buildObservation(
   previousRequestStatus: string | undefined
@@ -145,7 +147,29 @@ function buildObservation(
       status
     }
   }
+  if (request.status === "idle") return observeLastReply(conversation)
   return { kind: "none" }
+}
+
+/**
+ * Reads the shown conversation's last reply while no request follows one,
+ * so a completed reply still being said plays out after its stream ended.
+ *
+ * @param conversation - The shown conversation.
+ * @returns `settled` when its last message is a reply in a final state, and
+ * `none` otherwise.
+ */
+function observeLastReply(
+  conversation: ChatViewConversation
+): SpeechObservation {
+  const last = conversation.messages.at(-1)
+  if (last?.role !== "assistant" || last.status === "streaming")
+    return { kind: "none" }
+  return {
+    kind: "settled",
+    reply: { conversationId: conversation.id, replyId: last.id },
+    status: last.status
+  }
 }
 
 /**

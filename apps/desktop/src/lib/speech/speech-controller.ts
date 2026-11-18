@@ -123,6 +123,14 @@ type OpenSpeech = {
   frames: number
 }
 
+/** The open notification socket. */
+type OpenNotification = Readonly<{
+  /** The reply the notification is for. */
+  reply: SpeechReply
+  /** The open notification socket. */
+  socket: SpeechSocket
+}>
+
 /** A streaming reply nothing speaks yet. */
 type WaitingSpeech = Readonly<{
   /** The reply to join once focus or voice allows. */
@@ -162,8 +170,8 @@ export class SpeechController {
   #open: OpenSpeech | null = null
   /** The reply being waited on, if any. */
   #waiting: WaitingSpeech | null = null
-  /** The open notification socket, if any. */
-  #notification: SpeechSocket | null = null
+  /** The open notification socket and the reply it is for, if any. */
+  #notification: OpenNotification | null = null
   /** Replies already handled as settled, oldest first. */
   readonly #settledReplies: string[] = []
   /** Focus at the previous update; undefined before the first. */
@@ -272,13 +280,21 @@ export class SpeechController {
   }
 
   /**
-   * Drops anything open or waited for that belongs to another reply.
+   * Drops anything open, notified, or waited for that belongs to another
+   * reply, such as once the view shows another conversation.
    *
-   * @param reply - The reply that is streaming now.
+   * @param reply - The reply the view shows now.
    */
   #dropForeign(reply: SpeechReply): void {
     if (this.#open !== null && this.#open.reply.replyId !== reply.replyId) {
       this.#closeOpen()
+      this.#player.stop()
+    }
+    if (
+      this.#notification !== null &&
+      this.#notification.reply.replyId !== reply.replyId
+    ) {
+      this.#closeNotification()
       this.#player.stop()
     }
     if (this.#waiting?.reply.replyId !== reply.replyId) this.#waiting = null
@@ -311,6 +327,7 @@ export class SpeechController {
     focused: boolean
   ): void {
     const { reply, status } = observation
+    this.#dropForeign(reply)
     const isNewSettlement = this.#rememberSettled(reply, status)
     if (status === "completed")
       this.#onCompleted(reply, isNewSettlement, focused)
@@ -431,15 +448,15 @@ export class SpeechController {
     this.#closeNotification()
     const socket = this.#deps.openSocket(this.#deps.notificationPath(reply), {
       onAudio: (frame) => {
-        if (this.#notification === socket) this.#player.enqueue(frame)
+        if (this.#notification?.socket === socket) this.#player.enqueue(frame)
       },
       onClose: (code) => {
-        if (this.#notification !== socket) return
+        if (this.#notification?.socket !== socket) return
         this.#notification = null
         this.#handleClose(code)
       }
     })
-    this.#notification = socket
+    this.#notification = { reply, socket }
   }
 
   /**
@@ -467,6 +484,6 @@ export class SpeechController {
   #closeNotification(): void {
     const notification = this.#notification
     this.#notification = null
-    notification?.close()
+    notification?.socket.close()
   }
 }

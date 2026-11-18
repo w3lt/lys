@@ -217,6 +217,11 @@ function completeReply(): void {
   })
 }
 
+/** Returns the request to `idle`, as the store does once the stream ends. */
+function settleRequest(): void {
+  useChatViewStore.setState({ request: { status: "idle" } })
+}
+
 /** The URLs of every socket opened, in order. */
 function openedUrls(): string[] {
   return FakeWebSocket.opened.map((socket) => socket.url)
@@ -341,6 +346,55 @@ describe("startSpeech", () => {
     showConversation(buildCompletedAssistantMessage(3, "Hello."))
     completeReply()
     expect(openedUrls()).toEqual([`${SOCKET_BASE}${REPLY_PATH}/notification`])
+  })
+
+  it("keeps reading a completed reply after the request returns to idle", async () => {
+    startSpeechForTest()
+    await waitForMicrotasks()
+    showConversation(buildStreamingAssistantMessage(3, "Hello"))
+    awaitTurn()
+    streamReply()
+    socketAt().emit("message", { data: new ArrayBuffer(4) })
+    showConversation(buildCompletedAssistantMessage(3, "Hello."))
+    completeReply()
+    settleRequest()
+    expect(socketAt().isClosed).toBe(false)
+    expect(FakeWebSocket.opened).toHaveLength(1)
+  })
+
+  it("keeps the notification line after the request returns to idle", async () => {
+    startSpeechForTest()
+    await waitForMicrotasks()
+    blurWindow()
+    showConversation(buildStreamingAssistantMessage(3, "Hello"))
+    awaitTurn()
+    streamReply()
+    showConversation(buildCompletedAssistantMessage(3, "Hello."))
+    completeReply()
+    settleRequest()
+    expect(openedUrls()).toEqual([`${SOCKET_BASE}${REPLY_PATH}/notification`])
+    expect(socketAt().isClosed).toBe(false)
+  })
+
+  it("stops a completed reply's speech once another conversation is shown", async () => {
+    startSpeechForTest()
+    await waitForMicrotasks()
+    showConversation(buildStreamingAssistantMessage(3, "Hello"))
+    awaitTurn()
+    streamReply()
+    showConversation(buildCompletedAssistantMessage(3, "Hello."))
+    completeReply()
+    settleRequest()
+    useChatViewStore.setState({
+      conversation: createStoredChatViewConversation(
+        buildConversation(createFixtureUuidV7(9), "Other", [
+          buildUserMessage(10, "Hi"),
+          buildCompletedAssistantMessage(11, "Hi there.")
+        ])
+      )
+    })
+    expect(socketAt().isClosed).toBe(true)
+    expect(FakeWebSocket.opened).toHaveLength(1)
   })
 
   it("forwards binary frames and asks for voice's status after a 4503 close", async () => {

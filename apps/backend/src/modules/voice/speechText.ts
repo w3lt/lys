@@ -13,8 +13,8 @@ import remarkMath from "remark-math"
 import remarkParse from "remark-parse"
 import { unified } from "unified"
 
-/** Definitions of link references, keyed by their lower-cased label. */
-type Definitions = Map<string, string>
+/** A span of the reply's source text, by UTF-16 offset. */
+type SourceRange = Readonly<{ start: number; end: number }>
 
 /** A block whose last child may be the block still being written. */
 type BlockContainer = Root | Blockquote | List | ListItem
@@ -69,8 +69,8 @@ const WHOLE_CITATION_MARKER = new RegExp(`^${CITATION_MARKER_PATTERN.source}$`)
 const REPARSABLE_MARK = /\$|!\[/
 
 /**
- * Reference syntax as text shows it while its definition has not arrived:
- * `[text][label]`, `[text][]`, `[text]`, `![alt][label]`, `![alt]`, and
+ * Reference syntax as text shows it, which is how every reference parses
+ * once the reply's definitions are left out: `[text][label]`, `[text][]`, `[text]`, `![alt][label]`, `![alt]`, and
  * `[^label]`. Group 1 is the image mark, group 2 what the first brackets
  * enclose, and group 3 the label's brackets, when there are any.
  */
@@ -143,10 +143,11 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * like `[1]`, code blocks, math, tables, images, and bare URLs are not
  * words, so they are not spoken; inline code is read as words; formatting
  * is dropped; a link is spoken by its text, unless the text is the URL
- * itself; each paragraph, heading, and list item ends a sentence. A
- * reference reads the same before its definition arrives as after: a link
- * by its text; a citation marker, an image, and a footnote reference not at
- * all. An unclosed code fence holds the rest of the text back until it
+ * itself; each paragraph, heading, and list item ends a sentence. The
+ * text is read as if it held no link or footnote definition, so a reference
+ * reads the same before its definition arrives as after: a link by its
+ * text; a citation marker, an image, and a footnote reference not at all.
+ * An unclosed code fence holds the rest of the text back until it
  * closes. A paragraph or heading still being written waits until it ends
  * when it holds a `|`, because its next line may turn it into a table
  * header, and from its first `$` or `![` outside code on, because a later
@@ -372,11 +373,10 @@ function endsWithLineBreak(segment: string): boolean {
  * @returns The plain text.
  */
 function toPlainText(markdown: string, lastBlock: LastBlock): string {
-  const tree = markdownParser.parse(markdown)
-  const definitions = collectDefinitions(tree)
-  if (lastBlock === "open") removeReparsableText(tree, definitions)
+  const tree = parseWithoutDefinitions(markdown)
+  if (lastBlock === "open") removeReparsableText(tree)
   const blocks: string[] = []
-  for (const child of tree.children) collectBlock(child, definitions, blocks)
+  for (const child of tree.children) collectBlock(child, blocks)
   return blocks
     .map((block, index) =>
       (index < blocks.length - 1 || lastBlock === "closed") &&
@@ -399,15 +399,14 @@ function toPlainText(markdown: string, lastBlock: LastBlock): string {
  *
  * @param root - Parsed reply whose last block may still grow; changed in
  * place.
- * @param definitions - Link definitions of the reply.
  */
-function removeReparsableText(root: Root, definitions: Definitions): void {
+function removeReparsableText(root: Root): void {
   let container: BlockContainer = root
   for (;;) {
     const last: RootContent | undefined = container.children.at(-1)
     if (last === undefined) return
     if (last.type === "paragraph" || last.type === "heading") {
-      removeReparsableLeaf(container, last, definitions)
+      removeReparsableLeaf(container, last)
       return
     }
     if (
@@ -428,46 +427,44 @@ function removeReparsableText(root: Root, definitions: Definitions): void {
  * in place.
  * @param leaf - The paragraph or heading still being written; changed in
  * place.
- * @param definitions - Link definitions of the reply.
  */
 function removeReparsableLeaf(
   container: BlockContainer,
-  leaf: Paragraph | Heading,
-  definitions: Definitions
+  leaf: Paragraph | Heading
 ): void {
-  if (inlineChildren(leaf, definitions).includes("|")) {
+  if (inlineChildren(leaf).includes("|")) {
     container.children.pop()
     return
   }
-  const before = findTextBeforeReparsableMark(leaf, definitions)
-  if (before !== undefined) leaf.children = [{ type: "text", value: before }]
+  removeTextFromReparsableMark(leaf)
 }
 
 /**
- * Renders a node's inline text up to its first reparsable mark in plain
- * text, as {@link REPARSABLE_MARK} defines it; a mark in code or math is
- * never parsed again.
+ * Cuts a node's inline content at its first reparsable mark in plain text,
+ * as {@link REPARSABLE_MARK} defines it: the text node holding the mark
+ * keeps only its text before the mark, and every node after it is left
+ * out. A mark in code or math is never parsed again, so it cuts nothing.
  *
- * @param node - The node to render.
- * @param definitions - Link definitions of the reply.
- * @returns The text before that mark, or undefined when there is none.
+ * @param node - The node to cut; changed in place.
+ * @returns Whether the node held such a mark.
+ * @remarks The tree is cut rather than rendered and rebuilt, so what
+ * precedes the mark is rendered once, exactly as it would be without it.
  */
-function findTextBeforeReparsableMark(
-  node: Root | RootContent,
-  definitions: Definitions
-): string | undefined {
+function removeTextFromReparsableMark(node: Root | RootContent): boolean {
   if (node.type === "text") {
     const index = node.value.search(REPARSABLE_MARK)
-    return index === -1 ? undefined : node.value.slice(0, index)
+    if (index === -1) return false
+    node.value = node.value.slice(0, index)
+    return true
   }
-  if (!("children" in node)) return undefined
-  let before = ""
-  for (const child of node.children) {
-    const prefix = findTextBeforeReparsableMark(child, definitions)
-    if (prefix !== undefined) return before + prefix
-    before += inline(child, definitions)
+  if (!("children" in node)) return false
+  for (const [index, child] of node.children.entries()) {
+    if (removeTextFromReparsableMark(child)) {
+      node.children.length = index + 1
+      return true
+    }
   }
-  return undefined
+  return false
 }
 
 /**
@@ -486,76 +483,84 @@ function cleanInline(text: string): string {
 }
 
 /**
- * Collects the link definitions of a tree.
+ * Parses reply markdown as if it held no link or footnote definition.
  *
- * @param root - Parsed reply.
- * @returns Each definition's URL, keyed by its lower-cased label.
+ * @param markdown - The reply's text.
+ * @returns The parsed reply, in which every reference is plain text.
+ * @remarks A definition may follow its reference by any number of
+ * paragraphs, and it changes how the reference parses. Parsing as if no
+ * definition existed makes a reference read the same before its definition
+ * arrives as after, so a sentence already spoken never reads differently
+ * later. Definitions are never spoken, so blanking them loses no words.
  */
-function collectDefinitions(root: Root): Definitions {
-  const definitions: Definitions = new Map()
-  addDefinitions(root, definitions)
-  return definitions
+function parseWithoutDefinitions(markdown: string): Root {
+  const tree = markdownParser.parse(markdown)
+  const ranges = listDefinitionRanges(tree)
+  if (ranges.length === 0) return tree
+  let blanked = ""
+  let end = 0
+  for (const range of ranges) {
+    blanked += markdown.slice(end, range.start)
+    blanked += markdown.slice(range.start, range.end).replace(/[^\n]/g, " ")
+    end = range.end
+  }
+  return markdownParser.parse(blanked + markdown.slice(end))
 }
 
 /**
- * Adds the link definitions of a subtree, depth-first.
+ * Lists where the link and footnote definitions of a subtree are written.
  *
  * @param node - Root of the subtree.
- * @param definitions - Map that receives each definition's URL under its
- * lower-cased label.
+ * @returns The definitions' source ranges, in document order. The parser
+ * records a position on every node, so none is skipped in practice; a
+ * definition without one would be kept, and its references would read
+ * as defined.
  */
-function addDefinitions(
-  node: Root | RootContent,
-  definitions: Definitions
-): void {
-  if (node.type === "definition")
-    definitions.set(node.identifier.toLowerCase(), node.url)
-  if (!("children" in node)) return
-  for (const child of node.children) addDefinitions(child, definitions)
+function listDefinitionRanges(node: Root | RootContent): SourceRange[] {
+  if (node.type === "definition" || node.type === "footnoteDefinition") {
+    const start = node.position?.start.offset
+    const end = node.position?.end.offset
+    return start === undefined || end === undefined ? [] : [{ start, end }]
+  }
+  if (!("children" in node)) return []
+  return node.children.flatMap(listDefinitionRanges)
 }
 
 /**
  * Renders the inline content of a node as speech text.
  *
  * @param node - Inline node, or a node whose children are inline.
- * @param definitions - Link definitions of the reply.
  * @returns The words the node reads as; empty for content that is not
  * spoken.
  */
-function inline(node: Root | RootContent, definitions: Definitions): string {
+function inline(node: Root | RootContent): string {
   switch (node.type) {
     case "text":
       return formatReferenceSyntax(node.value)
     case "inlineCode":
       return node.value
     case "link":
-      return linkText(inlineChildren(node, definitions), node.url)
-    case "linkReference": {
-      const label = inlineChildren(node, definitions)
-      if (isCitationMarkerLabel(label)) return ""
-      const url = definitions.get(node.identifier.toLowerCase())
-      return url === undefined ? label : linkText(label, url)
-    }
+      return linkText(inlineChildren(node), node.url)
     case "image":
-    case "imageReference":
-    case "footnoteReference":
     case "inlineMath":
     case "html":
       return ""
     case "break":
       return " "
     default:
-      return inlineChildren(node, definitions)
+      return inlineChildren(node)
   }
 }
 
 /**
- * Reads reference syntax in plain text as the reference reads once its
- * definition arrives, because a definition may follow the reference by any
- * number of paragraphs: a full or collapsed link reference by its text, and
- * a citation marker, an image, or a footnote reference not at all. A
- * shortcut link reference, `[text]`, is left as it is: its brackets are not
- * words, so it already reads as the link does.
+ * Reads reference syntax in plain text as a defined reference reads: a full
+ * or collapsed link reference by its text, and a citation marker, an image,
+ * or a footnote reference not at all. A shortcut link reference, `[text]`,
+ * is left as it is: its brackets are not words, so it already reads as the
+ * link does. Syntax that formatting splits across nodes, such as
+ * `[*the* docs][d]`, stays as written; it reads the same whether its
+ * definition arrived or not, because the reply is parsed without its
+ * definitions.
  *
  * @param text - A text node's value.
  * @returns The text with each reference replaced.
@@ -622,15 +627,11 @@ function linkText(label: string, url: string): string {
  * Renders the inline children of a node, concatenated.
  *
  * @param node - Node whose children to render.
- * @param definitions - Link definitions of the reply.
  * @returns The children's words; empty for a node without children.
  */
-function inlineChildren(
-  node: Root | RootContent,
-  definitions: Definitions
-): string {
+function inlineChildren(node: Root | RootContent): string {
   if (!("children" in node)) return ""
-  return node.children.map((child) => inline(child, definitions)).join("")
+  return node.children.map((child) => inline(child)).join("")
 }
 
 /**
@@ -649,18 +650,13 @@ function pushBlock(blocks: string[], text: string): void {
  * item's inline runs join into one sentence.
  *
  * @param node - The list item.
- * @param definitions - Link definitions of the reply.
  * @param blocks - Blocks collected so far; receives the item's.
  */
-function collectListItem(
-  node: ListItem,
-  definitions: Definitions,
-  blocks: string[]
-): void {
+function collectListItem(node: ListItem, blocks: string[]): void {
   const parts: string[] = []
   for (const child of node.children) {
-    if (isBlockChild(child)) collectBlock(child, definitions, blocks)
-    else parts.push(inline(child, definitions))
+    if (isBlockChild(child)) collectBlock(child, blocks)
+    else parts.push(inline(child))
   }
   if (parts.length > 0) pushBlock(blocks, parts.join(" "))
 }
@@ -669,28 +665,23 @@ function collectListItem(
  * Collects the blocks of one subtree.
  *
  * @param node - Root of the subtree.
- * @param definitions - Link definitions of the reply.
  * @param blocks - Blocks collected so far; receives the subtree's, in
  * order.
  */
-function collectBlock(
-  node: RootContent,
-  definitions: Definitions,
-  blocks: string[]
-): void {
+function collectBlock(node: RootContent, blocks: string[]): void {
   switch (node.type) {
     case "paragraph":
     case "heading":
-      pushBlock(blocks, inlineChildren(node, definitions))
+      pushBlock(blocks, inlineChildren(node))
       return
     case "listItem":
-      collectListItem(node, definitions, blocks)
+      collectListItem(node, blocks)
       return
     default:
       break
   }
   if (SPOKEN_SILENCED.has(node.type) || !("children" in node)) return
-  for (const child of node.children) collectBlock(child, definitions, blocks)
+  for (const child of node.children) collectBlock(child, blocks)
 }
 
 /**

@@ -443,9 +443,10 @@ next text part when the stored reply's last part is not text. The speech
 turns markdown into plain text: links read as their text and inline code as
 its words; code blocks, math, tables, images, bare URLs, and citation
 markers, by the renderer's own `CITATION_MARKER_PATTERN`, are dropped; list
-items, paragraphs, and headings end a sentence. A reference reads the same
-before its definition arrives as after: a link reference by its text, and a
-citation marker, an image, or a footnote reference not at all. Sentences are
+items, paragraphs, and headings end a sentence. The reply is read as if it
+held no link or footnote definition, so a reference reads the same before its
+definition arrives as after: a link reference by its text, and a citation
+marker, an image, or a footnote reference not at all. Sentences are
 cut with `Intl.Segmenter`. While the reply streams, a sentence is sent to
 voice once a line break ends it or the next sentence has begun with a
 letter, so `$3.50`, `2.5`, and `Fig. 3` are never cut at their period; a

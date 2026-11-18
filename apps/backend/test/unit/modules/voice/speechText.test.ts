@@ -261,6 +261,30 @@ describe("SpeechSentenceBuffer structure changes", () => {
     }
   )
 
+  it.each([
+    ["emphasis", "[*the* docs]"],
+    ["inline code", "[`npm`]"],
+    ["nested brackets", "[a [b] c]"]
+  ])(
+    "speaks a link reference whose text holds %s once its definition arrives after a later sentence",
+    (_content, linkText) => {
+      const fragments = [
+        `Intro here. See ${linkText}[d] now.`,
+        " More text here.",
+        "\n\n[d]: https://x.y\n"
+      ]
+      expect(speakStreamed(fragments)).toEqual(
+        speakFinished(fragments.join(""))
+      )
+    }
+  )
+
+  it("speaks inline code that looks like a reference once while a hold is active", () => {
+    const fragments = ["Use `[a][b]` today. Then $5 and more", " text. End."]
+    expect(speakStreamed(fragments)).toEqual(speakFinished(fragments.join("")))
+    expect(speakStreamed(fragments)[0]).toBe("Use [a][b] today.")
+  })
+
   it("reads a link reference with no definition by its text", () => {
     expect(speakFinished("See [the docs][d] and [this][] now.")).toEqual([
       "See the docs and this now."

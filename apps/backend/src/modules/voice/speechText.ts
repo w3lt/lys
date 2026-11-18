@@ -76,16 +76,6 @@ export type SpeechSnapshot = Readonly<{
 }>
 
 /**
- * The tree-building extension {@link addLiteralSyntaxMarking} registers.
- */
-const LITERAL_SYNTAX_MARKING: TreeExtension = {
-  exit: {
-    characterEscapeValue: handleCharacterEscapeValueExit,
-    characterReference: handleCharacterReferenceExit
-  }
-}
-
-/**
  * Parses reply markdown with the renderer's GFM and math syntax, marking
  * the brackets and `!` that escapes and character references write.
  */
@@ -93,7 +83,7 @@ const markdownParser = unified()
   .use(remarkParse)
   .use(remarkGfm)
   .use(remarkMath)
-  .use(addLiteralSyntaxMarking)
+  .use(registerLiteralSyntaxMarking)
 
 /** Shared segmenter for English sentences. */
 const sentenceSegmenter = new Intl.Segmenter("en", { granularity: "sentence" })
@@ -134,7 +124,10 @@ const CODE_END = "\uE001"
  */
 const LITERAL_OPEN_BRACKET = "\uE002"
 
-/** Stands for a `]` that is never reference syntax, as above. */
+/**
+ * Stands for a `]` that is never reference syntax, as
+ * {@link LITERAL_OPEN_BRACKET} stands for a `[`.
+ */
 const LITERAL_CLOSE_BRACKET = "\uE003"
 
 /**
@@ -160,6 +153,23 @@ const TEXT_MARKS = new RegExp(
     IMAGE_MARK,
     LITERAL_EXCLAMATION_MARK
   ].join("")}]`,
+  "g"
+)
+
+/**
+ * A citation marker in a text node's value with a bracket that an escape or
+ * a character reference wrote, which is never reference syntax, built from
+ * the renderer's own {@link CITATION_MARKER_PATTERN}. A marker whose brackets
+ * are both syntax is reference syntax, which {@link formatReferenceSyntax}
+ * reads.
+ */
+const LITERAL_CITATION_MARKER = new RegExp(
+  [
+    CITATION_MARKER_PATTERN.source
+      .replace("\\[", LITERAL_OPEN_BRACKET)
+      .replace("\\]", `[\\]${LITERAL_CLOSE_BRACKET}]`),
+    CITATION_MARKER_PATTERN.source.replace("\\]", LITERAL_CLOSE_BRACKET)
+  ].join("|"),
   "g"
 )
 
@@ -239,21 +249,23 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * Buffers reply markdown and hands out the plain sentences voice speaks, as
  * they become final.
  *
- * @remarks The text is what the renderer shows, spoken: citation markers like
- * `[1]`, code blocks, math, tables, images, and bare URLs are not words, so
- * they are not spoken; inline code is read as words; formatting is dropped; a
- * link is spoken by its text, and a bare URL, in a link's text or not, is not
- * spoken; each paragraph, heading, and list item ends a sentence. A reference
- * reads the same before its definition arrives as after: a link by its text; a
- * citation marker, an image, and a footnote reference not at all; a bracket or
- * a `!` an escape or a character reference writes is never syntax. An unclosed
- * code fence holds the rest of the text back until it closes. A paragraph or
- * heading still being written waits until it ends when it holds a `|`, because
- * its next line may turn it into a table header, or when it starts with a label
- * in brackets and a colon, because a closing title quote may turn it into a
- * link definition; and from its first `$` or `![` outside code on, because a
- * later `$` may turn that text into inline math and the `![` may begin an
- * image.
+ * @remarks The text is what the renderer shows, spoken: code blocks, math,
+ * tables, images, bare URLs, and citation markers like `[1]`, found by the
+ * renderer's own pattern in each text node, are not words, so they are not
+ * spoken; inline code is read as words; formatting is dropped; a link is spoken
+ * by its text, and a bare URL, in a link's text or not, is not spoken; each
+ * paragraph, heading, and list item ends a sentence. A reference reads the same
+ * before its definition arrives as after: a link by its text; a citation
+ * marker, an image, and a footnote reference not at all; a bracket or a `!` an
+ * escape or a character reference writes is never reference syntax, though a
+ * citation marker it writes is still dropped, as the renderer still shows one.
+ * An unclosed code fence holds the rest of the text back until it closes. A
+ * paragraph or heading still being written waits until it ends when it holds a
+ * `|`, because its next line may turn it into a table header, or when it starts
+ * with a label in brackets and a colon, because a closing title quote may turn
+ * it into a link definition; and from its first `$` or `![` outside code on,
+ * because a later `$` may turn that text into inline math and the `![` may
+ * begin an image.
  *
  * A sentence is final once a later sentence holding a letter follows it, a
  * line break ends it, or its text part ends, so a period inside a number, a
@@ -672,7 +684,8 @@ function formatBlockText(text: string): string {
 /**
  * Drops the bare URLs of a block's text outside its inline code.
  *
- * @param text - A block's text, its inline code marked.
+ * @param text - A block's text, marked as {@link formatBlockText} receives
+ * it; only its inline code marks matter here.
  * @returns The text without them.
  * @remarks Links render by their text, so a block's text keeps every
  * character the reply shows, and a URL reads the same whether GFM linked it,
@@ -698,7 +711,7 @@ function formatWithoutBareUrls(text: string): string {
 function formatInlineText(node: Root | RootContent): string {
   switch (node.type) {
     case "text":
-      return node.value.replaceAll("![", `${IMAGE_MARK}[`)
+      return formatTextValue(node.value)
     case "inlineCode":
       return formatInlineCode(node.value)
     case "linkReference": {
@@ -716,6 +729,22 @@ function formatInlineText(node: Root | RootContent): string {
     default:
       return formatInlineChildren(node)
   }
+}
+
+/**
+ * Renders a text node's value: each citation marker with a bracket that an
+ * escape or a character reference wrote dropped, as the renderer finds it
+ * in a text node's value, and each `!` right before a `[` written literally
+ * marked as an {@link IMAGE_MARK}.
+ *
+ * @param value - The node's value, its literal brackets and `!` marked by
+ * the parser.
+ * @returns The value as a block's text reads it.
+ */
+function formatTextValue(value: string): string {
+  return value
+    .replace(LITERAL_CITATION_MARKER, "")
+    .replaceAll("![", `${IMAGE_MARK}[`)
 }
 
 /**
@@ -924,10 +953,16 @@ function isBlockChild(node: RootContent): boolean {
  *
  * @param this - The processor being configured.
  */
-function addLiteralSyntaxMarking(this: Processor): void {
+function registerLiteralSyntaxMarking(this: Processor): void {
+  const extension: TreeExtension = {
+    exit: {
+      characterEscapeValue: handleCharacterEscapeValueExit,
+      characterReference: handleCharacterReferenceExit
+    }
+  }
   const data = this.data()
   data.fromMarkdownExtensions ??= []
-  data.fromMarkdownExtensions.push(LITERAL_SYNTAX_MARKING)
+  data.fromMarkdownExtensions.push(extension)
 }
 
 /**
@@ -936,8 +971,8 @@ function addLiteralSyntaxMarking(this: Processor): void {
  *
  * @param this - The tree building, with the text node on top of its stack.
  * @param token - The escaped character's token.
- * @throws {Error} If no text node is on the stack, which the parser never
- * allows.
+ * @throws {Error} If the node on top of the stack is not a text node, or has
+ * no position, which the parser never allows.
  */
 function handleCharacterEscapeValueExit(
   this: TreeBuildingContext,
@@ -945,7 +980,9 @@ function handleCharacterEscapeValueExit(
 ): void {
   const text = this.stack.pop()
   if (text?.type !== "text" || text.position === undefined)
-    throw new Error("A character escape ended outside a text node")
+    throw new Error(
+      "A character escape ended outside a text node with a position"
+    )
   text.value += formatLiteralSyntaxCharacter(this.sliceSerialize(token))
   text.position.end = {
     line: token.end.line,
@@ -960,8 +997,8 @@ function handleCharacterEscapeValueExit(
  *
  * @param this - The tree building, with the text node on top of its stack.
  * @param token - The character reference's token.
- * @throws {Error} If no text node is on the stack, which the parser never
- * allows.
+ * @throws {Error} If the node on top of the stack is not a text node, or has
+ * no position, which the parser never allows.
  * @remarks The reference's character was appended last; no reference to a
  * bracket or a `!` writes more than that one character.
  */
@@ -971,7 +1008,9 @@ function handleCharacterReferenceExit(
 ): void {
   const text = this.stack.pop()
   if (text?.type !== "text" || text.position === undefined)
-    throw new Error("A character reference ended outside a text node")
+    throw new Error(
+      "A character reference ended outside a text node with a position"
+    )
   const written = text.value.at(-1) ?? ""
   text.value =
     text.value.slice(0, text.value.length - written.length) +

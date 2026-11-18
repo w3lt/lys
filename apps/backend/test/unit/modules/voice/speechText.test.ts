@@ -416,6 +416,36 @@ describe("SpeechSentenceBuffer structure changes", () => {
     }
   )
 
+  it.each([
+    ["escapes", "\\[1\\]"],
+    ["character references", "&#91;1&#93;"]
+  ])(
+    "drops a citation marker whose brackets %s write, as the renderer shows it as a citation",
+    (_writer, marker) => {
+      const text = `See the docs ${marker} now. Bye.`
+      const expected = ["See the docs now.", "Bye."]
+      expect(listFinishedSentences(text)).toEqual(expected)
+      expect(listStreamedSentences([...text])).toEqual(expected)
+    }
+  )
+
+  it("drops a citation marker that is a reference's text once, before and after its definition arrives", () => {
+    const fragments = [
+      "Cite [1][] and [2][x] here.",
+      " Ok.",
+      "\n\n[1]: https://a.b\n[x]: https://c.d\n"
+    ]
+    const expected = ["Cite and here.", "Ok."]
+    expect(listStreamedSentences(fragments)).toEqual(expected)
+    expect(listFinishedSentences(fragments.join(""))).toEqual(expected)
+  })
+
+  it("keeps a citation-shaped index in inline code however its brackets are written", () => {
+    expect(listFinishedSentences("Use `\\[1\\]` and `[2]` now.")).toEqual([
+      "Use \\[1\\] and [2] now."
+    ])
+  })
+
   it("drops an image reference whose definition arrives later", () => {
     const fragments = [
       "Intro here. See ![a chart][c] now.",

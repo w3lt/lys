@@ -18,7 +18,9 @@ import { findRunningReplyGeneration } from "./jobStops"
  * not stored as streaming but whose reply task still runs, in the order
  * their generations started, such as a reply a newer turn superseded while
  * it waited on a tool call, an approval prompt, or a request slot. Empty
- * when none works or the conversation is not stored.
+ * when none works. For a conversation that is no longer stored, only its
+ * own replies whose reply task still runs are listed, such as those a
+ * delete still waits on.
  * @throws If the conversation store is closed or a stored identity violates
  * the conversation contract.
  * @remarks The caller lists the replies in the same synchronous step as the

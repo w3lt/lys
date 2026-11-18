@@ -88,8 +88,9 @@ export interface ConversationDeleter {
  * then those of the jobs below it, at any depth, in the order the jobs were
  * created; then the conversation's own replies whose generation still runs
  * its reply although they are not stored as streaming, such as a reply a
- * newer turn superseded. Empty when none works or the conversation is not
- * stored.
+ * newer turn superseded. Empty when none works. For a conversation that is
+ * no longer stored, only its own replies whose generation still runs the
+ * reply are listed, such as those a delete still waits on.
  * @throws If the conversation store is closed or a stored identity
  * violates the conversation contract; nothing is listed then.
  */

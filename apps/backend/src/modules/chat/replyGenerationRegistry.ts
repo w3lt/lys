@@ -21,8 +21,8 @@ type RegisteredReplyGeneration = Readonly<{
 }>
 
 /**
- * Failure of starting or finding a generation once the registry's disposal
- * began, which ends every generation it holds.
+ * Failure of starting, finding, or listing generations once the registry's
+ * disposal began, which ends every generation it holds.
  *
  * @remarks Passive failure value constructed once per refused call. It
  * preserves the native `Error` contract and owns no mutable state, so a

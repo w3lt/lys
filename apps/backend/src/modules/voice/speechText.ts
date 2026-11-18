@@ -98,7 +98,7 @@ const markdownParser = unified()
 const sentenceSegmenter = new Intl.Segmenter("en", { granularity: "sentence" })
 
 /** Characters that terminate a spoken sentence, followed by optional closers. */
-const SENTENCE_END_PATTERN = /[.!?…]["'”’)\]]*$/
+const SENTENCE_END_PATTERN = /[.!?…‼⁇⁈⁉]["'”’)\]]*$/
 
 /** Any letter, in any script. */
 const LETTER_PATTERN = /\p{L}/u
@@ -113,14 +113,20 @@ const WHOLE_CITATION_MARKER = new RegExp(`^${CITATION_MARKER_PATTERN.source}$`)
  * close into inline code, or a mark that may open emphasis, strong, or
  * struck text, which a closing mark would turn into formatting: a `*` or
  * `~` not before whitespace, or such a `_` not inside a word; or the start
- * of a footnote reference, `[^`, or of inline HTML, a `<` before a letter,
- * `/`, `!`, or `?`, that no `]` or `>` closes yet, whose letters are not
- * spoken once it is complete. A mark that ends a text node counts, since
- * the node after it may be the emphasis that a second mark turns into
- * strong text.
+ * of inline HTML, a `<` before a letter, `/`, `!`, or `?`, whose letters are
+ * not spoken once it is complete. Complete inline HTML leaves the text node,
+ * so a `<` still in one may yet be a tag or a comment, whatever `>` follows
+ * it. A mark that ends a text node counts, since the node after it may be
+ * the emphasis that a second mark turns into strong text.
  */
 const REPARSABLE_MARK =
-  /\$|!\[|`|[*~]+(?!\s)|(?<![\p{L}\p{N}])_+(?!\s)|\[\^(?![^\]]*\])|<[A-Za-z/!?](?![^>]*>)/u
+  /\$|!\[|`|[*~]+(?!\s)|(?<![\p{L}\p{N}])_+(?!\s)|<[A-Za-z/!?]/u
+
+/**
+ * The start of a footnote reference, whose letters are not spoken once a
+ * bracket closes it.
+ */
+const FOOTNOTE_REFERENCE_START = "[^"
 
 /**
  * A word ending the speech text of the blocks still being written that more
@@ -236,14 +242,15 @@ const BARE_URL = /\b(?:https?:\/\/|www\.)\S*[^\s.,:;!?"'’”)\]*_~]/giu
 
 /**
  * An emoji or other pictograph, which is not spoken: an emoji matched whole,
- * such as `🎉`, a flag, a keycap, an emoji-style character such as `❤️`, or
- * a sequence with skin tones or zero-width joiners; or a text-style
- * pictograph, such as `☀`, `❤`, `✔`, `©`, or `™`, other than an arrow or
- * punctuation such as `‼`, which ends a sentence. Other symbols, such as `$`,
- * `+`, `%`, `★`, `✓`, `→`, and `↔`, are spoken as written.
+ * such as `🎉`, a flag, a keycap, an emoji-style character such as `❤️`, or a
+ * sequence with skin tones or zero-width joiners; or a text-style pictograph,
+ * such as `☀`, `❤`, `✔`, `©`, or `™`, other than an arrow or punctuation such
+ * as `‼`, which ends a sentence, also in its emoji form `‼️`, which loses only
+ * its variation selector. Other symbols, such as `$`, `+`, `%`, `★`, `✓`, `→`,
+ * and `↔`, are spoken as written.
  */
 const PICTOGRAPH =
-  /\p{RGI_Emoji}|[\p{Extended_Pictographic}--\p{P}--[\u2190-\u21FF\u27A1\u2900-\u297F\u2B05-\u2B07]]/gv
+  /[\p{RGI_Emoji}--\q{\u203C\uFE0F|\u2049\uFE0F}]|[\p{Extended_Pictographic}--\p{P}--[\u2190-\u21FF\u27A1\u2900-\u297F\u2B05-\u2B07]]|\uFE0F/gv
 
 /**
  * Longest piece of text, in UTF-16 code units, sent to voice in one message.
@@ -292,6 +299,16 @@ function findPieceEnd(text: string): number {
     : MAX_SPOKEN_PIECE_LENGTH
 }
 
+/**
+ * Blocks whose children are inline content, which reads the same at any
+ * place in the text, a reference included.
+ */
+const INLINE_PARENT_TYPES: ReadonlySet<string> = new Set([
+  "paragraph",
+  "heading",
+  "tableCell"
+])
+
 /** Blocks that carry no words to speak. */
 const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
   "table",
@@ -311,49 +328,50 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * @remarks The text is what the renderer shows, spoken: code blocks, math,
  * tables, images, bare URLs, and citation markers like `[1]`, found by the
  * renderer's own pattern, are not words, so they are not spoken, and neither
- * are emoji and other pictographs, such as `☀` and `©`, while other
- * symbols, such as `$`, `✓`, and arrows like `→` and `↔`, are; inline code is
- * read as words; formatting is dropped; a link is spoken by its text, and a
- * bare URL, in a link's text or not, is not spoken; each paragraph, heading,
- * and list item ends a sentence. A reference reads the same before its
- * definition arrives as after: a link by its text; a citation marker, an image,
- * and a footnote reference not at all; a bracket or a `!` an escape or a
- * character reference writes is never reference syntax, though a citation
- * marker it writes is still dropped, as the renderer still shows one, unless
- * its other bracket opens or closes a reference, as in `[see \[1]`, where it
- * reads as that reference's text, the same before the definition arrives as
- * after. Any other citation marker is dropped wherever it stands outside code,
- * a link's text included, where the renderer shows it as text. An unclosed code
- * fence holds the rest of the text back until it closes. A paragraph or heading
- * still being written waits until it ends when it holds a `|`, because its next
- * line may turn it into a table header, or when it starts with a label in
- * brackets and a colon, because a closing title quote may turn it into a link
- * definition; from its first `$`, `![`, unclosed backtick, opening
- * emphasis mark, or unclosed `[^` or inline HTML start outside code on,
- * because a later `$` may turn that text into inline math, the `![` may
- * begin an image, a closing backtick, `*`, `_`, or `~` may turn the text
- * into code or formatting, whose marks are not spoken, and a `]` or `>` may
- * complete a footnote reference or a tag, whose letters are not spoken. The last word of the text being written waits too when
- * more letters may turn it into a bare URL, such as `htt`.
+ * are emoji and other pictographs, such as `☀` and `©`, while other symbols,
+ * such as `$`, `✓`, and arrows like `→` and `↔`, are; inline code is read as
+ * words; formatting is dropped; a link is spoken by its text, and a bare URL,
+ * in a link's text or not, is not spoken; each paragraph, heading, and list
+ * item ends a sentence. A reference reads the same before its definition
+ * arrives as after: a link by its text; a citation marker, an image, and a
+ * footnote reference not at all; a bracket or a `!` an escape or a character
+ * reference writes is never reference syntax, though a citation marker it
+ * writes is still dropped, as the renderer still shows one, unless its other
+ * bracket opens or closes a reference, as in `[see \[1]`, where it reads as
+ * that reference's text, the same before the definition arrives as after. Any
+ * other citation marker is dropped wherever it stands outside code, a link's
+ * text included, where the renderer shows it as text. An unclosed code fence
+ * holds the rest of the text back until it closes. A paragraph or heading still
+ * being written waits until it ends when it holds a `|`, because its next line
+ * may turn it into a table header, or when it starts with a label in brackets
+ * and a colon, because a closing title quote may turn it into a link
+ * definition; from its first `$`, `![`, unclosed backtick, opening emphasis
+ * mark, or `[^` that no bracket closes yet, counting nested pairs, or inline
+ * HTML start outside code on, because a later `$` may turn that text into
+ * inline math, the `![` may begin an image, a closing backtick, `*`, `_`, or
+ * `~` may turn the text into code or formatting, whose marks are not spoken,
+ * and a `]` may complete a footnote reference and a `>` a tag or a comment,
+ * whose letters are not spoken. The last word of the text being written waits
+ * too when more letters may turn it into a bare URL, such as `htt`.
  *
- * Each round's text is a markdown document of its own, its text parts
- * joined as the renderer joins them, so whatever one round leaves open,
- * such as a code fence, ends with it. A sentence is final once a later
- * sentence holding a letter follows it, a line break ends it, another block
- * follows its block, or its round's text ends, so a period inside a number,
- * a version, or an abbreviation, such as `$3.50`, never ends a sentence
- * early; `closeRoundText()` hands out the rest, however short. A sentence is
- * handed out at most once and never taken back. When more text changes how
- * earlier text reads, such as a line that turns into a table header, the
- * buffer resumes after the last handed-out sentence still present in its
- * order, so no later sentence is skipped and no earlier one that reads the
- * same is spoken again. No later text changes how a block reads once the
- * first line of the block after it ended, and for a table its delimiter row,
- * or how an item reads once the first line of the item after it ended, so
- * the buffer keeps only the text from the block or the item still being
- * written on. A fragment parses only that text: its cost grows with the
- * block being written, such as a long table or blockquote, but not with the
- * blocks before it.
+ * Each round's text is a markdown document of its own, its text parts joined as
+ * the renderer joins them, so whatever one round leaves open, such as a code
+ * fence, ends with it. A sentence is final once a later sentence holding a
+ * letter follows it, a line break ends it, another block follows its block, or
+ * its round's text ends, so a period inside a number, a version, or an
+ * abbreviation, such as `$3.50`, never ends a sentence early;
+ * `closeRoundText()` hands out the rest, however short. A sentence is handed
+ * out at most once and never taken back. When more text changes how earlier
+ * text reads, such as a line that turns into a table header, the buffer resumes
+ * after the last handed-out sentence still present in its order, so no later
+ * sentence is skipped and no earlier one that reads the same is spoken again.
+ * No later text changes how a block reads once the first line of the block
+ * after it ended, and for a table its delimiter row, or how an item reads once
+ * the first line of the item after it ended, so the buffer keeps only the text
+ * from the block or the item still being written on, unless that text parses
+ * into other blocks alone, as `- 42.` right after a paragraph does. A fragment
+ * parses only that text: its cost grows with the block being written, such as a
+ * long table or blockquote, but not with the blocks before it.
  *
  * Feed the buffer the reply's text: the snapshot at the start, then every
  * text part and fragment as it arrives, and `closeRoundText()` when a tool
@@ -620,7 +638,10 @@ type SplitRoundText = Readonly<{
  * blocks still being written: from the last block whose first line ended,
  * or, in the list that ends the text, from the last such item. No later
  * text changes how a block before it reads, since a reference reads the
- * same before its definition arrives as after.
+ * same before its definition arrives as after. Nothing settles while the
+ * text from that block on parses into other blocks alone, as `- 42.` right
+ * after a paragraph, where `42.` is text, alone is an empty ordered list,
+ * because only the text from it on is parsed again.
  *
  * @param tree - The parsed round's text; its nodes move into the result.
  * @param markdown - The text, which `tree` was parsed from.
@@ -628,6 +649,32 @@ type SplitRoundText = Readonly<{
  * the line they start on starts.
  */
 function splitSettledBlocks(tree: Root, markdown: string): SplitRoundText {
+  const split = splitBeforeWritingBlocks(tree, markdown)
+  if (
+    split.writingStart === 0 ||
+    describeBlockStructure(split.writing.children) ===
+      describeBlockStructure(
+        markdownParser.parse(markdown.slice(split.writingStart)).children
+      )
+  )
+    return split
+  return { settled: buildRoot([]), writing: tree, writingStart: 0 }
+}
+
+/**
+ * Splits a parsed round's text before the blocks still being written, as
+ * {@link splitSettledBlocks} does, however the text from them on parses
+ * alone.
+ *
+ * @param tree - The parsed round's text; its nodes move into the result.
+ * @param markdown - The text, which `tree` was parsed from.
+ * @returns The settled blocks, the blocks still being written, and where
+ * the line they start on starts.
+ */
+function splitBeforeWritingBlocks(
+  tree: Root,
+  markdown: string
+): SplitRoundText {
   const blocks = tree.children
   const last = blocks.at(-1)
   if (last?.type === "list") {
@@ -714,6 +761,24 @@ function findLineStart(
 ): number {
   const offset = node?.position?.start.offset ?? 0
   return markdown.lastIndexOf("\n", offset - 1) + 1
+}
+
+/**
+ * Describes how parsed text nests into blocks, which is all that may differ
+ * between the same text parsed alone and after other text.
+ *
+ * @param nodes - Sibling blocks, in order.
+ * @returns Each block's type, followed for a container by its blocks in
+ * parentheses; inline content is left out.
+ */
+function describeBlockStructure(nodes: readonly RootContent[]): string {
+  return nodes
+    .map((node) =>
+      INLINE_PARENT_TYPES.has(node.type) || !("children" in node)
+        ? node.type
+        : `${node.type}(${describeBlockStructure(node.children)})`
+    )
+    .join(",")
 }
 
 /**
@@ -846,9 +911,10 @@ function isPossibleDefinition(
 
 /**
  * Cuts a node's inline content at its first reparsable mark in plain text,
- * as {@link REPARSABLE_MARK} defines it: the text node holding the mark
- * keeps only its text before the mark, and every node after it is left
- * out. A mark in code or math is never parsed again, so it cuts nothing.
+ * as {@link findReparsableMarkIndex} finds it: the text node holding the
+ * mark keeps only its text before the mark, and every node after it is
+ * left out. A mark in code or math is never parsed again, so it cuts
+ * nothing.
  *
  * @param node - The node to cut; changed in place.
  * @returns Whether the node held such a mark.
@@ -857,8 +923,8 @@ function isPossibleDefinition(
  */
 function removeTextFromReparsableMark(node: Root | RootContent): boolean {
   if (node.type === "text") {
-    const index = node.value.search(REPARSABLE_MARK)
-    if (index === -1) return false
+    const index = findReparsableMarkIndex(node.value)
+    if (index === undefined) return false
     node.value = node.value.slice(0, index)
     return true
   }
@@ -870,6 +936,31 @@ function removeTextFromReparsableMark(node: Root | RootContent): boolean {
     }
   }
   return false
+}
+
+/**
+ * Finds the first mark in a text node that more text may parse again: a
+ * {@link REPARSABLE_MARK}, or a {@link FOOTNOTE_REFERENCE_START} that no
+ * bracket closes in the text before such a mark, counting nested pairs as
+ * {@link findReference} does, since the text from that mark on is cut.
+ *
+ * @param text - The value of a text node.
+ * @returns The mark's index, or undefined when the text holds none.
+ * @remarks A footnote reference closed in the kept text also closes every
+ * bracket nested in it, so cutting at the first one left open never opens
+ * one before it.
+ */
+function findReparsableMarkIndex(text: string): number | undefined {
+  const markIndex = text.search(REPARSABLE_MARK)
+  const kept = markIndex === -1 ? text : text.slice(0, markIndex)
+  for (
+    let open = kept.indexOf(FOOTNOTE_REFERENCE_START);
+    open !== -1;
+    open = kept.indexOf(FOOTNOTE_REFERENCE_START, open + 1)
+  ) {
+    if (findClosingBracket(kept, open) === undefined) return open
+  }
+  return markIndex === -1 ? undefined : markIndex
 }
 
 /**

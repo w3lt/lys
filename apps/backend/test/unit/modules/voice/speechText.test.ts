@@ -144,13 +144,16 @@ describe("speech text", () => {
     ).toEqual(["Sunny today, fly there, love it, done, warn, Lys."])
   })
 
-  it("reads punctuation that is also a pictograph as punctuation", () => {
-    expect(listFinishedSentences("Stop‼ Go now⁉ Fine.")).toEqual([
-      "Stop‼",
-      "Go now⁉",
-      "Fine."
-    ])
-  })
+  it.each([
+    ["Stop‼ Go now⁉ Fine.", ["Stop‼", "Go now⁉", "Fine."]],
+    ["Stop‼️ Go now.", ["Stop‼", "Go now."]],
+    ["Really⁉\n\nYes.", ["Really⁉", "Yes."]]
+  ])(
+    "reads punctuation that is also a pictograph as punctuation in %j",
+    (markdown, sentences) => {
+      expect(listFinishedSentences(markdown)).toEqual(sentences)
+    }
+  )
 
   it("speaks symbols that are not pictographs, and arrows, as written", () => {
     expect(
@@ -444,13 +447,68 @@ describe("SpeechSentenceBuffer structure changes", () => {
     ["a footnote reference follows a period", "Done. [^No] - more"],
     ["an HTML tag follows a sentence", "Wow! <br> - more"],
     ["a closed HTML tag follows a sentence", "Run it! <br/>, then go"],
-    ["an HTML comment follows a sentence", "Ok? <!-- c --> - x"]
+    ["an HTML comment follows a sentence", "Ok? <!-- c --> - x"],
+    [
+      "an HTML comment holding a `>` follows a sentence",
+      "Ok? <!-- a > b --> - x"
+    ],
+    [
+      "an HTML comment holding `->` follows a sentence",
+      "Ok? <!-- a->b --> - x"
+    ],
+    [
+      "a tag whose quoted attribute holds a `>` follows a sentence",
+      'Wow! <img alt="a > b"> - more'
+    ],
+    [
+      "a tag whose single-quoted attribute holds a `>` follows a sentence",
+      "Run it! <br class='x>y'>, then go"
+    ]
   ])(
     "speaks text streamed one character at a time as the whole text when %s",
     (_shape, markdown) => {
       expect(listStreamedSentences([...markdown])).toEqual(
         listFinishedSentences(markdown)
       )
+    }
+  )
+
+  it.each([
+    [
+      "a list item right after a paragraph, before a quote",
+      "Hi.\n- 42.\n> q",
+      ["Hi.", "42.", "q."]
+    ],
+    [
+      "a list item right after a paragraph, before an empty quote",
+      "Hi.\n- 42.\n>",
+      ["Hi.", "42."]
+    ],
+    [
+      "a numbered item in a bullet item right after a paragraph",
+      "Hi.\n- 2. x\n- b",
+      ["Hi.", "2. x.", "b."]
+    ],
+    [
+      "a bullet item of a number alone right after a paragraph",
+      "Fine.\n- 1.\n\nNext.",
+      ["Fine.", "1.", "Next."]
+    ],
+    [
+      "a footnote reference a later mark cuts",
+      "Done! [^x *y] - more",
+      ["Done! - more."]
+    ],
+    [
+      "a footnote reference with nested brackets",
+      "Done! [^a [b] c] - more",
+      ["Done! - more."]
+    ]
+  ])(
+    "reads %s as the chat shows it, whole and streamed one character at a time",
+    (_shape, markdown, sentences) => {
+      expect(listFinishedSentences(markdown)).toEqual(sentences)
+      expect(listStreamedSentences([...markdown])).toEqual(sentences)
     }
   )
 

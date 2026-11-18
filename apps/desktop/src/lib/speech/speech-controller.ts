@@ -172,6 +172,11 @@ export class SpeechController {
   #waiting: WaitingSpeech | null = null
   /** The open notification socket and the reply it is for, if any. */
   #notification: OpenNotification | null = null
+  /**
+   * The reply whose frames the player was last given, until the player is
+   * stopped; its audio may still play after its socket closed with `1000`.
+   */
+  #audibleReplyId: string | null = null
   /** Replies already handled as settled, oldest first. */
   readonly #settledReplies: string[] = []
   /** Focus at the previous update; undefined before the first. */
@@ -254,7 +259,7 @@ export class SpeechController {
     this.#dropForeign(reply)
     if (this.#notification !== null) {
       this.#closeNotification()
-      this.#player.stop()
+      this.#stopAudio()
     }
 
     if (this.#open?.reply.replyId === reply.replyId) {
@@ -280,23 +285,27 @@ export class SpeechController {
   }
 
   /**
-   * Drops anything open, notified, or waited for that belongs to another
-   * reply, such as once the view shows another conversation.
+   * Drops anything open, notified, waited for, or still playing that
+   * belongs to another reply, such as once the view shows another
+   * conversation.
    *
    * @param reply - The reply the view shows now.
    */
   #dropForeign(reply: SpeechReply): void {
     if (this.#open !== null && this.#open.reply.replyId !== reply.replyId) {
       this.#closeOpen()
-      this.#player.stop()
+      this.#stopAudio()
     }
     if (
       this.#notification !== null &&
       this.#notification.reply.replyId !== reply.replyId
     ) {
       this.#closeNotification()
-      this.#player.stop()
+      this.#stopAudio()
     }
+    // Audio queued before a 1000 close outlives its socket.
+    if (this.#audibleReplyId !== null && this.#audibleReplyId !== reply.replyId)
+      this.#stopAudio()
     if (this.#waiting?.reply.replyId !== reply.replyId) this.#waiting = null
   }
 
@@ -413,6 +422,23 @@ export class SpeechController {
   #silence(): void {
     this.#closeOpen()
     this.#closeNotification()
+    this.#stopAudio()
+  }
+
+  /**
+   * Queues one frame of a reply's audio.
+   *
+   * @param reply - The reply the frame belongs to.
+   * @param frame - Raw PCM, as the backend relays it.
+   */
+  #play(reply: SpeechReply, frame: Uint8Array): void {
+    this.#audibleReplyId = reply.replyId
+    this.#player.enqueue(frame)
+  }
+
+  /** Drops every queued frame. */
+  #stopAudio(): void {
+    this.#audibleReplyId = null
     this.#player.stop()
   }
 
@@ -427,7 +453,7 @@ export class SpeechController {
       onAudio: (frame) => {
         if (this.#open?.socket !== socket) return
         this.#open.frames += 1
-        this.#player.enqueue(frame)
+        this.#play(reply, frame)
       },
       onClose: (code) => {
         if (this.#open?.socket !== socket) return
@@ -448,7 +474,7 @@ export class SpeechController {
     this.#closeNotification()
     const socket = this.#deps.openSocket(this.#deps.notificationPath(reply), {
       onAudio: (frame) => {
-        if (this.#notification?.socket === socket) this.#player.enqueue(frame)
+        if (this.#notification?.socket === socket) this.#play(reply, frame)
       },
       onClose: (code) => {
         if (this.#notification?.socket !== socket) return
@@ -468,7 +494,7 @@ export class SpeechController {
    */
   #handleClose(code: number): void {
     if (code === SPEECH_CLOSE_COMPLETE) return
-    this.#player.stop()
+    this.#stopAudio()
     if (code === SPEECH_CLOSE_VOICE_UNAVAILABLE || code === SPEECH_CLOSE_FAILED)
       this.#deps.recheckVoice()
   }

@@ -14,6 +14,10 @@ const REPLY_2: SpeechReply = {
   conversationId: "conversation-1",
   replyId: "reply-2"
 }
+const OTHER_CONVERSATION_REPLY: SpeechReply = {
+  conversationId: "conversation-2",
+  replyId: "reply-3"
+}
 
 const PCM = new Uint8Array([1, 0, 255, 127, 0, 128])
 
@@ -368,6 +372,33 @@ describe("speech controller: when she reads", () => {
     harness.controller.update(settled())
     expect(harness.player.stops).toBe(1)
   })
+
+  it("drops audio still queued after a 1000 close once another conversation's reply is shown", () => {
+    const harness = createHarness()
+    harness.controller.update(streaming())
+    const socket = socketAt(harness)
+    socket.pushAudio(PCM)
+    harness.controller.update(settled())
+    socket.serverClose(1000)
+    harness.controller.update(settled())
+    expect(harness.player.stops).toBe(0)
+    harness.controller.update(settled(OTHER_CONVERSATION_REPLY))
+    expect(harness.player.stops).toBe(1)
+    harness.controller.update(settled(OTHER_CONVERSATION_REPLY))
+    expect(harness.player.stops).toBe(1)
+  })
+
+  it("drops audio still queued after a 1000 close once another reply streams", () => {
+    const harness = createHarness()
+    harness.controller.update(streaming())
+    const socket = socketAt(harness)
+    socket.pushAudio(PCM)
+    harness.controller.update(settled())
+    socket.serverClose(1000)
+    harness.controller.update(streaming(OTHER_CONVERSATION_REPLY, false))
+    expect(harness.player.stops).toBe(1)
+    expect(socketAt(harness).path).toBe("reply-3/speech?from=current")
+  })
 })
 
 describe("speech controller: sockets that close on their own", () => {
@@ -441,6 +472,15 @@ describe("speech controller: the notification socket", () => {
     notification.pushAudio(PCM)
     notification.serverClose(1000)
     expect(harness.player.stops).toBe(0)
+  })
+
+  it("drops a notification's queued audio once another conversation's reply is shown", () => {
+    const harness = createHarness()
+    const notification = openNotification(harness)
+    notification.pushAudio(PCM)
+    notification.serverClose(1000)
+    harness.controller.update(settled(OTHER_CONVERSATION_REPLY))
+    expect(harness.player.stops).toBe(1)
   })
 
   it("stops a notification that closed with another code", () => {

@@ -637,6 +637,21 @@ describe("SpeechSentenceBuffer structure changes", () => {
   })
 
   it.each([
+    ["inline HTML", "Pay $5 now. Then\n# <b>"],
+    ["an image", "Pay $5 now. Then\n# ![i](u)"]
+  ])(
+    "speaks the paragraph before a heading holding %s on its first line at once",
+    (_content, text) => {
+      const buffer = new SpeechSentenceBuffer("start")
+      buffer.loadSnapshot({
+        textParts: [createTextPart("")],
+        lastRoundText: "open"
+      })
+      expect(buffer.addFragment(text)).toEqual(["Pay $5 now."])
+    }
+  )
+
+  it.each([
     ["inline code", ["Run `a` then $3. Next", " $4 more. Bye."]],
     ["emphasis", ["It is *cheap $3. Then* $4 more", ". Bye."]],
     ["a link", ["See [the $3 plan](https://x.y). Then", " $4 more. Bye."]]

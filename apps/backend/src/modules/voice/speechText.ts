@@ -362,8 +362,9 @@ const SPOKEN_SILENCED: ReadonlySet<RootContent["type"]> = new Set<
  * whose letters are not spoken. The last word of the text being written waits
  * too when more letters may turn it into a bare URL, such as `htt`, and so does
  * inline code whose closing run ends the text, since one more backtick would
- * turn it back into text, and the text before a block that is silent or empty,
- * such as a code fence or an empty heading, while that block is on its first
+ * turn it back into text, and the text before a block of a kind never spoken,
+ * such as a code fence, or a block with no content, such as an empty heading,
+ * or a quote or list holding only such blocks, while that block is on its first
  * line.
  *
  * Each round's text is a markdown document of its own, its text parts joined as
@@ -901,23 +902,22 @@ function isSilentOrEmptyBlockOnFirstLine(
 }
 
 /**
- * Whether a node is silent or empty: one of {@link SPOKEN_SILENCED}, or a
- * parent node whose children, if it has any, are all silent or empty, such as
- * an empty heading, list item, or list. A block whose content only reads as
- * nothing, such as a list item holding an image, is neither: once a line holds
- * content after its marker, no more text on it turns the block back into the
- * block before it.
+ * Whether a block is silent or empty: silent when it is one of
+ * {@link SPOKEN_SILENCED}, which are never spoken; empty when it is a paragraph
+ * or heading with no content, such as `#`, or a quote, list, or list item whose
+ * blocks, if it has any, are all silent or empty. Content of any kind makes a
+ * paragraph or heading neither, even an image or inline HTML, which are not
+ * spoken: once a line holds content after its marker, no more text on it turns
+ * the block back into the block before it.
  *
- * @param node - A node of the parsed text.
- * @returns Whether the node is a silent block or a parent of only such nodes,
- * or of none.
+ * @param node - A block of the parsed text.
+ * @returns Whether the block is silent or empty.
  */
 function isSilentOrEmptyBlock(node: RootContent): boolean {
   if (SPOKEN_SILENCED.has(node.type)) return true
-  return (
-    "children" in node &&
-    node.children.every((child) => isSilentOrEmptyBlock(child))
-  )
+  if (!("children" in node)) return false
+  if (INLINE_PARENT_TYPES.has(node.type)) return node.children.length === 0
+  return node.children.every((child) => isSilentOrEmptyBlock(child))
 }
 
 /**

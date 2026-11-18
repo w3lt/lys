@@ -11,7 +11,7 @@ struct EndpointTests {
     func answersOkWhenReady() async throws {
         let router = try Router(routes: [.buildHealth(isReady: { true })])
 
-        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/health", query: []))
+        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/health"))
 
         #expect(response.status == .ok)
         #expect(response.headerFields == [HTTPHeaderField(name: "Content-Type", value: "text/plain; charset=utf-8")])
@@ -24,7 +24,7 @@ struct EndpointTests {
     func answersUnavailableUntilReady() async throws {
         let router = try Router(routes: [.buildHealth(isReady: { false })])
 
-        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/health", query: []))
+        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/health"))
 
         #expect(response.status == .serviceUnavailable)
         #expect(response.body == Data("not ready\n".utf8))

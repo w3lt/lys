@@ -57,23 +57,6 @@ extension HTTPResponse {
         self.init(status: status, text: "\(status.reasonPhrase)\n")
     }
 
-    /// Creates a JSON response.
-    ///
-    /// Object keys are sorted, so the body does not depend on property or
-    /// dictionary order. The output is indented for reading.
-    ///
-    /// - Parameters:
-    ///   - status: Status to send.
-    ///   - value: Value to encode as the body.
-    /// - Throws: `EncodingError` when `value` cannot be represented as JSON.
-    init(status: HTTPStatus, json value: some Encodable) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let body = try encoder.encode(value)
-        let contentType = HTTPHeaderField(name: "Content-Type", value: "application/json; charset=utf-8")
-        self.init(status: status, headerFields: [contentType], body: body)
-    }
-
     /// Creates the `405 Method Not Allowed` response for a path that other
     /// methods can use.
     ///

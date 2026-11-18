@@ -2,15 +2,6 @@ import Foundation
 import Testing
 @testable import voice
 
-/// Value whose properties are declared in reverse alphabetical order, so
-/// sorted JSON keys differ from declaration order.
-private struct ReverseOrderedFixture: Encodable {
-    /// Declared first, sorts last.
-    let zebra: Int
-    /// Declared last, sorts first.
-    let apple: Int
-}
-
 /// Checks the responses this server builds and their bytes on the wire.
 @Suite("Building responses")
 struct HTTPResponseTests {
@@ -74,18 +65,5 @@ struct HTTPResponseTests {
     )
     func answersRequestErrors(requestError: HTTPRequestError, expectedStatus: HTTPStatus) {
         #expect(HTTPResponse(requestError: requestError).status == expectedStatus)
-    }
-
-    /// Verifies that JSON bodies have a stable key order and are labeled as
-    /// UTF-8 JSON.
-    @Test("Encodes JSON with sorted keys and a JSON content type")
-    func encodesJSONWithSortedKeys() throws {
-        let response = try HTTPResponse(status: .ok, json: ReverseOrderedFixture(zebra: 1, apple: 2))
-
-        let body = String(decoding: response.body, as: UTF8.self)
-        let appleKey = try #require(body.range(of: "\"apple\""))
-        let zebraKey = try #require(body.range(of: "\"zebra\""))
-        #expect(appleKey.lowerBound < zebraKey.lowerBound)
-        #expect(response.headerFields == [HTTPHeaderField(name: "Content-Type", value: "application/json; charset=utf-8")])
     }
 }

@@ -444,8 +444,8 @@ turns markdown into plain text: links read as their text and inline code as
 its words; code blocks, math, tables, images, bare URLs, emoji and other
 pictographs, such as `☀`, `❤`, and `©`, and citation markers, by the
 renderer's own `CITATION_MARKER_PATTERN`, are dropped, while other symbols,
-such as `$`, `+`, `✓`, `★`, and arrows such as `→` and `↔`, are read as
-written; list
+such as `$`, `+`, `✓`, `★`, arrows such as `→` and `↔`, and punctuation such
+as `‼`, are read as written; list
 items, paragraphs, and headings end a sentence. A reference reads the same
 before its definition arrives as after, because reference syntax is read over
 each block's text outside inline code: a link reference by its text, and a
@@ -470,10 +470,11 @@ fence holds the text after it back until it closes. A paragraph or heading
 being written waits until it ends when it holds a `|`, because its next
 line may make it a table header, or when it starts with `[label]:`, because
 a closing title quote may make it a link definition; and from its first
-`$`, `![`, unclosed backtick, or opening `*`, `_`, or `~` outside code on,
-because a later `$` may make that text inline math, the `![` may begin an
-image, and a closing mark may make it inline code or formatting, whose
-marks are not read. The last word being written waits too while more
+`$`, `![`, unclosed backtick, opening `*`, `_`, or `~`, or unclosed `[^` or
+inline HTML start such as `<br` outside code on, because a later `$` may make
+that text inline math, the `![` may begin an image, a closing mark may make
+it inline code or formatting, whose marks are not read, and a `]` or `>` may
+complete a footnote reference or a tag, whose letters are not read. The last word being written waits too while more
 letters may make it a bare URL, such as `htt`. Such a hold delays the
 sentences it covers, not only its marks: in "It takes ~5 minutes. Then do
 X.", nothing from the `~` on is read until the paragraph ends or a closing

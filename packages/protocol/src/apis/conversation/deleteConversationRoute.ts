@@ -23,8 +23,9 @@ const deleteConversationApiResponseSchemas = Object.freeze({
  * @remarks Success is a bodyless 204 sent after the conversation and every
  * message have been removed, with its jobs and their reports, and after the
  * work that was running in the conversation and in its jobs was cancelled
- * and has ended: each working reply's model request, the tool calls and
- * approval prompts it waited on, and its title request. A delete that fails
+ * and has ended: the model request of each reply still running there, a
+ * reply a newer turn superseded included, the tool calls and approval
+ * prompts it waited on, and its title request. A delete that fails
  * or finds no conversation cancels nothing. Deletion cannot be undone. A
  * missing conversation returns the conversation-not-found problem with HTTP
  * 404; clients may treat that problem as confirmation that the conversation

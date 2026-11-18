@@ -154,6 +154,71 @@ describe("listWorkingReplies", () => {
       buildJobReplyTarget(workingJob)
     ])
   })
+
+  it("lists a reply of the conversation that a newer turn superseded while its generation still runs, after the stored working replies", async () => {
+    const services = openDelegationTestServices()
+    const superseded = createPersonTurn(services.conversation.turns)
+    const conversationId = superseded.turn.conversation.id
+    startControlledGeneration(services, superseded)
+    await waitForMicrotasks()
+    const lead = startPersonTurn(services, {
+      kind: "existing",
+      id: conversationId
+    })
+    const job = sendJobMessage(services, lead, MOTHS_REQUEST)
+
+    const replies = listWorkingReplies(services.runtime, conversationId)
+
+    expect(replies).toEqual([
+      buildReplyTarget(lead),
+      buildJobReplyTarget(job),
+      buildReplyTarget(superseded)
+    ])
+  })
+
+  it("leaves out a superseded reply whose reply task settled while its title task runs, so the delete leaves that title running", async () => {
+    const services = openDelegationTestServices()
+    const superseded = createPersonTurn(services.conversation.turns)
+    const conversationId = superseded.turn.conversation.id
+    const titleTask = new ControlledReplyTask()
+    const { replyTask } = startControlledGeneration(
+      services,
+      superseded,
+      titleTask
+    )
+    await waitForMicrotasks()
+    const lead = createPersonTurn(services.conversation.turns, {
+      kind: "existing",
+      id: conversationId
+    })
+    replyTask.resolve()
+    await waitForMicrotasks()
+
+    const replies = listWorkingReplies(services.runtime, conversationId)
+    await deleteConversation(services, conversationId)
+
+    expect(replies).toEqual([buildReplyTarget(lead)])
+    expect(titleTask.context.abortSignal.aborted).toBe(false)
+  })
+
+  it("lists only the stored working replies, without failing, once the registry's disposal began", async () => {
+    const services = openDelegationTestServices()
+    const superseded = createPersonTurn(services.conversation.turns)
+    const conversationId = superseded.turn.conversation.id
+    const { replyTask } = startControlledGeneration(services, superseded)
+    await waitForMicrotasks()
+    const lead = createPersonTurn(services.conversation.turns, {
+      kind: "existing",
+      id: conversationId
+    })
+    const disposal = services.generations[Symbol.asyncDispose]()
+
+    const replies = listWorkingReplies(services.runtime, conversationId)
+
+    expect(replies).toEqual([buildReplyTarget(lead)])
+    replyTask.resolve()
+    await disposal
+  })
 })
 
 describe("stopDeletedReplies", () => {

@@ -1,6 +1,7 @@
 import {
   conversationIsJobProblemSchema,
   conversationNotFoundProblemSchema,
+  type ChatToolCall,
   type ListConversationsApiResponse
 } from "@lys/protocol"
 import type { Conversation, ConversationMetadata, Job } from "@lys/share"
@@ -16,6 +17,7 @@ import {
 } from "../../../../../src/modules/conversation/listOptions"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import AttachmentFileStore from "../../../../../src/modules/attachment/attachmentFileStore"
+import type { ReplyTaskContext } from "../../../../../src/modules/chat/replyGeneration"
 import type { ReplyTarget } from "../../../../../src/modules/chat/replyGenerationRegistry"
 import updateFastifyWithChatRoute from "../../../../../src/modules/chat/routes/chatRoute"
 import type { TurnDelegationContext } from "../../../../../src/modules/chat/turnStart"
@@ -911,6 +913,55 @@ describe("updateFastifyWithConversationRoutes", () => {
         requester: "person",
         stoppedReplyCount: 2
       })
+    })
+
+    it("cancels a reply that a newer turn superseded while it waits on a desktop tool call, and ends that wait", async () => {
+      /** Call of a desktop tool the superseded reply waits on. */
+      const desktopToolCall = Object.freeze({
+        id: "01900000-0000-7000-8000-00000000000a",
+        toolName: "read_text_file",
+        arguments: Object.freeze({ path: "/notes/moths.md" })
+      } satisfies ChatToolCall)
+
+      const { app, services } = await createDelegationRouteApp()
+      const superseded = createPersonTurn(services.conversation.turns)
+      const conversationId = superseded.turn.conversation.id
+      const replyTask = new ControlledReplyTask<ReplyTaskContext>()
+      const generation = services.generations.startReplyGeneration(
+        buildReplyTarget(superseded),
+        {
+          startReplyTask: (context) => {
+            context.abortSignal.addEventListener("abort", () => {
+              replyTask.resolve()
+            })
+            return replyTask.start(context)
+          },
+          startTitleTask: undefined,
+          reportTaskFailure: vi.fn()
+        }
+      )
+      onTestFinished(() => {
+        replyTask.resolve()
+      })
+      await waitForMicrotasks()
+      const toolResult = replyTask.context.sendClientToolCall(desktopToolCall)
+      startPersonTurn(services, { kind: "existing", id: conversationId })
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/conversations/${conversationId}`
+      })
+
+      expect(response.statusCode).toBe(204)
+      expect(replyTask.context.abortSignal.aborted).toBe(true)
+      expect(await toolResult).toBeUndefined()
+      expect(generation.pendingToolCalls).toEqual({
+        toolCalls: [],
+        toolApprovals: []
+      })
+      expect(
+        services.generations.findReplyGeneration(buildReplyTarget(superseded))
+      ).toBeUndefined()
     })
 
     it("aborts the reply request and the title request of a deleted conversation whose model holds its first piece, without the model sending anything", async () => {

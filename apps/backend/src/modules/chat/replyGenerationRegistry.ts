@@ -1,5 +1,6 @@
 import ReplyGeneration, {
   type ReplyGenerationTaskContext,
+  type ReplyTaskContext,
   type StartReplyGenerationOptions
 } from "./replyGeneration"
 
@@ -36,21 +37,29 @@ export class ReplyGenerationRegistryClosedError extends Error {
 
 /**
  * Owns every running reply generation: admits new ones, finds one for a
- * follower or a stop request, and ends them all at shutdown.
+ * follower or a stop request, lists the replies of a conversation that still
+ * run, and ends them all at shutdown.
  *
  * @remarks The invariants are that at most one registered generation exists
  * per assistant reply, a generation stays registered from
- * `startReplyGeneration` until it settles, and at most one title task runs per
- * conversation. The registry holds no reply text.
+ * `startReplyGeneration` until it settles, its reply counts as running from
+ * that admission until its reply task settles, and at most one title task
+ * runs per conversation. The registry holds no reply text.
  * Lifecycle: ready until disposal begins; disposal permanently closes the
  * registry, cancels every generation, and settles after all of them settle,
- * and repeated calls share that completion. After disposal begins, starting
- * or finding a generation throws {@link ReplyGenerationRegistryClosedError}.
+ * and repeated calls share that completion. After disposal begins, starting,
+ * finding, or listing generations throws
+ * {@link ReplyGenerationRegistryClosedError}.
  * Concurrency model: single-owner, on the backend's event loop.
  */
 export default class ReplyGenerationRegistry implements AsyncDisposable {
   /** Running generations keyed by assistant message identifier. */
   readonly #generations = new Map<string, RegisteredReplyGeneration>()
+  /**
+   * Assistant message identifiers of the registered generations whose reply
+   * task runs, from admission until that task settles.
+   */
+  readonly #runningReplyIds = new Set<string>()
   /** Conversations with a running title task, from admission to settlement. */
   readonly #conversationIdsGeneratingTitle = new Set<string>()
   /** Shared disposal completion; its presence means the registry is closed. */
@@ -80,7 +89,10 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
       throw new Error("A generation for this reply is already running")
 
     const generation = ReplyGeneration.start({
-      startReplyTask: options.startReplyTask,
+      startReplyTask: this.#startReplyTracking(
+        target.assistantMessageId,
+        options.startReplyTask
+      ),
       startTitleTask: this.#startTitleTracking(
         target.conversationId,
         options.startTitleTask
@@ -116,6 +128,34 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
   }
 
   /**
+   * Lists the replies of one conversation whose reply task still runs.
+   *
+   * @param conversationId - UUIDv7 of the conversation; the replies of its
+   * jobs, which are conversations of their own, are not listed.
+   * @returns A frozen list of frozen targets, in the order their generations
+   * started. A reply is listed from the step that admits its generation
+   * until its reply task settles, also after a newer reply of the
+   * conversation started; a generation whose reply task settled while its
+   * title task runs is left out. Empty when no reply of the conversation
+   * runs.
+   * @throws {ReplyGenerationRegistryClosedError} If the registry is closed.
+   */
+  public listRunningReplies(conversationId: string): readonly ReplyTarget[] {
+    if (this.#disposal !== undefined)
+      throw new ReplyGenerationRegistryClosedError()
+
+    const replies: ReplyTarget[] = []
+    for (const [assistantMessageId, registered] of this.#generations) {
+      if (
+        registered.conversationId === conversationId &&
+        this.#runningReplyIds.has(assistantMessageId)
+      )
+        replies.push(Object.freeze({ conversationId, assistantMessageId }))
+    }
+    return Object.freeze(replies)
+  }
+
+  /**
    * Closes the registry, cancels every running generation, and waits for them.
    *
    * @returns Shared completion for repeated or concurrent calls; it settles
@@ -128,6 +168,51 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
       )
     ).then(() => undefined)
     return this.#disposal
+  }
+
+  /**
+   * Starts tracking a reply as running until its reply task settles.
+   *
+   * @param assistantMessageId - Reply of the generation being admitted.
+   * @param startReplyTask - Requested reply launcher.
+   * @returns A launcher that starts the requested task and ends the tracking
+   * once that task settles, whatever its outcome.
+   * @remarks Tracking begins in the admission step, so the reply is listed
+   * as running before its task starts. The caller hands the launcher to
+   * {@link ReplyGeneration.start}, which always runs the reply launcher, so
+   * the tracking always ends.
+   */
+  #startReplyTracking(
+    assistantMessageId: string,
+    startReplyTask: StartReplyGenerationOptions["startReplyTask"]
+  ): StartReplyGenerationOptions["startReplyTask"] {
+    this.#runningReplyIds.add(assistantMessageId)
+    return (context) =>
+      this.#startTrackedReplyTask(assistantMessageId, startReplyTask, context)
+  }
+
+  /**
+   * Starts an admitted reply task and ends its reply's tracking once the
+   * task settles.
+   *
+   * @param assistantMessageId - Reply whose task is tracked.
+   * @param startReplyTask - Reply launcher admitted for that reply.
+   * @param context - Generation-owned cancellation, event sender, and tool
+   * call senders.
+   * @returns Settlement after the reply task settles and tracking ended.
+   * @throws The reply task's failure, after tracking ended; the generation
+   * reports it.
+   */
+  async #startTrackedReplyTask(
+    assistantMessageId: string,
+    startReplyTask: StartReplyGenerationOptions["startReplyTask"],
+    context: ReplyTaskContext
+  ): Promise<void> {
+    try {
+      await startReplyTask(context)
+    } finally {
+      this.#runningReplyIds.delete(assistantMessageId)
+    }
   }
 
   /**

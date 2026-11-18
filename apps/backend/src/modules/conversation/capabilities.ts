@@ -84,9 +84,12 @@ export interface ConversationDeleter {
  * delegation runtime by the composition root.
  *
  * @param conversationId - UUIDv7 of the conversation about to be deleted.
- * @returns The conversation's own working reply first, then those of the
- * jobs below it, at any depth, in the order the jobs were created; empty
- * when none works or the conversation is not stored.
+ * @returns The replies stored as streaming, the conversation's own first,
+ * then those of the jobs below it, at any depth, in the order the jobs were
+ * created; then the conversation's own replies whose generation still runs
+ * its reply although they are not stored as streaming, such as a reply a
+ * newer turn superseded. Empty when none works or the conversation is not
+ * stored.
  * @throws If the conversation store is closed or a stored identity
  * violates the conversation contract; nothing is listed then.
  */
@@ -106,7 +109,8 @@ export type ListWorkingReplies = (
  * @param replies - The working replies listed right before the delete.
  * @returns A promise that resolves once every cancelled generation has
  * settled; it never rejects. A listed reply without a running generation
- * is skipped.
+ * is skipped. A title request whose reply ended and stored its final state
+ * before the listing is not cancelled, because that reply is not listed.
  */
 export type StopDeletedReplies = (
   conversationId: string,

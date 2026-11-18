@@ -1,29 +1,45 @@
 import type ReplyGeneration from "../chat/replyGeneration"
-import type { ReplyTarget } from "../chat/replyGenerationRegistry"
+import {
+  ReplyGenerationRegistryClosedError,
+  type ReplyTarget
+} from "../chat/replyGenerationRegistry"
 import type { DelegationRuntime } from "./dependencies"
 import { findRunningReplyGeneration } from "./jobStops"
 
 /**
  * Lists the working replies of a conversation the person is about to
- * delete, and of every job below it, as they are stored.
+ * delete, and of every job below it.
  *
- * @param runtime - The reply reader.
+ * @param runtime - The reply reader and the generation registry.
  * @param conversationId - UUIDv7 of the conversation.
- * @returns The streaming replies: the conversation's own first, then those
- * of the jobs below it, at any depth, in the order the jobs were created;
- * empty when none streams or the conversation is not stored.
+ * @returns A frozen list. First the replies stored as streaming: the
+ * conversation's own, then those of the jobs below it, at any depth, in the
+ * order the jobs were created. Then the conversation's own replies that are
+ * not stored as streaming but whose reply task still runs, in the order
+ * their generations started, such as a reply a newer turn superseded while
+ * it waited on a tool call, an approval prompt, or a request slot. Empty
+ * when none works or the conversation is not stored.
  * @throws If the conversation store is closed or a stored identity violates
  * the conversation contract.
- * @remarks Only the stored replies are read, so the caller lists them in
- * the same synchronous step as the delete, which removes the rows that name
- * them. Whether a generation runs for each is found by
- * {@link stopDeletedReplies} once the delete succeeded.
+ * @remarks The caller lists the replies in the same synchronous step as the
+ * delete, which removes the rows that name them. Only the conversation's own
+ * running replies are added: a job takes a message only once it no longer
+ * works, and the person cannot send into a job, so no newer turn supersedes
+ * a job's reply. Once the registry's disposal began, which ends every
+ * generation, only the stored replies are listed. Whether a generation still
+ * runs for each listed reply is found by {@link stopDeletedReplies} once the
+ * delete succeeded.
  */
 export function listWorkingReplies(
-  runtime: Pick<DelegationRuntime, "jobActivity">,
+  runtime: Pick<DelegationRuntime, "jobActivity" | "generations">,
   conversationId: string
 ): readonly ReplyTarget[] {
-  return runtime.jobActivity.listStreamingReplies(conversationId)
+  const storedReplies = runtime.jobActivity.listStreamingReplies(conversationId)
+  const runningReplies = listRunningConversationReplies(
+    runtime.generations,
+    conversationId
+  )
+  return buildWorkingReplies(storedReplies, runningReplies)
 }
 
 /**
@@ -46,10 +62,13 @@ export function listWorkingReplies(
  * waits on without an answer, and cancels its title request, which the
  * person's stop leaves running; and one `stop-requested` is reported for
  * the conversation, with `person` as the requester and the number of
- * cancelled generations, also when there are none. No stop request is
- * remembered: the end of each cancelled reply finds its rows gone, so it
- * stores no report, starts no wake-up turn, and removes the reply from the
- * activity hub with `null`.
+ * cancelled generations, also when there are none. A reply a newer turn
+ * superseded is cancelled the same way when it was listed. The title
+ * request of a generation whose reply ended and stored its final state
+ * before the listing is left running, because that reply is not listed. No
+ * stop request is remembered: the end of each cancelled reply finds its
+ * rows gone, so it stores no report, starts no wake-up turn, and removes
+ * the reply from the activity hub with `null`.
  */
 export async function stopDeletedReplies(
   runtime: Pick<
@@ -71,6 +90,50 @@ export async function stopDeletedReplies(
     stoppedReplyCount: generations.length
   })
   await Promise.all(settlements)
+}
+
+/**
+ * Lists the replies of a conversation whose reply task still runs.
+ *
+ * @param generations - Lists the running replies of a conversation.
+ * @param conversationId - UUIDv7 of the conversation.
+ * @returns The conversation's own replies whose reply task runs, in the
+ * order their generations started; empty once the registry's disposal
+ * began, which ends every generation.
+ */
+function listRunningConversationReplies(
+  generations: DelegationRuntime["generations"],
+  conversationId: string
+): readonly ReplyTarget[] {
+  try {
+    return generations.listRunningReplies(conversationId)
+  } catch (error) {
+    if (error instanceof ReplyGenerationRegistryClosedError) return []
+    throw error
+  }
+}
+
+/**
+ * Builds the working replies of a conversation from those stored as
+ * streaming and those whose reply task runs.
+ *
+ * @param storedReplies - The replies stored as streaming, in their order.
+ * @param runningReplies - The conversation's own replies whose reply task
+ * runs, in their order.
+ * @returns A frozen list: `storedReplies`, then each running reply that
+ * `storedReplies` does not hold.
+ */
+function buildWorkingReplies(
+  storedReplies: readonly ReplyTarget[],
+  runningReplies: readonly ReplyTarget[]
+): readonly ReplyTarget[] {
+  const storedReplyIds = new Set(
+    storedReplies.map(({ assistantMessageId }) => assistantMessageId)
+  )
+  const addedReplies = runningReplies.filter(
+    ({ assistantMessageId }) => !storedReplyIds.has(assistantMessageId)
+  )
+  return Object.freeze([...storedReplies, ...addedReplies])
 }
 
 /**

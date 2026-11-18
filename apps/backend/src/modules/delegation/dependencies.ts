@@ -45,8 +45,14 @@ export type DelegationDependencies = DelegationAgentLookups &
     turns: Pick<ConversationTurnWriter, "createConversationTurn">
     /** Starts the generation of each stored job turn and wake-up turn. */
     startTurn: StartTurn
-    /** Finds the running generation of a reply, to stop it. */
-    generations: Pick<ReplyGenerationRegistry, "findReplyGeneration">
+    /**
+     * Finds the running generation of a reply, to stop it, and lists the
+     * running replies of a conversation, to cancel them when it is deleted.
+     */
+    generations: Pick<
+      ReplyGenerationRegistry,
+      "findReplyGeneration" | "listRunningReplies"
+    >
     /**
      * Tells the activity streams which replies delegation started and how
      * jobs changed.

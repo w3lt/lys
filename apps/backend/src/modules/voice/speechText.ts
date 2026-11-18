@@ -278,12 +278,12 @@ const SPOKEN_SILENCED: ReadonlySet<string> = new Set([
  * marker it writes is still dropped, as the renderer still shows one, unless
  * its other bracket opens or closes a reference, as in `[see \[1]`, where it
  * reads as that reference's text, the same before the definition arrives as
- * after. A citation marker is dropped wherever it stands outside code, a link's
- * text included, where the renderer shows it as text. An unclosed code fence
- * holds the rest of the text back until it closes. A paragraph or heading still
- * being written waits until it ends when it holds a `|`, because its next line
- * may turn it into a table header, or when it starts with a label in brackets
- * and a colon, because a closing title quote may turn it into a link
+ * after. Any other citation marker is dropped wherever it stands outside code,
+ * a link's text included, where the renderer shows it as text. An unclosed code
+ * fence holds the rest of the text back until it closes. A paragraph or heading
+ * still being written waits until it ends when it holds a `|`, because its next
+ * line may turn it into a table header, or when it starts with a label in
+ * brackets and a colon, because a closing title quote may turn it into a link
  * definition; and from its first `$` or `![` outside code on, because a later
  * `$` may turn that text into inline math and the `![` may begin an image.
  *

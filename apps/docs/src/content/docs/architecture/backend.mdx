@@ -452,9 +452,9 @@ as the renderer never reads it as one; a citation marker written with such
 brackets is still dropped, as the renderer still shows it as a citation,
 unless its other bracket opens or closes a reference, as in `[see \[1]`, where
 it reads as that reference's text, the same before the definition arrives as
-after. A citation marker is dropped wherever it stands outside code, a link's
-text included, where the renderer shows it as text. Sentences are cut with
-`Intl.Segmenter`. While the reply streams, a sentence is sent to
+after. Any other citation marker is dropped wherever it stands outside code, a
+link's text included, where the renderer shows it as text. Sentences are cut
+with `Intl.Segmenter`. While the reply streams, a sentence is sent to
 voice once a line break ends it or the next sentence has begun with a
 letter, so `$3.50`, `2.5`, and `Fig. 3` are never cut at their period; a
 text part's last sentence is sent once a part of another kind follows it,

@@ -449,8 +449,9 @@ each block's text outside inline code: a link reference by its text, and a
 citation marker, an image, or a footnote reference not at all. A bracket or a
 `!` that an escape or a character reference writes is never reference syntax,
 as the renderer never reads it as one; a citation marker written with such
-brackets is still dropped, because the renderer finds citation markers in each
-text node's value. Sentences are
+brackets is still dropped, as the renderer still shows it as a citation. A
+citation marker is dropped wherever it stands outside code, a link's text
+included, where the renderer shows it as text. Sentences are
 cut with `Intl.Segmenter`. While the reply streams, a sentence is sent to
 voice once a line break ends it or the next sentence has begun with a
 letter, so `$3.50`, `2.5`, and `Fig. 3` are never cut at their period; a

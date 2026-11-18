@@ -446,7 +446,9 @@ export const jobSchema = z.strictObject({
   state: jobStateSchema,
   /**
    * Newest progress note of the job's latest reply; null when that reply
-   * sent none.
+   * sent none. Its citation markers use the job's source numbers until the
+   * note is delivered to the parent conversation, and the parent's
+   * afterwards, because delivery renumbers the stored note.
    */
   latestNote: z.string().min(1).nullable(),
   /** The job's latest reply: an assistant message id in the job conversation. */

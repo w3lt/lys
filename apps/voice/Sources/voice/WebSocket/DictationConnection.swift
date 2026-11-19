@@ -6,8 +6,8 @@ import Synchronization
 /// started it until it closes.
 ///
 /// The client sends binary messages carrying raw 16 kHz mono 16-bit
-/// little-endian PCM, whole samples each, and `{ "type": "stop" }` when no
-/// more audio follows. The server answers with JSON text messages:
+/// little-endian PCM, one or more whole samples each, and
+/// `{ "type": "stop" }` when no more audio follows. The server answers with JSON text messages:
 /// `{ "type": "partial", "text": "…" }` with the whole text so far whenever
 /// it changed, and `{ "type": "final", "text": "…" }` after `stop`. It ends
 /// the socket with a close frame: `1000` once the final text was sent,
@@ -17,8 +17,10 @@ import Synchronization
 /// too far behind the audio. Audio and a `stop` that arrive after the first
 /// `stop` are dropped. A client message may carry at most
 /// ``SpeechSocketServer/maximumMessageSize`` bytes; a longer one fails the
-/// receive, and Network.framework closes the socket with `1009` itself. The
-/// client cancels a dictation by closing the socket. Every failure is logged
+/// receive, and Network.framework closes the socket with `1009` itself. An
+/// empty message is read as a peer that went away: the connection is
+/// cancelled without a close frame. The client cancels a dictation by
+/// closing the socket. Every failure is logged
 /// with its cause, and neither audio nor text is ever logged.
 ///
 /// Concurrency model: one task runs ``handleMessages()`` per connection;
@@ -182,21 +184,27 @@ final class DictationConnection: Sendable {
         state.withLock { state in state.session }?.closeAudio()
     }
 
-    /// Clears the dictation and closes the socket, normally or with the
-    /// internal-error code; a failed dictation's session is cancelled first,
-    /// because a failed send leaves it running.
+    /// Clears the dictation whose final text was sent and closes the socket
+    /// normally.
     ///
-    /// - Parameters:
-    ///   - id: Identity of the dictation that ended.
-    ///   - failed: Whether recognition or sending failed.
-    private func handleDictationCompleted(id: UUID, failed: Bool) async {
+    /// - Parameter id: Identity of the dictation that completed.
+    private func handleDictationCompleted(id: UUID) async {
+        guard state.withLock({ state in state.removeDictation(id) }).isCurrent else { return }
+        hub.remove(id)
+        await startClose(.protocolCode(.normalClosure))
+    }
+
+    /// Clears the dictation whose recognition or sending failed, cancels its
+    /// session, because a failed send leaves it running, and closes the
+    /// socket with the internal-error code.
+    ///
+    /// - Parameter id: Identity of the dictation that failed.
+    private func handleDictationFailed(id: UUID) async {
         let (isCurrent, session) = state.withLock { state in state.removeDictation(id) }
         guard isCurrent else { return }
-        if failed {
-            session?.cancel()
-        }
+        session?.cancel()
         hub.remove(id)
-        await startClose(failed ? .protocolCode(.internalServerError) : .protocolCode(.normalClosure))
+        await startClose(.protocolCode(.internalServerError))
     }
 
     // MARK: - Update pump
@@ -234,7 +242,7 @@ final class DictationConnection: Sendable {
                 if Task.isCancelled || isCloseSent { return }
                 try await connection.sendSocketMessage(buildDictationUpdateMessage(update), opcode: .text)
                 if case .final = update {
-                    await handleDictationCompleted(id: id, failed: false)
+                    await handleDictationCompleted(id: id)
                 }
             }
         } catch {
@@ -243,7 +251,7 @@ final class DictationConnection: Sendable {
             if !isCloseSent {
                 print("voice: dictation \(id) failed: \(error)")
             }
-            await handleDictationCompleted(id: id, failed: true)
+            await handleDictationFailed(id: id)
         }
     }
 

@@ -67,21 +67,22 @@ export type DictationServerMessage = z.infer<
  * Describes the WebSocket endpoint that turns one dictation into text.
  *
  * @remarks The client opens the socket, sends binary messages of raw 16 kHz
- * mono 16-bit little-endian PCM, whole samples each, and receives
+ * mono 16-bit little-endian PCM, one or more whole samples each, and receives
  * {@link dictationServerMessageSchema} text messages. It ends the dictation
  * with the {@link dictationClientMessageSchema} message; the backend ends it
  * the same way after `DICTATION_MAX_DURATION_MS`. The backend relays to voice
  * and keeps nothing. The close code says why the socket closed: `1000` the
  * final text was sent, `1001` the backend is shutting down, `1002` the client
- * sent a text message that is not a dictation message or audio that is not
- * whole samples, `1009` a client message was longer than
- * `SOCKET_MAX_CLIENT_MESSAGE_BYTES`, `1011` the dictation failed (voice
- * could not be reached, failed, broke the protocol, or sent no final text in
- * time, or more audio waited for voice, or more text for the client, than
- * the backend holds), `4409` a newer dictation socket replaced this one,
- * `4503` voice is not ready. Closing the
- * socket from the client at any time cancels the dictation. Changing the
- * method, path, or schemas requires coordinated consumers.
+ * sent a text message that is not a dictation message or audio that is
+ * empty or not whole samples, `1009` a client message was longer than
+ * `SOCKET_MAX_CLIENT_MESSAGE_BYTES`, `1011` the dictation failed (the
+ * handshake with voice failed for another reason than a refusal, voice
+ * failed, broke the protocol, or sent no final text in time, or more audio
+ * waited for voice, or more text for the client, than the backend holds),
+ * `4409` a newer dictation socket replaced this one, `4503` voice is not
+ * ready or refused the handshake. Closing the socket from the client at any
+ * time cancels the dictation. Changing the method, path, or schemas requires
+ * coordinated consumers.
  */
 export const voiceDictationApi = Object.freeze({
   method: "GET",

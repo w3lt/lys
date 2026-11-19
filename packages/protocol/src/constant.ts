@@ -213,9 +213,9 @@ export const DICTATION_AUDIO_SAMPLE_RATE_HZ = 16_000
  * Number of samples the desktop sends in one message of a dictation's audio:
  * 100 ms at {@link DICTATION_AUDIO_SAMPLE_RATE_HZ}, which is 3,200 bytes.
  *
- * @remarks The last message of a dictation may carry fewer samples. The
- * backend and voice accept any whole number of samples up to their message
- * limits, so this is the desktop's choice, not a limit.
+ * @remarks The backend and voice accept any whole number of samples, from
+ * one up to their message limits, so this is the desktop's choice, not a
+ * limit.
  */
 export const DICTATION_AUDIO_FRAME_SAMPLES = 1_600
 /**
@@ -244,14 +244,15 @@ export const SOCKET_MAX_CLIENT_MESSAGE_BYTES = 8_192
 export const DICTATION_CLOSE_COMPLETE = 1000
 /**
  * Close code of a dictation socket whose client sent a text message that is
- * not a dictation message, or audio that is not whole samples.
+ * not a dictation message, or audio that is empty or not whole samples.
  */
 export const DICTATION_CLOSE_PROTOCOL_ERROR = 1002
 /**
- * Close code of a dictation socket whose dictation failed: voice could not
- * be reached, failed, broke the protocol, or sent no final text in time
- * after the stop, or more audio waited for voice, or more text for the
- * client, than the backend holds. The text sent so far stays valid.
+ * Close code of a dictation socket whose dictation failed: the handshake
+ * with voice failed for another reason than a refusal, voice failed, broke
+ * the protocol, or sent no final text in time after the stop, or more audio
+ * waited for voice, or more text for the client, than the backend holds.
+ * The text sent so far stays valid.
  */
 export const DICTATION_CLOSE_FAILED = 1011
 /**

@@ -77,7 +77,9 @@ final class DictationSession: Sendable {
     }
 
     /// Says that no more audio follows; the final text is reported once
-    /// everything queued was heard. A second call does nothing.
+    /// everything queued was heard. A second call does nothing. Like audio,
+    /// it fails the dictation when
+    /// ``DictationEngine/maximumQueuedMessageCount`` messages already wait.
     func closeAudio() {
         addCommand(.close)
         commandInput.finish()
@@ -138,9 +140,10 @@ final class DictationEngine: Sendable {
         }
     }
 
-    /// Most audio messages that may wait for the recognizer in one
-    /// dictation: 30 s of audio at the desktop's 100 ms per message. A
-    /// dictation that falls further behind fails.
+    /// Most messages of one dictation, its audio and its closing stop, that
+    /// may wait for the recognizer, inclusive: 30 s of audio at the
+    /// desktop's 100 ms per message. A dictation that falls further behind
+    /// fails.
     static let maximumQueuedMessageCount = 300
 
     /// The model.

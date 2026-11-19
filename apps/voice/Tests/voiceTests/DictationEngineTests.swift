@@ -88,6 +88,26 @@ struct DictationEngineTests {
         await #expect(throws: FakeRecognitionError.self) { try await readUpdates(of: session) }
     }
 
+    /// Verifies audio that waits exactly at the bound is all heard, so the
+    /// bound is the most that may wait and not one less.
+    @Test func audioAtTheBacklogBoundIsAllHeard() async throws {
+        let recognizer = FakeRecognizer(FakeRecognizerBehavior(holdsFirstAudio: true))
+        let engine = try await startDictationEngine(recognizer: recognizer)
+        let session = engine.startSession()
+        session.addAudio([0.5])
+        try await waitUntil { recognizer.startedAudioCount == 1 }
+
+        for _ in 1 ... DictationEngine.maximumQueuedMessageCount {
+            session.addAudio([0.5])
+        }
+        recognizer.resolveFirstAudio()
+        try await waitUntil { recognizer.startedAudioCount == DictationEngine.maximumQueuedMessageCount + 1 }
+        session.closeAudio()
+
+        let heardCount = DictationEngine.maximumQueuedMessageCount + 1
+        #expect(try await readUpdates(of: session).last == .final("Heard \(heardCount)."))
+    }
+
     /// Verifies a dictation whose audio waits beyond the bound fails,
     /// instead of holding ever more audio in memory.
     @Test func audioBeyondTheBacklogBoundFailsTheDictation() async throws {

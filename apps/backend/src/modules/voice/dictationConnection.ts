@@ -15,6 +15,7 @@ import type { FastifyBaseLogger } from "fastify"
 import type { RawData, WebSocket } from "ws"
 import type { SingleSocketRegistry } from "./singleSocketRegistry"
 import {
+  VOICE_CLOSE_COMPLETE,
   VoiceUnavailableError,
   type openVoiceDictation,
   type VoiceDictation
@@ -37,9 +38,6 @@ const MAX_BUFFERED_BYTES = 1_000_000
 
 /** How long voice has to send the final text after `stop`, in milliseconds. */
 const FINAL_TEXT_TIMEOUT_MS = 10_000
-
-/** Close code voice ends a dictation with once the final text was sent. */
-const VOICE_CLOSE_COMPLETE = 1000
 
 /** Dependencies the dictation connection borrows. */
 export type DictationConnectionDependencies = Readonly<{
@@ -72,10 +70,11 @@ export type DictationConnectionOptions = Readonly<{
  * socket was closed without one; it never rejects.
  * @remarks Closes the socket with the code the UI understands: the final
  * text was sent (`1000`), the client sent a text message that is not `stop`
- * or audio that is not whole samples (`1002`), voice is not ready (`4503`),
- * or the dictation failed (`1011`): voice could not be reached, failed,
- * broke the protocol, or sent no final text in time, or more audio waited
- * for voice, or more text for the UI, than the relay holds. A newer
+ * or audio that is empty or not whole samples (`1002`), voice is not ready
+ * or refused the handshake (`4503`), or the dictation failed (`1011`): the
+ * handshake with voice failed for another reason than a refusal, voice
+ * failed, broke the protocol, or sent no final text in time, or more audio
+ * waited for voice, or more text for the UI, than the relay holds. A newer
  * dictation socket closes this one with `4409` first. The socket's
  * messages are read from the moment it opens, so audio sent while voice is
  * asked and dialed waits in order. A socket closed before voice answers
@@ -188,6 +187,18 @@ type RelayState =
       voice: VoiceDictation
     }>
   | Readonly<{ phase: "closed" }>
+
+/**
+ * Answers whether a message of audio carries one or more whole samples.
+ *
+ * @param pcm - Audio the UI sent.
+ * @returns False for an empty message and for one that ends inside a sample.
+ */
+function hasWholeSamples(pcm: Buffer): boolean {
+  return (
+    pcm.byteLength > 0 && pcm.byteLength % VOICE_AUDIO_BYTES_PER_SAMPLE === 0
+  )
+}
 
 /**
  * Adds audio to the audio waiting for voice, unless the wait is full.
@@ -335,11 +346,16 @@ class DictationRelay {
    * audio after the stop is dropped.
    *
    * @param pcm - Audio the UI sent.
+   * @remarks Audio that is empty or not whole samples closes the socket
+   * with `1002` and never reaches voice, which reads an empty message as a
+   * connection that went away.
    */
   #handleClientAudio(pcm: Buffer): void {
     const state = this.#state
-    if (pcm.byteLength % VOICE_AUDIO_BYTES_PER_SAMPLE !== 0) {
-      this.#log.warn("Dictation socket sent audio that is not whole samples")
+    if (!hasWholeSamples(pcm)) {
+      this.#log.warn(
+        "Dictation socket sent audio that is empty or not whole samples"
+      )
       this.#closeSocket(DICTATION_CLOSE_PROTOCOL_ERROR)
       return
     }

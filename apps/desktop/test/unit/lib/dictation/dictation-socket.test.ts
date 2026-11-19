@@ -56,6 +56,16 @@ describe("openDictationSocket", () => {
     expect(platform.sent).toHaveLength(50)
   })
 
+  it("keeps the stop message when more audio waited than it keeps", () => {
+    const { socket, platform } = openSocket()
+    for (let count = 0; count < 60; count += 1) socket.sendAudio(FRAME)
+    socket.sendStop()
+    platform.open()
+
+    expect(platform.sent).toHaveLength(51)
+    expect(platform.sent.at(-1)).toBe('{"type":"stop"}')
+  })
+
   it("drops what is sent while it closes", () => {
     const { socket, platform } = openSocket()
     platform.open()

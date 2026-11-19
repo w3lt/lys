@@ -3,7 +3,9 @@
  *
  * @remarks The socket carries audio up and text down. Messages sent while
  * the socket is still connecting wait, in order, and are sent once it opens,
- * so a recording may start before the socket is open.
+ * so a recording may start before the socket is open. Only so much audio
+ * waits; the stop message always does, so a dictation whose socket opens
+ * late still asks for its final text.
  */
 import type {
   DictationSocket,
@@ -14,8 +16,9 @@ import type {
 const STOP_MESSAGE = JSON.stringify({ type: "stop" })
 
 /**
- * Most messages that wait for the socket to open: five seconds of audio at
- * ten frames a second. A message beyond them is dropped.
+ * Most messages that may wait for the socket to open before a frame of
+ * audio is dropped instead of waiting too, inclusive: five seconds of audio
+ * at ten frames a second. The stop message waits whatever their number.
  */
 const MAX_WAITING_MESSAGES = 50
 
@@ -29,7 +32,8 @@ type DictationSocketMessage = string | Uint8Array<ArrayBuffer>
  * @param waiting - Messages that wait for the socket to open, in order.
  * @param message - The message.
  * @remarks A message for a socket that is closing or closed is dropped, as
- * is one beyond the most that may wait.
+ * is a frame of audio beyond the most that may wait. The stop message
+ * always waits.
  */
 function sendSocketMessage(
   socket: WebSocket,
@@ -38,7 +42,8 @@ function sendSocketMessage(
 ): void {
   if (socket.readyState === WebSocket.OPEN) socket.send(message)
   else if (socket.readyState !== WebSocket.CONNECTING) return
-  else if (waiting.length < MAX_WAITING_MESSAGES) waiting.push(message)
+  else if (message === STOP_MESSAGE || waiting.length < MAX_WAITING_MESSAGES)
+    waiting.push(message)
 }
 
 /**
@@ -72,8 +77,9 @@ function sendTextMessage(
  *
  * @param url - URL of the backend's dictation route, with the `ws` scheme.
  * @param handlers - Receive each text message and the close.
- * @returns The socket. A message sent while it connects waits for the open;
- * one sent once it is closing or closed is dropped.
+ * @returns The socket. A message sent while it connects waits for the open,
+ * audio up to five seconds of it and the stop message always; one sent once
+ * it is closing or closed is dropped.
  * @remarks A connection that fails is reported as a close, with the code the
  * platform gives it. Binary messages from the backend are ignored: a
  * dictation carries none.

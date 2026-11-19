@@ -366,7 +366,7 @@ describe("dictation route refusals", () => {
     )
   })
 
-  it("closes 1011 and logs the cause when voice cannot be reached", async () => {
+  it("closes 1011 and logs the cause when the handshake with voice fails for another reason than a refusal", async () => {
     const app = await createDictationApp({
       openVoiceDictation: () => Promise.reject(new Error("connect ECONNRESET"))
     })
@@ -439,23 +439,52 @@ describe("dictation route refusals", () => {
     }
   )
 
-  it("closes 1002 for audio that is not whole samples", async () => {
-    const { app, socket, voice } = await openDictation()
-    socket.send(Buffer.alloc(3))
+  it.each([
+    ["empty", 0],
+    ["not whole samples", 3]
+  ])(
+    "closes 1002, relaying nothing, for audio that is %s",
+    async (_fault, byteLength) => {
+      const { app, socket, voice } = await openDictation()
+      socket.send(Buffer.alloc(byteLength))
+
+      await expect(socket.closed).resolves.toBe(DICTATION_CLOSE_PROTOCOL_ERROR)
+      expect(voice.audio).toEqual([])
+      expect(voice.isCancelled).toBe(true)
+      expect(app.log.records).toContainEqual(
+        matchLogEntry(
+          "warn",
+          "Dictation socket sent audio that is empty or not whole samples"
+        )
+      )
+    }
+  )
+
+  it("closes 1002 for empty audio sent before voice accepted, and hands voice none of it", async () => {
+    const pending = createPendingVoice()
+    const app = await createDictationApp(pending)
+    const socket = openTestSocket(app.baseUrl)
+    await socket.opened
+    socket.send(Buffer.alloc(0))
 
     await expect(socket.closed).resolves.toBe(DICTATION_CLOSE_PROTOCOL_ERROR)
+    await vi.waitFor(() => expect(pending.isDialed()).toBe(true))
+    const voice = pending.resolveHandshake()
+    await vi.waitFor(() => expect(voice.isCancelled).toBe(true))
     expect(voice.audio).toEqual([])
-    expect(app.log.records).toContainEqual(
-      matchLogEntry(
-        "warn",
-        "Dictation socket sent audio that is not whole samples"
-      )
-    )
   })
 
-  it("closes 1009 for a message over the size limit", async () => {
+  it("relays a message of exactly the size limit", async () => {
     const { socket, voice } = await openDictation()
-    socket.send(Buffer.alloc(SOCKET_MAX_CLIENT_MESSAGE_BYTES + 2))
+    const audio = Buffer.alloc(SOCKET_MAX_CLIENT_MESSAGE_BYTES, 1)
+    socket.send(audio)
+
+    await vi.waitFor(() => expect(voice.audio).toEqual([audio]))
+  })
+
+  it("closes 1009 for a message one byte over the size limit", async () => {
+    const { socket, voice } = await openDictation()
+    socket.send(Buffer.alloc(SOCKET_MAX_CLIENT_MESSAGE_BYTES + 1))
 
     await expect(socket.closed).resolves.toBe(1009)
     expect(voice.audio).toEqual([])
@@ -521,6 +550,39 @@ describe("dictation route failures and limits", () => {
     }
   )
 
+  it("relays a text of 100,000 characters, the most a dictation message may carry", async () => {
+    const { socket, voice } = await openDictation()
+    const text = "a".repeat(100_000)
+    voice.sendText({ type: "partial", text })
+
+    await vi.waitFor(() =>
+      expect(socket.messages).toEqual([{ type: "partial", text }])
+    )
+  })
+
+  it("closes 1011, relaying nothing, when voice sends a text of 100,001 characters", async () => {
+    const { app, socket, voice } = await openDictation()
+    voice.sendText({ type: "partial", text: "a".repeat(100_001) })
+
+    await expect(socket.closed).resolves.toBe(DICTATION_CLOSE_FAILED)
+    expect(voice.isCancelled).toBe(true)
+    expect(socket.messages).toEqual([])
+    expect(app.log.records).toContainEqual(
+      matchLogEntry(
+        "error",
+        "Voice sent a message that is not a dictation message"
+      )
+    )
+  })
+
+  it("relays audio while exactly 1,000,000 bytes wait for voice", async () => {
+    const { socket, voice } = await openDictation()
+    voice.bufferedBytes = 1_000_000
+    socket.send(AUDIO_FRAME)
+
+    await vi.waitFor(() => expect(voice.audio).toEqual([AUDIO_FRAME]))
+  })
+
   it("closes 1011 when voice falls behind the audio", async () => {
     const { app, socket, voice } = await openDictation()
     voice.bufferedBytes = 1_000_001
@@ -549,6 +611,21 @@ describe("dictation route failures and limits", () => {
         bufferedBytes: expect.any(Number)
       })
     )
+  })
+
+  it("hands voice exactly five seconds of audio that waited for it", async () => {
+    const pending = createPendingVoice()
+    const app = await createDictationApp(pending)
+    const socket = openTestSocket(app.baseUrl)
+    await socket.opened
+    for (let count = 0; count < 50; count += 1) socket.send(AUDIO_FRAME)
+    await vi.waitFor(() => expect(app.getReceivedMessageCount()).toBe(50))
+    await vi.waitFor(() => expect(pending.isDialed()).toBe(true))
+    const voice = pending.resolveHandshake()
+
+    await vi.waitFor(() => expect(voice.audio).toHaveLength(50))
+    expect(voice.isStarted).toBe(true)
+    expect(voice.isCancelled).toBe(false)
   })
 
   it("closes 1011 when more audio waits for voice than five seconds of it", async () => {

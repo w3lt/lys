@@ -60,12 +60,12 @@ extension NWConnection {
     func readSocketMessage() async throws -> SocketMessage {
         try await withCheckedThrowingContinuation { continuation in
             receiveMessage { content, context, _, error in
-                continuation.resume(with: Self.readReceivedMessage(content: content, context: context, error: error))
+                continuation.resume(with: Self.parseReceivedMessage(content: content, context: context, error: error))
             }
         }
     }
 
-    /// Reads what one receive delivered as a WebSocket message.
+    /// Parses what one receive delivered into a WebSocket message.
     ///
     /// - Parameters:
     ///   - content: The message's payload, if any.
@@ -74,7 +74,7 @@ extension NWConnection {
     /// - Returns: The message, or the failure ``readSocketMessage()``
     ///   throws: the receive's error, or ``ConnectionClosedError`` for a
     ///   payload that is missing or empty outside a close frame.
-    private static func readReceivedMessage(
+    private static func parseReceivedMessage(
         content: Data?,
         context: NWConnection.ContentContext?,
         error: NWError?

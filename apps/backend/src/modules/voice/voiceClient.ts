@@ -13,6 +13,12 @@ const VOICE_HEALTH_URL = `http://${VOICE_HOST}:${VOICE_PORT}/health`
 const VOICE_SOCKET_URL = `ws://${VOICE_HOST}:${VOICE_SOCKET_PORT}`
 
 /**
+ * Close code voice ends a job with once it is complete: a speech once
+ * everything was spoken, a dictation once its final text was sent.
+ */
+export const VOICE_CLOSE_COMPLETE = 1000
+
+/**
  * Asks voice whether it is ready to speak and to listen.
  *
  * @param fetchImpl - Fetch implementation to use; the global `fetch` unless
@@ -67,7 +73,7 @@ export type VoiceDictationHandlers = Readonly<{
 export type VoiceDictation = Readonly<{
   /** Tells voice to begin a dictation, closing any older dictation. */
   start: () => void
-  /** Sends audio to hear: 16 kHz mono 16-bit PCM, whole samples. */
+  /** Sends audio to hear: 16 kHz mono 16-bit PCM, one or more whole samples. */
   sendAudio: (pcm: Uint8Array) => void
   /** Signals that no more audio follows; voice answers with the final text. */
   sendStop: () => void

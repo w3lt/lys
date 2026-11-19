@@ -196,6 +196,17 @@ function sendUpdate(
   socket.handlers.onText(JSON.stringify({ type, text }))
 }
 
+/**
+ * Replaces the platform's `reportError` until the test ends.
+ *
+ * @returns The replacement, which records what is reported.
+ */
+function startErrorReportSpy(): ReturnType<typeof vi.fn> {
+  const reportError = vi.fn()
+  vi.stubGlobal("reportError", reportError)
+  return reportError
+}
+
 /** Freezes timers until the test ends. */
 function startFakeTimers(): void {
   vi.useFakeTimers()
@@ -245,11 +256,11 @@ describe("ComposerDictation start", () => {
 
   it.each([
     ["denied", "microphone-denied"],
-    ["missing", "microphone-missing"],
-    ["failed", "microphone-failed"]
+    ["missing", "microphone-missing"]
   ] as const)(
-    "ends with a notice when the microphone is %s",
+    "ends with a notice, and reports nothing, when the microphone is %s",
     async (kind, notice) => {
+      const reportError = startErrorReportSpy()
       const harness = createHarness("typed")
       harness.dictation.handleButtonPress(5)
       harness.microphones[0]?.reject(new MicrophoneError(kind))
@@ -262,16 +273,56 @@ describe("ComposerDictation start", () => {
       })
       expect(harness.sockets[0]?.isClosed).toBe(true)
       expect(harness.draft).toBe("typed")
+      expect(reportError).not.toHaveBeenCalled()
     }
   )
 
-  it("ends with the microphone-failed notice for a failure that is not a microphone error", async () => {
+  it("ends with the microphone-failed notice and reports the failure, with its cause, when the microphone could not be started", async () => {
+    const reportError = startErrorReportSpy()
+    const harness = createHarness("typed")
+    const failure = new MicrophoneError("failed", {
+      cause: new Error("worklet")
+    })
+    harness.dictation.handleButtonPress(5)
+    harness.microphones[0]?.reject(failure)
+    await waitForMicrotasks()
+
+    expect(harness.views.at(-1)).toEqual({
+      status: "idle",
+      notice: "microphone-failed",
+      isAtDraftEnd: false
+    })
+    expect(harness.sockets[0]?.isClosed).toBe(true)
+    expect(harness.draft).toBe("typed")
+    expect(reportError).toHaveBeenCalledExactlyOnceWith(failure)
+  })
+
+  it("ends with the microphone-failed notice and reports a failure that is not a microphone error", async () => {
+    const reportError = startErrorReportSpy()
     const harness = createHarness()
+    const failure = new Error("worklet")
     harness.dictation.handleButtonPress(0)
-    harness.microphones[0]?.reject(new Error("worklet"))
+    harness.microphones[0]?.reject(failure)
     await waitForMicrotasks()
 
     expect(harness.views.at(-1)?.notice).toBe("microphone-failed")
+    expect(reportError).toHaveBeenCalledExactlyOnceWith(failure)
+  })
+
+  it("reports nothing for a microphone that fails after the start was cancelled", async () => {
+    const reportError = startErrorReportSpy()
+    const harness = createHarness()
+    harness.dictation.handleButtonPress(0)
+    harness.dictation.handleButtonPress(0)
+    harness.microphones[0]?.reject(new Error("aborted"))
+    await waitForMicrotasks()
+
+    expect(harness.views.at(-1)).toEqual({
+      status: "idle",
+      notice: undefined,
+      isAtDraftEnd: false
+    })
+    expect(reportError).not.toHaveBeenCalled()
   })
 
   it("clears the last notice when the next dictation starts", async () => {
@@ -388,14 +439,20 @@ describe("ComposerDictation text", () => {
   })
 
   it.each(["not json", '{"type":"partial"}', '{"type":"speak","text":"x"}'])(
-    "ends with the stopped notice for the message %s",
+    "ends with the stopped notice, and reports the failure without the text, for the message %s",
     async (message) => {
+      const reportError = startErrorReportSpy()
       const { harness, socket, microphone } = await startListening("typed")
       socket.handlers.onText(message)
 
       expect(harness.draft).toBe("typed")
       expect(microphone.isStopped).toBe(true)
       expect(harness.views.at(-1)?.notice).toBe("stopped")
+      expect(reportError).toHaveBeenCalledExactlyOnceWith(
+        new Error(
+          "The dictation socket sent a message that is not a dictation message."
+        )
+      )
     }
   )
 })

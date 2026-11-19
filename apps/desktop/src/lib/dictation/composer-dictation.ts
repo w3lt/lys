@@ -12,6 +12,7 @@
  * | The button is pressed while listening | The microphone is released, `stop` is sent, and the dictation waits up to five seconds for the final text. |
  * | A `partial` arrives | The draft holds the typed text with everything dictated so far. |
  * | A `final` arrives | The draft holds the final text, and the dictation ends; one that arrives while listening, as at the backend's time limit, also releases the microphone. |
+ * | A message that is not a dictation message arrives | The text so far stays, and the dictation ends with the `stopped` notice. |
  * | No final text arrives in time | The last partial stays, and the dictation ends. |
  * | The microphone cannot be opened | The dictation ends with a notice that says why. |
  * | The socket closes first | The text so far stays, and the dictation ends with a notice. |
@@ -20,6 +21,12 @@
  * The microphone is released on every path out of `listening`, and nothing
  * is sent or written for a dictation once it ended. Whether Lys may listen
  * when the button is pressed is the caller's rule, not this module's.
+ *
+ * Two failures are not expected and also go to the platform's `reportError`,
+ * as an uncaught error does, since the desktop has no logger: a microphone
+ * that could not be started for another reason than a refusal or a missing
+ * device, with its cause, and a message that is not a dictation message,
+ * without the message's text. No report carries dictated text.
  */
 import {
   DICTATION_CLOSE_COMPLETE,
@@ -202,6 +209,10 @@ type DictationStage =
       readonly timer: ReturnType<typeof setTimeout>
     }
 
+/** What is reported for a message that is not a dictation message. */
+const INVALID_MESSAGE_REPORT =
+  "The dictation socket sent a message that is not a dictation message."
+
 /**
  * Parses one text message of the dictation socket.
  *
@@ -336,6 +347,8 @@ export class ComposerDictation {
    * @param signal - The dictation's signal.
    * @returns Settlement once the dictation listens, ended, or failed; never
    * rejects.
+   * @remarks A failure other than a refused or missing microphone is not
+   * expected: it also goes to `reportError`, with its cause.
    */
   async #startRecorder(signal: AbortSignal): Promise<void> {
     let recorder: MicrophoneRecorder
@@ -352,6 +365,7 @@ export class ComposerDictation {
     } catch (error) {
       if (signal.aborted) return
       const kind = error instanceof MicrophoneError ? error.kind : "failed"
+      if (kind === "failed") reportError(error)
       this.#closeDictation(MICROPHONE_NOTICES[kind])
       return
     }
@@ -401,12 +415,15 @@ export class ComposerDictation {
    *
    * @param signal - Signal of the dictation the message belongs to.
    * @param text - The message, as the backend sent it.
+   * @remarks A message that is not a dictation message ends the dictation
+   * and goes to `reportError` as an error that does not carry its text.
    */
   #handleText(signal: AbortSignal, text: string): void {
     const state = this.#state
     if (signal.aborted || state.phase === "idle") return
     const message = parseServerMessage(text)
     if (message === undefined) {
+      reportError(new Error(INVALID_MESSAGE_REPORT))
       this.#closeDictation("stopped")
       return
     }

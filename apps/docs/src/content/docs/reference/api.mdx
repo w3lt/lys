@@ -43,6 +43,7 @@ route definitions. Two of the routes are WebSockets, marked `WS` below.
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`     | `{ status, reason?, content?, approvalToken }`                                                       | Bodyless `204`, or `409` Problem Details                                   |
 | `WS`     | `/api/v1/chat/:conversationId/replies/:assistantMessageId/speech?from=start\|current` | none; `from` is `start` when omitted                                                                 | Binary PCM (24 kHz, mono, 16-bit little-endian), then a close code         |
 | `WS`     | `/api/v1/chat/:conversationId/replies/:assistantMessageId/notification`               | none                                                                                                 | Binary PCM, then a close code                                              |
+| `WS`     | `/api/v1/voice/dictation`                                                             | none; binary PCM (16 kHz, mono, 16-bit little-endian) and `{ type: "stop" }` as messages             | `{ type: "partial" \| "final", text }` messages, then a close code         |
 | `POST`   | `/api/v1/chat/:conversationId/jobs/stop`                                              | none                                                                                                 | Bodyless `204`, or `404` Problem Details                                   |
 | `GET`    | `/api/v1/activity/events`                                                             | none                                                                                                 | `text/event-stream` (activity snapshot, then live events)                  |
 
@@ -427,7 +428,48 @@ is the same socket without the `from` query, and speaks one short line chosen
 by the backend at random, for a reply that finished in the background. Its
 line is never stored. Its close codes are the same, except `4410`, which it
 never sends. Neither socket accepts a message from the client; the PCM frames
-are the only payload, one direction.
+are the only payload, one direction. A client message over 8 KiB closes
+either socket with `1009`.
+
+## Dictation socket
+
+`GET /api/v1/voice/dictation` is a WebSocket for Lys's desktop, which
+dictates into the message field through it. The backend accepts the upgrade
+by the same `Origin` rule as the [speech sockets](#speech-sockets): another
+`Origin` is refused with a `403` Problem Details body, and a request without
+one is accepted. The route takes no parameter. The client sends audio, the
+voice service turns it into text, and the text comes back on the same
+socket:
+
+| Direction | Message                              | Meaning                                                                                                                    |
+| --------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| Client    | binary                               | Raw 16 kHz mono 16-bit little-endian PCM, a whole number of samples, at most 8 KiB; the desktop sends 100 ms, 3,200 bytes. |
+| Client    | `{ "type": "stop" }`                 | Asks for the final text. Audio and `stop` messages after the first `stop` are dropped.                                     |
+| Server    | `{ "type": "partial", "text": "…" }` | The whole text so far, sent whenever it changes; each one replaces the one before.                                         |
+| Server    | `{ "type": "final", "text": "…" }`   | The finished text, once, after a `stop` or at five minutes; the socket then closes with `1000`.                            |
+
+`text` holds at most 100,000 characters. Audio may be sent from the moment
+the socket opens; what arrives before the voice service accepted the
+dictation waits, in order, up to five seconds of audio. A dictation listens
+for at most five minutes, counted from the socket's opening; the backend
+then stops it as a `stop` does.
+
+Lys listens to one dictation at a time: opening a socket closes the older
+one. A dictation and a speech do not close each other. The socket closes
+with:
+
+| Code   | Meaning                                                                                                                                                                           |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1000` | The final text was sent.                                                                                                                                                          |
+| `1001` | The backend is shutting down; no final text follows.                                                                                                                              |
+| `1002` | The client sent a text message that is not `stop`, or audio that is not whole samples.                                                                                            |
+| `1009` | The client sent a message over 8 KiB.                                                                                                                                             |
+| `1011` | The voice service failed or fell behind, sent no final text within ten seconds of the `stop`, or more than five seconds of audio waited for it. The text sent so far stays valid. |
+| `4409` | A newer dictation socket opened.                                                                                                                                                  |
+| `4503` | Voice is not ready, or refused or did not answer the dictation within two seconds.                                                                                                |
+
+Closing the socket from the client cancels the dictation at once; no final
+text follows. Neither the audio nor the text is stored or logged.
 
 ## Chat context measurement
 

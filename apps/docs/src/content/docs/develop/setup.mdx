@@ -26,7 +26,7 @@ Toolchain versions, platform prerequisites, and first build.
   validation list includes Cargo-based checks for both.
 - **Swift 6.3 or later** (Xcode or the Command Line Tools): required to build
   vmo, the page reader `read_page` uses, and voice, the speech server Lys
-  reads her replies with. The desktop starts both with
+  reads her replies with and hears dictation with. The desktop starts both with
   `apps/vmo/run.sh` and `apps/voice/run.sh`, and `build.sh` installs both.
   vmo builds and runs only on macOS 26 on Apple silicon; voice needs macOS 15
   or later; see
@@ -105,7 +105,7 @@ readiness.
   only LM Studio is on, on `127.0.0.1:1234`.
 - vmo listens on `127.0.0.1:8080`.
 - voice listens on `127.0.0.1:9090` for health and `127.0.0.1:9091` for its
-  speech sockets.
+  speech and dictation sockets.
 
 Backend startup does not wait for the providers: the backend opens its HTTP
 listener, then tries once to connect to each provider that is on. If a

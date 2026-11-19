@@ -408,7 +408,8 @@ reader is offered.
 
 The backend relays a reply's audio to the UI over two WebSocket routes, both
 on the same Fastify server as the HTTP API and registered by the voice
-module's plugin, `registerVoiceRoutes` in `modules/voice/routes.ts`, under
+module's plugin, `registerVoiceRoutes` in `modules/voice/routes.ts`, which
+also registers the [dictation socket](#dictation-socket), under
 `/api/v1/chat/:conversationId/replies/:assistantMessageId/`:
 
 - `speech?from=start|current`, `chatSpeechApi`: streams the reply as audio.
@@ -519,6 +520,70 @@ close, and failure is logged; see
 
 The close codes are `SPEECH_CLOSE_*` in `@lys/protocol`, next to the routes,
 and the [API reference](/reference/api/#speech-sockets) lists them.
+
+## Dictation socket
+
+The backend relays a dictation between the UI and voice over one WebSocket
+route, `GET /api/v1/voice/dictation`, `voiceDictationApi`, registered by the
+same plugin as the speech sockets. The UI sends the microphone's audio and a
+`stop`; voice's text comes back. The backend reads nothing into the audio or
+the text: it checks each message's shape, relays it, and keeps neither.
+
+Only the desktop origin may open the socket, by the same check as the speech
+sockets: any other `Origin` is refused before the upgrade with a `403`
+Problem Details body, so no web page can make Lys listen. Lys listens to one
+dictation at a time: a registry of its own holds the socket that dictates,
+and opening a socket closes the older one with `4409`, which cancels the
+older dictation at voice. A dictation and a speech do not close each other.
+
+`handleDictationConnection` in `modules/voice/dictationConnection.ts` reads
+the socket's messages from the moment it opens. It asks voice's `GET /health`
+and then opens a dictation at voice's socket, each waiting at most two
+seconds: a voice that is not ready, or a refused, closed, or unanswered
+handshake, closes the socket with `4503`, and any other failure to reach
+voice with `1011`. Audio that arrives in the meantime waits in order, for at
+most five seconds of audio, 160,000 bytes; more closes the socket with
+`1011`. A socket the UI closed in the meantime starts no dictation, or
+cancels the one voice just accepted.
+
+The messages are the same on both hops, and `@lys/protocol` holds their
+schemas:
+
+| Direction       | Message                              | Meaning                                                          |
+| --------------- | ------------------------------------ | ---------------------------------------------------------------- |
+| UI → voice      | binary                               | 16 kHz mono 16-bit little-endian PCM, a whole number of samples. |
+| UI → voice      | `{ "type": "stop" }`                 | Send the final text.                                             |
+| voice → UI      | `{ "type": "partial", "text": "…" }` | The whole text so far.                                           |
+| voice → UI      | `{ "type": "final", "text": "…" }`   | The finished text; the socket then closes with `1000`.           |
+| backend → voice | `{ "type": "transcribe" }`           | The first message, which starts a dictation at voice.            |
+
+A text message that is not `stop`, or audio that is not whole samples,
+closes the socket with `1002`. The WebSocket server refuses any client
+message over 8 KiB, `SOCKET_MAX_CLIENT_MESSAGE_BYTES`, on every socket route,
+and closes that socket with `1009`; an audio message of the UI is 3,200
+bytes. A `stop` that arrives before voice accepted the dictation is kept and
+sent after the waiting audio. After the first `stop`, further audio and
+further `stop` messages are dropped.
+
+The backend counts five minutes, `DICTATION_MAX_DURATION_MS`, from the
+moment the socket opens, and then stops the dictation as a `stop` from the
+UI does. Once it has relayed a `stop`, voice has ten seconds to send the
+final text; after that the socket closes with `1011`. A `final` that voice
+sends before any `stop`, or a message of voice that is not a dictation
+message, closes it with `1011` too. Voice closing the dictation with `1000`
+after its final text closes the socket with `1000`; any other close of
+voice's becomes `1011`.
+
+Neither side may fall behind: when more than 1 MB of audio waits for voice,
+about thirty seconds, or more than 1 MB of text waits for the UI, the socket
+closes with `1011`. Whenever the UI's socket closes, for any reason, the
+backend closes voice's socket, which cancels the recognition. When the
+backend shuts down, the socket is closed with `1001`. Every open, close, and
+failure is logged, without audio or text; see
+[Dictation socket entries](/operate/logging/#dictation-socket-entries).
+
+The close codes are `DICTATION_CLOSE_*` in `@lys/protocol`, and the
+[API reference](/reference/api/#dictation-socket) lists them.
 
 ## Tool call policy
 

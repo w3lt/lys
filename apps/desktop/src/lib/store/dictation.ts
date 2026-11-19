@@ -180,8 +180,8 @@ function createDictationStoreState(store: DictationStoreApi): DictationStore {
  * while another view than the chat view is shown, while voice does not run,
  * while Lys answers or talks, and while a conversation is opening;
  * {@link registerDictationRules} ends a running dictation when one of those
- * begins. When a dictation ends because voice
- * was not ready or stopped, it has voice's status read again.
+ * begins. When a dictation ends because voice was not ready or stopped, it
+ * has voice's status read again.
  */
 export const useDictationStore: UseBoundStore<StoreApi<DictationStore>> =
   create<DictationStore>((setState, getState) =>

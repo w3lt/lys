@@ -149,6 +149,20 @@ export const VOICE_AUDIO_CHANNELS = 1
 export const VOICE_AUDIO_BYTES_PER_SAMPLE = 2
 // ============== AUDIO ============== //
 
+// ============== BACKEND SOCKETS ============== //
+/**
+ * Most bytes one message a client sends on a backend WebSocket may carry,
+ * inclusive: 8 KiB.
+ *
+ * @remarks A dictation's audio message carries 3,200 bytes, and a speech
+ * socket's client sends nothing, so nothing legitimate comes near it. The
+ * backend closes a socket that sends a longer message with `1009`. voice
+ * accepts messages of up to 16 KiB, so every message the backend relays
+ * fits there.
+ */
+export const SOCKET_MAX_CLIENT_MESSAGE_BYTES = 8_192
+// ============== BACKEND SOCKETS ============== //
+
 // ============== SPEECH STREAM ============== //
 /**
  * Close code of a speech or notification socket whose audio was fully sent:
@@ -227,17 +241,6 @@ export const DICTATION_AUDIO_FRAME_SAMPLES = 1_600
  * {@link DICTATION_CLOSE_COMPLETE}.
  */
 export const DICTATION_MAX_DURATION_MS = 300_000
-/**
- * Most bytes one message a client sends on a backend WebSocket may carry,
- * inclusive: 8 KiB.
- *
- * @remarks A dictation's audio message carries 3,200 bytes, and a speech
- * socket's client sends nothing, so nothing legitimate comes near it. The
- * backend closes a socket that sends a longer message with `1009`. voice
- * accepts messages of up to 16 KiB, so every message the backend relays
- * fits there.
- */
-export const SOCKET_MAX_CLIENT_MESSAGE_BYTES = 8_192
 /**
  * Close code of a dictation socket whose final text was sent.
  */

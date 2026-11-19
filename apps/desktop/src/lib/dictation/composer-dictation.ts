@@ -247,11 +247,11 @@ function findCloseNotice(code: number): DictationNotice | undefined {
  *
  * @remarks Lifecycle: one instance for the application; the owner calls
  * {@link ComposerDictation.cancel} before it lets the instance go, which
- * releases the microphone, the socket, and the timer.
- * Concurrency model: serialized on the UI thread. A dictation's callbacks
- * carry its abort signal, and a callback whose signal aborted does nothing,
- * so a recording that starts late, a late message, and a late close of an
- * ended dictation change nothing.
+ * releases the microphone, the socket, and the timer. Concurrency model:
+ * serialized on the UI thread. A dictation's callbacks carry its abort
+ * signal, and a callback whose signal aborted does nothing, so a recording
+ * that starts late, a late message, and a late close of an ended dictation
+ * change nothing.
  */
 export class ComposerDictation {
   /** What the instance borrows. */

@@ -373,10 +373,10 @@ function removeDictationPlatformFake(): void {
  * either answer.
  * @remarks Only platform globals are replaced, so the socket adapter, the
  * recorder, the composer's dictation, and the store under test are the real
- * ones. The
- * navigator keeps everything else it has. Vitest restores the globals after
- * the case, and the microphone is removed when the case finishes. A socket
- * opens only when the case calls {@link FakeWebSocket.open}.
+ * ones. The navigator keeps everything else it has. Vitest restores the
+ * globals after the case, and the microphone is removed when the case
+ * finishes. A socket opens only when the case calls
+ * {@link FakeWebSocket.open}.
  */
 export function startDictationPlatformFake(): DictationPlatformFake {
   const platform: DictationPlatformFake = {

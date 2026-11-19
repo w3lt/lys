@@ -87,9 +87,7 @@ final class TestSocketClient: @unchecked Sendable {
     /// Whether the handshake was refused, or the connection ended without
     /// an answer, as a dropped one does.
     var isRefused: Bool {
-        lock.withLock {
-            if let handshakeStatus { handshakeStatus != 101 } else { ended }
-        }
+        lock.withLock { handshakeStatus.map { $0 != 101 } ?? ended }
     }
 
     /// Sends one text message.
@@ -122,11 +120,13 @@ final class TestSocketClient: @unchecked Sendable {
     ///   ``ConnectionEndedError`` when the connection ended before it.
     func readMessage(within seconds: Double = 2) async throws -> ReceivedMessage {
         try await waitUntil(within: seconds) { hasMessageOrEnded }
-        return try lock.withLock { () throws -> ReceivedMessage in
-            guard handedOut < inbox.count else { throw ConnectionEndedError() }
-            handedOut += 1
-            return inbox[handedOut - 1]
+        let message = lock.withLock { () -> ReceivedMessage? in
+            let next = handedOut < inbox.count ? inbox[handedOut] : nil
+            handedOut += next == nil ? 0 : 1
+            return next
         }
+        guard let message else { throw ConnectionEndedError() }
+        return message
     }
 
     /// Receives messages until the close frame, skipping those before it.
@@ -158,20 +158,31 @@ final class TestSocketClient: @unchecked Sendable {
         lock.withLock { handedOut < inbox.count || ended }
     }
 
-    /// Receives the next bytes and parses them, until the connection ends.
+    /// Receives the next bytes and handles them, until the connection ends.
     private func readNextBytes() {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] content, _, isComplete, error in
-            guard let self else { return }
-            let isEnd = isComplete || error != nil
-            let (replies, isPaused) = self.lock.withLock { () -> ([Data], Bool) in
-                if let content { unparsed.append(content) }
-                let replies = parseReceivedBytes()
-                if isEnd { ended = true }
-                return (replies, isReadingPaused)
-            }
-            replies.forEach(sendBytes)
-            if !isEnd && !isPaused { self.readNextBytes() }
+            self?.handleReceivedBytes(content, isComplete: isComplete, error: error)
         }
+    }
+
+    /// Handles the outcome of one receive: parses the bytes, sends the
+    /// answers they call for, and receives the next ones unless the
+    /// connection ended or the test stopped reading.
+    ///
+    /// - Parameters:
+    ///   - content: The bytes received, if any.
+    ///   - isComplete: Whether the server ended the connection.
+    ///   - error: The receive's failure, if it failed.
+    private func handleReceivedBytes(_ content: Data?, isComplete: Bool, error: NWError?) {
+        let isEnd = isComplete || error != nil
+        let (replies, isPaused) = lock.withLock { () -> ([Data], Bool) in
+            unparsed.append(content ?? Data())
+            let replies = parseReceivedBytes()
+            ended = ended || isEnd
+            return (replies, isReadingPaused)
+        }
+        replies.forEach(sendBytes)
+        if !isEnd && !isPaused { readNextBytes() }
     }
 
     /// Parses the handshake answer, then every complete frame received.

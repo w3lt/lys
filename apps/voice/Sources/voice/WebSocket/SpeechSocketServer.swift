@@ -127,11 +127,32 @@ final class SpeechSocketServer: Sendable {
         return !headers.contains(where: { $0.name.lowercased() == "origin" })
     }
 
+    /// Answers one client handshake: accepts it, or rejects it and logs why,
+    /// when the peer sent an `Origin` header or the models are not loaded
+    /// yet.
+    ///
+    /// - Parameters:
+    ///   - headers: The handshake's request headers.
+    ///   - jobs: The engines, whose models must be loaded.
+    /// - Returns: The response that accepts or rejects the handshake.
+    private static func handleClientRequest(
+        headers: [(name: String, value: String)],
+        jobs: VoiceJobs
+    ) -> NWProtocolWebSocket.Response {
+        let isReady = jobs.speechEngine.isReady && jobs.dictationEngine.isReady
+        guard canAcceptHandshake(headers: headers, isReady: isReady) else {
+            let reason = isReady ? "it carries an Origin header" : "the models are not loaded"
+            print("voice: refused a socket handshake: \(reason)")
+            return NWProtocolWebSocket.Response(status: .reject, subprotocol: nil)
+        }
+        return NWProtocolWebSocket.Response(status: .accept, subprotocol: nil)
+    }
+
     /// Builds the WebSocket listener.
     ///
     /// The protocol stack is a single WebSocket layer; the handshake is
-    /// rejected in the client-request handler, and the refusal logged, when
-    /// the peer sent an `Origin` header or the models are not loaded yet.
+    /// answered in the client-request handler by
+    /// ``handleClientRequest(headers:jobs:)``.
     ///
     /// - Returns: A listener that has not been started.
     /// - Throws: `NWError` when Network.framework rejects the parameters.
@@ -141,13 +162,7 @@ final class SpeechSocketServer: Sendable {
         websocket.maximumMessageSize = Self.maximumMessageSize
         let jobs = self.jobs
         websocket.setClientRequestHandler(DispatchQueue(label: "voice.WebSocketHandshake")) { _, headers in
-            let isReady = jobs.speechEngine.isReady && jobs.dictationEngine.isReady
-            let accept = Self.canAcceptHandshake(headers: headers, isReady: isReady)
-            if !accept {
-                let reason = isReady ? "it carries an Origin header" : "the models are not loaded"
-                print("voice: refused a socket handshake: \(reason)")
-            }
-            return NWProtocolWebSocket.Response(status: accept ? .accept : .reject, subprotocol: nil)
+            Self.handleClientRequest(headers: headers, jobs: jobs)
         }
         let parameters = NWParameters.tcp
         parameters.defaultProtocolStack.applicationProtocols = [websocket]
@@ -196,28 +211,35 @@ final class SpeechSocketServer: Sendable {
             switch event {
             case .accepted(let connection):
                 let maxConnections = settings.maxConnections
-                let atCapacity = liveConnections.withLock { count -> Bool in
-                    if count >= maxConnections { return true }
-                    count += 1
-                    return false
+                let isAdmitted = liveConnections.withLock { count -> Bool in
+                    let isAdmitted = count < maxConnections
+                    count += isAdmitted ? 1 : 0
+                    return isAdmitted
                 }
-                if atCapacity {
+                guard isAdmitted else {
                     print("voice: dropped a connection: \(maxConnections) connections are already open")
                     connection.cancel()
                     continue
                 }
-                group.addTask {
-                    defer { self.liveConnections.withLock { $0 -= 1 } }
-                    let accepted = JobConnection(
-                        connection: connection,
-                        jobs: self.jobs,
-                        handshakeTimeout: self.settings.handshakeTimeout
-                    )
-                    await accepted.handleConnection()
-                }
+                group.addTask { await self.handleAcceptedConnection(connection) }
             case .failed(let error):
                 throw error
             }
         }
+    }
+
+    /// Handles one accepted connection until it closes, then frees its
+    /// place among the live connections.
+    ///
+    /// - Parameter connection: The accepted connection, already counted as
+    ///   live.
+    private func handleAcceptedConnection(_ connection: NWConnection) async {
+        defer { liveConnections.withLock { $0 -= 1 } }
+        let accepted = JobConnection(
+            connection: connection,
+            jobs: jobs,
+            handshakeTimeout: settings.handshakeTimeout
+        )
+        await accepted.handleConnection()
     }
 }

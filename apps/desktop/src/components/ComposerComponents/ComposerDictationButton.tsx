@@ -39,9 +39,8 @@ type ComposerDictationButtonProps = {
  * moves focus to the message field, where the text lands and the button
  * turns off for the wait. The name carries the state, as Send's does when it
  * turns into Stop, so the button is no toggle and exposes no pressed state.
- * The
- * button is off while the final text is awaited, while the field is off,
- * while a conversation opens, while voice does not run, and while Lys
+ * The button is off while the final text is awaited, while the field is
+ * off, while a conversation opens, while voice does not run, and while Lys
  * answers or talks; a reason that does not pass on its own is the button's
  * description and its hover text. The hover text otherwise names the button.
  * @param props - The composer's activity, whether the field is off, and the

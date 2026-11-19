@@ -7,21 +7,22 @@ import Synchronization
 ///
 /// The client sends binary messages carrying raw 16 kHz mono 16-bit
 /// little-endian PCM, one or more whole samples each, and
-/// `{ "type": "stop" }` when no more audio follows. The server answers with JSON text messages:
-/// `{ "type": "partial", "text": "…" }` with the whole text so far whenever
-/// it changed, and `{ "type": "final", "text": "…" }` after `stop`. It ends
-/// the socket with a close frame: `1000` once the final text was sent,
-/// `1001` when a newer dictation superseded this one, `1002` for a message
-/// that breaks the protocol — a text message that is not `stop`, or audio
-/// that is not whole samples — and `1011` when recognition failed or fell
-/// too far behind the audio. Audio and a `stop` that arrive after the first
-/// `stop` are dropped. A client message may carry at most
+/// `{ "type": "stop" }` when no more audio follows. The server answers with
+/// JSON text messages: `{ "type": "partial", "text": "…" }` with the whole
+/// text so far whenever it changed, and
+/// `{ "type": "final", "text": "…" }` after `stop`. It ends the socket with
+/// a close frame: `1000` once the final text was sent, `1001` when a newer
+/// dictation superseded this one, `1002` for a message that breaks the
+/// protocol — a text message that is not `stop`, or audio that is not whole
+/// samples — and `1011` when recognition failed or fell too far behind the
+/// audio. Audio and a `stop` that arrive after the first `stop` are
+/// dropped. A client message may carry at most
 /// ``SpeechSocketServer/maximumMessageSize`` bytes; a longer one fails the
 /// receive, and Network.framework closes the socket with `1009` itself. An
 /// empty message is read as a peer that went away: the connection is
 /// cancelled without a close frame. The client cancels a dictation by
-/// closing the socket. Every failure is logged
-/// with its cause, and neither audio nor text is ever logged.
+/// closing the socket. Every failure is logged with its cause, and neither
+/// audio nor text is ever logged.
 ///
 /// Concurrency model: one task runs ``handleMessages()`` per connection;
 /// the receive loop and the update pump communicate through the state under

@@ -15,9 +15,9 @@ import Synchronization
 /// failed. A client message may carry at most
 /// ``SpeechSocketServer/maximumMessageSize`` bytes; a longer one fails the
 /// receive, and Network.framework closes the socket with `1009` itself, so
-/// the client splits longer text.
-/// A close waits at most ``pumpStopTimeout`` for audio still being sent
-/// before it cancels the connection. Every failure is logged with its cause.
+/// the client splits longer text. A close waits at most
+/// ``pumpStopTimeout`` for audio still being sent before it cancels the
+/// connection. Every failure is logged with its cause.
 ///
 /// Concurrency model: one task runs ``handleMessages(startingWith:)`` per
 /// connection; the receive loop and the frame pump communicate through the
@@ -250,32 +250,41 @@ final class SpeechConnection: Sendable {
     ///   - session: The speech's session.
     ///   - id: Identity of the speech, for the hub.
     private func startPump(session: any SpeechSession, id: UUID) {
-        let task = Task { [weak self] in
-            guard let self else { return }
-            do {
-                for try await frame in session.frames {
-                    if Task.isCancelled { return }
-                    if self.isCloseSent { return }
-                    try await self.connection.sendSocketMessage(PCMConversion.buildLittleEndianPCM16(from: frame), opcode: .binary)
-                }
-                // A cancelled pump ends its frames early; the close that
-                // cancelled it decides the close code.
-                guard !Task.isCancelled else { return }
-                await self.handleSpeechCompleted(id: id, failed: false)
-            } catch {
-                // A send that fails after this side closed the socket follows
-                // from that close and is not a failure of its own.
-                if !self.isCloseSent {
-                    print("voice: speech \(id) failed: \(error)")
-                }
-                await self.handleSpeechCompleted(id: id, failed: true)
-            }
+        let task = Task<Void, Never> { [weak self] in
+            await self?.sendFrames(of: session, id: id)
         }
         // A pump that already completed its speech cleared the speech; its
         // handle is not stored, so a close never waits for the pump that
         // runs it.
         state.withLock { state in
             if state.speechID == id { state.pumpTask = task }
+        }
+    }
+
+    /// Forwards the session's frames to the socket until the speech ends,
+    /// the pump was cancelled, the close frame went out, or a failure ended
+    /// the speech.
+    ///
+    /// - Parameters:
+    ///   - session: The speech's session.
+    ///   - id: Identity of the speech, for the hub.
+    private func sendFrames(of session: any SpeechSession, id: UUID) async {
+        do {
+            for try await frame in session.frames {
+                if Task.isCancelled || isCloseSent { return }
+                try await connection.sendSocketMessage(PCMConversion.buildLittleEndianPCM16(from: frame), opcode: .binary)
+            }
+            // A cancelled pump ends its frames early; the close that
+            // cancelled it decides the close code.
+            guard !Task.isCancelled else { return }
+            await handleSpeechCompleted(id: id, failed: false)
+        } catch {
+            // A send that fails after this side closed the socket follows
+            // from that close and is not a failure of its own.
+            if !isCloseSent {
+                print("voice: speech \(id) failed: \(error)")
+            }
+            await handleSpeechCompleted(id: id, failed: true)
         }
     }
 

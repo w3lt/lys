@@ -100,8 +100,9 @@ final class FakeRecognizer: StreamingRecognizer, @unchecked Sendable {
         }
         try Task.checkCancellation()
         guard !behavior.failsRecognition else { throw FakeRecognitionError() }
+        let isAudible = samples.contains(where: { $0 != 0 })
         return lock.withLock {
-            if samples.contains(where: { $0 != 0 }) { heardCount += 1 }
+            heardCount += isAudible ? 1 : 0
             return heardCount == 0 ? "" : "heard \(heardCount)"
         }
     }
@@ -126,13 +127,20 @@ final class FakeRecognizer: StreamingRecognizer, @unchecked Sendable {
     /// Waits until the test released the held first audio.
     private func waitForRelease() async {
         await withCheckedContinuation { continuation in
-            let isReleased = lock.withLock { () -> Bool in
-                if isFirstAudioReleased { return true }
-                heldAudio = continuation
-                return false
-            }
-            if isReleased { continuation.resume() }
+            resumeOrHoldAudio(continuation)
         }
+    }
+
+    /// Resumes a waiting first audio when the test already released it, and
+    /// holds it until then otherwise.
+    ///
+    /// - Parameter continuation: The waiting first audio.
+    private func resumeOrHoldAudio(_ continuation: CheckedContinuation<Void, Never>) {
+        let isReleased = lock.withLock { () -> Bool in
+            heldAudio = isFirstAudioReleased ? nil : continuation
+            return isFirstAudioReleased
+        }
+        if isReleased { continuation.resume() }
     }
 }
 

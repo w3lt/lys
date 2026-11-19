@@ -126,10 +126,10 @@ describe("startMicrophoneRecorder", () => {
 
   it("reports a microphone that ends on its own, and not one it stopped", async () => {
     const { probe, recorder, stream } = await startRecording()
-    stream.track.end()
+    stream.track.sendEnded()
     expect(probe.ends).toBe(1)
     recorder.stop()
-    stream.track.end()
+    stream.track.sendEnded()
 
     expect(probe.ends).toBe(1)
   })

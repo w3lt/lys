@@ -2,6 +2,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest"
 import {
   ComposerDictation,
   FINAL_TEXT_WAIT_MS,
+  type DictationSocket,
   type DictationSocketHandlers,
   type DictationView
 } from "@/lib/dictation/composer-dictation"
@@ -26,7 +27,10 @@ type FakeSocket = {
   stops: number
   /** Whether the dictation closed the socket. */
   isClosed: boolean
-  /** The dictation's handlers, to play the backend. */
+  /**
+   * The dictation's handlers, to play the backend; the close is reported to
+   * the dictation once.
+   */
   readonly handlers: DictationSocketHandlers
 }
 
@@ -38,8 +42,8 @@ type FakeMicrophone = {
   isStopped: boolean
   /** Opens the microphone, as the platform does once access is granted. */
   open: () => void
-  /** Fails the start, as the platform does. */
-  fail: (error: unknown) => void
+  /** Rejects the start, as the platform does. */
+  reject: (error: unknown) => void
 }
 
 /** A composer's dictation over fakes, with everything it did. */
@@ -52,7 +56,7 @@ type DictationHarness = {
   readonly sockets: FakeSocket[]
   /** Microphones asked for, in order. */
   readonly microphones: FakeMicrophone[]
-  /** Views published, in order. */
+  /** Views sent, in order. */
   readonly views: DictationView[]
 }
 
@@ -69,29 +73,12 @@ function createHarness(draft = ""): DictationHarness {
     microphones: [],
     views: [],
     dictation: new ComposerDictation({
-      readDraft: () => harness.draft,
-      writeDraft: (written) => {
+      getDraft: () => harness.draft,
+      updateDraft: (written) => {
         harness.draft = written
       },
       startRecorder: (options) => startFakeMicrophone(harness, options),
-      openSocket: (handlers) => {
-        const socket: FakeSocket = {
-          audio: [],
-          stops: 0,
-          isClosed: false,
-          handlers
-        }
-        harness.sockets.push(socket)
-        return {
-          sendAudio: (frame) => socket.audio.push(frame),
-          sendStop: () => {
-            socket.stops += 1
-          },
-          close: () => {
-            socket.isClosed = true
-          }
-        }
-      },
+      openSocket: (handlers) => openFakeSocket(harness, handlers),
       onViewChange: (view) => harness.views.push(view)
     })
   }
@@ -99,7 +86,55 @@ function createHarness(draft = ""): DictationHarness {
 }
 
 /**
- * Starts a fake recording that the test opens or fails.
+ * Opens a fake dictation socket that the test drives.
+ *
+ * @param harness - The harness that records the socket.
+ * @param handlers - The dictation's handlers.
+ * @returns The socket as the dictation drives it. Like the real one, it
+ * reports its close once: with the code the test gives as the backend, or
+ * with `1005` after the dictation closed it, and then never inside the call
+ * that closed it.
+ */
+function openFakeSocket(
+  harness: DictationHarness,
+  handlers: DictationSocketHandlers
+): DictationSocket {
+  let isCloseSent = false
+
+  /**
+   * Reports the socket's close to the dictation, the first time only.
+   *
+   * @param code - The close code.
+   */
+  function sendClose(code: number): void {
+    if (isCloseSent) return
+    isCloseSent = true
+    handlers.onClose(code)
+  }
+
+  const socket: FakeSocket = {
+    audio: [],
+    stops: 0,
+    isClosed: false,
+    handlers: { onText: handlers.onText, onClose: sendClose }
+  }
+  harness.sockets.push(socket)
+  return {
+    sendAudio: (frame) => socket.audio.push(frame),
+    sendStop: () => {
+      socket.stops += 1
+    },
+    close: () => {
+      socket.isClosed = true
+      queueMicrotask(() => {
+        sendClose(1005)
+      })
+    }
+  }
+}
+
+/**
+ * Starts a fake recording that the test opens or rejects.
  *
  * @param harness - The harness that records the microphone.
  * @param options - What the dictation started the recording with.
@@ -120,7 +155,7 @@ function startFakeMicrophone(
         }
       })
     },
-    fail: (error) => {
+    reject: (error) => {
       started.reject(error)
     }
   }
@@ -137,7 +172,7 @@ function startFakeMicrophone(
  */
 async function startListening(draft = "", cursor = draft.length) {
   const harness = createHarness(draft)
-  harness.dictation.toggle(cursor)
+  harness.dictation.handleButtonPress(cursor)
   const [socket] = harness.sockets
   const [microphone] = harness.microphones
   if (socket === undefined || microphone === undefined)
@@ -173,7 +208,7 @@ function startFakeTimers(): void {
 describe("ComposerDictation start", () => {
   it("opens the socket and asks for the microphone on the first press, and listens once it is open", async () => {
     const harness = createHarness()
-    harness.dictation.toggle(0)
+    harness.dictation.handleButtonPress(0)
 
     expect(harness.sockets).toHaveLength(1)
     expect(harness.microphones).toHaveLength(1)
@@ -197,8 +232,8 @@ describe("ComposerDictation start", () => {
 
   it("cancels the start on a second press before the microphone is open, and releases a microphone that opens late", async () => {
     const harness = createHarness()
-    harness.dictation.toggle(0)
-    harness.dictation.toggle(0)
+    harness.dictation.handleButtonPress(0)
+    harness.dictation.handleButtonPress(0)
 
     expect(harness.views.at(-1)?.status).toBe("idle")
     expect(harness.sockets[0]?.isClosed).toBe(true)
@@ -217,8 +252,8 @@ describe("ComposerDictation start", () => {
     "ends with a notice when the microphone is %s",
     async (kind, notice) => {
       const harness = createHarness("typed")
-      harness.dictation.toggle(5)
-      harness.microphones[0]?.fail(new MicrophoneError(kind))
+      harness.dictation.handleButtonPress(5)
+      harness.microphones[0]?.reject(new MicrophoneError(kind))
       await waitForMicrotasks()
 
       expect(harness.views.at(-1)).toEqual({
@@ -233,8 +268,8 @@ describe("ComposerDictation start", () => {
 
   it("ends with the microphone-failed notice for a failure that is not a microphone error", async () => {
     const harness = createHarness()
-    harness.dictation.toggle(0)
-    harness.microphones[0]?.fail(new Error("worklet"))
+    harness.dictation.handleButtonPress(0)
+    harness.microphones[0]?.reject(new Error("worklet"))
     await waitForMicrotasks()
 
     expect(harness.views.at(-1)?.notice).toBe("microphone-failed")
@@ -242,10 +277,10 @@ describe("ComposerDictation start", () => {
 
   it("clears the last notice when the next dictation starts", async () => {
     const harness = createHarness()
-    harness.dictation.toggle(0)
-    harness.microphones[0]?.fail(new MicrophoneError("denied"))
+    harness.dictation.handleButtonPress(0)
+    harness.microphones[0]?.reject(new MicrophoneError("denied"))
     await waitForMicrotasks()
-    harness.dictation.toggle(0)
+    harness.dictation.handleButtonPress(0)
 
     expect(harness.views.at(-1)).toEqual({
       status: "starting",
@@ -256,7 +291,7 @@ describe("ComposerDictation start", () => {
 
   it("says whether the dictation writes at the draft's end", () => {
     const harness = createHarness("Hello world")
-    harness.dictation.toggle(5)
+    harness.dictation.handleButtonPress(5)
 
     expect(harness.views.at(-1)?.isAtDraftEnd).toBe(false)
   })
@@ -274,7 +309,7 @@ describe("ComposerDictation text", () => {
 
   it("stops on a press while listening: releases the microphone, sends stop, and waits for the final text", async () => {
     const { harness, socket, microphone } = await startListening()
-    harness.dictation.toggle(0)
+    harness.dictation.handleButtonPress(0)
 
     expect(microphone.isStopped).toBe(true)
     expect(socket.stops).toBe(1)
@@ -308,7 +343,7 @@ describe("ComposerDictation text", () => {
   it("ignores a press while the final text is awaited", async () => {
     const { harness, socket } = await startListening()
     harness.dictation.stop()
-    harness.dictation.toggle(0)
+    harness.dictation.handleButtonPress(0)
 
     expect(socket.stops).toBe(1)
     expect(harness.sockets).toHaveLength(1)
@@ -392,7 +427,7 @@ describe("ComposerDictation endings", () => {
 
   it("ends a start with the voice-not-ready notice when the socket closes with 4503, and cancels the microphone", async () => {
     const harness = createHarness()
-    harness.dictation.toggle(0)
+    harness.dictation.handleButtonPress(0)
     harness.sockets[0]?.handlers.onClose(4503)
 
     expect(harness.views.at(-1)?.notice).toBe("voice-not-ready")
@@ -449,6 +484,22 @@ describe("ComposerDictation endings", () => {
     })
   })
 
+  it("changes nothing when the socket of a cancelled dictation reports its close", async () => {
+    const { harness, socket } = await startListening("typed")
+    harness.dictation.cancel()
+    harness.dictation.handleButtonPress(0)
+    const views = harness.views.length
+    await waitForMicrotasks()
+
+    expect(socket.isClosed).toBe(true)
+    expect(harness.sockets).toHaveLength(2)
+    expect(harness.views).toHaveLength(views)
+    expect(harness.views.at(-1)).toMatchObject({
+      status: "starting",
+      notice: undefined
+    })
+  })
+
   it("clears a notice on cancel while nothing runs", async () => {
     const { harness, socket } = await startListening()
     socket.handlers.onClose(1011)
@@ -481,7 +532,7 @@ describe("ComposerDictation endings", () => {
     const { harness, socket } = await startListening()
     harness.dictation.stop()
     sendUpdate(socket, "final", "One.")
-    harness.dictation.toggle(harness.draft.length)
+    harness.dictation.handleButtonPress(harness.draft.length)
     harness.microphones[1]?.open()
     await waitForMicrotasks()
     const second = harness.sockets[1]

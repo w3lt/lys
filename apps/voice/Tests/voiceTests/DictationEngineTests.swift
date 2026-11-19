@@ -72,7 +72,7 @@ struct DictationEngineTests {
         try await waitUntil { recognizer.startedAudioCount == 1 }
 
         session.cancel()
-        recognizer.releaseFirstAudio()
+        recognizer.resolveFirstAudio()
 
         #expect(try await readUpdates(of: session).isEmpty)
     }
@@ -93,7 +93,7 @@ struct DictationEngineTests {
     @Test func audioBeyondTheBacklogBoundFailsTheDictation() async throws {
         let recognizer = FakeRecognizer(FakeRecognizerBehavior(holdsFirstAudio: true))
         let engine = try await startDictationEngine(recognizer: recognizer)
-        defer { recognizer.releaseFirstAudio() }
+        defer { recognizer.resolveFirstAudio() }
         let session = engine.startSession()
         session.addAudio([0.5])
         try await waitUntil { recognizer.startedAudioCount == 1 }
@@ -121,7 +121,7 @@ struct DictationEngineTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(recognizer.resetCount == 1)
         older.cancel()
-        recognizer.releaseFirstAudio()
+        recognizer.resolveFirstAudio()
 
         #expect(try await readUpdates(of: newer) == [.partial("heard 1"), .final("Heard 1.")])
         #expect(recognizer.resetCount == 2)

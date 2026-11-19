@@ -1,7 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { openDictationSocket } from "@/lib/dictation/dictation-socket"
 import {
-  FakeWebSocket,
   getDictationSocket,
   startDictationPlatformFake
 } from "../../support/dictationPlatformFake"
@@ -57,12 +56,33 @@ describe("openDictationSocket", () => {
     expect(platform.sent).toHaveLength(50)
   })
 
-  it("drops what is sent once it is closed", () => {
+  it("drops what is sent while it closes", () => {
     const { socket, platform } = openSocket()
-    platform.readyState = FakeWebSocket.CLOSED
+    platform.open()
+    socket.close()
     socket.sendAudio(FRAME)
     socket.sendStop()
+
+    expect(platform.sent).toEqual([])
+  })
+
+  it("drops what is sent once the backend closed it", () => {
+    const { socket, platform } = openSocket()
     platform.open()
+    platform.closeFromBackend(1000)
+    socket.sendAudio(FRAME)
+    socket.sendStop()
+
+    expect(platform.sent).toEqual([])
+  })
+
+  it("sends nothing that waited once it is closed before it opened", async () => {
+    const { socket, platform, closeCodes } = openSocket()
+    socket.sendAudio(FRAME)
+    socket.close()
+    await vi.waitFor(() => {
+      expect(closeCodes).toEqual([1006])
+    })
 
     expect(platform.sent).toEqual([])
   })
@@ -82,10 +102,15 @@ describe("openDictationSocket", () => {
     expect(closeCodes).toEqual([4503])
   })
 
-  it("closes the platform's socket", () => {
-    const { socket, platform } = openSocket()
+  it("closes the platform's socket, and reports that close once the platform does", async () => {
+    const { socket, platform, closeCodes } = openSocket()
+    platform.open()
     socket.close()
-
     expect(platform.isClosed).toBe(true)
+    expect(closeCodes).toEqual([])
+
+    await vi.waitFor(() => {
+      expect(closeCodes).toEqual([1005])
+    })
   })
 })

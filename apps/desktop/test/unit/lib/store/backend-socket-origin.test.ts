@@ -1,6 +1,6 @@
 import { describe, expect, it, onTestFinished } from "vitest"
 import { useLysStore } from "@/lib/store"
-import { readBackendSocketOrigin } from "@/lib/store/backend-socket-origin"
+import { getBackendSocketOrigin } from "@/lib/store/backend-socket-origin"
 
 /**
  * Names the backend's URL in the application store for one test.
@@ -15,13 +15,13 @@ function updateBackendUrl(backendUrl: string): void {
   useLysStore.setState({ backendUrl })
 }
 
-describe("readBackendSocketOrigin", () => {
+describe("getBackendSocketOrigin", () => {
   it.each([
     ["http://127.0.0.1:12345", "ws://127.0.0.1:12345"],
     ["https://lys.example", "wss://lys.example"]
   ])("reads %s as %s", (backendUrl, origin) => {
     updateBackendUrl(backendUrl)
 
-    expect(readBackendSocketOrigin()).toBe(origin)
+    expect(getBackendSocketOrigin()).toBe(origin)
   })
 })

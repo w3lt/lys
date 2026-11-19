@@ -2,16 +2,17 @@ import Foundation
 import Network
 
 /// What the jobs of a connection work with: each kind's engine, and the hub
-/// that keeps one job of the kind running.
+/// that keeps one job of the kind running. A new value has two hubs of its
+/// own, so every connection served with one value shares them.
 struct VoiceJobs: Sendable {
     /// Engine that makes the speech sessions.
     let speechEngine: any SpeechEngine
     /// The one active speech across every connection.
-    let speechHub: JobHub
+    let speechHub = JobHub()
     /// Engine that makes the dictation sessions.
     let dictationEngine: DictationEngine
     /// The one active dictation across every connection.
-    let dictationHub: JobHub
+    let dictationHub = JobHub()
 }
 
 /// One WebSocket connection accepted by ``SpeechSocketServer``, from its
@@ -56,16 +57,16 @@ final class JobConnection: Sendable {
     /// receive with an error.
     func handleConnection() async {
         await withTaskCancellationHandler {
-            await self.serveConnection()
+            await self.handleMessages()
         } onCancel: {
             self.connection.cancel()
         }
     }
 
-    /// Starts the connection, reads its first message, and serves the job
-    /// that message names; a connection that ends before its first message
-    /// is cancelled.
-    private func serveConnection() async {
+    /// Starts the connection and handles its messages: reads the first, and
+    /// serves the job that message names; a connection that ends before its
+    /// first message is cancelled.
+    private func handleMessages() async {
         connection.start(queue: DispatchQueue(label: "voice.WebSocket"))
         guard let first = await readFirstMessage() else {
             connection.cancel()

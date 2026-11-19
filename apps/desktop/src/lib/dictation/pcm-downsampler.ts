@@ -10,8 +10,8 @@
  * unchanged.
  */
 
-/** Bytes one 16-bit sample takes. */
-const BYTES_PER_SAMPLE = 2
+/** Bytes one output sample takes: the frames hold 16-bit integers. */
+const BYTES_PER_SAMPLE = Int16Array.BYTES_PER_ELEMENT
 
 /** Largest magnitude of a 16-bit sample that is the same on both sides. */
 const SAMPLE_SCALE = 32_767
@@ -104,8 +104,10 @@ function calculateFilterWeight(
  * @param position - The output's moment, in input samples from the buffer's
  * start.
  * @param filter - The conversion's filter.
- * @returns The filtered sample, with the weights it used summing to one;
- * input before the buffer's start counts as silence.
+ * @returns The filtered sample: the weighted sum of the buffered input
+ * within the filter's reach, divided by the sum of those weights. Input
+ * before the buffer's start is left out, not counted as silence, so the
+ * first samples of a recording keep their level.
  */
 function calculateFilteredSample(
   input: Float32Array,

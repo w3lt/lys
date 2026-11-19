@@ -29,8 +29,8 @@ import { updateProviderModelState } from "@/lib/store/model-runtime"
 import type { HeldToolCall } from "@/lib/store/tool-calls"
 import type { ToolListState } from "@/lib/store/tools"
 import {
-  countReleasedMicrophones,
   getDictationSocket,
+  listReleasedMicrophones,
   startDictationPlatformFake,
   type DictationPlatformFake
 } from "../support/dictationPlatformFake"
@@ -3136,7 +3136,7 @@ describe("Composer", () => {
       expect(getMessageField()).toHaveValue("Note: buy milk")
 
       await user.click(screen.getByRole("button", { name: "Stop dictation" }))
-      expect(countReleasedMicrophones(platform)).toBe(1)
+      expect(listReleasedMicrophones(platform)).toHaveLength(1)
       expect(getMessageField()).toHaveAttribute("readonly")
       expect(getMessageField()).toHaveFocus()
       expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
@@ -3265,7 +3265,7 @@ describe("Composer", () => {
       expect(getStatusRegion(sentence)).toBeInTheDocument()
       expect(getMessageField()).toHaveValue("so far")
       expect(getMessageField()).not.toHaveAttribute("readonly")
-      expect(countReleasedMicrophones(platform)).toBe(1)
+      expect(listReleasedMicrophones(platform)).toHaveLength(1)
     })
 
     it("keeps the last line in view while a dictation writes at the draft's end, and not in the middle", async () => {

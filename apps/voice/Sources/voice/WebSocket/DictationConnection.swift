@@ -32,7 +32,7 @@ final class DictationConnection: Sendable {
         var session: DictationSession?
         /// Identity of the dictation, for the hub.
         var dictationID: UUID?
-        /// Task forwarding the session's updates to the socket.
+        /// Task sending the session's updates to the socket.
         var pumpTask: Task<Void, Never>?
         /// Whether a close frame was sent or the peer went away.
         var closeSent = false
@@ -60,18 +60,6 @@ final class DictationConnection: Sendable {
             pumpTask = nil
             dictationID = nil
             return ended
-        }
-
-        /// Keeps a pump's handle while its dictation is still this
-        /// connection's. A pump that already completed its dictation
-        /// cleared it; its handle is not kept, so a close never waits for
-        /// the pump that runs it.
-        ///
-        /// - Parameters:
-        ///   - task: The pump.
-        ///   - id: Identity of the pump's dictation.
-        mutating func keepPump(_ task: Task<Void, Never>, of id: UUID) {
-            if dictationID == id { pumpTask = task }
         }
 
         /// Records that the close frame is being sent.
@@ -164,8 +152,8 @@ final class DictationConnection: Sendable {
         state.withLock { state in
             state.dictationID = id
             state.session = session
+            state.pumpTask = startPump(session: session, id: id)
         }
-        startPump(session: session, id: id)
     }
 
     /// Queues one message of audio on the dictation. Audio that is not
@@ -213,8 +201,8 @@ final class DictationConnection: Sendable {
 
     // MARK: - Update pump
 
-    /// Starts the task that forwards the session's updates to the socket
-    /// and closes it once the final text was sent.
+    /// Starts the task that sends the session's updates to the socket and
+    /// closes it once the final text was sent.
     ///
     /// A recognition or send failure before the socket closed is logged with
     /// the dictation id and closes the socket with `1011`. Updates that end
@@ -224,21 +212,23 @@ final class DictationConnection: Sendable {
     /// - Parameters:
     ///   - session: The dictation's session.
     ///   - id: Identity of the dictation, for the hub.
-    private func startPump(session: DictationSession, id: UUID) {
-        let task = Task<Void, Never> { [weak self] in
-            await self?.forwardUpdates(of: session, id: id)
+    /// - Returns: The pump. ``startDictation()`` keeps it in the state under
+    ///   the lock it starts it in, so the pump reads a state that already
+    ///   holds it.
+    private func startPump(session: DictationSession, id: UUID) -> Task<Void, Never> {
+        Task { [weak self] in
+            await self?.sendUpdates(of: session, id: id)
         }
-        state.withLock { state in state.keepPump(task, of: id) }
     }
 
-    /// Forwards the session's updates to the socket until the final text
-    /// was sent, the pump was cancelled, the close frame went out, or a
-    /// failure ended the dictation.
+    /// Sends the session's updates to the socket until the final text was
+    /// sent, the pump was cancelled, the close frame went out, or a failure
+    /// ended the dictation.
     ///
     /// - Parameters:
     ///   - session: The dictation's session.
     ///   - id: Identity of the dictation, for the hub.
-    private func forwardUpdates(of session: DictationSession, id: UUID) async {
+    private func sendUpdates(of session: DictationSession, id: UUID) async {
         do {
             for try await update in session.updates {
                 if Task.isCancelled || isCloseSent { return }

@@ -16,15 +16,30 @@ import Synchronization
 /// Refused handshakes get HTTP 400, which the browser surfaces as a failed
 /// connection, never as a readable error. Every refusal is logged.
 ///
-/// The server owns at most ``maxConnections`` connections; connections
-/// accepted beyond the cap are dropped without a handshake response, and
-/// each drop is logged. A connection that completes no handshake within
-/// ``handshakeTimeout`` is cancelled, so idle clients cannot hold every place.
+/// The server owns at most ``ListenerSettings/maxConnections`` connections;
+/// connections accepted beyond the cap are dropped without a handshake
+/// response, and each drop is logged. A connection that completes no
+/// handshake within ``ListenerSettings/handshakeTimeout`` is cancelled, so
+/// idle clients cannot hold every place.
 ///
 /// Concurrency model: serialized. The only mutable state, the count of live
 /// connections, is guarded by its `Mutex`; each job hub serializes the one
 /// active job of its kind the same way.
 final class SpeechSocketServer: Sendable {
+    /// Where the server listens and how many clients it serves.
+    struct ListenerSettings: Sendable {
+        /// Local address the listener binds.
+        var host: NWEndpoint.Host
+        /// Local TCP port the listener binds.
+        var port: NWEndpoint.Port
+        /// Most connections served at once; a connection accepted beyond
+        /// the cap is dropped without a handshake response.
+        var maxConnections = SpeechSocketServer.defaultMaxConnections
+        /// Longest wait for a client's WebSocket handshake before its
+        /// connection is cancelled.
+        var handshakeTimeout = SpeechSocketServer.defaultHandshakeTimeout
+    }
+
     /// Default most connections served at once.
     static let defaultMaxConnections = 16
     /// Default longest wait for a client's WebSocket handshake.
@@ -35,45 +50,22 @@ final class SpeechSocketServer: Sendable {
 
     /// The engines and hubs the accepted connections' jobs work with.
     private let jobs: VoiceJobs
-    /// Local address the listener binds.
-    private let host: NWEndpoint.Host
-    /// Local TCP port the listener binds.
-    private let port: NWEndpoint.Port
-    /// Most connections served at once.
-    private let maxConnections: Int
-    /// Longest wait for a client's WebSocket handshake.
-    private let handshakeTimeout: Duration
+    /// Where the server listens and how many clients it serves.
+    private let settings: ListenerSettings
 
     /// Creates a server that is not listening yet.
     ///
     /// - Parameters:
-    ///   - engine: Speech engine backing the connections that speak.
-    ///   - host: Local address to bind; loopback by default.
-    ///   - port: TCP port to bind; 9091 by default.
-    ///   - dictationEngine: Dictation engine backing the connections that
-    ///     listen.
-    ///   - maxConnections: Most connections served at once; a connection
-    ///     accepted beyond the cap is dropped without a handshake response.
-    ///   - handshakeTimeout: Longest wait for a client's WebSocket handshake
-    ///     before its connection is cancelled.
+    ///   - jobs: The speech and dictation engines backing the connections,
+    ///     with the hubs that keep one job of each kind running.
+    ///   - settings: Where the server listens and how many clients it
+    ///     serves; loopback on port 9091 with the default limits by default.
     init(
-        engine: any SpeechEngine,
-        host: NWEndpoint.Host = "127.0.0.1",
-        port: NWEndpoint.Port = 9091,
-        dictationEngine: DictationEngine,
-        maxConnections: Int = SpeechSocketServer.defaultMaxConnections,
-        handshakeTimeout: Duration = SpeechSocketServer.defaultHandshakeTimeout
+        jobs: VoiceJobs,
+        settings: ListenerSettings = ListenerSettings(host: "127.0.0.1", port: 9091)
     ) {
-        self.jobs = VoiceJobs(
-            speechEngine: engine,
-            speechHub: JobHub(),
-            dictationEngine: dictationEngine,
-            dictationHub: JobHub()
-        )
-        self.host = host
-        self.port = port
-        self.maxConnections = maxConnections
-        self.handshakeTimeout = handshakeTimeout
+        self.jobs = jobs
+        self.settings = settings
     }
 
     /// Listens and serves connections until the calling task is cancelled or
@@ -153,7 +145,7 @@ final class SpeechSocketServer: Sendable {
         }
         let parameters = NWParameters.tcp
         parameters.defaultProtocolStack.applicationProtocols = [websocket]
-        parameters.requiredLocalEndpoint = .hostPort(host: host, port: port)
+        parameters.requiredLocalEndpoint = .hostPort(host: settings.host, port: settings.port)
         parameters.allowLocalEndpointReuse = true
         return try NWListener(using: parameters)
     }
@@ -197,7 +189,7 @@ final class SpeechSocketServer: Sendable {
         for await event in events {
             switch event {
             case .accepted(let connection):
-                let maxConnections = self.maxConnections
+                let maxConnections = settings.maxConnections
                 let atCapacity = liveConnections.withLock { count -> Bool in
                     if count >= maxConnections { return true }
                     count += 1
@@ -213,7 +205,7 @@ final class SpeechSocketServer: Sendable {
                     let accepted = JobConnection(
                         connection: connection,
                         jobs: self.jobs,
-                        handshakeTimeout: self.handshakeTimeout
+                        handshakeTimeout: self.settings.handshakeTimeout
                     )
                     await accepted.handleConnection()
                 }

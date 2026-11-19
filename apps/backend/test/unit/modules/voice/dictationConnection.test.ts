@@ -99,12 +99,12 @@ function createFakeVoice(): FakeVoice {
 
 /** A fake voice whose handshake the test answers. */
 type PendingVoice = Readonly<{
-  /** Injected `openVoiceDictation` that waits for {@link answer}. */
+  /** Injected `openVoiceDictation` that waits for {@link resolveHandshake}. */
   openVoiceDictation: VoiceConnector
   /** Whether the backend dialed voice. */
   isDialed: () => boolean
   /** Accepts the handshake, returning the dictation the backend received. */
-  answer: () => FakeVoiceDictation
+  resolveHandshake: () => FakeVoiceDictation
 }>
 
 /** Creates a fake voice that holds the handshake until the test answers. */
@@ -117,7 +117,7 @@ function createPendingVoice(): PendingVoice {
       return handshake.promise
     },
     isDialed: () => handlers !== undefined,
-    answer: () => {
+    resolveHandshake: () => {
       if (handlers === undefined) throw new Error("voice was not dialed")
       const dictation = new FakeVoiceDictation(handlers)
       handshake.resolve(dictation)
@@ -164,8 +164,8 @@ async function createDictationApp(options: DictationAppOptions) {
   return {
     ...testFastify,
     baseUrl: `ws://127.0.0.1:${port}`,
-    /** Counts the client messages the server handled so far. */
-    countReceivedMessages: () => received.count
+    /** Gets how many client messages the server handled so far. */
+    getReceivedMessageCount: () => received.count
   }
 }
 
@@ -259,9 +259,9 @@ describe("dictation route", () => {
     await socket.opened
     socket.send(Buffer.alloc(2, 1))
     socket.send(Buffer.alloc(2, 2))
-    await vi.waitFor(() => expect(app.countReceivedMessages()).toBe(2))
+    await vi.waitFor(() => expect(app.getReceivedMessageCount()).toBe(2))
     await vi.waitFor(() => expect(pending.isDialed()).toBe(true))
-    const voice = pending.answer()
+    const voice = pending.resolveHandshake()
 
     await vi.waitFor(() =>
       expect(voice.audio).toEqual([Buffer.alloc(2, 1), Buffer.alloc(2, 2)])
@@ -278,9 +278,9 @@ describe("dictation route", () => {
     socket.send(AUDIO_FRAME)
     socket.send(STOP_MESSAGE)
     socket.send(Buffer.alloc(2, 2))
-    await vi.waitFor(() => expect(app.countReceivedMessages()).toBe(3))
+    await vi.waitFor(() => expect(app.getReceivedMessageCount()).toBe(3))
     await vi.waitFor(() => expect(pending.isDialed()).toBe(true))
-    const voice = pending.answer()
+    const voice = pending.resolveHandshake()
 
     await vi.waitFor(() => expect(voice.isStopped).toBe(true))
     expect(voice.audio).toEqual([AUDIO_FRAME])
@@ -402,7 +402,7 @@ describe("dictation route refusals", () => {
     await vi.waitFor(() => expect(pending.isDialed()).toBe(true))
     socket.close()
     await socket.closed
-    const voice = pending.answer()
+    const voice = pending.resolveHandshake()
 
     await vi.waitFor(() => expect(voice.isCancelled).toBe(true))
     expect(voice.isStarted).toBe(false)
@@ -417,7 +417,7 @@ describe("dictation route refusals", () => {
 
     await expect(socket.closed).resolves.toBe(DICTATION_CLOSE_PROTOCOL_ERROR)
     await vi.waitFor(() => expect(pending.isDialed()).toBe(true))
-    const voice = pending.answer()
+    const voice = pending.resolveHandshake()
     await vi.waitFor(() => expect(voice.isCancelled).toBe(true))
     expect(voice.isStarted).toBe(false)
   })
@@ -562,7 +562,7 @@ describe("dictation route failures and limits", () => {
     expect(app.log.records).toContainEqual(
       matchLogEntry("warn", "Dictation audio waited too long for voice")
     )
-    const voice = pending.answer()
+    const voice = pending.resolveHandshake()
     await vi.waitFor(() => expect(voice.isCancelled).toBe(true))
     expect(voice.audio).toEqual([])
   })

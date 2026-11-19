@@ -144,8 +144,8 @@ function closeCapture(
 }
 
 /**
- * Connects the microphone to the recorder's processor and starts handing
- * frames over.
+ * Starts the recording: connects the microphone to the recorder's processor
+ * and starts handing frames over.
  *
  * @param stream - The microphone's stream.
  * @param context - Audio context the recorder's worklet module is loaded in.
@@ -156,7 +156,7 @@ function closeCapture(
  * is asked to run once more, because an engine that kept it suspended lets
  * it run while the microphone is open.
  */
-function connectRecorder(
+function startRecording(
   stream: MediaStream,
   context: AudioContext,
   options: MicrophoneRecorderOptions
@@ -224,7 +224,7 @@ export async function startMicrophoneRecorder(
     options.signal.throwIfAborted()
     await context.audioWorklet.addModule(recorderWorkletUrl)
     options.signal.throwIfAborted()
-    return connectRecorder(stream, context, options)
+    return startRecording(stream, context, options)
   } catch (error) {
     closeCapture(stream, context)
     if (options.signal.aborted || error instanceof MicrophoneError) throw error

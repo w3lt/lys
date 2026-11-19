@@ -1,5 +1,1 @@
-export type {
-  DictationNotice,
-  DictationStatus,
-  DictationView
-} from "./composer-dictation"
+export type { DictationNotice, DictationStatus } from "./composer-dictation"

@@ -9,7 +9,10 @@ import Testing
 /// - Returns: The running server; the test stops it.
 /// - Throws: The listener's error when it fails before becoming ready.
 private func startDictationServer(engine: DictationEngine) async throws -> LoopbackServer {
-    let server = SpeechSocketServer(engine: SilentSpeechEngine(), port: .any, dictationEngine: engine)
+    let server = SpeechSocketServer(
+        jobs: VoiceJobs(speechEngine: SilentSpeechEngine(), dictationEngine: engine),
+        settings: SpeechSocketServer.ListenerSettings(host: "127.0.0.1", port: .any)
+    )
     let loopback = LoopbackServer()
     try await loopback.start { onReady in try await server.start(onReady: onReady) }
     return loopback
@@ -193,7 +196,7 @@ struct DictationSocketFailureTests {
         let recognizer = FakeRecognizer(FakeRecognizerBehavior(holdsFirstAudio: true))
         let server = try await startDictationServer(recognizer: recognizer)
         defer {
-            recognizer.releaseFirstAudio()
+            recognizer.resolveFirstAudio()
             server.stop()
         }
         let client = try await startDictation(port: server.port)

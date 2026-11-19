@@ -46,18 +46,20 @@ final class DictationSession: Sendable {
     /// Wraps the streams and the worker of a dictation the engine started.
     ///
     /// - Parameters:
-    ///   - updates: The dictation's text updates.
-    ///   - updateOutput: Producer side of `updates`.
+    ///   - updates: The dictation's text updates: the stream and its
+    ///     producer side.
     ///   - commandInput: Producer side of the worker's instructions.
     ///   - worker: The task that feeds the recognizer.
     fileprivate init(
-        updates: AsyncThrowingStream<DictationUpdate, any Error>,
-        updateOutput: AsyncThrowingStream<DictationUpdate, any Error>.Continuation,
+        updates: (
+            stream: AsyncThrowingStream<DictationUpdate, any Error>,
+            continuation: AsyncThrowingStream<DictationUpdate, any Error>.Continuation
+        ),
         commandInput: AsyncStream<DictationCommand>.Continuation,
         worker: Task<Void, Never>
     ) {
-        self.updates = updates
-        self.updateOutput = updateOutput
+        self.updates = updates.stream
+        self.updateOutput = updates.continuation
         self.commandInput = commandInput
         self.worker = worker
     }
@@ -71,13 +73,13 @@ final class DictationSession: Sendable {
     ///
     /// - Parameter samples: 16 kHz mono samples within `[-1, 1]`.
     func addAudio(_ samples: [Float]) {
-        offer(.audio(samples))
+        addCommand(.audio(samples))
     }
 
     /// Says that no more audio follows; the final text is reported once
     /// everything queued was heard. A second call does nothing.
     func closeAudio() {
-        offer(.close)
+        addCommand(.close)
         commandInput.finish()
     }
 
@@ -92,7 +94,7 @@ final class DictationSession: Sendable {
     /// Queues one instruction, failing the dictation when the queue is full.
     ///
     /// - Parameter command: The instruction.
-    private func offer(_ command: DictationCommand) {
+    private func addCommand(_ command: DictationCommand) {
         guard case .dropped = commandInput.yield(command) else { return }
         updateOutput.finish(throwing: AudioBacklogError())
         commandInput.finish()
@@ -169,7 +171,7 @@ final class DictationEngine: Sendable {
     ///
     /// - Returns: The dictation's session.
     func startSession() -> DictationSession {
-        let (updates, updateOutput) = AsyncThrowingStream.makeStream(of: DictationUpdate.self)
+        let updates = AsyncThrowingStream.makeStream(of: DictationUpdate.self)
         let (commands, commandInput) = AsyncStream.makeStream(
             of: DictationCommand.self,
             bufferingPolicy: .bufferingOldest(Self.maximumQueuedMessageCount)
@@ -177,13 +179,13 @@ final class DictationEngine: Sendable {
         let recognizer = self.recognizer
         let worker = state.withLock { state in
             state.startWorker {
-                await Self.runDictation(with: recognizer, commands: commands, updates: updateOutput)
+                await Self.sendDictationUpdates(with: recognizer, commands: commands, updates: updates.continuation)
             }
         }
-        return DictationSession(updates: updates, updateOutput: updateOutput, commandInput: commandInput, worker: worker)
+        return DictationSession(updates: updates, commandInput: commandInput, worker: worker)
     }
 
-    /// Runs one dictation and ends its updates: normally once the
+    /// Sends one dictation's updates and ends them: normally once the
     /// dictation closed or was cancelled, and with the error when the
     /// recognizer failed.
     ///
@@ -191,13 +193,13 @@ final class DictationEngine: Sendable {
     ///   - recognizer: The model, which no other task uses meanwhile.
     ///   - commands: The dictation's instructions, in order.
     ///   - updates: Where the dictation's text goes.
-    private static func runDictation(
+    private static func sendDictationUpdates(
         with recognizer: any StreamingRecognizer,
         commands: AsyncStream<DictationCommand>,
         updates: AsyncThrowingStream<DictationUpdate, any Error>.Continuation
     ) async {
         do {
-            try await hearDictation(with: recognizer, commands: commands, updates: updates)
+            try await followDictationCommands(with: recognizer, commands: commands, updates: updates)
             updates.finish()
         } catch is CancellationError {
             updates.finish()
@@ -206,9 +208,10 @@ final class DictationEngine: Sendable {
         }
     }
 
-    /// Feeds one dictation's audio to the recognizer in order and reports
-    /// its text: a partial text whenever the text changed, and the final
-    /// text once the audio closed.
+    /// Follows one dictation's instructions until the session ends them:
+    /// feeds its audio to the recognizer in order and reports its text, a
+    /// partial text whenever the text changed and the final text once the
+    /// audio closed.
     ///
     /// - Parameters:
     ///   - recognizer: The model, cleared before the first audio.
@@ -216,7 +219,7 @@ final class DictationEngine: Sendable {
     ///   - updates: Where the dictation's text goes.
     /// - Throws: `CancellationError` when the dictation was cancelled, and
     ///   the recognizer's error when it failed.
-    private static func hearDictation(
+    private static func followDictationCommands(
         with recognizer: any StreamingRecognizer,
         commands: AsyncStream<DictationCommand>,
         updates: AsyncThrowingStream<DictationUpdate, any Error>.Continuation

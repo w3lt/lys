@@ -24,11 +24,11 @@ type ButtonArrangement = Readonly<{
  * Renders the button beside a message field that holds "Hello world".
  *
  * @param arrangement - The composer's activity and the field's state.
- * @returns The spy that stands in for the store's toggle.
+ * @returns The spy that stands in for the store's press handler.
  */
 function renderButton(arrangement: ButtonArrangement = {}) {
-  const toggleDictation = vi.fn<(cursor: number) => void>()
-  useDictationStore.setState({ toggleDictation })
+  const handleDictationPress = vi.fn<(cursor: number) => void>()
+  useDictationStore.setState({ handleDictationPress })
   const messageFieldRef = createRef<HTMLTextAreaElement>()
   render(
     <>
@@ -46,7 +46,7 @@ function renderButton(arrangement: ButtonArrangement = {}) {
       />
     </>
   )
-  return toggleDictation
+  return handleDictationPress
 }
 
 /**
@@ -82,24 +82,24 @@ describe("ComposerDictationButton", () => {
   })
 
   it("starts a dictation at the message field's cursor", async () => {
-    const toggleDictation = renderButton()
+    const handleDictationPress = renderButton()
     const field = screen.getByRole<HTMLTextAreaElement>("textbox")
     field.setSelectionRange(2, 5)
     await userEvent
       .setup()
       .click(screen.getByRole("button", { name: "Dictate" }))
 
-    expect(toggleDictation).toHaveBeenCalledExactlyOnceWith(5)
+    expect(handleDictationPress).toHaveBeenCalledExactlyOnceWith(5)
     expect(field).not.toHaveFocus()
   })
 
   it("starts a dictation at the draft's end when there is no message field", async () => {
-    const toggleDictation = renderButton({ hasField: false })
+    const handleDictationPress = renderButton({ hasField: false })
     await userEvent
       .setup()
       .click(screen.getByRole("button", { name: "Dictate" }))
 
-    expect(toggleDictation).toHaveBeenCalledExactlyOnceWith(
+    expect(handleDictationPress).toHaveBeenCalledExactlyOnceWith(
       Number.POSITIVE_INFINITY
     )
   })
@@ -117,13 +117,13 @@ describe("ComposerDictationButton", () => {
   )
 
   it("stops the dictation on a press and moves focus to the message field", async () => {
-    const toggleDictation = renderButton()
+    const handleDictationPress = renderButton()
     updateDictationStatus("listening")
     await userEvent
       .setup()
       .click(screen.getByRole("button", { name: "Stop dictation" }))
 
-    expect(toggleDictation).toHaveBeenCalledOnce()
+    expect(handleDictationPress).toHaveBeenCalledOnce()
     expect(screen.getByRole("textbox")).toHaveFocus()
   })
 
@@ -150,7 +150,7 @@ describe("ComposerDictationButton", () => {
   })
 
   it("is off and says to start voice while voice does not run", async () => {
-    const toggleDictation = renderButton()
+    const handleDictationPress = renderButton()
     act(() => {
       useLysStore.setState({
         voiceServerInfo: Object.freeze({ status: "stopped", problem: null })
@@ -163,7 +163,7 @@ describe("ComposerDictationButton", () => {
     expect(button).toHaveAccessibleDescription(
       "Start voice in Settings to talk."
     )
-    expect(toggleDictation).not.toHaveBeenCalled()
+    expect(handleDictationPress).not.toHaveBeenCalled()
   })
 
   it("is off and says to wait while Lys answers", () => {

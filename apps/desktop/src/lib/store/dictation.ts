@@ -3,13 +3,14 @@ import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import {
   ComposerDictation,
-  type ComposerDictationDeps,
+  type DictationSocket,
+  type DictationSocketHandlers,
   type DictationView
 } from "@/lib/dictation/composer-dictation"
 import { openDictationSocket } from "@/lib/dictation/dictation-socket"
 import { startMicrophoneRecorder } from "@/lib/dictation/microphone-recorder"
 import { useLysStore } from "@/lib/store"
-import { readBackendSocketOrigin } from "@/lib/store/backend-socket-origin"
+import { getBackendSocketOrigin } from "@/lib/store/backend-socket-origin"
 import { useChatViewStore, type ChatViewStore } from "@/lib/store/chat-view"
 import { useSpeechActivityStore } from "@/lib/store/speech-activity"
 
@@ -22,7 +23,7 @@ export type DictationStore = DictationView & {
    * @param cursor - Offset of the cursor in the draft, where a new dictation
    * writes.
    */
-  readonly toggleDictation: (cursor: number) => void
+  readonly handleDictationPress: (cursor: number) => void
   /** Stops the running dictation as a press of the button does. */
   readonly stopDictation: () => void
   /**
@@ -38,25 +39,7 @@ export type DictationStore = DictationView & {
   readonly handleDraftChange: (draft: string) => void
 }
 
-/**
- * What a dictation store borrows: what the composer's dictation borrows,
- * except its view, and the two rules the store applies itself.
- */
-export type DictationStoreDeps = Omit<ComposerDictationDeps, "onViewChange"> &
-  Readonly<{
-    /**
-     * Whether Lys may listen now: voice is ready, and Lys neither answers
-     * nor talks.
-     */
-    canListen: () => boolean
-    /**
-     * Asks the application to read voice's status again, after a dictation
-     * ended because voice was not ready or stopped.
-     */
-    updateVoiceServerInfo: () => void
-  }>
-
-/** A dictation store's state accessors. */
+/** The dictation store's state accessors. */
 type DictationStoreApi = Pick<StoreApi<DictationStore>, "getState" | "setState">
 
 /**
@@ -67,83 +50,6 @@ type DictationStoreApi = Pick<StoreApi<DictationStore>, "getState" | "setState">
  */
 function isVoiceNotice(notice: DictationView["notice"]): boolean {
   return notice === "voice-not-ready" || notice === "voice-stopped"
-}
-
-/**
- * Builds a dictation store's first state over a new composer's dictation.
- *
- * @param deps - What the store borrows.
- * @param store - Reads and writes the store's state.
- * @returns The idle view with the composer's requests.
- */
-function createDictationStoreState(
-  deps: DictationStoreDeps,
-  store: DictationStoreApi
-): DictationStore {
-  /**
-   * Shows a view of the dictation, and has voice's status read again when
-   * the view first says that voice ended the dictation.
-   *
-   * @param view - The dictation's status and notice.
-   */
-  function handleViewChange(view: DictationView): void {
-    const isNewNotice = store.getState().notice !== view.notice
-    store.setState(view)
-    if (isNewNotice && isVoiceNotice(view.notice)) deps.updateVoiceServerInfo()
-  }
-
-  const dictation = new ComposerDictation({
-    readDraft: deps.readDraft,
-    writeDraft: deps.writeDraft,
-    startRecorder: deps.startRecorder,
-    openSocket: deps.openSocket,
-    onViewChange: handleViewChange
-  })
-
-  /**
-   * Handles a press of the dictation button.
-   *
-   * @param cursor - Offset of the cursor in the draft.
-   */
-  function toggleDictation(cursor: number): void {
-    if (store.getState().status === "idle" && !deps.canListen()) return
-    dictation.toggle(cursor)
-  }
-
-  return {
-    status: "idle",
-    notice: undefined,
-    isAtDraftEnd: false,
-    toggleDictation,
-    stopDictation: () => {
-      dictation.stop()
-    },
-    cancelDictation: () => {
-      dictation.cancel()
-    },
-    handleDraftChange: (draft) => {
-      dictation.handleDraftChange(draft)
-    }
-  }
-}
-
-/**
- * Creates a dictation store over one composer's dictation.
- *
- * @param deps - What the store borrows.
- * @returns The store, idle and without a notice.
- * @remarks The store owns the composer's dictation, which owns the
- * microphone and the socket of the running dictation;
- * {@link DictationStore.cancelDictation} releases them. The store refuses a
- * start while Lys may not listen, and has voice's status read again when a
- * dictation ends because voice was not ready or stopped.
- */
-export function createDictationStore(
-  deps: DictationStoreDeps
-): UseBoundStore<StoreApi<DictationStore>> {
-  return create<DictationStore>((setState, getState) =>
-    createDictationStoreState(deps, { getState, setState })
-  )
 }
 
 /**
@@ -173,32 +79,111 @@ function canListen(): boolean {
 }
 
 /**
+ * Gets the chat view's draft.
+ *
+ * @returns The text of the message field.
+ */
+function getDraft(): string {
+  return useChatViewStore.getState().inputDraft
+}
+
+/**
+ * Replaces the chat view's draft.
+ *
+ * @param draft - The new text of the message field.
+ */
+function updateDraft(draft: string): void {
+  useChatViewStore.getState().setInputDraft(draft)
+}
+
+/**
+ * Opens the dictation socket of the backend the application store names.
+ *
+ * @param handlers - Receive each text message and the close.
+ * @returns The socket, which takes messages at once.
+ */
+function openBackendDictationSocket(
+  handlers: DictationSocketHandlers
+): DictationSocket {
+  return openDictationSocket(
+    `${getBackendSocketOrigin()}${voiceDictationApi.path}`,
+    handlers
+  )
+}
+
+/**
+ * Creates the dictation store's first state over a new composer's dictation.
+ *
+ * @param store - Reads and writes the store's state.
+ * @returns The idle view with the composer's requests.
+ */
+function createDictationStoreState(store: DictationStoreApi): DictationStore {
+  /**
+   * Shows a view of the dictation, and has voice's status read again when
+   * the view first says that voice ended the dictation.
+   *
+   * @param view - The dictation's status and notice.
+   */
+  function handleViewChange(view: DictationView): void {
+    const isNewNotice = store.getState().notice !== view.notice
+    store.setState(view)
+    if (isNewNotice && isVoiceNotice(view.notice)) {
+      void useLysStore.getState().updateVoiceServerInfo()
+    }
+  }
+
+  const dictation = new ComposerDictation({
+    getDraft,
+    updateDraft,
+    startRecorder: startMicrophoneRecorder,
+    openSocket: openBackendDictationSocket,
+    onViewChange: handleViewChange
+  })
+
+  /**
+   * Handles a press of the dictation button.
+   *
+   * @param cursor - Offset of the cursor in the draft.
+   */
+  function handleDictationPress(cursor: number): void {
+    if (store.getState().status === "idle" && !canListen()) return
+    dictation.handleButtonPress(cursor)
+  }
+
+  return {
+    status: "idle",
+    notice: undefined,
+    isAtDraftEnd: false,
+    handleDictationPress,
+    stopDictation: () => {
+      dictation.stop()
+    },
+    cancelDictation: () => {
+      dictation.cancel()
+    },
+    handleDraftChange: (draft) => {
+      dictation.handleDraftChange(draft)
+    }
+  }
+}
+
+/**
  * The dictation store the composer uses.
  *
  * @remarks This singleton runs dictations against the chat view's draft, the
  * backend origin the application store names when a dictation starts, and
- * the platform's microphone. It refuses to start while voice does not run,
- * while Lys answers or talks, and while a conversation is opening;
- * {@link registerDictationRules} ends a running dictation when one of those
- * begins.
+ * the platform's microphone. It owns the composer's dictation, which owns
+ * the microphone and the socket of the running dictation;
+ * {@link DictationStore.cancelDictation} releases them. It refuses to start
+ * while voice does not run, while Lys answers or talks, and while a
+ * conversation is opening; {@link registerDictationRules} ends a running
+ * dictation when one of those begins. When a dictation ends because voice
+ * was not ready or stopped, it has voice's status read again.
  */
 export const useDictationStore: UseBoundStore<StoreApi<DictationStore>> =
-  createDictationStore({
-    canListen,
-    readDraft: () => useChatViewStore.getState().inputDraft,
-    writeDraft: (draft) => {
-      useChatViewStore.getState().setInputDraft(draft)
-    },
-    startRecorder: startMicrophoneRecorder,
-    openSocket: (handlers) =>
-      openDictationSocket(
-        `${readBackendSocketOrigin()}${voiceDictationApi.path}`,
-        handlers
-      ),
-    updateVoiceServerInfo: () => {
-      void useLysStore.getState().updateVoiceServerInfo()
-    }
-  })
+  create<DictationStore>((setState, getState) =>
+    createDictationStoreState({ getState, setState })
+  )
 
 /**
  * Applies a change of the chat view to the running dictation.
@@ -225,7 +210,7 @@ function handleChatChange(chat: ChatViewStore, previous: ChatViewStore): void {
 }
 
 /** Stops the running dictation once Lys may no longer listen. */
-function stopUnlessAllowed(): void {
+function stopDisallowedDictation(): void {
   if (!canListen()) useDictationStore.getState().stopDictation()
 }
 
@@ -244,9 +229,10 @@ function stopUnlessAllowed(): void {
  */
 export function registerDictationRules(): () => void {
   const stopFollowingChat = useChatViewStore.subscribe(handleChatChange)
-  const stopFollowingVoice = useLysStore.subscribe(stopUnlessAllowed)
-  const stopFollowingSpeech =
-    useSpeechActivityStore.subscribe(stopUnlessAllowed)
+  const stopFollowingVoice = useLysStore.subscribe(stopDisallowedDictation)
+  const stopFollowingSpeech = useSpeechActivityStore.subscribe(
+    stopDisallowedDictation
+  )
   return () => {
     stopFollowingSpeech()
     stopFollowingVoice()

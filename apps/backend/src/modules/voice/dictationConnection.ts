@@ -257,7 +257,7 @@ class DictationRelay {
     this.#socket.on("close", () => this.#closeRelay())
     this.#limitTimer = setTimeout(() => {
       this.#log.info("Dictation reached its time limit")
-      this.#requestStop()
+      this.#stopDictation()
     }, DICTATION_MAX_DURATION_MS)
   }
 
@@ -269,7 +269,7 @@ class DictationRelay {
    * was closed because voice refused or failed; it never rejects.
    */
   public async openVoice(open: typeof openVoiceDictation): Promise<void> {
-    const voice = await this.#dialVoice(open)
+    const voice = await this.#openDictationAtVoice(open)
     if (voice === undefined) return
     const state = this.#state
     if (state.phase !== "connecting" || !isOpen(this.#socket)) {
@@ -289,7 +289,7 @@ class DictationRelay {
    * @returns The dictation, or undefined once the socket was closed with
    * `4503` for a refused handshake or `1011` for any other failure.
    */
-  async #dialVoice(
+  async #openDictationAtVoice(
     open: typeof openVoiceDictation
   ): Promise<VoiceDictation | undefined> {
     try {
@@ -327,7 +327,7 @@ class DictationRelay {
       this.#closeSocket(DICTATION_CLOSE_PROTOCOL_ERROR)
       return
     }
-    this.#requestStop()
+    this.#stopDictation()
   }
 
   /**
@@ -363,7 +363,7 @@ class DictationRelay {
    * Stops the dictation: at once when voice has it, and as soon as voice
    * accepted it otherwise. A second stop does nothing.
    */
-  #requestStop(): void {
+  #stopDictation(): void {
     const state = this.#state
     if (state.phase === "connecting") state.isStopRequested = true
     if (state.phase === "listening") this.#sendStop(state.voice)

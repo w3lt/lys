@@ -48,7 +48,9 @@ struct voice {
                 .buildHealth(isReady: { engine.isReady && dictationEngine.isReady }),
             ])
             let httpServer = WebServer(router: router)
-            let socketServer = SpeechSocketServer(engine: engine, dictationEngine: dictationEngine)
+            let socketServer = SpeechSocketServer(
+                jobs: VoiceJobs(speechEngine: engine, dictationEngine: dictationEngine)
+            )
             try await serveVoice(
                 loadModels: {
                     try await engine.loadModels()

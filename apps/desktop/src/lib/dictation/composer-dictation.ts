@@ -116,14 +116,14 @@ export type DictationSocketHandlers = Readonly<{
 
 /** What the composer's dictation borrows. */
 export type ComposerDictationDeps = Readonly<{
-  /** Reads the composer's draft. */
-  readDraft: () => string
+  /** Gets the composer's draft. */
+  getDraft: () => string
   /**
    * Replaces the composer's draft.
    *
    * @param draft - The new draft.
    */
-  writeDraft: (draft: string) => void
+  updateDraft: (draft: string) => void
   /**
    * Opens the microphone and starts recording it.
    *
@@ -268,7 +268,7 @@ export class ComposerDictation {
    * @remarks A press while the final text is awaited does nothing. The
    * caller decides whether Lys may listen before it asks for a start.
    */
-  public toggle(cursor: number): void {
+  public handleButtonPress(cursor: number): void {
     if (this.#state.phase === "idle") this.#start(cursor)
     else this.stop()
   }
@@ -279,8 +279,8 @@ export class ComposerDictation {
    * for its final text.
    */
   public stop(): void {
-    if (this.#state.phase === "starting") this.#finish(undefined)
-    else this.#requestStop(undefined)
+    if (this.#state.phase === "starting") this.#closeDictation(undefined)
+    else this.#stopListening(undefined)
   }
 
   /**
@@ -288,10 +288,10 @@ export class ComposerDictation {
    * released, the notice is cleared, and nothing more is written.
    */
   public cancel(): void {
-    this.#finish(undefined)
+    this.#closeDictation(undefined)
     if (this.#notice === undefined) return
     this.#notice = undefined
-    this.#publish()
+    this.#sendView()
   }
 
   /**
@@ -311,7 +311,7 @@ export class ComposerDictation {
    */
   #start(cursor: number): void {
     const abort = new AbortController()
-    const draft = this.#deps.readDraft()
+    const draft = this.#deps.getDraft()
     const socket = this.#deps.openSocket({
       onText: (text) => {
         this.#handleText(abort.signal, text)
@@ -326,7 +326,7 @@ export class ComposerDictation {
       phase: "starting",
       session: { abort, socket, anchor, draft }
     }
-    this.#publish()
+    this.#sendView()
     void this.#startRecorder(abort.signal)
   }
 
@@ -346,13 +346,13 @@ export class ComposerDictation {
           this.#sendFrame(signal, frame)
         },
         onEnded: () => {
-          if (!signal.aborted) this.#requestStop("stopped")
+          if (!signal.aborted) this.#stopListening("stopped")
         }
       })
     } catch (error) {
       if (signal.aborted) return
       const kind = error instanceof MicrophoneError ? error.kind : "failed"
-      this.#finish(MICROPHONE_NOTICES[kind])
+      this.#closeDictation(MICROPHONE_NOTICES[kind])
       return
     }
     const state = this.#state
@@ -361,7 +361,7 @@ export class ComposerDictation {
       return
     }
     this.#state = { phase: "listening", session: state.session, recorder }
-    this.#publish()
+    this.#sendView()
   }
 
   /**
@@ -382,17 +382,17 @@ export class ComposerDictation {
    *
    * @param notice - Why the dictation stops on its own, if it does.
    */
-  #requestStop(notice: DictationNotice | undefined): void {
+  #stopListening(notice: DictationNotice | undefined): void {
     const state = this.#state
     if (state.phase !== "listening") return
     state.recorder.stop()
     state.session.socket.sendStop()
     const timer = setTimeout(() => {
-      this.#finish(this.#notice)
+      this.#closeDictation(this.#notice)
     }, FINAL_TEXT_WAIT_MS)
     this.#notice = notice
     this.#state = { phase: "stopping", session: state.session, timer }
-    this.#publish()
+    this.#sendView()
   }
 
   /**
@@ -407,12 +407,12 @@ export class ComposerDictation {
     if (signal.aborted || state.phase === "idle") return
     const message = parseServerMessage(text)
     if (message === undefined) {
-      this.#finish("stopped")
+      this.#closeDictation("stopped")
       return
     }
     state.session.draft = buildDictatedDraft(state.session.anchor, message.text)
-    this.#deps.writeDraft(state.session.draft)
-    if (message.type === "final") this.#finish(this.#notice)
+    this.#deps.updateDraft(state.session.draft)
+    if (message.type === "final") this.#closeDictation(this.#notice)
   }
 
   /**
@@ -423,16 +423,16 @@ export class ComposerDictation {
    */
   #handleClose(signal: AbortSignal, code: number): void {
     if (signal.aborted) return
-    this.#finish(findCloseNotice(code) ?? this.#notice)
+    this.#closeDictation(findCloseNotice(code) ?? this.#notice)
   }
 
   /**
-   * Ends the running dictation: releases the microphone, the timer, and the
-   * socket, and publishes the idle view.
+   * Closes the running dictation: releases the microphone, the timer, and
+   * the socket, and sends the idle view.
    *
    * @param notice - Why the dictation ended on its own, if it did.
    */
-  #finish(notice: DictationNotice | undefined): void {
+  #closeDictation(notice: DictationNotice | undefined): void {
     const state = this.#state
     if (state.phase === "idle") return
     this.#state = { phase: "idle" }
@@ -441,11 +441,11 @@ export class ComposerDictation {
     if (state.phase === "listening") state.recorder.stop()
     if (state.phase === "stopping") clearTimeout(state.timer)
     state.session.socket.close()
-    this.#publish()
+    this.#sendView()
   }
 
-  /** Publishes what the composer shows. */
-  #publish(): void {
+  /** Sends what the composer shows to the view's receiver. */
+  #sendView(): void {
     const state = this.#state
     this.#deps.onViewChange({
       status: state.phase,

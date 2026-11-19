@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, onTestFinished } from "vitest"
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
 import { useLysStore } from "@/lib/store"
 import { useChatViewStore } from "@/lib/store/chat-view"
@@ -14,9 +14,10 @@ import {
   FIXTURE_CONVERSATION_ID
 } from "../../support/conversationFixtures"
 import {
-  countReleasedMicrophones,
-  countSentStops,
+  FakeWebSocket,
   getDictationSocket,
+  listReleasedMicrophones,
+  listSentStops,
   startDictationPlatformFake,
   type DictationPlatformFake
 } from "../../support/dictationPlatformFake"
@@ -43,7 +44,7 @@ function updateShownConversation(conversationId: string): void {
  */
 async function startListening(): Promise<void> {
   const draft = useChatViewStore.getState().inputDraft
-  useDictationStore.getState().toggleDictation(draft.length)
+  useDictationStore.getState().handleDictationPress(draft.length)
   await waitForMicrotasks()
   expect(useDictationStore.getState().status).toBe("listening")
 }
@@ -121,7 +122,7 @@ describe("useDictationStore", () => {
   ])("starts nothing while %s", (_situation, update) => {
     const platform = startDictationPlatformFake()
     update()
-    useDictationStore.getState().toggleDictation(0)
+    useDictationStore.getState().handleDictationPress(0)
 
     expect(platform.sockets).toEqual([])
     expect(platform.microphoneRequests).toEqual([])
@@ -133,9 +134,9 @@ describe("useDictationStore", () => {
     await startListening()
     getDictationSocket(platform).open()
     useSpeechActivityStore.setState({ isTalking: true })
-    useDictationStore.getState().toggleDictation(0)
+    useDictationStore.getState().handleDictationPress(0)
 
-    expect(countSentStops(platform)).toBe(1)
+    expect(listSentStops(platform)).toHaveLength(1)
     expect(useDictationStore.getState().status).toBe("stopping")
   })
 
@@ -166,6 +167,26 @@ describe("useDictationStore", () => {
       expect(useLysStore.getState().voiceServerInfo.status).toBe(voice.shown)
     }
   )
+
+  it("keeps the next dictation when the socket of a cancelled one reports its close late", async () => {
+    const platform = startDictationPlatformFake()
+    await startListening()
+    const cancelled = getDictationSocket(platform)
+    cancelled.open()
+    useDictationStore.getState().cancelDictation()
+    await startListening()
+    sendPartial(platform, "second")
+    await vi.waitFor(() => {
+      expect(cancelled.readyState).toBe(FakeWebSocket.CLOSED)
+    })
+
+    expect(getDictationSocket(platform)).not.toBe(cancelled)
+    expect(useDictationStore.getState()).toMatchObject({
+      status: "listening",
+      notice: undefined
+    })
+    expect(useChatViewStore.getState().inputDraft).toBe("second")
+  })
 
   it("listens after a reply completed while its stream stays open for a title", async () => {
     const platform = startDictationPlatformFake()
@@ -211,8 +232,8 @@ describe("registerDictationRules", () => {
       getDictationSocket(platform).open()
       update()
 
-      expect(countReleasedMicrophones(platform)).toBe(1)
-      expect(countSentStops(platform)).toBe(1)
+      expect(listReleasedMicrophones(platform)).toHaveLength(1)
+      expect(listSentStops(platform)).toHaveLength(1)
       expect(getDictationSocket(platform).isClosed).toBe(false)
       expect(useDictationStore.getState().status).toBe("stopping")
     }
@@ -249,8 +270,8 @@ describe("registerDictationRules", () => {
       update()
       sendPartial(platform, "late words")
 
-      expect(countReleasedMicrophones(platform)).toBe(1)
-      expect(countSentStops(platform)).toBe(0)
+      expect(listReleasedMicrophones(platform)).toHaveLength(1)
+      expect(listSentStops(platform)).toHaveLength(0)
       expect(getDictationSocket(platform).isClosed).toBe(true)
       expect(useDictationStore.getState().status).toBe("idle")
       expect(useChatViewStore.getState().inputDraft).not.toContain("late")
@@ -285,7 +306,7 @@ describe("registerDictationRules", () => {
     const unregister = registerDictationRules()
     await startListening()
     unregister()
-    expect(countReleasedMicrophones(platform)).toBe(1)
+    expect(listReleasedMicrophones(platform)).toHaveLength(1)
     expect(useDictationStore.getState().status).toBe("idle")
     await startListening()
     useSpeechActivityStore.setState({ isTalking: true })

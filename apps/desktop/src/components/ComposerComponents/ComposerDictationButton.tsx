@@ -51,7 +51,9 @@ export default function ComposerDictationButton({
   messageFieldRef
 }: ComposerDictationButtonProps): ReactElement {
   const status = useDictationStore((state) => state.status)
-  const toggleDictation = useDictationStore((state) => state.toggleDictation)
+  const handleDictationPress = useDictationStore(
+    (state) => state.handleDictationPress
+  )
   const isVoiceRunning = useLysStore(
     (state) => state.voiceServerInfo.status === "running"
   )
@@ -74,7 +76,7 @@ export default function ComposerDictationButton({
    */
   function handleClick(): void {
     const field = messageFieldRef.current
-    toggleDictation(field?.selectionEnd ?? Number.POSITIVE_INFINITY)
+    handleDictationPress(field?.selectionEnd ?? Number.POSITIVE_INFINITY)
     if (isListening) field?.focus()
   }
 

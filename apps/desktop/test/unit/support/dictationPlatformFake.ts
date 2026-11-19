@@ -46,12 +46,21 @@ function getRunningPlatform(): DictationPlatformFake {
   return runningPlatform
 }
 
-/** One WebSocket the code under test opened. */
+/**
+ * One WebSocket the code under test opened.
+ *
+ * @remarks It follows the platform's socket where a dictation can tell: a
+ * message sent while it connects throws, one sent while it closes or once it
+ * closed is dropped, and a close from the client side is reported on a later
+ * task, never inside the call.
+ */
 export class FakeWebSocket {
   /** State of a socket that is still connecting. */
   public static readonly CONNECTING = 0
   /** State of an open socket. */
   public static readonly OPEN = 1
+  /** State of a socket whose close started and is not reported yet. */
+  public static readonly CLOSING = 2
   /** State of a closed socket. */
   public static readonly CLOSED = 3
   /** The socket's state. */
@@ -62,6 +71,8 @@ export class FakeWebSocket {
   public isClosed = false
   /** Its listeners, by event type. */
   readonly #listeners = new Map<string, ((event: unknown) => void)[]>()
+  /** The platform of the case that opened it. */
+  readonly #platform = getRunningPlatform()
 
   /**
    * Records the socket with the running case's platform.
@@ -69,7 +80,7 @@ export class FakeWebSocket {
    * @param url - The URL it was opened with.
    */
   public constructor(public readonly url: string) {
-    getRunningPlatform().sockets.push(this)
+    this.#platform.sockets.push(this)
   }
 
   /**
@@ -83,20 +94,50 @@ export class FakeWebSocket {
   }
 
   /**
-   * Sends a message.
+   * Sends a message, as the platform does: only an open socket takes it.
    *
    * @param message - The message.
+   * @throws {DOMException} `InvalidStateError` while the socket connects.
    */
   public send(message: unknown): void {
-    this.sent.push(message)
+    if (this.readyState === FakeWebSocket.CONNECTING) {
+      throw new DOMException("Still in CONNECTING state.", "InvalidStateError")
+    }
+    if (this.readyState === FakeWebSocket.OPEN) this.sent.push(message)
   }
 
   /**
-   * Closes the socket from the client side. Like the platform, it reports no
-   * close event by itself.
+   * Closes the socket from the client side, as the platform does: the socket
+   * is closing at once, and on a later task it is closed and reports its
+   * `close` event. The event carries `1005` for a socket that was open,
+   * because the client gave no code, and `1006` after an `error` event for
+   * one that never opened. A close of a closing or closed socket does
+   * nothing more.
+   *
+   * @remarks A close still waiting when the case finishes is never reported,
+   * so it cannot reach the next case.
    */
   public close(): void {
     this.isClosed = true
+    if (this.readyState >= FakeWebSocket.CLOSING) return
+    const wasOpen = this.readyState === FakeWebSocket.OPEN
+    this.readyState = FakeWebSocket.CLOSING
+    setTimeout(() => {
+      this.#handleClientCloseDone(wasOpen)
+    }, 0)
+  }
+
+  /**
+   * Reports the close the client started, unless the backend's close came
+   * first or the case finished.
+   *
+   * @param wasOpen - Whether the socket was open when the client closed it.
+   */
+  #handleClientCloseDone(wasOpen: boolean): void {
+    if (this.readyState === FakeWebSocket.CLOSED) return
+    if (runningPlatform !== this.#platform) return
+    if (!wasOpen) this.sendEvent("error")
+    this.closeFromBackend(wasOpen ? 1005 : 1006)
   }
 
   /**
@@ -109,8 +150,16 @@ export class FakeWebSocket {
     for (const listener of this.#listeners.get(type) ?? []) listener(event)
   }
 
-  /** Opens the socket, as the platform does once it connected. */
+  /**
+   * Opens the socket, as the platform does once it connected.
+   *
+   * @throws {Error} When the socket is not connecting, which the platform
+   * never opens.
+   */
   public open(): void {
+    if (this.readyState !== FakeWebSocket.CONNECTING) {
+      throw new Error("The case opened a socket that is not connecting")
+    }
     this.readyState = FakeWebSocket.OPEN
     this.sendEvent("open")
   }
@@ -125,11 +174,13 @@ export class FakeWebSocket {
   }
 
   /**
-   * Closes the socket from the backend's side.
+   * Closes the socket from the backend's side, or ends a close the client
+   * started; a closed socket reports nothing more.
    *
    * @param code - The close code.
    */
   public closeFromBackend(code: number): void {
+    if (this.readyState === FakeWebSocket.CLOSED) return
     this.readyState = FakeWebSocket.CLOSED
     this.sendEvent("close", { code })
   }
@@ -157,8 +208,8 @@ export class FakeMicrophoneTrack {
     this.#endedListeners.push(listener)
   }
 
-  /** Ends the track on its own, as unplugging the microphone does. */
-  public end(): void {
+  /** Reports the track's end, as unplugging the microphone does. */
+  public sendEnded(): void {
     for (const listener of this.#endedListeners) listener()
   }
 }
@@ -290,12 +341,12 @@ export class FakeWorkletNode {
 }
 
 /**
- * Asks the running case's platform for the microphone.
+ * Handles a request for the microphone with the running case's platform.
  *
  * @param constraints - What the recorder asked for.
  * @returns The platform's answer.
  */
-function requestMicrophone(
+function handleMicrophoneRequest(
   constraints: unknown
 ): Promise<FakeMicrophoneStream> {
   const platform = getRunningPlatform()
@@ -321,7 +372,8 @@ function removeDictationPlatformFake(): void {
  * stream and its worklet module loads at once, until the case replaces
  * either answer.
  * @remarks Only platform globals are replaced, so the socket adapter, the
- * recorder, the controller, and the store under test are the real ones. The
+ * recorder, the composer's dictation, and the store under test are the real
+ * ones. The
  * navigator keeps everything else it has. Vitest restores the globals after
  * the case, and the microphone is removed when the case finishes. A socket
  * opens only when the case calls {@link FakeWebSocket.open}.
@@ -342,7 +394,7 @@ export function startDictationPlatformFake(): DictationPlatformFake {
   vi.stubGlobal("AudioWorkletNode", FakeWorkletNode)
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
-    value: { getUserMedia: requestMicrophone }
+    value: { getUserMedia: handleMicrophoneRequest }
   })
   onTestFinished(removeDictationPlatformFake)
   return platform
@@ -367,25 +419,25 @@ export function getDictationSocket(
 }
 
 /**
- * Counts the `stop` messages sent on every socket.
+ * Lists the `stop` messages sent on every socket.
  *
  * @param platform - The case's platform.
- * @returns How many text messages equal to `{"type":"stop"}` were sent.
+ * @returns Each text message equal to `{"type":"stop"}` that was sent.
  */
-export function countSentStops(platform: DictationPlatformFake): number {
+export function listSentStops(platform: DictationPlatformFake): unknown[] {
   return platform.sockets
     .flatMap((socket) => socket.sent)
-    .filter((message) => message === JSON.stringify({ type: "stop" })).length
+    .filter((message) => message === JSON.stringify({ type: "stop" }))
 }
 
 /**
- * Counts the microphone streams the code under test released.
+ * Lists the microphone streams the code under test released.
  *
  * @param platform - The case's platform.
- * @returns How many streams had their track stopped.
+ * @returns Each stream whose track was stopped.
  */
-export function countReleasedMicrophones(
+export function listReleasedMicrophones(
   platform: DictationPlatformFake
-): number {
-  return platform.streams.filter((stream) => stream.track.isStopped).length
+): FakeMicrophoneStream[] {
+  return platform.streams.filter((stream) => stream.track.isStopped)
 }

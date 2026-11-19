@@ -193,11 +193,16 @@ private func startSpeechServer(
     handshakeTimeout: Duration = SpeechSocketServer.defaultHandshakeTimeout
 ) async throws -> LoopbackServer {
     let server = SpeechSocketServer(
-        engine: engine,
-        port: .any,
-        dictationEngine: try await startDictationEngine(recognizer: FakeRecognizer()),
-        maxConnections: maxConnections,
-        handshakeTimeout: handshakeTimeout
+        jobs: VoiceJobs(
+            speechEngine: engine,
+            dictationEngine: try await startDictationEngine(recognizer: FakeRecognizer())
+        ),
+        settings: SpeechSocketServer.ListenerSettings(
+            host: "127.0.0.1",
+            port: .any,
+            maxConnections: maxConnections,
+            handshakeTimeout: handshakeTimeout
+        )
     )
     let loopback = LoopbackServer()
     try await loopback.start { onReady in try await server.start(onReady: onReady) }

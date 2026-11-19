@@ -114,7 +114,7 @@ final class FakeRecognizer: StreamingRecognizer, @unchecked Sendable {
     }
 
     /// Lets the held first audio go on.
-    func releaseFirstAudio() {
+    func resolveFirstAudio() {
         let held = lock.withLock { () -> CheckedContinuation<Void, Never>? in
             isFirstAudioReleased = true
             defer { heldAudio = nil }

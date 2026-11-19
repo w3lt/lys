@@ -9,6 +9,7 @@ import {
   type RuntimeSettings
 } from "@/lib/store/settings"
 import type { VmoServerInfo } from "@/lib/store/vmo-runtime"
+import type { VoiceServerInfo } from "@/lib/store/voice-runtime"
 import {
   ACTIVITY_ROUTE,
   buildIdleActivityRoute
@@ -24,6 +25,12 @@ import {
   startBackendFake,
   type ObservedBackendRequest
 } from "./support/backendFake"
+import {
+  getDictationSocket,
+  listReleasedMicrophones,
+  listSentStops,
+  startDictationPlatformFake
+} from "./support/dictationPlatformFake"
 import { startNativeHostFake } from "./support/nativeHostFake"
 import {
   createControlledPromise,
@@ -246,6 +253,43 @@ describe("App", () => {
     expect(activityRequests).toHaveLength(1)
     // Ending the read cancels the stream the backend opened for it.
     expect(activityRequests[0]?.signal?.aborted).toBe(true)
+  })
+
+  it("stops a running dictation when another view is shown while mounted, cancels it on unmount, and follows the stores no longer", async () => {
+    startStoppedDesktopHost()
+    const platform = startDictationPlatformFake()
+    const { useLysStore, App } = await loadFreshApp()
+    const { useDictationStore } = await import("@/lib/store/dictation")
+    const { unmount } = render(<App />)
+    await screen.findByRole("region", { name: "Conversation" })
+    const runningVoice: VoiceServerInfo = { status: "running", problem: null }
+    await act(async () => {
+      useLysStore.setState({ voiceServerInfo: runningVoice })
+      useDictationStore.getState().handleDictationPress(0)
+      await waitForMicrotasks()
+      getDictationSocket(platform).open()
+    })
+    expect(useDictationStore.getState().status).toBe("listening")
+
+    act(() => {
+      useLysStore.setState({ activeView: "settings" })
+    })
+    expect(useDictationStore.getState().status).toBe("stopping")
+    expect(listSentStops(platform)).toHaveLength(1)
+    expect(listReleasedMicrophones(platform)).toHaveLength(1)
+    expect(getDictationSocket(platform).isClosed).toBe(false)
+
+    unmount()
+    expect(useDictationStore.getState().status).toBe("idle")
+    expect(getDictationSocket(platform).isClosed).toBe(true)
+
+    useLysStore.setState({ activeView: "chat" })
+    useDictationStore.getState().handleDictationPress(0)
+    await waitForMicrotasks()
+    useLysStore.setState({ activeView: "settings" })
+
+    expect(useDictationStore.getState().status).toBe("listening")
+    useDictationStore.getState().cancelDictation()
   })
 
   it("switches to Settings and back to the chat on Done", async () => {

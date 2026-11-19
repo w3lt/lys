@@ -8,8 +8,8 @@ sidebar:
 
 The Tauri layer is a small native host. It does not implement the backend API
 itself; it starts the backend, vmo, the page reader `read_page` uses, and voice, the
-speech server Lys reads replies with, and exposes a few native commands to
-the React UI.
+speech server Lys reads replies with and hears dictation with, and exposes a
+few native commands to the React UI.
 
 ## Registered commands
 
@@ -310,7 +310,7 @@ app dies without running its exit handler, after a crash, Force Quit, or
 The host owns one `Voice` state object (`src/voice.rs`), like `Vmo`'s. voice
 starts when the desktop's initialization or the Runtime pane asks for it,
 never on its own; `runtime.autoStartVoice` is off by default because a first
-start downloads about 780 MB of models. The child depends on the build mode:
+start downloads about 1.4 GB of models. The child depends on the build mode:
 
 - Development builds run `bash run.sh` in `apps/voice` of the checkout
   recorded at compile time. `run.sh` builds voice and replaces itself with it
@@ -347,6 +347,27 @@ for them. A failure or a killed voice is written to standard error and does
 not stop the exit. When the app dies without running its exit handler, after
 a crash, Force Quit, or `kill -9`, voice and the rest keep running, like
 vmo ([#202](https://github.com/w3lt/lys/issues/202)).
+
+## Microphone access
+
+Dictation records the microphone in the WebView, with `getUserMedia`; the
+host has no command for it. Three things in `src-tauri` let it:
+
+- `Info.plist` holds `NSMicrophoneUsageDescription`, "Lys listens only while
+  the microphone button is on.", the sentence macOS shows when it asks for
+  access the first time. Tauri merges the file into the bundle's
+  `Info.plist` and embeds it in a development build's binary.
+- `Entitlements.plist` holds `com.apple.security.device.audio-input`, which
+  a build signed with the hardened runtime needs to open the microphone.
+  `tauri.conf.json` names the file as `bundle.macOS.entitlements`, for a
+  build that Tauri signs with an identity. `build.sh` signs with none: its
+  bundle is ad hoc signed by the linker, without the hardened runtime, and
+  needs no entitlement.
+- wry, the WebView library Tauri uses, grants the WebView's own capture
+  request, because Lys sets no permission handler, so the person answers
+  only macOS's prompt.
+
+macOS keeps the answer in System Settings → Privacy & Security → Microphone.
 
 ## Settings file
 

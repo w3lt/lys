@@ -79,12 +79,12 @@ describe("getVoiceReadiness", () => {
     expect(listCommandNames(host)).toEqual(["get_voice_status"])
   })
 
-  it("reports unresponsive once ten minutes pass without an answer from a live process", async () => {
+  it("reports unresponsive once twenty minutes pass without an answer from a live process", async () => {
     startHostReadyFrom(Number.POSITIVE_INFINITY)
 
     const readiness = getVoiceReadiness()
     const getSettlement = createSettlementReader(readiness)
-    await vi.advanceTimersByTimeAsync(599_999)
+    await vi.advanceTimersByTimeAsync(1_199_999)
     const beforeDeadline = getSettlement()
     await vi.advanceTimersByTimeAsync(1)
 

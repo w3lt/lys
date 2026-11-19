@@ -10,7 +10,8 @@
  * `stop()` ends every scheduled frame and forgets the timeline, so the next
  * frame starts at once. The output is resumed on each start and each frame,
  * because a context created before a user gesture starts out suspended.
- * `close()` releases the output for good.
+ * `close()` releases the output for good. The player reports when it starts
+ * and stops having audio scheduled, which is when Lys can be heard.
  */
 import {
   VOICE_AUDIO_BYTES_PER_SAMPLE,
@@ -155,21 +156,44 @@ export function createAudioContextOutput(context: AudioContext): PcmOutput {
   })
 }
 
+/** What a player is created with. */
+export type PcmPlayerOptions = Readonly<{
+  /**
+   * Factory for the output, injectable for tests; defaults to one over a new
+   * platform `AudioContext`.
+   */
+  createOutput?: () => PcmOutput
+  /**
+   * Called when the player starts having audio scheduled, and when it stops
+   * having any, because the audio ended or was stopped.
+   *
+   * @param isPlaying - Whether audio is scheduled now.
+   */
+  onPlayingChange?: (isPlaying: boolean) => void
+}>
+
 /**
  * Creates a player over an audio output.
  *
- * @param createOutput - Factory for the output, injectable for tests;
- * defaults to one over a new platform `AudioContext`.
+ * @param options - The output's factory and the playing report; both
+ * optional.
  * @returns The player. Nothing is created until the first start or frame.
  */
-export function createPcmPlayer(
-  createOutput: () => PcmOutput = () =>
-    createAudioContextOutput(new AudioContext())
-): PcmPlayer {
+export function createPcmPlayer(options: PcmPlayerOptions = {}): PcmPlayer {
+  const createOutput =
+    options.createOutput ?? (() => createAudioContextOutput(new AudioContext()))
   let output: PcmOutput | undefined
   let isClosed = false
+  let isPlaying = false
   let nextStartTime = 0
   const scheduled = new Set<ScheduledPcm>()
+
+  /** Reports a change of whether audio is scheduled. */
+  function updatePlaying(): void {
+    if (isPlaying === scheduled.size > 0) return
+    isPlaying = scheduled.size > 0
+    options.onPlayingChange?.(isPlaying)
+  }
 
   /**
    * Gets the player's output, creating it on first use.
@@ -187,6 +211,7 @@ export function createPcmPlayer(
     scheduled.clear()
     nextStartTime = 0
     for (const stretch of stretches) stretch.stop()
+    updatePlaying()
   }
 
   return {
@@ -199,9 +224,11 @@ export function createPcmPlayer(
       const startAt = Math.max(audio.getCurrentTime(), nextStartTime)
       const stretch = audio.startStretch(samples, startAt, () => {
         scheduled.delete(stretch)
+        updatePlaying()
       })
       nextStartTime = startAt + stretch.duration
       scheduled.add(stretch)
+      updatePlaying()
     },
     stop,
     start(): void {

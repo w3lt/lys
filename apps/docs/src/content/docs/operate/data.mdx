@@ -210,13 +210,23 @@ that space.
 
 ## voice's models
 
-voice, the speech server Lys reads replies with, keeps its PocketTTS models in
+voice, the speech server Lys reads replies with and hears dictation with,
+keeps its PocketTTS models and its Nemotron model in
 `~/.lys/voice/models` whichever Lys home is in use, because voice does not read
 `LYS_HOME`: that is inside the default Lys home, `~/.lys`, and outside any
-other one. It downloads them on its first start, about 780 MB, so the
-directory exists once voice has started on this machine. Deleting it while
-voice is stopped loses nothing else; the next start downloads the models
-again.
+other one. It downloads them on its first start, about 1.4 GB, so the
+directory exists once voice has started on this machine. A voice that
+started before Lys could hear dictation downloads the Nemotron model, about
+600 MB, on its next start. Deleting the directory while voice is stopped
+loses nothing else; the next start downloads the models again.
+
+## Dictation
+
+A dictation leaves nothing behind. The microphone's audio and the text voice
+makes of it pass through the desktop, the backend, and voice in memory, and
+none of them writes either to a file or a log. The text exists only as the
+draft in the message field, which is stored once the person sends it, as any
+message is.
 
 ## Lifecycle notes
 

@@ -15,10 +15,10 @@ const VOICE_READINESS_CHECK_INTERVAL_MS = 1_000
 
 /**
  * Longest time a started voice is waited for, in milliseconds: long enough
- * for a first start, which downloads about 780 MB of models, and for a
+ * for a first start, which downloads about 1.4 GB of models, and for a
  * development build, which compiles voice first.
  */
-const VOICE_READINESS_TIMEOUT_MS = 600_000
+const VOICE_READINESS_TIMEOUT_MS = 1_200_000
 
 /**
  * Checks a started voice until it answers its health route, its process
@@ -32,7 +32,7 @@ const VOICE_READINESS_TIMEOUT_MS = 600_000
  * reported ready. The health route answers for whatever listens on voice's
  * port: while the owned voice is still starting, another voice there, such
  * as one left by a Lys that died without quitting (#202), makes it ready.
- * Checks run every second for at most ten minutes of monotonic time. The
+ * Checks run every second for at most twenty minutes of monotonic time. The
  * caller revalidates its own state before publishing.
  */
 export async function getVoiceReadiness(): Promise<VoiceReadiness> {

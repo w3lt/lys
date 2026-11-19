@@ -492,7 +492,7 @@ describe("RuntimePaneContent", () => {
       await startRuntimePane()
 
       expect(
-        screen.getByText(/first start downloads about 780 MB of models/)
+        screen.getByText(/first start downloads about 1\.4 GB of models/)
       ).toBeInTheDocument()
     })
   })

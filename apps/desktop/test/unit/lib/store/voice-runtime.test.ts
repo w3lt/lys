@@ -136,13 +136,13 @@ describe("createVoiceRuntimeSlice", () => {
       })
     })
 
-    it("shows voice not responding when it runs for ten minutes without answering", async () => {
+    it("shows voice not responding when it runs for twenty minutes without answering", async () => {
       vi.useFakeTimers()
       startHostSpawningVoice(() => "not-ready")
       const store = createVoiceRuntimeStore()
 
       const start = store.getState().startVoice()
-      await vi.advanceTimersByTimeAsync(600_000)
+      await vi.advanceTimersByTimeAsync(1_200_000)
       await start
 
       expect(store.getState().voiceServerInfo).toEqual({

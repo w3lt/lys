@@ -77,14 +77,14 @@ const MICROPHONE_CONSTRAINTS = Object.freeze({
 }) satisfies MediaStreamConstraints
 
 /**
- * Finds why asking for the microphone failed.
+ * Calculates why asking for the microphone failed.
  *
  * @param failure - Value `getUserMedia` rejected with, or the failure of
  * reading it.
  * @returns `denied` for a refused permission, `missing` when no microphone
  * was found, and `failed` otherwise.
  */
-function findMicrophoneFailure(failure: unknown): MicrophoneFailure {
+function calculateMicrophoneFailure(failure: unknown): MicrophoneFailure {
   const name = failure instanceof DOMException ? failure.name : ""
   if (name === "NotAllowedError" || name === "SecurityError") return "denied"
   return name === "NotFoundError" ? "missing" : "failed"
@@ -101,7 +101,9 @@ async function openMicrophoneStream(): Promise<MediaStream> {
   try {
     return await navigator.mediaDevices.getUserMedia(MICROPHONE_CONSTRAINTS)
   } catch (error) {
-    throw new MicrophoneError(findMicrophoneFailure(error), { cause: error })
+    throw new MicrophoneError(calculateMicrophoneFailure(error), {
+      cause: error
+    })
   }
 }
 
@@ -176,9 +178,12 @@ function startRecording(
     if (isStopped || !(event.data instanceof ArrayBuffer)) return
     options.onFrame(new Uint8Array(event.data))
   }
-  const handleTrackEnded = (): void => {
+
+  /** Reports that the microphone ended on its own, unless it was stopped. */
+  function handleTrackEnded(): void {
     if (!isStopped) options.onEnded()
   }
+
   for (const track of stream.getTracks()) {
     track.addEventListener("ended", handleTrackEnded)
   }

@@ -231,7 +231,7 @@ final class DictationEngine: Sendable {
             try Task.checkCancellation()
             switch command {
             case .audio(let samples):
-                let text = try await recognizer.addAudio(samples)
+                let text = try await recognizer.sendAudio(samples)
                 if text != heard { updates.yield(.partial(text)) }
                 heard = text
             case .close:

@@ -579,7 +579,7 @@ struct SpeechProtocolPathTests {
         defer { client.cancel() }
         client.sendText(#"{"type":"speak"}"#)
         try await waitUntil { engine.madeSessions.first != nil }
-        let sentence = String(repeating: "a", count: SpeechConnection.maximumMessageSize)
+        let sentence = String(repeating: "a", count: SpeechSocketServer.maximumMessageSize)
         client.sendText(#"{"type":"text","text":"\#(sentence)"}"#)
 
         #expect(try await client.readMessage() == .close(1009))

@@ -224,11 +224,17 @@ function createSpeechActivityReport(): SpeechActivityReport {
   let openSocketCount = 0
   let isPlaying = false
   let isClosed = false
-  const sendActivity = (): void => {
+
+  /**
+   * Writes whether Lys is talking to the speech activity store, unless the
+   * report was closed.
+   */
+  function sendActivity(): void {
     if (isClosed) return
     const isTalking = openSocketCount > 0 || isPlaying
     useSpeechActivityStore.setState({ isTalking })
   }
+
   return {
     handleSocketChange: (change) => {
       openSocketCount += change

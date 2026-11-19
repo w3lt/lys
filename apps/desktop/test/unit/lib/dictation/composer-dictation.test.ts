@@ -1,7 +1,6 @@
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import {
   ComposerDictation,
-  FINAL_TEXT_WAIT_MS,
   type DictationSocket,
   type DictationSocketHandlers,
   type DictationView
@@ -355,7 +354,7 @@ describe("ComposerDictation text", () => {
     const { harness, socket } = await startListening()
     sendUpdate(socket, "partial", "so far")
     harness.dictation.stop()
-    vi.advanceTimersByTime(FINAL_TEXT_WAIT_MS - 1)
+    vi.advanceTimersByTime(4_999)
     expect(harness.views.at(-1)?.status).toBe("stopping")
     vi.advanceTimersByTime(1)
 
@@ -439,7 +438,7 @@ describe("ComposerDictation endings", () => {
     const { harness, socket } = await startListening()
     harness.dictation.stop()
     socket.handlers.onClose(1011)
-    vi.advanceTimersByTime(FINAL_TEXT_WAIT_MS)
+    vi.advanceTimersByTime(5_000)
 
     expect(harness.views.at(-1)).toEqual({
       status: "idle",

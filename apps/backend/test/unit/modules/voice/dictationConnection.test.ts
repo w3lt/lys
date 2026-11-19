@@ -3,11 +3,11 @@ import {
   DICTATION_CLOSE_COMPLETE,
   DICTATION_CLOSE_FAILED,
   DICTATION_CLOSE_PROTOCOL_ERROR,
-  DICTATION_CLOSE_SHUTDOWN,
   DICTATION_CLOSE_SUPERSEDED,
   DICTATION_CLOSE_VOICE_UNAVAILABLE,
   DICTATION_MAX_DURATION_MS,
   SOCKET_MAX_CLIENT_MESSAGE_BYTES,
+  SPEECH_CLOSE_SHUTDOWN,
   voiceDictationApi
 } from "@lys/protocol"
 import { updateFastifyWithHttpTransport } from "../../../../src/http"
@@ -603,7 +603,7 @@ describe("dictation route failures and limits", () => {
     const { app, socket, voice } = await openDictation()
     await app.app.close()
 
-    await expect(socket.closed).resolves.toBe(DICTATION_CLOSE_SHUTDOWN)
+    await expect(socket.closed).resolves.toBe(SPEECH_CLOSE_SHUTDOWN)
     expect(voice.isCancelled).toBe(true)
   })
 })

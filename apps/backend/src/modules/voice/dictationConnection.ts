@@ -319,7 +319,7 @@ class DictationRelay {
   #handleClientMessage(message: Buffer, isBinary: boolean): void {
     if (!isOpen(this.#socket)) return
     if (isBinary) {
-      this.#addAudio(message)
+      this.#handleClientAudio(message)
       return
     }
     if (parseClientMessage(message.toString("utf8")) === undefined) {
@@ -336,7 +336,7 @@ class DictationRelay {
    *
    * @param pcm - Audio the UI sent.
    */
-  #addAudio(pcm: Buffer): void {
+  #handleClientAudio(pcm: Buffer): void {
     const state = this.#state
     if (pcm.byteLength % VOICE_AUDIO_BYTES_PER_SAMPLE !== 0) {
       this.#log.warn("Dictation socket sent audio that is not whole samples")

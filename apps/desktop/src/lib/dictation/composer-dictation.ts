@@ -152,7 +152,7 @@ export type ComposerDictationDeps = Readonly<{
 }>
 
 /** How long the final text is awaited after a stop, in milliseconds. */
-export const FINAL_TEXT_WAIT_MS = 5_000
+const FINAL_TEXT_WAIT_MS = 5_000
 
 /** The notice for each way the microphone can fail to open. */
 const MICROPHONE_NOTICES = Object.freeze({

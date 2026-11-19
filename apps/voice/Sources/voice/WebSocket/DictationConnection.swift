@@ -15,11 +15,11 @@ import Synchronization
 /// that breaks the protocol — a text message that is not `stop`, or audio
 /// that is not whole samples — and `1011` when recognition failed or fell
 /// too far behind the audio. Audio and a `stop` that arrive after the first
-/// `stop` are dropped. A client message may carry at most ``SpeechConnection/maximumMessageSize``
-/// bytes; a longer one fails the receive, and Network.framework closes the
-/// socket with `1009` itself. The client cancels a dictation by closing the
-/// socket. Every failure is logged with its cause, and neither audio nor
-/// text is ever logged.
+/// `stop` are dropped. A client message may carry at most
+/// ``SpeechSocketServer/maximumMessageSize`` bytes; a longer one fails the
+/// receive, and Network.framework closes the socket with `1009` itself. The
+/// client cancels a dictation by closing the socket. Every failure is logged
+/// with its cause, and neither audio nor text is ever logged.
 ///
 /// Concurrency model: one task runs ``handleMessages()`` per connection;
 /// the receive loop and the update pump communicate through the state under
@@ -34,7 +34,7 @@ final class DictationConnection: Sendable {
         var dictationID: UUID?
         /// Task sending the session's updates to the socket.
         var pumpTask: Task<Void, Never>?
-        /// Whether a close frame was sent or the peer went away.
+        /// Whether this side started sending its close frame.
         var closeSent = false
 
         /// Forgets the dictation when it is the one named.
@@ -112,7 +112,7 @@ final class DictationConnection: Sendable {
             case .close:
                 isOpen = false
             case .binary(let audio):
-                if !isCloseSent { await addAudio(audio) }
+                if !isCloseSent { await handleAudio(audio) }
             case .text(let body):
                 if !isCloseSent { await handleText(body) }
             }
@@ -156,12 +156,12 @@ final class DictationConnection: Sendable {
         }
     }
 
-    /// Queues one message of audio on the dictation. Audio that is not
-    /// whole samples is a protocol error; audio that arrives after `stop`,
-    /// or while the dictation is ending, is dropped.
+    /// Handles one client audio message: queues it on the dictation. Audio
+    /// that is not whole samples is a protocol error; audio that arrives
+    /// after `stop`, or while the dictation is ending, is dropped.
     ///
     /// - Parameter audio: The binary message's payload.
-    private func addAudio(_ audio: Data) async {
+    private func handleAudio(_ audio: Data) async {
         guard let session = state.withLock({ state in state.session }) else { return }
         guard let samples = PCMConversion.parseLittleEndianPCM16(audio) else {
             await closeForProtocolViolation("sent audio that is not whole samples")
@@ -277,8 +277,7 @@ final class DictationConnection: Sendable {
     private func startClose(_ code: NWProtocolWebSocket.CloseCode) async {
         let (sends, pump) = state.withLock { state in state.startClose() }
         if let pump {
-            pump.cancel()
-            await connection.waitForSender(pump, within: Self.pumpStopTimeout)
+            await connection.stopSender(pump, within: Self.pumpStopTimeout)
         }
         if sends {
             try? await connection.sendSocketMessage(nil, opcode: .close, closeCode: code)

@@ -40,6 +40,12 @@ final class SpeechSocketServer: Sendable {
         var handshakeTimeout = SpeechSocketServer.defaultHandshakeTimeout
     }
 
+    /// Most bytes one client message may carry on any connection, a
+    /// speech's text and a dictation's audio alike: 16 KiB. Sentences are
+    /// short, and the backend relays audio in messages of at most 8 KiB. A
+    /// longer message fails its receive, and Network.framework closes the
+    /// socket with `1009` itself.
+    static let maximumMessageSize = 16 * 1024
     /// Default most connections served at once.
     static let defaultMaxConnections = 16
     /// Default longest wait for a client's WebSocket handshake.
@@ -132,7 +138,7 @@ final class SpeechSocketServer: Sendable {
     private func createListener() throws -> NWListener {
         let websocket = NWProtocolWebSocket.Options()
         websocket.autoReplyPing = true
-        websocket.maximumMessageSize = SpeechConnection.maximumMessageSize
+        websocket.maximumMessageSize = Self.maximumMessageSize
         let jobs = self.jobs
         websocket.setClientRequestHandler(DispatchQueue(label: "voice.WebSocketHandshake")) { _, headers in
             let isReady = jobs.speechEngine.isReady && jobs.dictationEngine.isReady

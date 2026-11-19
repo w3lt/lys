@@ -62,6 +62,7 @@ function sendPartial(platform: DictationPlatformFake, text: string): void {
 beforeEach(() => {
   useDictationStore.getState().cancelDictation()
   useLysStore.setState({
+    activeView: "chat",
     voiceServerInfo: Object.freeze({ status: "running", problem: null })
   })
   useSpeechActivityStore.setState({ isTalking: false })
@@ -118,7 +119,11 @@ describe("useDictationStore", () => {
           }
         })
     ],
-    ["Lys talks", () => useSpeechActivityStore.setState({ isTalking: true })]
+    ["Lys talks", () => useSpeechActivityStore.setState({ isTalking: true })],
+    [
+      "the settings view is shown",
+      () => useLysStore.setState({ activeView: "settings" })
+    ]
   ])("starts nothing while %s", (_situation, update) => {
     const platform = startDictationPlatformFake()
     update()
@@ -222,6 +227,10 @@ describe("registerDictationRules", () => {
     [
       "Lys starts talking",
       () => useSpeechActivityStore.setState({ isTalking: true })
+    ],
+    [
+      "the settings view is shown instead of the chat view",
+      () => useLysStore.setState({ activeView: "settings" })
     ]
   ])(
     "stops the dictation as a press does when %s",

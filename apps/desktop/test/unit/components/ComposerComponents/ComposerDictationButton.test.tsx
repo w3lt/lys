@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import ComposerDictationButton from "@/components/ComposerComponents/ComposerDictationButton"
 import type { ComposerActivity } from "@/components/ComposerComponents/composer-presentation"
-import type { DictationStatus } from "@/lib/dictation"
+import type { DictationStatus } from "@/lib/dictation/composer-dictation"
 import { useLysStore } from "@/lib/store"
 import { useDictationStore } from "@/lib/store/dictation"
 import { useSpeechActivityStore } from "@/lib/store/speech-activity"
@@ -72,7 +72,7 @@ beforeEach(() => {
 })
 
 describe("ComposerDictationButton", () => {
-  it("is named Dictate, is not pressed, and can be pressed while Lys may listen", () => {
+  it("is named Dictate, is no toggle, and can be pressed while Lys may listen", () => {
     renderButton()
     const button = screen.getByRole("button", { name: "Dictate" })
 
@@ -105,14 +105,14 @@ describe("ComposerDictationButton", () => {
   })
 
   it.each(["starting", "listening"] as const)(
-    "is named Stop dictation and is pressed while a dictation is %s",
+    "is named Stop dictation, and is no toggle, while a dictation is %s",
     (status) => {
       renderButton()
       updateDictationStatus(status)
       const button = screen.getByRole("button", { name: "Stop dictation" })
 
       expect(button).toBeEnabled()
-      expect(button).toHaveAttribute("aria-pressed", "true")
+      expect(button).not.toHaveAttribute("aria-pressed")
     }
   )
 

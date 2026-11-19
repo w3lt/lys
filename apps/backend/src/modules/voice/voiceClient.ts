@@ -301,9 +301,15 @@ function createVoiceSpeech(socket: WebSocket): VoiceSpeech {
  * being open.
  */
 function createVoiceDictation(socket: WebSocket): VoiceDictation {
-  const sendMessage = (message: string | Uint8Array): void => {
+  /**
+   * Sends one message to voice, unless the socket stopped being open.
+   *
+   * @param message - A JSON text message, or audio as bytes.
+   */
+  function sendMessage(message: string | Uint8Array): void {
     if (socket.readyState === socket.OPEN) socket.send(message)
   }
+
   return Object.freeze({
     start: () => sendMessage(JSON.stringify({ type: "transcribe" })),
     sendAudio: (pcm: Uint8Array) => sendMessage(pcm),

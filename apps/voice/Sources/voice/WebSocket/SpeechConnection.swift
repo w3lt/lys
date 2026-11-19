@@ -12,9 +12,10 @@ import Synchronization
 /// a close frame: `1000` once everything enqueued was spoken, `1001` when a
 /// newer speech superseded this one, `1002` for a protocol violation,
 /// `1003` for a binary message from the client, and `1011` when synthesis
-/// failed. A client message may carry at most ``maximumMessageSize`` bytes;
-/// a longer one fails the receive, and Network.framework closes the socket
-/// with `1009` itself, so the client splits longer text.
+/// failed. A client message may carry at most
+/// ``SpeechSocketServer/maximumMessageSize`` bytes; a longer one fails the
+/// receive, and Network.framework closes the socket with `1009` itself, so
+/// the client splits longer text.
 /// A close waits at most ``pumpStopTimeout`` for audio still being sent
 /// before it cancels the connection. Every failure is logged with its cause.
 ///
@@ -46,9 +47,6 @@ final class SpeechConnection: Sendable {
         /// Whether `finish` was received, after which `text` is an error.
         var finishReceived = false
     }
-
-    /// Most bytes a client text message may carry; sentences are short.
-    static let maximumMessageSize = 16 * 1024
 
     /// Longest wait for the frame pump once a close cancelled it. A send to a
     /// peer that stopped reading ends only when the connection is cancelled.
@@ -106,10 +104,10 @@ final class SpeechConnection: Sendable {
     ///
     /// - Returns: The message, or `nil` once a receive failed. A failure
     ///   before this side sent its close frame, such as a message over
-    ///   ``maximumMessageSize`` or a peer that went away without a close
-    ///   frame, is logged before the speech is torn down. So is a text
-    ///   message that is not UTF-8: Network.framework fails its receive and
-    ///   closes the socket with `1002` itself.
+    ///   ``SpeechSocketServer/maximumMessageSize`` or a peer that went away
+    ///   without a close frame, is logged before the speech is torn down. So
+    ///   is a text message that is not UTF-8: Network.framework fails its
+    ///   receive and closes the socket with `1002` itself.
     private func readNextMessage() async -> SocketMessage? {
         do {
             return try await connection.readSocketMessage()
@@ -326,8 +324,7 @@ final class SpeechConnection: Sendable {
             return (true, pump)
         }
         if let pump {
-            pump.cancel()
-            await connection.waitForSender(pump, within: Self.pumpStopTimeout)
+            await connection.stopSender(pump, within: Self.pumpStopTimeout)
         }
         if sends {
             try? await connection.sendSocketMessage(nil, opcode: .close, closeCode: code)

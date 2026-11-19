@@ -35,8 +35,11 @@ type ComposerDictationButtonProps = {
  * talking. The component owns no state. Named Dictate, the button starts a
  * dictation at the field's cursor, or at the draft's end when the field has
  * none. While a dictation starts or listens it is named Stop dictation and
- * is pressed, and a press stops the dictation and moves focus to the message
- * field, where the text lands and the button turns off for the wait. The
+ * marked as listening for its style, and a press stops the dictation and
+ * moves focus to the message field, where the text lands and the button
+ * turns off for the wait. The name carries the state, as Send's does when it
+ * turns into Stop, so the button is no toggle and exposes no pressed state.
+ * The
  * button is off while the final text is awaited, while the field is off,
  * while a conversation opens, while voice does not run, and while Lys
  * answers or talks; a reason that does not pass on its own is the button's
@@ -85,8 +88,8 @@ export default function ComposerDictationButton({
       <Tooltip description={reason ?? label}>
         <Button
           aria-describedby={reason === undefined ? undefined : reasonId}
-          aria-pressed={isListening ? true : undefined}
           className="composer__dictation"
+          data-listening={isListening ? "" : undefined}
           disabled={button.kind === "unavailable"}
           onClick={handleClick}
           size="icon"

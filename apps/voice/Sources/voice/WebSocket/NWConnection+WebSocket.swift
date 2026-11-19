@@ -89,18 +89,20 @@ extension NWConnection {
 }
 
 extension NWConnection {
-    /// Waits for a cancelled sending task to end, cancelling this connection
-    /// when it has not ended within `timeout`.
+    /// Stops a sending task: cancels it, waits for it to end, and cancels
+    /// this connection when it has not ended within `timeout`.
     ///
     /// Cancelling the task ends its wait for output but not a send already
     /// pending towards a peer that stopped reading; cancelling the
     /// connection fails that send, so the task ends and a close can proceed.
-    /// The cancellation is logged.
+    /// The connection's cancellation is logged.
     ///
     /// - Parameters:
-    ///   - sender: The task that sends on this connection, already cancelled.
-    ///   - timeout: Longest wait for the task.
-    func waitForSender(_ sender: Task<Void, Never>, within timeout: Duration) async {
+    ///   - sender: The task that sends on this connection.
+    ///   - timeout: Longest wait for the task before the connection is
+    ///     cancelled.
+    func stopSender(_ sender: Task<Void, Never>, within timeout: Duration) async {
+        sender.cancel()
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await sender.value }
             group.addTask { await self.cancelStalledSend(after: timeout) }

@@ -19,7 +19,7 @@ protocol StreamingRecognizer: Sendable {
     /// - Returns: The whole text heard since the last ``reset()``.
     /// - Throws: The error that stopped recognition, or `CancellationError`
     ///   when the calling task was cancelled.
-    func addAudio(_ samples: [Float]) async throws -> String
+    func sendAudio(_ samples: [Float]) async throws -> String
     /// Hears the end of the stream.
     ///
     /// - Returns: The finished text of the stream.

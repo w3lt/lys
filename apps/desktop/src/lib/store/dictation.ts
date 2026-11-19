@@ -69,11 +69,13 @@ function isChatBusy(chat: ChatViewStore): boolean {
 /**
  * Answers whether Lys may listen now.
  *
- * @returns True while voice runs and Lys neither answers, opens a
- * conversation, nor talks.
+ * @returns True while the chat view is shown, voice runs, and Lys neither
+ * answers, opens a conversation, nor talks.
  */
 function canListen(): boolean {
-  if (useLysStore.getState().voiceServerInfo.status !== "running") return false
+  const application = useLysStore.getState()
+  if (application.activeView !== "chat") return false
+  if (application.voiceServerInfo.status !== "running") return false
   if (useSpeechActivityStore.getState().isTalking) return false
   return !isChatBusy(useChatViewStore.getState())
 }
@@ -175,9 +177,10 @@ function createDictationStoreState(store: DictationStoreApi): DictationStore {
  * the platform's microphone. It owns the composer's dictation, which owns
  * the microphone and the socket of the running dictation;
  * {@link DictationStore.cancelDictation} releases them. It refuses to start
- * while voice does not run, while Lys answers or talks, and while a
- * conversation is opening; {@link registerDictationRules} ends a running
- * dictation when one of those begins. When a dictation ends because voice
+ * while another view than the chat view is shown, while voice does not run,
+ * while Lys answers or talks, and while a conversation is opening;
+ * {@link registerDictationRules} ends a running dictation when one of those
+ * begins. When a dictation ends because voice
  * was not ready or stopped, it has voice's status read again.
  */
 export const useDictationStore: UseBoundStore<StoreApi<DictationStore>> =
@@ -223,19 +226,23 @@ function stopDisallowedDictation(): void {
  * speech activity. A dictation is cancelled, writing nothing more, when the
  * shown conversation changes or starts to be replaced, and when something
  * else changes the draft. It is stopped as a press of its button stops it,
- * so its final text still arrives, when Lys starts answering or talking and
- * when voice stops running. The application shell registers it once while
- * it is mounted; nothing subscribes when this module is evaluated.
+ * so its final text still arrives, when Lys starts answering or talking,
+ * when voice stops running, and when another view than the chat view is
+ * shown, where its button cannot be seen. The application shell registers
+ * it once while it is mounted; nothing subscribes when this module is
+ * evaluated.
  */
 export function registerDictationRules(): () => void {
   const stopFollowingChat = useChatViewStore.subscribe(handleChatChange)
-  const stopFollowingVoice = useLysStore.subscribe(stopDisallowedDictation)
+  const stopFollowingApplication = useLysStore.subscribe(
+    stopDisallowedDictation
+  )
   const stopFollowingSpeech = useSpeechActivityStore.subscribe(
     stopDisallowedDictation
   )
   return () => {
     stopFollowingSpeech()
-    stopFollowingVoice()
+    stopFollowingApplication()
     stopFollowingChat()
     useDictationStore.getState().cancelDictation()
   }

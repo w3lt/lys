@@ -171,8 +171,13 @@
   flex: none;
 }
 
-/* Listening is said by the pressed frame and by the brand tint together. */
-.composer__dictation[aria-pressed="true"] {
+/*
+ * Listening is shown by the selected frame and by the brand tint together;
+ * the button's name says it.
+ */
+.composer__dictation[data-listening] {
+  border-color: var(--app-border-interactive);
+  background: var(--app-surface-selected);
   color: var(--lys-violet);
 }
 

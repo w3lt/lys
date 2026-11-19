@@ -90,7 +90,7 @@ final class FakeRecognizer: StreamingRecognizer, @unchecked Sendable {
     /// - Returns: `heard N`, or an empty text while nothing was audible.
     /// - Throws: ``FakeRecognitionError`` when recognition fails;
     ///   `CancellationError` when the dictation was cancelled meanwhile.
-    func addAudio(_ samples: [Float]) async throws -> String {
+    func sendAudio(_ samples: [Float]) async throws -> String {
         let isHeld = lock.withLock { () -> Bool in
             audioCalls += 1
             return behavior.holdsFirstAudio && audioCalls == 1 && !isFirstAudioReleased

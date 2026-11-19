@@ -50,7 +50,7 @@ final class NemotronRecognizer: StreamingRecognizer {
     /// - Throws: ``AudioBufferError`` when no buffer could be made;
     ///   FluidAudio's error when the model fails; `CancellationError` when
     ///   the calling task was cancelled.
-    func addAudio(_ samples: [Float]) async throws -> String {
+    func sendAudio(_ samples: [Float]) async throws -> String {
         if !samples.isEmpty {
             try await manager.appendAudio(try Self.buildBuffer(from: samples))
             try await manager.processBufferedAudio()

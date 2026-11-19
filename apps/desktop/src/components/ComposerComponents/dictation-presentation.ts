@@ -1,4 +1,7 @@
-import type { DictationNotice, DictationStatus } from "@/lib/dictation"
+import type {
+  DictationNotice,
+  DictationStatus
+} from "@/lib/dictation/composer-dictation"
 
 /** What the dictation button reads to decide what it offers. */
 export type DictationButtonSituation = Readonly<{

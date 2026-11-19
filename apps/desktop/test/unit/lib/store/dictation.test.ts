@@ -1,13 +1,6 @@
-import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
-import { useLysStore } from "@/lib/store"
-import { useChatViewStore } from "@/lib/store/chat-view"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
-import {
-  registerDictationRules,
-  useDictationStore
-} from "@/lib/store/dictation"
-import { useSpeechActivityStore } from "@/lib/store/speech-activity"
 import {
   buildConversation,
   createFixtureUuidV7,
@@ -25,12 +18,50 @@ import { startNativeHostFake } from "../../support/nativeHostFake"
 import { waitForMicrotasks } from "../../support/settlement"
 
 /**
+ * Loads fresh stores for one case, with voice running, and has the case's
+ * dictation cancelled when the case ends.
+ *
+ * @returns The stores a dictation reads, and the registration of its rules.
+ */
+async function loadFreshDictationStores() {
+  vi.resetModules()
+  const { useLysStore } = await import("@/lib/store")
+  const { useChatViewStore } = await import("@/lib/store/chat-view")
+  const { registerDictationRules, useDictationStore } =
+    await import("@/lib/store/dictation")
+  const { useSpeechActivityStore } = await import("@/lib/store/speech-activity")
+  useLysStore.setState({
+    voiceServerInfo: Object.freeze({ status: "running", problem: null })
+  })
+  onTestFinished(() => {
+    useDictationStore.getState().cancelDictation()
+  })
+  return {
+    useLysStore,
+    useChatViewStore,
+    useDictationStore,
+    useSpeechActivityStore,
+    registerDictationRules
+  }
+}
+
+/** The fresh stores of one case. */
+type DictationStores = Awaited<ReturnType<typeof loadFreshDictationStores>>
+
+/** Changes a case's stores into the situation the case names. */
+type StoreUpdate = (stores: DictationStores) => void
+
+/**
  * Shows a stored conversation in the chat view.
  *
+ * @param stores - The case's stores.
  * @param conversationId - The conversation's identity.
  */
-function updateShownConversation(conversationId: string): void {
-  useChatViewStore.setState({
+function updateShownConversation(
+  stores: DictationStores,
+  conversationId: string
+): void {
+  stores.useChatViewStore.setState({
     conversation: createStoredChatViewConversation(
       buildConversation(conversationId, "Trip", [])
     )
@@ -40,13 +71,14 @@ function updateShownConversation(conversationId: string): void {
 /**
  * Starts a dictation at the draft's end and opens its microphone.
  *
+ * @param stores - The case's stores.
  * @returns Settlement once the dictation listens.
  */
-async function startListening(): Promise<void> {
-  const draft = useChatViewStore.getState().inputDraft
-  useDictationStore.getState().handleDictationPress(draft.length)
+async function startListening(stores: DictationStores): Promise<void> {
+  const draft = stores.useChatViewStore.getState().inputDraft
+  stores.useDictationStore.getState().handleDictationPress(draft.length)
   await waitForMicrotasks()
-  expect(useDictationStore.getState().status).toBe("listening")
+  expect(stores.useDictationStore.getState().status).toBe("listening")
 }
 
 /**
@@ -59,59 +91,49 @@ function sendPartial(platform: DictationPlatformFake, text: string): void {
   getDictationSocket(platform).sendJson({ type: "partial", text })
 }
 
-beforeEach(() => {
-  useDictationStore.getState().cancelDictation()
-  useLysStore.setState({
-    activeView: "chat",
-    voiceServerInfo: Object.freeze({ status: "running", problem: null })
-  })
-  useSpeechActivityStore.setState({ isTalking: false })
-  useChatViewStore.setState({
-    conversation: undefined,
-    conversationOpen: { status: "idle" },
-    inputDraft: "",
-    request: { status: "idle" }
-  })
-})
-
-/** Registers the rules for one test, unregistered when the test ends. */
-function registerRulesForTest(): void {
-  onTestFinished(registerDictationRules())
+/**
+ * Registers the rules for one test, unregistered when the test ends.
+ *
+ * @param stores - The case's stores.
+ */
+function registerRulesForTest(stores: DictationStores): void {
+  onTestFinished(stores.registerDictationRules())
 }
 
 describe("useDictationStore", () => {
   it("opens the backend's dictation socket and writes the text into the chat view's draft", async () => {
     const platform = startDictationPlatformFake()
-    useChatViewStore.setState({ inputDraft: "Note:" })
-    await startListening()
+    const stores = await loadFreshDictationStores()
+    stores.useChatViewStore.setState({ inputDraft: "Note:" })
+    await startListening(stores)
     sendPartial(platform, "buy milk")
 
     expect(platform.sockets.map((socket) => socket.url)).toEqual([
       `ws://${BACKEND_HOST}:${BACKEND_PORT}/api/v1/voice/dictation`
     ])
-    expect(useChatViewStore.getState().inputDraft).toBe("Note: buy milk")
-    expect(useDictationStore.getState().status).toBe("listening")
+    expect(stores.useChatViewStore.getState().inputDraft).toBe("Note: buy milk")
+    expect(stores.useDictationStore.getState().status).toBe("listening")
   })
 
-  it.each([
+  it.each<[string, StoreUpdate]>([
     [
       "voice does not run",
-      () =>
-        useLysStore.setState({
+      (stores) =>
+        stores.useLysStore.setState({
           voiceServerInfo: Object.freeze({ status: "stopped", problem: null })
         })
     ],
     [
       "Lys waits for a turn",
-      () =>
-        useChatViewStore.setState({
+      (stores) =>
+        stores.useChatViewStore.setState({
           request: { status: "awaiting-turn", token: 1 }
         })
     ],
     [
       "Lys answers",
-      () =>
-        useChatViewStore.setState({
+      (stores) =>
+        stores.useChatViewStore.setState({
           request: {
             status: "reply-streaming",
             token: 1,
@@ -119,30 +141,35 @@ describe("useDictationStore", () => {
           }
         })
     ],
-    ["Lys talks", () => useSpeechActivityStore.setState({ isTalking: true })],
+    [
+      "Lys talks",
+      (stores) => stores.useSpeechActivityStore.setState({ isTalking: true })
+    ],
     [
       "the settings view is shown",
-      () => useLysStore.setState({ activeView: "settings" })
+      (stores) => stores.useLysStore.setState({ activeView: "settings" })
     ]
-  ])("starts nothing while %s", (_situation, update) => {
+  ])("starts nothing while %s", async (_situation, update) => {
     const platform = startDictationPlatformFake()
-    update()
-    useDictationStore.getState().handleDictationPress(0)
+    const stores = await loadFreshDictationStores()
+    update(stores)
+    stores.useDictationStore.getState().handleDictationPress(0)
 
     expect(platform.sockets).toEqual([])
     expect(platform.microphoneRequests).toEqual([])
-    expect(useDictationStore.getState().status).toBe("idle")
+    expect(stores.useDictationStore.getState().status).toBe("idle")
   })
 
   it("stops the running dictation on a press while Lys may no longer listen", async () => {
     const platform = startDictationPlatformFake()
-    await startListening()
+    const stores = await loadFreshDictationStores()
+    await startListening(stores)
     getDictationSocket(platform).open()
-    useSpeechActivityStore.setState({ isTalking: true })
-    useDictationStore.getState().handleDictationPress(0)
+    stores.useSpeechActivityStore.setState({ isTalking: true })
+    stores.useDictationStore.getState().handleDictationPress(0)
 
     expect(listSentStops(platform)).toHaveLength(1)
-    expect(useDictationStore.getState().status).toBe("stopping")
+    expect(stores.useDictationStore.getState().status).toBe("stopping")
   })
 
   it.each([
@@ -161,102 +188,108 @@ describe("useDictationStore", () => {
         get_voice_status: () => ({ status: "stopped" })
       })
       const platform = startDictationPlatformFake()
-      await startListening()
+      const stores = await loadFreshDictationStores()
+      await startListening(stores)
       getDictationSocket(platform).closeFromBackend(code)
       await waitForMicrotasks()
 
-      expect(useDictationStore.getState().notice).toBe(notice)
+      expect(stores.useDictationStore.getState().notice).toBe(notice)
       expect(host.commands.map((invoked) => invoked.command)).toEqual(
         voice.reads
       )
-      expect(useLysStore.getState().voiceServerInfo.status).toBe(voice.shown)
+      expect(stores.useLysStore.getState().voiceServerInfo.status).toBe(
+        voice.shown
+      )
     }
   )
 
   it("keeps the next dictation when the socket of a cancelled one reports its close late", async () => {
     const platform = startDictationPlatformFake()
-    await startListening()
+    const stores = await loadFreshDictationStores()
+    await startListening(stores)
     const cancelled = getDictationSocket(platform)
     cancelled.open()
-    useDictationStore.getState().cancelDictation()
-    await startListening()
+    stores.useDictationStore.getState().cancelDictation()
+    await startListening(stores)
     sendPartial(platform, "second")
     await vi.waitFor(() => {
       expect(cancelled.readyState).toBe(FakeWebSocket.CLOSED)
     })
 
     expect(getDictationSocket(platform)).not.toBe(cancelled)
-    expect(useDictationStore.getState()).toMatchObject({
+    expect(stores.useDictationStore.getState()).toMatchObject({
       status: "listening",
       notice: undefined
     })
-    expect(useChatViewStore.getState().inputDraft).toBe("second")
+    expect(stores.useChatViewStore.getState().inputDraft).toBe("second")
   })
 
   it("listens after a reply completed while its stream stays open for a title", async () => {
     const platform = startDictationPlatformFake()
-    useChatViewStore.setState({
+    const stores = await loadFreshDictationStores()
+    stores.useChatViewStore.setState({
       request: {
         status: "reply-completed",
         token: 1,
         assistantMessageId: createFixtureUuidV7(3)
       }
     })
-    await startListening()
+    await startListening(stores)
 
     expect(platform.microphoneRequests).toHaveLength(1)
   })
 })
 
 describe("registerDictationRules", () => {
-  it.each([
+  it.each<[string, StoreUpdate]>([
     [
       "Lys starts answering",
-      () =>
-        useChatViewStore.setState({
+      (stores) =>
+        stores.useChatViewStore.setState({
           request: { status: "awaiting-turn", token: 1 }
         })
     ],
     [
       "voice stops running",
-      () =>
-        useLysStore.setState({
+      (stores) =>
+        stores.useLysStore.setState({
           voiceServerInfo: Object.freeze({ status: "stopping", problem: null })
         })
     ],
     [
       "Lys starts talking",
-      () => useSpeechActivityStore.setState({ isTalking: true })
+      (stores) => stores.useSpeechActivityStore.setState({ isTalking: true })
     ],
     [
       "the settings view is shown instead of the chat view",
-      () => useLysStore.setState({ activeView: "settings" })
+      (stores) => stores.useLysStore.setState({ activeView: "settings" })
     ]
   ])(
     "stops the dictation as a press does when %s",
     async (_situation, update) => {
       const platform = startDictationPlatformFake()
-      registerRulesForTest()
-      await startListening()
+      const stores = await loadFreshDictationStores()
+      registerRulesForTest(stores)
+      await startListening(stores)
       getDictationSocket(platform).open()
-      update()
+      update(stores)
 
       expect(listReleasedMicrophones(platform)).toHaveLength(1)
       expect(listSentStops(platform)).toHaveLength(1)
       expect(getDictationSocket(platform).isClosed).toBe(false)
-      expect(useDictationStore.getState().status).toBe("stopping")
+      expect(stores.useDictationStore.getState().status).toBe("stopping")
     }
   )
 
-  it.each([
+  it.each<[string, StoreUpdate]>([
     [
       "another conversation is shown",
-      () => updateShownConversation(FIXTURE_CONVERSATION_ID)
+      (stores) => updateShownConversation(stores, FIXTURE_CONVERSATION_ID)
     ],
     [
       "a conversation starts to open",
-      () =>
-        useChatViewStore.setState({
+      (stores) =>
+        stores.useChatViewStore.setState({
           conversationOpen: {
             status: "opening",
             conversationId: FIXTURE_CONVERSATION_ID,
@@ -266,61 +299,68 @@ describe("registerDictationRules", () => {
     ],
     [
       "something else changes the draft",
-      () => useChatViewStore.getState().setInputDraft("typed elsewhere")
+      (stores) =>
+        stores.useChatViewStore.getState().setInputDraft("typed elsewhere")
     ]
   ])(
     "cancels the dictation, sending no stop, when %s",
     async (_situation, update) => {
       const platform = startDictationPlatformFake()
-      registerRulesForTest()
-      await startListening()
+      const stores = await loadFreshDictationStores()
+      registerRulesForTest(stores)
+      await startListening(stores)
       getDictationSocket(platform).open()
       sendPartial(platform, "so far")
-      update()
+      update(stores)
       sendPartial(platform, "late words")
 
       expect(listReleasedMicrophones(platform)).toHaveLength(1)
       expect(listSentStops(platform)).toHaveLength(0)
       expect(getDictationSocket(platform).isClosed).toBe(true)
-      expect(useDictationStore.getState().status).toBe("idle")
-      expect(useChatViewStore.getState().inputDraft).not.toContain("late")
+      expect(stores.useDictationStore.getState().status).toBe("idle")
+      expect(stores.useChatViewStore.getState().inputDraft).not.toContain(
+        "late"
+      )
     }
   )
 
   it("keeps listening while the shown conversation's messages change", async () => {
     const platform = startDictationPlatformFake()
-    registerRulesForTest()
-    updateShownConversation(FIXTURE_CONVERSATION_ID)
-    await startListening()
-    updateShownConversation(FIXTURE_CONVERSATION_ID)
+    const stores = await loadFreshDictationStores()
+    registerRulesForTest(stores)
+    updateShownConversation(stores, FIXTURE_CONVERSATION_ID)
+    await startListening(stores)
+    updateShownConversation(stores, FIXTURE_CONVERSATION_ID)
     sendPartial(platform, "still here")
 
-    expect(useDictationStore.getState().status).toBe("listening")
-    expect(useChatViewStore.getState().inputDraft).toBe("still here")
+    expect(stores.useDictationStore.getState().status).toBe("listening")
+    expect(stores.useChatViewStore.getState().inputDraft).toBe("still here")
   })
 
   it("keeps a failure's notice until another conversation is shown", async () => {
     const platform = startDictationPlatformFake()
-    registerRulesForTest()
-    await startListening()
+    const stores = await loadFreshDictationStores()
+    registerRulesForTest(stores)
+    await startListening(stores)
     getDictationSocket(platform).closeFromBackend(1011)
-    expect(useDictationStore.getState().notice).toBe("voice-stopped")
-    updateShownConversation(FIXTURE_CONVERSATION_ID)
+    expect(stores.useDictationStore.getState().notice).toBe("voice-stopped")
+    updateShownConversation(stores, FIXTURE_CONVERSATION_ID)
 
-    expect(useDictationStore.getState().notice).toBeUndefined()
+    expect(stores.useDictationStore.getState().notice).toBeUndefined()
   })
 
   it("cancels the dictation and stops following the stores once it is unregistered", async () => {
     const platform = startDictationPlatformFake()
-    const unregister = registerDictationRules()
-    await startListening()
+    const stores = await loadFreshDictationStores()
+    const unregister = stores.registerDictationRules()
+    await startListening(stores)
     unregister()
     expect(listReleasedMicrophones(platform)).toHaveLength(1)
-    expect(useDictationStore.getState().status).toBe("idle")
-    await startListening()
-    useSpeechActivityStore.setState({ isTalking: true })
-    updateShownConversation(FIXTURE_CONVERSATION_ID)
+    expect(stores.useDictationStore.getState().status).toBe("idle")
+    await startListening(stores)
+    stores.useSpeechActivityStore.setState({ isTalking: true })
+    updateShownConversation(stores, FIXTURE_CONVERSATION_ID)
 
-    expect(useDictationStore.getState().status).toBe("listening")
+    expect(stores.useDictationStore.getState().status).toBe("listening")
   })
 })

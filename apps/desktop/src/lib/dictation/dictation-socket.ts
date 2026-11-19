@@ -7,6 +7,11 @@
  * waits; the stop message always does, so a dictation whose socket opens
  * late still asks for its final text.
  */
+import {
+  DICTATION_AUDIO_FRAME_SAMPLES,
+  DICTATION_AUDIO_SAMPLE_RATE_HZ
+} from "@lys/protocol"
+
 import type {
   DictationSocket,
   DictationSocketHandlers
@@ -15,12 +20,19 @@ import type {
 /** The message that asks for the final text. */
 const STOP_MESSAGE = JSON.stringify({ type: "stop" })
 
+/** How many seconds of audio may wait for the socket to open. */
+const MAX_WAITING_AUDIO_SECONDS = 5
+
 /**
  * Most messages that may wait for the socket to open before a frame of
- * audio is dropped instead of waiting too, inclusive: five seconds of audio
- * at ten frames a second. The stop message waits whatever their number.
+ * audio is dropped instead of waiting too, inclusive: the whole frames of
+ * {@link MAX_WAITING_AUDIO_SECONDS} of audio, fifty of them at the
+ * protocol's frame size. The stop message waits whatever their number.
  */
-const MAX_WAITING_MESSAGES = 50
+const MAX_WAITING_MESSAGES = Math.floor(
+  (MAX_WAITING_AUDIO_SECONDS * DICTATION_AUDIO_SAMPLE_RATE_HZ) /
+    DICTATION_AUDIO_FRAME_SAMPLES
+)
 
 /** A message of the dictation socket: the stop message, or a frame of audio. */
 type DictationSocketMessage = string | Uint8Array<ArrayBuffer>

@@ -1,26 +1,27 @@
-import { describe, expect, it, onTestFinished } from "vitest"
-import { useLysStore } from "@/lib/store"
-import { getBackendSocketOrigin } from "@/lib/store/backend-socket-origin"
+import { describe, expect, it, vi } from "vitest"
 
 /**
- * Names the backend's URL in the application store for one test.
+ * Loads a fresh application store that names a backend URL, and the reader
+ * of the backend's socket origin over it.
  *
- * @param backendUrl - The URL the store names during the test.
+ * @param backendUrl - The URL the store names.
+ * @returns The reader of the socket origin.
  */
-function updateBackendUrl(backendUrl: string): void {
-  const previous = useLysStore.getState().backendUrl
-  onTestFinished(() => {
-    useLysStore.setState({ backendUrl: previous })
-  })
+async function loadFreshSocketOriginReader(backendUrl: string) {
+  vi.resetModules()
+  const { useLysStore } = await import("@/lib/store")
+  const { getBackendSocketOrigin } =
+    await import("@/lib/store/backend-socket-origin")
   useLysStore.setState({ backendUrl })
+  return getBackendSocketOrigin
 }
 
 describe("getBackendSocketOrigin", () => {
   it.each([
     ["http://127.0.0.1:12345", "ws://127.0.0.1:12345"],
     ["https://lys.example", "wss://lys.example"]
-  ])("reads %s as %s", (backendUrl, origin) => {
-    updateBackendUrl(backendUrl)
+  ])("reads %s as %s", async (backendUrl, origin) => {
+    const getBackendSocketOrigin = await loadFreshSocketOriginReader(backendUrl)
 
     expect(getBackendSocketOrigin()).toBe(origin)
   })

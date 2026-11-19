@@ -1,13 +1,9 @@
 import { createRef } from "react"
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
-import ComposerDictationButton from "@/components/ComposerComponents/ComposerDictationButton"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import type { ComposerActivity } from "@/components/ComposerComponents/composer-presentation"
 import type { DictationStatus } from "@/lib/dictation/composer-dictation"
-import { useLysStore } from "@/lib/store"
-import { useDictationStore } from "@/lib/store/dictation"
-import { useSpeechActivityStore } from "@/lib/store/speech-activity"
 import { startHover } from "../../support/rendering"
 
 /** What a case renders the button with. */
@@ -21,14 +17,25 @@ type ButtonArrangement = Readonly<{
 }>
 
 /**
- * Renders the button beside a message field that holds "Hello world".
+ * Loads fresh stores and the button, and renders the button beside a message
+ * field that holds "Hello world", while voice runs and Lys is silent.
  *
  * @param arrangement - The composer's activity and the field's state.
- * @returns The spy that stands in for the store's press handler.
+ * @returns The stores the button reads, and the spy that stands in for the
+ * dictation store's press handler.
  */
-function renderButton(arrangement: ButtonArrangement = {}) {
+async function renderFreshButton(arrangement: ButtonArrangement = {}) {
+  vi.resetModules()
+  const { useLysStore } = await import("@/lib/store")
+  const { useDictationStore } = await import("@/lib/store/dictation")
+  const { useSpeechActivityStore } = await import("@/lib/store/speech-activity")
+  const { default: ComposerDictationButton } =
+    await import("@/components/ComposerComponents/ComposerDictationButton")
   const handleDictationPress = vi.fn<(cursor: number) => void>()
   useDictationStore.setState({ handleDictationPress })
+  useLysStore.setState({
+    voiceServerInfo: Object.freeze({ status: "running", problem: null })
+  })
   const messageFieldRef = createRef<HTMLTextAreaElement>()
   render(
     <>
@@ -46,34 +53,35 @@ function renderButton(arrangement: ButtonArrangement = {}) {
       />
     </>
   )
-  return handleDictationPress
+  return {
+    useLysStore,
+    useDictationStore,
+    useSpeechActivityStore,
+    handleDictationPress
+  }
 }
+
+/** The stores and the press spy of one case's rendered button. */
+type RenderedButton = Awaited<ReturnType<typeof renderFreshButton>>
 
 /**
  * Puts the dictation at a status, as the dictation store publishes it.
  *
+ * @param rendered - The case's stores.
  * @param status - Where the dictation stands.
  */
-function updateDictationStatus(status: DictationStatus): void {
+function updateDictationStatus(
+  rendered: RenderedButton,
+  status: DictationStatus
+): void {
   act(() => {
-    useDictationStore.setState({ status })
+    rendered.useDictationStore.setState({ status })
   })
 }
 
-beforeEach(() => {
-  const initialDictation = useDictationStore.getInitialState()
-  onTestFinished(() => {
-    useDictationStore.setState(initialDictation, true)
-  })
-  useLysStore.setState({
-    voiceServerInfo: Object.freeze({ status: "running", problem: null })
-  })
-  useSpeechActivityStore.setState({ isTalking: false })
-})
-
 describe("ComposerDictationButton", () => {
-  it("is named Dictate, is no toggle, and can be pressed while Lys may listen", () => {
-    renderButton()
+  it("is named Dictate, is no toggle, and can be pressed while Lys may listen", async () => {
+    await renderFreshButton()
     const button = screen.getByRole("button", { name: "Dictate" })
 
     expect(button).toBeEnabled()
@@ -82,7 +90,7 @@ describe("ComposerDictationButton", () => {
   })
 
   it("starts a dictation at the message field's cursor", async () => {
-    const handleDictationPress = renderButton()
+    const { handleDictationPress } = await renderFreshButton()
     const field = screen.getByRole<HTMLTextAreaElement>("textbox")
     field.setSelectionRange(2, 5)
     await userEvent
@@ -94,7 +102,9 @@ describe("ComposerDictationButton", () => {
   })
 
   it("starts a dictation at the draft's end when there is no message field", async () => {
-    const handleDictationPress = renderButton({ hasField: false })
+    const { handleDictationPress } = await renderFreshButton({
+      hasField: false
+    })
     await userEvent
       .setup()
       .click(screen.getByRole("button", { name: "Dictate" }))
@@ -106,9 +116,8 @@ describe("ComposerDictationButton", () => {
 
   it.each(["starting", "listening"] as const)(
     "is named Stop dictation, and is no toggle, while a dictation is %s",
-    (status) => {
-      renderButton()
-      updateDictationStatus(status)
+    async (status) => {
+      updateDictationStatus(await renderFreshButton(), status)
       const button = screen.getByRole("button", { name: "Stop dictation" })
 
       expect(button).toBeEnabled()
@@ -117,32 +126,34 @@ describe("ComposerDictationButton", () => {
   )
 
   it("stops the dictation on a press and moves focus to the message field", async () => {
-    const handleDictationPress = renderButton()
-    updateDictationStatus("listening")
+    const rendered = await renderFreshButton()
+    updateDictationStatus(rendered, "listening")
     await userEvent
       .setup()
       .click(screen.getByRole("button", { name: "Stop dictation" }))
 
-    expect(handleDictationPress).toHaveBeenCalledOnce()
+    expect(rendered.handleDictationPress).toHaveBeenCalledOnce()
     expect(screen.getByRole("textbox")).toHaveFocus()
   })
 
-  it("can stop a dictation whatever would keep one from starting", () => {
-    renderButton({ activity: "awaiting-reply", isFieldOff: true })
+  it("can stop a dictation whatever would keep one from starting", async () => {
+    const rendered = await renderFreshButton({
+      activity: "awaiting-reply",
+      isFieldOff: true
+    })
     act(() => {
-      useLysStore.setState({
+      rendered.useLysStore.setState({
         voiceServerInfo: Object.freeze({ status: "stopped", problem: null })
       })
-      useSpeechActivityStore.setState({ isTalking: true })
+      rendered.useSpeechActivityStore.setState({ isTalking: true })
     })
-    updateDictationStatus("listening")
+    updateDictationStatus(rendered, "listening")
 
     expect(screen.getByRole("button", { name: "Stop dictation" })).toBeEnabled()
   })
 
-  it("is off, without a reason, while the final text is awaited", () => {
-    renderButton()
-    updateDictationStatus("stopping")
+  it("is off, without a reason, while the final text is awaited", async () => {
+    updateDictationStatus(await renderFreshButton(), "stopping")
     const button = screen.getByRole("button", { name: "Dictate" })
 
     expect(button).toBeDisabled()
@@ -150,7 +161,7 @@ describe("ComposerDictationButton", () => {
   })
 
   it("is off and says to start voice while voice does not run", async () => {
-    const handleDictationPress = renderButton()
+    const { useLysStore, handleDictationPress } = await renderFreshButton()
     act(() => {
       useLysStore.setState({
         voiceServerInfo: Object.freeze({ status: "stopped", problem: null })
@@ -166,16 +177,16 @@ describe("ComposerDictationButton", () => {
     expect(handleDictationPress).not.toHaveBeenCalled()
   })
 
-  it("is off and says to wait while Lys answers", () => {
-    renderButton({ activity: "awaiting-reply" })
+  it("is off and says to wait while Lys answers", async () => {
+    await renderFreshButton({ activity: "awaiting-reply" })
     const button = screen.getByRole("button", { name: "Dictate" })
 
     expect(button).toBeDisabled()
     expect(button).toHaveAccessibleDescription("Wait for Lys to finish.")
   })
 
-  it("is off and says to wait while Lys talks, and can be pressed again once she is silent", () => {
-    renderButton()
+  it("is off and says to wait while Lys talks, and can be pressed again once she is silent", async () => {
+    const { useSpeechActivityStore } = await renderFreshButton()
     act(() => {
       useSpeechActivityStore.setState({ isTalking: true })
     })
@@ -189,28 +200,28 @@ describe("ComposerDictationButton", () => {
     expect(screen.getByRole("button", { name: "Dictate" })).toBeEnabled()
   })
 
-  it("is off and says so while the message field is off", () => {
-    renderButton({ isFieldOff: true })
+  it("is off and says so while the message field is off", async () => {
+    await renderFreshButton({ isFieldOff: true })
     const button = screen.getByRole("button", { name: "Dictate" })
 
     expect(button).toBeDisabled()
     expect(button).toHaveAccessibleDescription("The message field is off.")
   })
 
-  it("is off, without a reason, while a conversation opens", () => {
-    renderButton({ activity: "opening-conversation" })
+  it("is off, without a reason, while a conversation opens", async () => {
+    await renderFreshButton({ activity: "opening-conversation" })
     const button = screen.getByRole("button", { name: "Dictate" })
 
     expect(button).toBeDisabled()
     expect(button).not.toHaveAccessibleDescription()
   })
 
-  it("shows its reason to a pointer that rests on the disabled button", () => {
+  it("shows its reason to a pointer that rests on the disabled button", async () => {
+    await renderFreshButton({ activity: "awaiting-reply" })
     vi.useFakeTimers()
     onTestFinished(() => {
       vi.useRealTimers()
     })
-    renderButton({ activity: "awaiting-reply" })
     const trigger = screen.getByRole("button", {
       name: "Dictate"
     }).parentElement

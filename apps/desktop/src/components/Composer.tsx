@@ -1560,9 +1560,10 @@ function ComposerMeta({
  * says into the draft, where the cursor was, through the dictation store.
  * From a dictation's start until its final text arrived, the field is
  * read-only and Send is off, and nothing is sent unless the person presses
- * Send afterwards. The button is off, with its reason, while voice does not
- * run and while Lys answers or talks. Why a dictation ended on its own is
- * said in a polite status line below the row, until the next dictation.
+ * Send afterwards. {@link ComposerDictationButton} owns when the button is
+ * off and the reason it gives. Why a dictation ended on its own is said in
+ * a polite status line below the row, until the next dictation or until
+ * another conversation is shown.
  *
  * Files chosen through the add menu or dropped on the field are handed to
  * the store, which reads and admits them and lists them in the tray above

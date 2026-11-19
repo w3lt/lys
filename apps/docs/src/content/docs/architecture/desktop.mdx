@@ -666,7 +666,9 @@ A press starts a dictation:
   (`recorder-worklet.ts`), which converts the context's rate to 16 kHz with
   a windowed-sinc low-pass filter (`pcm-downsampler.ts`) and posts frames of
   1,600 samples, 100 ms, as 16-bit little-endian PCM. Frames recorded before
-  the socket opens wait in the socket adapter, at most 50 of them.
+  the socket opens wait in the socket adapter, at most 50 of them; the
+  `stop` message always waits, so a dictation whose socket opens late still
+  asks for its final text.
 - From the press until the final text arrived, the message field is
   read-only and Send and Enter are off, so typing cannot fight the dictated
   text and nothing is sent while Lys listens. While the dictation writes at
@@ -716,6 +718,12 @@ a speech socket's does. The microphone is released, its tracks stopped and
 its audio context closed, on every way out of listening. Neither the audio
 nor the text is stored or logged by the UI; the text lives on only as the
 draft.
+
+Two failures are not expected, and the UI also hands them to the WebView's
+`reportError`, as an uncaught error is, because the desktop has no logger: a
+microphone that could not be started for another reason than a refusal or a
+missing device, with its cause, and a message from the backend that is not a
+dictation message, without the message's text.
 
 ## vmo status
 

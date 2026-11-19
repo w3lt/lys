@@ -551,14 +551,15 @@ schemas:
 
 | Direction       | Message                              | Meaning                                                          |
 | --------------- | ------------------------------------ | ---------------------------------------------------------------- |
-| UI → voice      | binary                               | 16 kHz mono 16-bit little-endian PCM, a whole number of samples. |
+| UI → voice      | binary                               | 16 kHz mono 16-bit little-endian PCM, one or more whole samples. |
 | UI → voice      | `{ "type": "stop" }`                 | Send the final text.                                             |
 | voice → UI      | `{ "type": "partial", "text": "…" }` | The whole text so far.                                           |
 | voice → UI      | `{ "type": "final", "text": "…" }`   | The finished text; the socket then closes with `1000`.           |
 | backend → voice | `{ "type": "transcribe" }`           | The first message, which starts a dictation at voice.            |
 
-A text message that is not `stop`, or audio that is not whole samples,
-closes the socket with `1002`. The WebSocket server refuses any client
+A text message that is not `stop`, or audio that is empty or not whole
+samples, closes the socket with `1002`; the backend never relays an empty
+message, which voice reads as a connection that went away. The WebSocket server refuses any client
 message over 8 KiB, `SOCKET_MAX_CLIENT_MESSAGE_BYTES`, on every socket route,
 and closes that socket with `1009`; an audio message of the UI is 3,200
 bytes. A `stop` that arrives before voice accepted the dictation is kept and

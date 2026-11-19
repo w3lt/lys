@@ -303,23 +303,23 @@ The backend logs what happens on the
 [dictation socket](/architecture/backend/#dictation-socket). No entry holds
 a dictation's audio or its text.
 
-| Message                                                 | Level   | Other fields     | When                                                                                                          |
-| ------------------------------------------------------- | ------- | ---------------- | ------------------------------------------------------------------------------------------------------------- |
-| `Dictation socket opened`                               | `info`  |                  | A client opened the dictation socket                                                                          |
-| `Dictation socket closed`                               | `info`  | `code`           | The socket closed; `code` is its close code, such as `1000`, `4409`, or `4503`                                |
-| `Dictation socket failed`                               | `warn`  | `err`            | The socket reported an error, such as a message over 8 KiB                                                    |
-| `Voice refused a dictation`                             | `warn`  | `err`            | Voice refused or closed the handshake, or did not answer it within two seconds; the socket closes with `4503` |
-| `Dictation could not reach voice`                       | `error` | `err`            | The handshake failed for another reason; the socket closes with `1011`                                        |
-| `Dictation audio waited too long for voice`             | `warn`  |                  | More than five seconds of audio arrived before voice accepted the dictation; the socket closes with `1011`    |
-| `Dictation socket sent a text message that is not stop` | `warn`  |                  | The client broke the protocol; the socket closes with `1002`                                                  |
-| `Dictation socket sent audio that is not whole samples` | `warn`  |                  | A binary message had an odd number of bytes; the socket closes with `1002`                                    |
-| `Dictation reached its time limit`                      | `info`  |                  | The dictation listened for five minutes; the backend stops it, and the final text follows                     |
-| `Voice fell behind a dictation's audio`                 | `warn`  | `bufferedBytes`  | More than 1 MB of audio waited for voice; the socket closes with `1011`                                       |
-| `Dictation socket fell behind its text`                 | `warn`  | `bufferedBytes`  | More than 1 MB of text waited for the client; the socket closes with `1011`                                   |
-| `Voice sent no final text in time`                      | `warn`  |                  | Ten seconds passed after the `stop` without a final text; the socket closes with `1011`                       |
-| `Voice sent a message that is not a dictation message`  | `error` |                  | Voice broke the protocol; the socket closes with `1011`                                                       |
-| `Voice sent a final text before the dictation stopped`  | `error` |                  | Voice broke the protocol; the socket closes with `1011`                                                       |
-| `Voice ended a dictation that failed`                   | `warn`  | `voiceCloseCode` | Voice closed the dictation other than with `1000` after its final text; the socket closes with `1011`         |
+| Message                                                          | Level   | Other fields     | When                                                                                                          |
+| ---------------------------------------------------------------- | ------- | ---------------- | ------------------------------------------------------------------------------------------------------------- |
+| `Dictation socket opened`                                        | `info`  |                  | A client opened the dictation socket                                                                          |
+| `Dictation socket closed`                                        | `info`  | `code`           | The socket closed; `code` is its close code, such as `1000`, `4409`, or `4503`                                |
+| `Dictation socket failed`                                        | `warn`  | `err`            | The socket reported an error, such as a message over 8 KiB                                                    |
+| `Voice refused a dictation`                                      | `warn`  | `err`            | Voice refused or closed the handshake, or did not answer it within two seconds; the socket closes with `4503` |
+| `Dictation could not reach voice`                                | `error` | `err`            | The handshake failed for another reason; the socket closes with `1011`                                        |
+| `Dictation audio waited too long for voice`                      | `warn`  |                  | More than five seconds of audio arrived before voice accepted the dictation; the socket closes with `1011`    |
+| `Dictation socket sent a text message that is not stop`          | `warn`  |                  | The client broke the protocol; the socket closes with `1002`                                                  |
+| `Dictation socket sent audio that is empty or not whole samples` | `warn`  |                  | A binary message was empty or had an odd number of bytes; the socket closes with `1002`                       |
+| `Dictation reached its time limit`                               | `info`  |                  | The dictation listened for five minutes; the backend stops it, and the final text follows                     |
+| `Voice fell behind a dictation's audio`                          | `warn`  | `bufferedBytes`  | More than 1 MB of audio waited for voice; the socket closes with `1011`                                       |
+| `Dictation socket fell behind its text`                          | `warn`  | `bufferedBytes`  | More than 1 MB of text waited for the client; the socket closes with `1011`                                   |
+| `Voice sent no final text in time`                               | `warn`  |                  | Ten seconds passed after the `stop` without a final text; the socket closes with `1011`                       |
+| `Voice sent a message that is not a dictation message`           | `error` |                  | Voice broke the protocol; the socket closes with `1011`                                                       |
+| `Voice sent a final text before the dictation stopped`           | `error` |                  | Voice broke the protocol; the socket closes with `1011`                                                       |
+| `Voice ended a dictation that failed`                            | `warn`  | `voiceCloseCode` | Voice closed the dictation other than with `1000` after its final text; the socket closes with `1011`         |
 
 voice prints its refusals, drops, and failures to its standard output and
 standard error, and never a reply's text, a dictation's audio, or its text:

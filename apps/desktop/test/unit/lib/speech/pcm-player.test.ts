@@ -97,9 +97,11 @@ function buildSilentFrame(sampleCount: number): Uint8Array {
 describe("createPcmPlayer", () => {
   it("creates nothing until the first start or frame", () => {
     let created = 0
-    const player = createPcmPlayer(() => {
-      created += 1
-      return createFakeOutput()
+    const player = createPcmPlayer({
+      createOutput: () => {
+        created += 1
+        return createFakeOutput()
+      }
     })
     expect(created).toBe(0)
     player.start()
@@ -109,7 +111,7 @@ describe("createPcmPlayer", () => {
 
   it("schedules frames back to back and starts a late frame at once", () => {
     const output = createFakeOutput()
-    const player = createPcmPlayer(() => output)
+    const player = createPcmPlayer({ createOutput: () => output })
     player.addFrame(buildSilentFrame(12_000))
     player.addFrame(buildSilentFrame(24_000))
     output.clock = 5
@@ -119,21 +121,21 @@ describe("createPcmPlayer", () => {
 
   it("decodes each frame's samples", () => {
     const output = createFakeOutput()
-    const player = createPcmPlayer(() => output)
+    const player = createPcmPlayer({ createOutput: () => output })
     player.addFrame(new Uint8Array([0x00, 0x80, 0x00, 0x00]))
     expect([...(output.played[0]?.samples ?? [])]).toEqual([-1, 0])
   })
 
   it("schedules nothing for a frame without a whole sample", () => {
     const output = createFakeOutput()
-    const player = createPcmPlayer(() => output)
+    const player = createPcmPlayer({ createOutput: () => output })
     player.addFrame(new Uint8Array([1]))
     expect(output.played).toHaveLength(0)
   })
 
   it("stops every scheduled frame and starts the next one at once", () => {
     const output = createFakeOutput()
-    const player = createPcmPlayer(() => output)
+    const player = createPcmPlayer({ createOutput: () => output })
     player.addFrame(buildSilentFrame(24_000))
     player.addFrame(buildSilentFrame(24_000))
     output.played[0]?.end()
@@ -149,7 +151,7 @@ describe("createPcmPlayer", () => {
 
   it("resumes the output on every start and frame", () => {
     const output = createFakeOutput()
-    const player = createPcmPlayer(() => output)
+    const player = createPcmPlayer({ createOutput: () => output })
     player.start()
     player.addFrame(buildSilentFrame(1))
     expect(output.starts).toBe(2)
@@ -157,7 +159,7 @@ describe("createPcmPlayer", () => {
 
   it("closes the output once, stopping its frames, and ignores later frames", () => {
     const output = createFakeOutput()
-    const player = createPcmPlayer(() => output)
+    const player = createPcmPlayer({ createOutput: () => output })
     player.addFrame(buildSilentFrame(24_000))
     player.close()
     player.close()
@@ -169,11 +171,45 @@ describe("createPcmPlayer", () => {
     expect(output.starts).toBe(1)
   })
 
+  it("reports when audio starts being scheduled and when none is left", () => {
+    const output = createFakeOutput()
+    const changes: boolean[] = []
+    const player = createPcmPlayer({
+      createOutput: () => output,
+      onPlayingChange: (isPlaying) => changes.push(isPlaying)
+    })
+    player.addFrame(buildSilentFrame(4))
+    player.addFrame(buildSilentFrame(4))
+    expect(changes).toEqual([true])
+    output.played[0]?.end()
+    expect(changes).toEqual([true])
+    output.played[1]?.end()
+    expect(changes).toEqual([true, false])
+  })
+
+  it("reports that nothing plays once it is stopped, and plays again afterwards", () => {
+    const output = createFakeOutput()
+    const changes: boolean[] = []
+    const player = createPcmPlayer({
+      createOutput: () => output,
+      onPlayingChange: (isPlaying) => changes.push(isPlaying)
+    })
+    player.addFrame(buildSilentFrame(4))
+    player.stop()
+    output.played[0]?.end()
+    expect(changes).toEqual([true, false])
+    player.addFrame(buildSilentFrame(4))
+    player.close()
+    expect(changes).toEqual([true, false, true, false])
+  })
+
   it("closes nothing when it never created its output", () => {
     let created = 0
-    const player = createPcmPlayer(() => {
-      created += 1
-      return createFakeOutput()
+    const player = createPcmPlayer({
+      createOutput: () => {
+        created += 1
+        return createFakeOutput()
+      }
     })
     player.close()
     expect(created).toBe(0)

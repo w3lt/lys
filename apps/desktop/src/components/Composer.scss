@@ -107,6 +107,15 @@
   box-shadow: none;
 }
 
+/*
+ * The field keeps its text color while a dictation writes into it: the words
+ * being said are the content, not a value that cannot be changed. A disabled
+ * field, which matches :read-only too, keeps the muted text of its primitive.
+ */
+.composer__textarea:read-only:not(:disabled) {
+  color: var(--app-text);
+}
+
 .composer__plus {
   display: flex;
   width: 32px;
@@ -156,6 +165,15 @@
 
 .composer__send {
   flex: none;
+}
+
+.composer__dictation {
+  flex: none;
+}
+
+/* Listening is said by the pressed frame and by the brand tint together. */
+.composer__dictation[aria-pressed="true"] {
+  color: var(--lys-violet);
 }
 
 /*
@@ -266,6 +284,20 @@
 }
 
 .composer__attachment-refusal:empty {
+  position: absolute;
+}
+
+/*
+ * Why the last dictation ended on its own. Like the refusal above, the
+ * status line stays in the page while it has nothing to say, out of the
+ * field's flow.
+ */
+.composer__dictation-notice {
+  font-size: var(--text-note);
+  color: var(--app-text-danger);
+}
+
+.composer__dictation-notice:empty {
   position: absolute;
 }
 

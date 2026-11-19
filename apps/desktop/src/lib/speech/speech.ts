@@ -1,7 +1,8 @@
 /**
  * Wires the speech controller to the application: the chat view's store, the
  * voice lifecycle in the application store, the window's focus, the Web
- * Audio player, and the backend's speech and notification sockets.
+ * Audio player, and the backend's speech and notification sockets. It also
+ * reports whether Lys is talking to the speech activity store.
  *
  * @remarks {@link startSpeech} is called once from the application shell and
  * returns the cleanup for it. The chat stream itself stays on SSE; speech is
@@ -14,10 +15,13 @@ import { chatNotificationApi, chatSpeechApi } from "@lys/protocol"
 import { useChatViewStore, type ChatRequestState } from "@/lib/store/chat-view"
 import type { ChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import { useLysStore } from "@/lib/store"
+import { useSpeechActivityStore } from "@/lib/store/speech-activity"
 import {
   SpeechController,
   type SpeechObservation,
-  type SpeechReply
+  type SpeechReply,
+  type SpeechSocket,
+  type SpeechSocketHandlers
 } from "./speech-controller"
 import { createPcmPlayer } from "./pcm-player"
 
@@ -199,11 +203,89 @@ function sendBinaryFrame(
   }
 }
 
+/** Reports whether Lys is talking to the speech activity store. */
+type SpeechActivityReport = Readonly<{
+  /**
+   * Counts a speech or notification socket that opened or closed.
+   *
+   * @param change - `1` for a socket that opened, `-1` for one that closed.
+   */
+  handleSocketChange: (change: 1 | -1) => void
+  /**
+   * Records whether the player has audio scheduled.
+   *
+   * @param isPlaying - Whether audio is scheduled now.
+   */
+  handlePlayingChange: (isPlaying: boolean) => void
+  /** Reports that Lys is silent, and reports nothing afterwards. */
+  close: () => void
+}>
+
+/**
+ * Creates the report of whether Lys is talking: while a speech or
+ * notification socket is open, and while audio of one is still scheduled.
+ *
+ * @returns The report, which writes each change to the speech activity
+ * store until it is closed.
+ */
+function createSpeechActivityReport(): SpeechActivityReport {
+  let openSocketCount = 0
+  let isPlaying = false
+  let isClosed = false
+  const sendActivity = (): void => {
+    if (isClosed) return
+    const isTalking = openSocketCount > 0 || isPlaying
+    useSpeechActivityStore.setState({ isTalking })
+  }
+  return {
+    handleSocketChange: (change) => {
+      openSocketCount += change
+      sendActivity()
+    },
+    handlePlayingChange: (playing) => {
+      isPlaying = playing
+      sendActivity()
+    },
+    close: () => {
+      isClosed = true
+      useSpeechActivityStore.setState({ isTalking: false })
+    }
+  }
+}
+
+/**
+ * Opens one speech or notification socket of the backend.
+ *
+ * @param path - The socket's path, with its query.
+ * @param handlers - The controller's socket handlers.
+ * @param activity - Counts the socket as open until it closes.
+ * @returns The socket.
+ */
+function openSpeechSocket(
+  path: string,
+  handlers: SpeechSocketHandlers,
+  activity: SpeechActivityReport
+): SpeechSocket {
+  const socket = new WebSocket(`${buildWebSocketOrigin()}${path}`)
+  socket.binaryType = "arraybuffer"
+  activity.handleSocketChange(1)
+  socket.addEventListener("message", (event) => {
+    sendBinaryFrame(event, handlers)
+  })
+  socket.addEventListener("close", (event) => {
+    activity.handleSocketChange(-1)
+    handlers.onClose(event.code)
+  })
+  // The error is followed by a close; nothing more to do here.
+  return { close: () => socket.close() }
+}
+
 /**
  * Starts the speech controller.
  *
  * @returns A cleanup that stops following the stores and the window's focus,
- * and closes the controller with its sockets and audio context.
+ * closes the controller with its sockets and audio context, and reports
+ * that Lys is silent.
  * @remarks Idempotent within one call only: callers must call the returned
  * cleanup rather than start twice.
  */
@@ -215,6 +297,7 @@ export function startSpeech(): () => void {
   }
 
   let focused = true
+  const activity = createSpeechActivityReport()
   const controller = new SpeechController({
     isFocused: () => focused,
     isVoiceReady,
@@ -222,19 +305,9 @@ export function startSpeech(): () => void {
       buildSpeechRoutePath(chatSpeechApi.path, reply, `from=${from}`),
     buildNotificationPath: (reply) =>
       buildSpeechRoutePath(chatNotificationApi.path, reply),
-    openSocket: (path, handlers) => {
-      const socket = new WebSocket(`${buildWebSocketOrigin()}${path}`)
-      socket.binaryType = "arraybuffer"
-      socket.addEventListener("message", (event) => {
-        sendBinaryFrame(event, handlers)
-      })
-      socket.addEventListener("close", (event) => {
-        handlers.onClose(event.code)
-      })
-      // The error is followed by a close; nothing more to do here.
-      return { close: () => socket.close() }
-    },
-    createPlayer: () => createPcmPlayer(),
+    openSocket: (path, handlers) => openSpeechSocket(path, handlers, activity),
+    createPlayer: () =>
+      createPcmPlayer({ onPlayingChange: activity.handlePlayingChange }),
     updateVoiceServerInfo
   })
 
@@ -270,5 +343,6 @@ export function startSpeech(): () => void {
     stopFollowingVoice()
     stopFollowingChat()
     controller.close()
+    activity.close()
   }
 }

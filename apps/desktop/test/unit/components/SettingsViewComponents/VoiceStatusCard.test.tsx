@@ -233,7 +233,7 @@ describe("VoiceStatusCard", () => {
     expect(toggle).toBeChecked()
     expect(spies.onIsAutoStartOnChange).toHaveBeenCalledExactlyOnceWith(false)
     expect(toggle).toHaveAccessibleDescription(
-      "voice reads Lys's replies aloud. Off means Lys stays silent until you press start. The first start downloads about 780 MB of models."
+      "voice reads Lys's replies aloud and writes down what you dictate. Off means Lys stays silent and cannot listen until you press start. The first start downloads about 1.4 GB of models."
     )
   })
 

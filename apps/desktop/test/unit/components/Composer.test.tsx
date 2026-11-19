@@ -21,8 +21,9 @@ import {
   type Conversation,
   type LlmModelReference
 } from "@lys/share"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
+import type { DictationSocketHandlers } from "@/lib/dictation/dictation-controller"
 import type { ChatRequestState } from "@/lib/store/chat-view"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import { updateProviderModelState } from "@/lib/store/model-runtime"
@@ -687,6 +688,81 @@ function listModelOptionNames(
       (option) =>
         option.querySelector(".composer__model-option-name")?.textContent
     )
+}
+
+/** The microphone and the dictation socket a case's dictation runs over. */
+type DictationPlatform = {
+  /** Handlers of the dictation socket, once one opened, to play the backend. */
+  handlers: DictationSocketHandlers | undefined
+  /** How many recordings were started. */
+  recordings: number
+  /** How many recordings were stopped. */
+  recordingStops: number
+}
+
+/**
+ * Loads a fresh composer whose dictations run over a fake microphone, which
+ * opens at once, and a fake dictation socket, while voice runs.
+ *
+ * @returns The stores and the composer of {@link loadFreshComposer}, the
+ * dictation store the composer reads, and the fake platform.
+ * @remarks Only the microphone and the socket are replaced, for the case's
+ * module graph; the dictation store and its controller are the real ones.
+ */
+async function loadFreshDictationComposer() {
+  const platform: DictationPlatform = {
+    handlers: undefined,
+    recordings: 0,
+    recordingStops: 0
+  }
+  vi.doMock("@/lib/dictation/dictation-socket", () => ({
+    openDictationSocket: (_url: string, handlers: DictationSocketHandlers) => {
+      platform.handlers = handlers
+      return { sendAudio: vi.fn(), sendStop: vi.fn(), close: vi.fn() }
+    }
+  }))
+  vi.doMock(
+    import("@/lib/dictation/microphone-recorder"),
+    async (importOriginal) => ({
+      ...(await importOriginal()),
+      startMicrophoneRecorder: () => {
+        platform.recordings += 1
+        return Promise.resolve({
+          stop: () => {
+            platform.recordingStops += 1
+          }
+        })
+      }
+    })
+  )
+  onTestFinished(() => {
+    vi.doUnmock("@/lib/dictation/dictation-socket")
+    vi.doUnmock("@/lib/dictation/microphone-recorder")
+  })
+  const loaded = await loadFreshComposer()
+  const { useDictationStore } = await import("@/lib/store/dictation")
+  loaded.useLysStore.setState({
+    voiceServerInfo: Object.freeze({ status: "running", problem: null })
+  })
+  return { ...loaded, useDictationStore, platform }
+}
+
+/**
+ * Sends one dictation message from the fake backend, and lets the composer
+ * render it.
+ *
+ * @param platform - The case's fake platform, whose socket is open.
+ * @param type - Kind of update.
+ * @param text - Everything dictated so far.
+ */
+function sendDictationUpdate(
+  platform: DictationPlatform,
+  type: "partial" | "final",
+  text: string
+): void {
+  act(() => {
+    platform.handlers?.onText(JSON.stringify({ type, text }))
+  })
 }
 
 describe("Composer", () => {
@@ -3040,6 +3116,215 @@ describe("Composer", () => {
         screen.queryByRole("list", { name: "Attached to this message" })
       ).toBeNull()
       streams[0]?.close()
+    })
+  })
+
+  describe("dictation", () => {
+    it("puts the dictation button between the message field and Send", async () => {
+      const { Composer } = await loadFreshDictationComposer()
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+      const dictate = screen.getByRole("button", { name: "Dictate" })
+
+      expect(
+        getMessageField().compareDocumentPosition(dictate) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(
+        dictate.compareDocumentPosition(
+          screen.getByRole("button", { name: "Send" })
+        ) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    })
+
+    it("writes what is said into the draft, keeps the field read-only and Send off until the final text, and sends nothing itself", async () => {
+      const backend = startBackendFake(MEASURING_BACKEND_ROUTES)
+      const { Composer, useChatViewStore, platform } =
+        await loadFreshDictationComposer()
+      const user = userEvent.setup()
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+      await user.type(getMessageField(), "Note:")
+
+      await user.click(screen.getByRole("button", { name: "Dictate" }))
+      await waitForRenderedWork()
+      sendDictationUpdate(platform, "partial", "buy milk")
+      expect(getMessageField()).toHaveValue("Note: buy milk")
+      expect(getMessageField()).toHaveAttribute("readonly")
+      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+      await user.type(getMessageField(), "typed{Enter}")
+      expect(getMessageField()).toHaveValue("Note: buy milk")
+
+      await user.click(screen.getByRole("button", { name: "Stop dictation" }))
+      expect(platform.recordingStops).toBe(1)
+      expect(getMessageField()).toHaveAttribute("readonly")
+      expect(getMessageField()).toHaveFocus()
+      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+      expect(screen.getByRole("button", { name: "Dictate" })).toBeDisabled()
+
+      sendDictationUpdate(platform, "final", "Buy milk.")
+      expect(getMessageField()).toHaveValue("Note: Buy milk.")
+      expect(getMessageField()).not.toHaveAttribute("readonly")
+      expect(screen.getByRole("button", { name: "Send" })).toBeEnabled()
+      expect(screen.getByRole("button", { name: "Dictate" })).toBeEnabled()
+      expect(useChatViewStore.getState().request.status).toBe("idle")
+      expect(listRequestsBesideMeasurements(backend)).toEqual([])
+    })
+
+    it("keeps the dictated text where the cursor was, between what was typed", async () => {
+      const { Composer, platform } = await loadFreshDictationComposer()
+      const user = userEvent.setup()
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+      await user.type(getMessageField(), "Dear Ana, bye")
+      screen
+        .getByRole<HTMLTextAreaElement>("textbox", {
+          name: "Message Caliginia"
+        })
+        .setSelectionRange(9, 9)
+
+      await user.click(screen.getByRole("button", { name: "Dictate" }))
+      await waitForRenderedWork()
+      sendDictationUpdate(platform, "partial", "thanks for the note")
+
+      expect(getMessageField()).toHaveValue("Dear Ana, thanks for the note bye")
+    })
+
+    it("turns the button off, with its reason, while voice does not run", async () => {
+      const { Composer, useLysStore, platform } =
+        await loadFreshDictationComposer()
+      useLysStore.setState({
+        voiceServerInfo: Object.freeze({ status: "stopped", problem: null })
+      })
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+      const dictate = screen.getByRole("button", { name: "Dictate" })
+      await userEvent.setup().click(dictate)
+
+      expect(dictate).toBeDisabled()
+      expect(dictate).toHaveAccessibleDescription(
+        "Start voice in Settings to talk."
+      )
+      expect(platform.recordings).toBe(0)
+    })
+
+    it("turns the button off while Lys answers, when Stop shows", async () => {
+      const { Composer, useChatViewStore } = await loadFreshDictationComposer()
+      useChatViewStore.setState({
+        request: { status: "awaiting-turn", token: 1 }
+      })
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+
+      expect(screen.getByRole("button", { name: "Stop reply" })).toBeEnabled()
+      expect(screen.getByRole("button", { name: "Dictate" })).toBeDisabled()
+      expect(
+        screen.getByRole("button", { name: "Dictate" })
+      ).toHaveAccessibleDescription("Wait for Lys to finish.")
+    })
+
+    it("turns the button off in a job, whose field is off", async () => {
+      const { Composer, useChatViewStore } = await loadFreshDictationComposer()
+      useChatViewStore.setState({
+        conversation: createStoredChatViewConversation(JOB)
+      })
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+
+      expect(
+        screen.getByRole("button", { name: "Dictate" })
+      ).toHaveAccessibleDescription("The message field is off.")
+    })
+
+    it("says why a dictation ended on its own in a status line that waits empty", async () => {
+      const { Composer, platform } = await loadFreshDictationComposer()
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+      const sentence = "Listening stopped because voice stopped."
+      expect(screen.queryByText(sentence)).toBeNull()
+
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: "Dictate" }))
+      await waitForRenderedWork()
+      sendDictationUpdate(platform, "partial", "so far")
+      act(() => {
+        platform.handlers?.onClose(1011)
+      })
+
+      expect(getStatusRegion(sentence)).toBeInTheDocument()
+      expect(getMessageField()).toHaveValue("so far")
+      expect(getMessageField()).not.toHaveAttribute("readonly")
+      expect(platform.recordingStops).toBe(1)
+    })
+
+    it("keeps the last line in view while a dictation writes at the draft's end, and not in the middle", async () => {
+      const { Composer, useChatViewStore, useDictationStore } =
+        await loadFreshDictationComposer()
+      render(
+        <Composer
+          jobOpenedFromCardId={undefined}
+          messageFieldRef={createRef()}
+          onOpenConversation={vi.fn()}
+          onStartConversation={vi.fn()}
+        />
+      )
+      const field = getMessageField()
+      Object.defineProperty(field, "scrollHeight", { value: 480 })
+
+      act(() => {
+        useDictationStore.setState({ status: "listening", isAtDraftEnd: false })
+        useChatViewStore.setState({ inputDraft: "one\ntwo" })
+      })
+      expect(field.scrollTop).toBe(0)
+      act(() => {
+        useDictationStore.setState({ isAtDraftEnd: true })
+        useChatViewStore.setState({ inputDraft: "one\ntwo\nthree" })
+      })
+
+      expect(field.scrollTop).toBe(480)
     })
   })
 })

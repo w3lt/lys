@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import type {
   ChangeEvent,
   DragEvent,
@@ -26,12 +26,14 @@ import { useChatViewStore } from "@/lib/store/chat-view"
 import type { ChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import { calculateStagedImageTokens } from "@/lib/store/chat-view/attachments"
 import { useConversationHistoryStore } from "@/lib/store/conversation-history"
+import { useDictationStore } from "@/lib/store/dictation"
 import { findShownToolCall, useToolCallStore } from "@/lib/store/tool-calls"
 
 import ComposerAgentMenu from "./ComposerComponents/ComposerAgentMenu"
 import ComposerAttachmentTray from "./ComposerComponents/ComposerAttachmentTray"
 import ComposerContextMeter from "./ComposerComponents/ComposerContextMeter"
 import ComposerDeletedAgentNotice from "./ComposerComponents/ComposerDeletedAgentNotice"
+import ComposerDictationButton from "./ComposerComponents/ComposerDictationButton"
 import ComposerJobNotice from "./ComposerComponents/ComposerJobNotice"
 import ComposerJobsBar from "./ComposerComponents/ComposerJobsBar"
 import ComposerModelMenu from "./ComposerComponents/ComposerModelMenu"
@@ -58,6 +60,7 @@ import {
   type ComposerModelState,
   type ComposerRuntime
 } from "./ComposerComponents/composer-presentation"
+import { formatDictationNotice } from "./ComposerComponents/dictation-presentation"
 
 import "./Composer.scss"
 
@@ -688,6 +691,23 @@ function ComposerFileChooser({
   )
 }
 
+/**
+ * Scrolls the message field to its last line while a dictation writes at the
+ * draft's end.
+ *
+ * @param field - The message field, or null while it is not rendered.
+ * @param isDictationAtDraftEnd - Whether a dictation writes at the draft's
+ * end.
+ */
+function updateDictationScroll(
+  field: HTMLTextAreaElement | null,
+  isDictationAtDraftEnd: boolean
+): void {
+  if (isDictationAtDraftEnd && field !== null) {
+    field.scrollTop = field.scrollHeight
+  }
+}
+
 /** Properties accepted by {@link ComposerMessageInput}. */
 type ComposerMessageInputProps = {
   /** Name of the agent that answers, which names the field. */
@@ -699,6 +719,8 @@ type ComposerMessageInputProps = {
    * deleted, or the conversation is a job.
    */
   readonly isDisabled: boolean
+  /** Whether the field takes no typing, while a dictation writes into it. */
+  readonly isReadOnly: boolean
   /** Whether Enter cannot send the draft now. */
   readonly isSendDisabled: boolean
   /** Parent-owned host the field is attached to. */
@@ -731,7 +753,10 @@ type ComposerMessageInputProps = {
  * off, and suppresses the newline either way; Shift+Enter keeps it. A key
  * pressed while an input method composes text is left to the input method.
  * The field is named after the answering agent, and it tells the parent when
- * it gains or loses focus.
+ * it gains or loses focus. While it is read-only it takes no typing and
+ * still answers keys. The dictation store owns whether a dictation writes at
+ * the draft's end; while one does, the field scrolls to its last line after
+ * every change of the draft, so the words being said stay in view.
  * @param props - The field's name, placeholder, availability, host, and the
  * parent's focus tracking and rejection.
  * @returns The message field.
@@ -740,6 +765,7 @@ function ComposerMessageInput({
   agentName,
   placeholder,
   isDisabled,
+  isReadOnly,
   isSendDisabled,
   messageFieldRef,
   onIsFocusedChange,
@@ -749,6 +775,11 @@ function ComposerMessageInput({
   const inputDraft = useChatViewStore((state) => state.inputDraft)
   const setInputDraft = useChatViewStore((state) => state.setInputDraft)
   const sendMessage = useChatViewStore((state) => state.sendMessage)
+  const isDictationAtDraftEnd = useDictationStore((state) => state.isAtDraftEnd)
+
+  useLayoutEffect(() => {
+    updateDictationScroll(messageFieldRef.current, isDictationAtDraftEnd)
+  }, [inputDraft, isDictationAtDraftEnd, messageFieldRef])
 
   /**
    * Answers the tool call of the shown conversation that waits for the
@@ -810,6 +841,7 @@ function ComposerMessageInput({
       onFocus={() => onIsFocusedChange(true)}
       onKeyDown={handleKeyDown}
       placeholder={placeholder}
+      readOnly={isReadOnly}
       ref={messageFieldRef}
       rows={1}
       value={inputDraft}
@@ -870,6 +902,122 @@ function ComposerSendButton({
   )
 }
 
+/**
+ * Says why the last dictation ended on its own.
+ *
+ * @remarks The dictation store owns the notice, which lasts until the next
+ * dictation starts or another conversation is shown; the component owns no
+ * state. The sentence is said in a polite status line that stays in the page
+ * while it has nothing to say.
+ * @returns The dictation's status line.
+ */
+function ComposerDictationNotice(): ReactElement {
+  const notice = useDictationStore((state) => state.notice)
+
+  return (
+    <output className="composer__dictation-notice">
+      {formatDictationNotice(notice)}
+    </output>
+  )
+}
+
+/** Properties accepted by {@link ComposerMessageRow}. */
+type ComposerMessageRowProps = {
+  /** Chat work that keeps the composer from sending. */
+  readonly activity: ComposerActivity
+  /** The agent that answers the next message. */
+  readonly agent: ConversationAgent
+  /** What the composer knows of the conversation's model. */
+  readonly modelState: ComposerModelState
+  /** Whether the current measurement with the draft exceeds the window. */
+  readonly isOverWindow: boolean
+  /** Whether the shown conversation is a job, which the person only reads. */
+  readonly isJob: boolean
+  /**
+   * Whether the field is off: the model cannot answer, the agent was
+   * deleted, or the conversation is a job.
+   */
+  readonly isFieldDisabled: boolean
+  /** Parent-owned host the message field is attached to. */
+  readonly messageFieldRef: RefObject<HTMLTextAreaElement | null>
+  /**
+   * Tells the parent that the message field gained or lost focus.
+   *
+   * @param isFocused - Whether the field has focus now.
+   */
+  readonly onIsFocusedChange: (isFocused: boolean) => void
+  /**
+   * Requests that the parent reject the waiting tool call with the draft as
+   * the reason, and clear the draft.
+   *
+   * @param callId - Call that waits for the person.
+   */
+  readonly onRejectToolCall: (callId: string) => void
+}
+
+/**
+ * Presents the row of the composer's controls: the add menu, the message
+ * field, the dictation button, and Send or Stop.
+ *
+ * @remarks The chat-view store owns the draft, and the dictation store the
+ * dictation; the row owns no state. Send needs a draft that is not blank
+ * and, once measured, fits the window, and is off while chat work runs or
+ * the field is off. From a dictation's start until its final text arrived,
+ * the message field is read-only and Send is off, so typing cannot fight
+ * the dictated text and no message is sent while Lys listens.
+ * @param props - The composer's activity, agent, model state, window
+ * overflow, whether the conversation is a job, whether the field is off,
+ * the message field's host, and the parent's focus tracking and rejection.
+ * @returns The row of controls.
+ */
+function ComposerMessageRow({
+  activity,
+  agent,
+  modelState,
+  isOverWindow,
+  isJob,
+  isFieldDisabled,
+  messageFieldRef,
+  onIsFocusedChange,
+  onRejectToolCall
+}: ComposerMessageRowProps): ReactElement {
+  const inputDraft = useChatViewStore((state) => state.inputDraft)
+  const isDictating = useDictationStore((state) => state.status !== "idle")
+  const canSubmitDraft = inputDraft.trim().length > 0 && !isOverWindow
+  const isSendBlocked = isFieldDisabled || isDictating
+  const isSendDisabled = activity !== "idle" || isSendBlocked || !canSubmitDraft
+
+  return (
+    <div className="composer__row">
+      <ComposerFileChooser isDisabled={isFieldDisabled} />
+
+      <ComposerMessageInput
+        agentName={formatConversationAgentName(agent)}
+        isDisabled={isFieldDisabled}
+        isReadOnly={isDictating}
+        isSendDisabled={isSendDisabled}
+        messageFieldRef={messageFieldRef}
+        onIsFocusedChange={onIsFocusedChange}
+        onRejectToolCall={onRejectToolCall}
+        placeholder={formatComposerPlaceholder({
+          state: modelState,
+          activity,
+          agent,
+          isJob
+        })}
+      />
+
+      <ComposerDictationButton
+        activity={activity}
+        isFieldOff={isFieldDisabled}
+        messageFieldRef={messageFieldRef}
+      />
+
+      <ComposerSendButton activity={activity} isSendDisabled={isSendDisabled} />
+    </div>
+  )
+}
+
 /** Properties accepted by {@link ComposerField}. */
 type ComposerFieldProps = {
   /** Chat work that keeps the composer from sending. */
@@ -894,15 +1042,13 @@ type ComposerFieldProps = {
 }
 
 /**
- * Presents the composer's field: the staged files, the message row, and the
- * drop target around them.
+ * Presents the composer's field: the staged files, the row of controls, the
+ * dictation's status line, and the drop target around them.
  *
- * @remarks The chat-view store owns the draft. The field owns whether a drag
- * is over it and whether its message field has focus, and marks both on its
- * host. The message field, the add menu, and file drops are off while the
- * model cannot answer, while the agent was deleted, and in a job. Send needs
- * a draft that is not blank and, once measured, fits the window, and is off
- * while chat work runs or the field is off.
+ * @remarks The field owns whether a drag is over it and whether its message
+ * field has focus, and marks both on its host. The message field, the add
+ * menu, the dictation button, and file drops are off while the model cannot
+ * answer, while the agent was deleted, and in a job.
  * @param props - The composer's activity, agent, model state, window
  * overflow, whether the conversation is a job, the message field's host,
  * and the parent's rejection.
@@ -917,14 +1063,10 @@ function ComposerField({
   messageFieldRef,
   onRejectToolCall
 }: ComposerFieldProps): ReactElement {
-  const inputDraft = useChatViewStore((state) => state.inputDraft)
   const isUnavailable = calculateLocalRuntimeConnection(modelState) !== "ready"
   const isFieldDisabled = isUnavailable || agent.status === "deleted" || isJob
   const drop = useComposerFileDrop(isFieldDisabled)
   const [isFocused, setIsFocused] = useState(false)
-  const canSubmitDraft = inputDraft.trim().length > 0 && !isOverWindow
-  const isSendDisabled =
-    activity !== "idle" || isFieldDisabled || !canSubmitDraft
 
   return (
     <div
@@ -937,29 +1079,19 @@ function ComposerField({
     >
       <ComposerStagedAttachments />
 
-      <div className="composer__row">
-        <ComposerFileChooser isDisabled={isFieldDisabled} />
+      <ComposerMessageRow
+        activity={activity}
+        agent={agent}
+        isFieldDisabled={isFieldDisabled}
+        isJob={isJob}
+        isOverWindow={isOverWindow}
+        messageFieldRef={messageFieldRef}
+        modelState={modelState}
+        onIsFocusedChange={setIsFocused}
+        onRejectToolCall={onRejectToolCall}
+      />
 
-        <ComposerMessageInput
-          agentName={formatConversationAgentName(agent)}
-          isDisabled={isFieldDisabled}
-          isSendDisabled={isSendDisabled}
-          messageFieldRef={messageFieldRef}
-          onIsFocusedChange={setIsFocused}
-          onRejectToolCall={onRejectToolCall}
-          placeholder={formatComposerPlaceholder({
-            state: modelState,
-            activity,
-            agent,
-            isJob
-          })}
-        />
-
-        <ComposerSendButton
-          activity={activity}
-          isSendDisabled={isSendDisabled}
-        />
-      </div>
+      <ComposerDictationNotice />
 
       {drop.isDropping ? (
         <span aria-hidden="true" className="composer__drop">
@@ -1423,6 +1555,14 @@ function ComposerMeta({
  * one of the shown conversation's jobs waits in that conversation too, with
  * a line naming the job's agent and title, and is announced under the job's
  * agent.
+ *
+ * The dictation button, between the field and Send, writes what the person
+ * says into the draft, where the cursor was, through the dictation store.
+ * From a dictation's start until its final text arrived, the field is
+ * read-only and Send is off, and nothing is sent unless the person presses
+ * Send afterwards. The button is off, with its reason, while voice does not
+ * run and while Lys answers or talks. Why a dictation ended on its own is
+ * said in a polite status line below the row, until the next dictation.
  *
  * Files chosen through the add menu or dropped on the field are handed to
  * the store, which reads and admits them and lists them in the tray above

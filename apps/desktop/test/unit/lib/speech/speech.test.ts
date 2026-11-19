@@ -12,6 +12,7 @@ import type { ConversationMessage } from "@lys/share"
 import { startSpeech } from "@/lib/speech/speech"
 import { useLysStore } from "@/lib/store"
 import { useChatViewStore } from "@/lib/store/chat-view"
+import { useSpeechActivityStore } from "@/lib/store/speech-activity"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import {
   buildCompletedAssistantMessage,
@@ -126,6 +127,8 @@ class FakeWebSocket {
 class FakeAudioContext {
   /** How many sources were started across every context. */
   public static started = 0
+  /** Ends of the sources started across every context, in order. */
+  public static readonly ends: (() => void)[] = []
   /** The context's state. */
   public readonly state = "running"
   /** The context's clock. */
@@ -144,17 +147,19 @@ class FakeAudioContext {
     return { duration: length / sampleRate, copyToChannel: () => undefined }
   }
 
-  /** Creates a source that counts its start. */
+  /** Creates a source that counts its start and can be ended by the test. */
   public createBufferSource() {
-    return {
+    const source = {
       buffer: null,
-      onended: null,
+      onended: null as (() => void) | null,
       connect: () => undefined,
       start: () => {
         FakeAudioContext.started += 1
+        FakeAudioContext.ends.push(() => source.onended?.())
       },
       stop: () => undefined
     }
+    return source
   }
 
   /** Resumes nothing. */
@@ -265,6 +270,7 @@ function startSpeechForTest(): () => void {
 
 beforeEach(() => {
   FakeAudioContext.started = 0
+  FakeAudioContext.ends.length = 0
   FakeWebSocket.opened.length = 0
   fakeWindow.focused = Promise.resolve(true)
   fakeWindow.listeners.length = 0
@@ -281,6 +287,7 @@ beforeEach(() => {
     conversation: undefined,
     request: { status: "idle" }
   })
+  useSpeechActivityStore.setState({ isTalking: false })
 })
 
 afterEach(() => {
@@ -505,5 +512,52 @@ describe("startSpeech", () => {
     updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
     updateRequestStreaming()
     expect(FakeWebSocket.opened).toHaveLength(0)
+  })
+})
+
+/** Starts a reply the person asked for, which opens its speech socket. */
+function startSpokenReply(): void {
+  updateShownConversation(buildStreamingAssistantMessage(3, "Hello"))
+  updateRequestAwaitingTurn()
+  updateRequestStreaming()
+}
+
+describe("startSpeech speech activity", () => {
+  it("says that Lys is talking while a speech socket is open", async () => {
+    startSpeechForTest()
+    await waitForMicrotasks()
+    expect(useSpeechActivityStore.getState().isTalking).toBe(false)
+    startSpokenReply()
+    expect(useSpeechActivityStore.getState().isTalking).toBe(true)
+    getSocketAt().sendEvent("close", { code: 1011 })
+
+    expect(useSpeechActivityStore.getState().isTalking).toBe(false)
+  })
+
+  it("says that Lys is talking until the audio of a closed socket has played", async () => {
+    startSpeechForTest()
+    await waitForMicrotasks()
+    startSpokenReply()
+    getSocketAt().sendEvent("message", { data: new ArrayBuffer(4) })
+    updateShownConversation(buildCompletedAssistantMessage(3, "Hello"))
+    updateRequestCompleted()
+    getSocketAt().sendEvent("close", { code: 1000 })
+    expect(useSpeechActivityStore.getState().isTalking).toBe(true)
+    FakeAudioContext.ends[0]?.()
+
+    expect(useSpeechActivityStore.getState().isTalking).toBe(false)
+  })
+
+  it("says that Lys is silent once cleaned up, whatever closes afterwards", async () => {
+    const stop = startSpeechForTest()
+    await waitForMicrotasks()
+    startSpokenReply()
+    const socket = getSocketAt()
+    stop()
+    expect(useSpeechActivityStore.getState().isTalking).toBe(false)
+    useSpeechActivityStore.setState({ isTalking: true })
+    socket.sendEvent("close", { code: 1005 })
+
+    expect(useSpeechActivityStore.getState().isTalking).toBe(true)
   })
 })

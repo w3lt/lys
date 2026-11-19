@@ -319,7 +319,7 @@ a dictation's audio or its text.
 | `Voice sent no final text in time`                      | `warn`  |                  | Ten seconds passed after the `stop` without a final text; the socket closes with `1011`                       |
 | `Voice sent a message that is not a dictation message`  | `error` |                  | Voice broke the protocol; the socket closes with `1011`                                                       |
 | `Voice sent a final text before the dictation stopped`  | `error` |                  | Voice broke the protocol; the socket closes with `1011`                                                       |
-| `Voice ended a dictation that failed`                   | `warn`  | `voiceCloseCode` | Voice closed the dictation with a code other than `1000`; the socket closes with `1011`                       |
+| `Voice ended a dictation that failed`                   | `warn`  | `voiceCloseCode` | Voice closed the dictation other than with `1000` after its final text; the socket closes with `1011`         |
 
 voice prints its refusals, drops, and failures to its standard output and
 standard error, and never a reply's text, a dictation's audio, or its text:

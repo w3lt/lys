@@ -635,8 +635,10 @@ its microphone, its socket, and its place in the draft. The backend and
 voice own the words: the UI sends audio and shows the text that comes back.
 
 The button sits between the message field and Send. It is named Dictate, and
-Stop dictation while Lys listens, when it is also pressed (`aria-pressed`).
-It is off, with its reason as its description and its hover text:
+Stop dictation while Lys listens, when it also shows a selected frame in the
+brand tint. Its name carries the state, as Send's does when it turns into
+Stop, so it is no toggle and has no pressed state (`aria-pressed`). It is
+off, with its reason as its description and its hover text:
 
 | While                                                             | The button says                    |
 | ----------------------------------------------------------------- | ---------------------------------- |
@@ -679,8 +681,10 @@ Send.
 
 The store ends a dictation on its own:
 
-- A reply that starts, Lys starting to talk, or voice no longer running
-  stops it, as a press does.
+- A reply that starts, Lys starting to talk, voice no longer running, or
+  another view than the chat view being shown, such as Settings, where the
+  button cannot be seen, stops it, as a press does. The final text still
+  arrives and stays in the draft.
 - The shown conversation changing, a conversation opening, a new or deleted
   conversation, or anything other than the dictation changing the draft,
   such as a tool-call rejection that takes the draft as its reason, cancels
@@ -688,6 +692,10 @@ The store ends a dictation on its own:
   more is written.
 - The microphone ending by itself, such as an unplugged device, stops it and
   says "Listening stopped."
+
+A dictation that already runs when the message field turns off, as when the
+model's provider disconnects, keeps running: the button still says Stop
+dictation, and what is said stays in the draft for when the field is back.
 
 When the microphone cannot be opened or the socket closes without a final
 text, the text so far stays, the field and Send turn back on, and a polite

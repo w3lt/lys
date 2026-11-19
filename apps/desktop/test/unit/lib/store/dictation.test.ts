@@ -1,7 +1,5 @@
-import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
+import { beforeEach, describe, expect, it, onTestFinished } from "vitest"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
-import type { DictationSocketHandlers } from "@/lib/dictation/dictation-controller"
-import type { MicrophoneRecorder } from "@/lib/dictation/microphone-recorder"
 import { useLysStore } from "@/lib/store"
 import { useChatViewStore } from "@/lib/store/chat-view"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
@@ -15,69 +13,14 @@ import {
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
 } from "../../support/conversationFixtures"
+import {
+  countReleasedMicrophones,
+  countSentStops,
+  getDictationSocket,
+  startDictationPlatformFake,
+  type DictationPlatformFake
+} from "../../support/dictationPlatformFake"
 import { waitForMicrotasks } from "../../support/settlement"
-
-/** What the fake platform recorded of the dictations the store ran. */
-type FakePlatform = {
-  /** URLs of the sockets opened, in order. */
-  readonly urls: string[]
-  /** Handlers of the sockets opened, to play the backend. */
-  readonly handlers: DictationSocketHandlers[]
-  /** How many times `stop` was sent on any socket. */
-  stops: number
-  /** How many sockets were closed. */
-  closes: number
-  /** How many recordings were started. */
-  recordings: number
-  /** How many recordings were stopped. */
-  recordingStops: number
-}
-
-/**
- * Creates the fake platform's record, with nothing recorded.
- *
- * @returns The record.
- */
-function createFakePlatform(): FakePlatform {
-  return {
-    urls: [],
-    handlers: [],
-    stops: 0,
-    closes: 0,
-    recordings: 0,
-    recordingStops: 0
-  }
-}
-
-/** The fake platform the module under test sees. */
-const platform = vi.hoisted(createFakePlatform)
-
-vi.mock("@/lib/dictation/dictation-socket", () => ({
-  openDictationSocket: (url: string, handlers: DictationSocketHandlers) => {
-    platform.urls.push(url)
-    platform.handlers.push(handlers)
-    return {
-      sendAudio: () => undefined,
-      sendStop: () => {
-        platform.stops += 1
-      },
-      close: () => {
-        platform.closes += 1
-      }
-    }
-  }
-}))
-
-vi.mock("@/lib/dictation/microphone-recorder", () => ({
-  startMicrophoneRecorder: (): Promise<MicrophoneRecorder> => {
-    platform.recordings += 1
-    return Promise.resolve({
-      stop: () => {
-        platform.recordingStops += 1
-      }
-    })
-  }
-}))
 
 /**
  * Shows a stored conversation in the chat view.
@@ -107,22 +50,15 @@ async function startListening(): Promise<void> {
 /**
  * Sends one partial text from the fake backend on the last socket.
  *
+ * @param platform - The case's platform.
  * @param text - Everything dictated so far.
  */
-function sendPartial(text: string): void {
-  platform.handlers.at(-1)?.onText(JSON.stringify({ type: "partial", text }))
+function sendPartial(platform: DictationPlatformFake, text: string): void {
+  getDictationSocket(platform).sendJson({ type: "partial", text })
 }
 
 beforeEach(() => {
   useDictationStore.getState().cancelDictation()
-  Object.assign(platform, {
-    stops: 0,
-    closes: 0,
-    recordings: 0,
-    recordingStops: 0
-  })
-  platform.urls.length = 0
-  platform.handlers.length = 0
   useLysStore.setState({
     voiceServerInfo: Object.freeze({ status: "running", problem: null })
   })
@@ -142,11 +78,12 @@ function registerRulesForTest(): void {
 
 describe("useDictationStore", () => {
   it("opens the backend's dictation socket and writes the text into the chat view's draft", async () => {
+    const platform = startDictationPlatformFake()
     useChatViewStore.setState({ inputDraft: "Note:" })
     await startListening()
-    sendPartial("buy milk")
+    sendPartial(platform, "buy milk")
 
-    expect(platform.urls).toEqual([
+    expect(platform.sockets.map((socket) => socket.url)).toEqual([
       `ws://${BACKEND_HOST}:${BACKEND_PORT}/api/v1/voice/dictation`
     ])
     expect(useChatViewStore.getState().inputDraft).toBe("Note: buy milk")
@@ -181,15 +118,17 @@ describe("useDictationStore", () => {
     ],
     ["Lys talks", () => useSpeechActivityStore.setState({ isTalking: true })]
   ])("starts nothing while %s", (_situation, update) => {
+    const platform = startDictationPlatformFake()
     update()
     useDictationStore.getState().toggleDictation(0)
 
-    expect(platform.urls).toEqual([])
-    expect(platform.recordings).toBe(0)
+    expect(platform.sockets).toEqual([])
+    expect(platform.microphoneRequests).toEqual([])
     expect(useDictationStore.getState().status).toBe("idle")
   })
 
   it("listens after a reply completed while its stream stays open for a title", async () => {
+    const platform = startDictationPlatformFake()
     useChatViewStore.setState({
       request: {
         status: "reply-completed",
@@ -199,7 +138,7 @@ describe("useDictationStore", () => {
     })
     await startListening()
 
-    expect(platform.recordings).toBe(1)
+    expect(platform.microphoneRequests).toHaveLength(1)
   })
 })
 
@@ -226,13 +165,15 @@ describe("registerDictationRules", () => {
   ])(
     "stops the dictation as a press does when %s",
     async (_situation, update) => {
+      const platform = startDictationPlatformFake()
       registerRulesForTest()
       await startListening()
+      getDictationSocket(platform).open()
       update()
 
-      expect(platform.recordingStops).toBe(1)
-      expect(platform.stops).toBe(1)
-      expect(platform.closes).toBe(0)
+      expect(countReleasedMicrophones(platform)).toBe(1)
+      expect(countSentStops(platform)).toBe(1)
+      expect(getDictationSocket(platform).isClosed).toBe(false)
       expect(useDictationStore.getState().status).toBe("stopping")
     }
   )
@@ -260,35 +201,39 @@ describe("registerDictationRules", () => {
   ])(
     "cancels the dictation, sending no stop, when %s",
     async (_situation, update) => {
+      const platform = startDictationPlatformFake()
       registerRulesForTest()
       await startListening()
-      sendPartial("so far")
+      getDictationSocket(platform).open()
+      sendPartial(platform, "so far")
       update()
-      sendPartial("late words")
+      sendPartial(platform, "late words")
 
-      expect(platform.recordingStops).toBe(1)
-      expect(platform.stops).toBe(0)
-      expect(platform.closes).toBe(1)
+      expect(countReleasedMicrophones(platform)).toBe(1)
+      expect(countSentStops(platform)).toBe(0)
+      expect(getDictationSocket(platform).isClosed).toBe(true)
       expect(useDictationStore.getState().status).toBe("idle")
       expect(useChatViewStore.getState().inputDraft).not.toContain("late")
     }
   )
 
   it("keeps listening while the shown conversation's messages change", async () => {
+    const platform = startDictationPlatformFake()
     registerRulesForTest()
     updateShownConversation(FIXTURE_CONVERSATION_ID)
     await startListening()
     updateShownConversation(FIXTURE_CONVERSATION_ID)
-    sendPartial("still here")
+    sendPartial(platform, "still here")
 
     expect(useDictationStore.getState().status).toBe("listening")
     expect(useChatViewStore.getState().inputDraft).toBe("still here")
   })
 
   it("keeps a failure's notice until another conversation is shown", async () => {
+    const platform = startDictationPlatformFake()
     registerRulesForTest()
     await startListening()
-    platform.handlers.at(-1)?.onClose(1011)
+    getDictationSocket(platform).closeFromBackend(1011)
     expect(useDictationStore.getState().notice).toBe("voice-stopped")
     updateShownConversation(FIXTURE_CONVERSATION_ID)
 
@@ -296,10 +241,11 @@ describe("registerDictationRules", () => {
   })
 
   it("cancels the dictation and stops following the stores once it is unregistered", async () => {
+    const platform = startDictationPlatformFake()
     const unregister = registerDictationRules()
     await startListening()
     unregister()
-    expect(platform.recordingStops).toBe(1)
+    expect(countReleasedMicrophones(platform)).toBe(1)
     expect(useDictationStore.getState().status).toBe("idle")
     await startListening()
     useSpeechActivityStore.setState({ isTalking: true })

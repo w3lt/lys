@@ -1,74 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { openDictationSocket } from "@/lib/dictation/dictation-socket"
-
-/** One WebSocket the module under test opened. */
-class FakeWebSocket {
-  /** State of a socket that is still connecting. */
-  public static readonly CONNECTING = 0
-  /** State of an open socket. */
-  public static readonly OPEN = 1
-  /** State of a closed socket. */
-  public static readonly CLOSED = 3
-  /** Every socket opened, in order. */
-  public static readonly opened: FakeWebSocket[] = []
-  /** The socket's state. */
-  public readyState = FakeWebSocket.CONNECTING
-  /** Messages sent, in order. */
-  public readonly sent: unknown[] = []
-  /** Whether `close` ran. */
-  public isClosed = false
-  /** Its listeners, by event type. */
-  readonly #listeners = new Map<string, ((event: unknown) => void)[]>()
-
-  /**
-   * Records the socket.
-   *
-   * @param url - The URL it was opened with.
-   */
-  public constructor(public readonly url: string) {
-    FakeWebSocket.opened.push(this)
-  }
-
-  /**
-   * Adds a listener.
-   *
-   * @param type - Event type.
-   * @param listener - The listener.
-   */
-  public addEventListener(type: string, listener: (event: unknown) => void) {
-    this.#listeners.set(type, [...(this.#listeners.get(type) ?? []), listener])
-  }
-
-  /**
-   * Sends a message.
-   *
-   * @param message - The message.
-   */
-  public send(message: unknown): void {
-    this.sent.push(message)
-  }
-
-  /** Closes the socket from the client side. */
-  public close(): void {
-    this.isClosed = true
-  }
-
-  /**
-   * Delivers an event to its listeners, as the platform does.
-   *
-   * @param type - Event type.
-   * @param event - The event.
-   */
-  public sendEvent(type: string, event: unknown = {}): void {
-    for (const listener of this.#listeners.get(type) ?? []) listener(event)
-  }
-
-  /** Opens the socket, as the platform does once it connected. */
-  public open(): void {
-    this.readyState = FakeWebSocket.OPEN
-    this.sendEvent("open")
-  }
-}
+import {
+  FakeWebSocket,
+  getDictationSocket,
+  startDictationPlatformFake
+} from "../../support/dictationPlatformFake"
 
 /**
  * Opens a dictation socket over the fake platform.
@@ -78,22 +14,16 @@ class FakeWebSocket {
 function openSocket() {
   const texts: string[] = []
   const closeCodes: number[] = []
+  const fake = startDictationPlatformFake()
   const socket = openDictationSocket("ws://127.0.0.1:1/dictation", {
     onText: (text) => texts.push(text),
     onClose: (code) => closeCodes.push(code)
   })
-  const [platform] = FakeWebSocket.opened
-  if (platform === undefined) throw new Error("no socket was opened")
-  return { socket, platform, texts, closeCodes }
+  return { socket, platform: getDictationSocket(fake), texts, closeCodes }
 }
 
 /** One frame of dictation audio. */
 const FRAME = new Uint8Array([1, 2, 3, 4])
-
-beforeEach(() => {
-  FakeWebSocket.opened.length = 0
-  vi.stubGlobal("WebSocket", FakeWebSocket)
-})
 
 describe("openDictationSocket", () => {
   it("opens the URL it is given", () => {

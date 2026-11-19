@@ -21,14 +21,19 @@ import {
   type Conversation,
   type LlmModelReference
 } from "@lys/share"
-import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
-import type { DictationSocketHandlers } from "@/lib/dictation/dictation-controller"
 import type { ChatRequestState } from "@/lib/store/chat-view"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import { updateProviderModelState } from "@/lib/store/model-runtime"
 import type { HeldToolCall } from "@/lib/store/tool-calls"
 import type { ToolListState } from "@/lib/store/tools"
+import {
+  countReleasedMicrophones,
+  getDictationSocket,
+  startDictationPlatformFake,
+  type DictationPlatformFake
+} from "../support/dictationPlatformFake"
 import {
   buildActivityApprovalPrompt,
   buildActivityReply
@@ -690,55 +695,18 @@ function listModelOptionNames(
     )
 }
 
-/** The microphone and the dictation socket a case's dictation runs over. */
-type DictationPlatform = {
-  /** Handlers of the dictation socket, once one opened, to play the backend. */
-  handlers: DictationSocketHandlers | undefined
-  /** How many recordings were started. */
-  recordings: number
-  /** How many recordings were stopped. */
-  recordingStops: number
-}
-
 /**
- * Loads a fresh composer whose dictations run over a fake microphone, which
- * opens at once, and a fake dictation socket, while voice runs.
+ * Loads a fresh composer whose dictations run over a fake platform, while
+ * voice runs.
  *
  * @returns The stores and the composer of {@link loadFreshComposer}, the
  * dictation store the composer reads, and the fake platform.
- * @remarks Only the microphone and the socket are replaced, for the case's
- * module graph; the dictation store and its controller are the real ones.
+ * @remarks Only the platform's WebSocket, microphone, and audio graph are
+ * replaced; the dictation store, its controller, the recorder, and the
+ * socket adapter are the real ones.
  */
 async function loadFreshDictationComposer() {
-  const platform: DictationPlatform = {
-    handlers: undefined,
-    recordings: 0,
-    recordingStops: 0
-  }
-  vi.doMock("@/lib/dictation/dictation-socket", () => ({
-    openDictationSocket: (_url: string, handlers: DictationSocketHandlers) => {
-      platform.handlers = handlers
-      return { sendAudio: vi.fn(), sendStop: vi.fn(), close: vi.fn() }
-    }
-  }))
-  vi.doMock(
-    import("@/lib/dictation/microphone-recorder"),
-    async (importOriginal) => ({
-      ...(await importOriginal()),
-      startMicrophoneRecorder: () => {
-        platform.recordings += 1
-        return Promise.resolve({
-          stop: () => {
-            platform.recordingStops += 1
-          }
-        })
-      }
-    })
-  )
-  onTestFinished(() => {
-    vi.doUnmock("@/lib/dictation/dictation-socket")
-    vi.doUnmock("@/lib/dictation/microphone-recorder")
-  })
+  const platform = startDictationPlatformFake()
   const loaded = await loadFreshComposer()
   const { useDictationStore } = await import("@/lib/store/dictation")
   loaded.useLysStore.setState({
@@ -751,17 +719,17 @@ async function loadFreshDictationComposer() {
  * Sends one dictation message from the fake backend, and lets the composer
  * render it.
  *
- * @param platform - The case's fake platform, whose socket is open.
+ * @param platform - The case's fake platform, which opened a socket.
  * @param type - Kind of update.
  * @param text - Everything dictated so far.
  */
 function sendDictationUpdate(
-  platform: DictationPlatform,
+  platform: DictationPlatformFake,
   type: "partial" | "final",
   text: string
 ): void {
   act(() => {
-    platform.handlers?.onText(JSON.stringify({ type, text }))
+    getDictationSocket(platform).sendJson({ type, text })
   })
 }
 
@@ -3168,7 +3136,7 @@ describe("Composer", () => {
       expect(getMessageField()).toHaveValue("Note: buy milk")
 
       await user.click(screen.getByRole("button", { name: "Stop dictation" }))
-      expect(platform.recordingStops).toBe(1)
+      expect(countReleasedMicrophones(platform)).toBe(1)
       expect(getMessageField()).toHaveAttribute("readonly")
       expect(getMessageField()).toHaveFocus()
       expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
@@ -3229,7 +3197,7 @@ describe("Composer", () => {
       expect(dictate).toHaveAccessibleDescription(
         "Start voice in Settings to talk."
       )
-      expect(platform.recordings).toBe(0)
+      expect(platform.microphoneRequests).toEqual([])
     })
 
     it("turns the button off while Lys answers, when Stop shows", async () => {
@@ -3291,13 +3259,13 @@ describe("Composer", () => {
       await waitForRenderedWork()
       sendDictationUpdate(platform, "partial", "so far")
       act(() => {
-        platform.handlers?.onClose(1011)
+        getDictationSocket(platform).closeFromBackend(1011)
       })
 
       expect(getStatusRegion(sentence)).toBeInTheDocument()
       expect(getMessageField()).toHaveValue("so far")
       expect(getMessageField()).not.toHaveAttribute("readonly")
-      expect(platform.recordingStops).toBe(1)
+      expect(countReleasedMicrophones(platform)).toBe(1)
     })
 
     it("keeps the last line in view while a dictation writes at the draft's end, and not in the middle", async () => {

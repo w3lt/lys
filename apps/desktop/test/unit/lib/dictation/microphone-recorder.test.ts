@@ -1,188 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   MicrophoneError,
   startMicrophoneRecorder,
   type MicrophoneRecorderOptions
 } from "@/lib/dictation/microphone-recorder"
 import {
+  FakeMicrophoneStream,
+  startDictationPlatformFake
+} from "../../support/dictationPlatformFake"
+import {
   createControlledPromise,
-  waitForMicrotasks,
-  type ControlledPromise
+  waitForMicrotasks
 } from "../../support/settlement"
-
-/** A microphone track, as the test drives it. */
-class FakeTrack {
-  /** Whether the recorder stopped the track. */
-  public isStopped = false
-  /** Listeners of the track's end. */
-  readonly #endedListeners: (() => void)[] = []
-
-  /** Stops the track, as the recorder does. */
-  public stop(): void {
-    this.isStopped = true
-  }
-
-  /**
-   * Adds a listener.
-   *
-   * @param _type - Event type; the recorder listens for `ended` only.
-   * @param listener - The listener.
-   */
-  public addEventListener(_type: string, listener: () => void): void {
-    this.#endedListeners.push(listener)
-  }
-
-  /** Ends the track on its own, as unplugging the microphone does. */
-  public end(): void {
-    for (const listener of this.#endedListeners) listener()
-  }
-}
-
-/** A microphone stream with one track. */
-class FakeStream {
-  /** The stream's track. */
-  public readonly track = new FakeTrack()
-
-  /** Lists the stream's tracks. */
-  public getTracks(): FakeTrack[] {
-    return [this.track]
-  }
-}
-
-/** A stand-in for the platform's audio context, which jsdom lacks. */
-class FakeAudioContext {
-  /** Every context created, in order. */
-  public static readonly created: FakeAudioContext[] = []
-  /** What loading the worklet module resolves with; the test may replace it. */
-  public static moduleLoad: Promise<void> = Promise.resolve()
-  /** Where the recorder's node connects. */
-  public readonly destination = { name: "destination" }
-  /** URLs of the worklet modules loaded. */
-  public readonly modules: string[] = []
-  /** What the microphone's source was connected to. */
-  public readonly sourceConnections: unknown[] = []
-  /** The stream a source was created for. */
-  public sourceStream: unknown
-  /** How many times the context was resumed. */
-  public resumes = 0
-  /** Whether the context was closed. */
-  public isClosed = false
-  /** The worklet of the context. */
-  public readonly audioWorklet = {
-    addModule: (url: string): Promise<void> => {
-      this.modules.push(url)
-      return FakeAudioContext.moduleLoad
-    }
-  }
-
-  /** Records the context. */
-  public constructor() {
-    FakeAudioContext.created.push(this)
-  }
-
-  /**
-   * Creates the microphone's source.
-   *
-   * @param stream - The microphone's stream.
-   */
-  public createMediaStreamSource(stream: unknown) {
-    this.sourceStream = stream
-    return {
-      connect: (node: unknown) => {
-        this.sourceConnections.push(node)
-      }
-    }
-  }
-
-  /** Resumes the context. */
-  public resume(): Promise<void> {
-    this.resumes += 1
-    return Promise.resolve()
-  }
-
-  /** Closes the context. */
-  public close(): Promise<void> {
-    this.isClosed = true
-    return Promise.resolve()
-  }
-}
-
-/** A stand-in for the recorder's worklet node. */
-class FakeWorkletNode {
-  /** Every node created, in order. */
-  public static readonly created: FakeWorkletNode[] = []
-  /** The port to the processor. */
-  public readonly port: { onmessage: ((event: unknown) => void) | null } = {
-    onmessage: null
-  }
-  /** What the node was connected to. */
-  public readonly connections: unknown[] = []
-
-  /**
-   * Records the node.
-   *
-   * @param context - The node's context.
-   * @param name - The processor's name.
-   * @param options - The node's options.
-   */
-  public constructor(
-    public readonly context: unknown,
-    public readonly name: string,
-    public readonly options: unknown
-  ) {
-    FakeWorkletNode.created.push(this)
-  }
-
-  /**
-   * Connects the node.
-   *
-   * @param destination - Where it connects.
-   */
-  public connect(destination: unknown): void {
-    this.connections.push(destination)
-  }
-
-  /**
-   * Posts a message from the processor.
-   *
-   * @param data - The message's data.
-   */
-  public sendMessage(data: unknown): void {
-    this.port.onmessage?.({ data })
-  }
-}
-
-/** What the fake platform answers a microphone request with. */
-type FakeMicrophone = {
-  /** The pending answer. */
-  readonly answer: ControlledPromise<FakeStream>
-  /** Constraints the recorder asked with. */
-  readonly constraints: unknown[]
-}
-
-/**
- * Installs a fake platform: the microphone, the audio context, and the
- * worklet node.
- *
- * @returns The microphone request, which the test answers.
- */
-function startFakePlatform(): FakeMicrophone {
-  const microphone: FakeMicrophone = {
-    answer: createControlledPromise<FakeStream>(),
-    constraints: []
-  }
-  vi.stubGlobal("navigator", {
-    mediaDevices: {
-      getUserMedia: (constraints: unknown) => {
-        microphone.constraints.push(constraints)
-        return microphone.answer.promise
-      }
-    }
-  })
-  vi.stubGlobal("AudioContext", FakeAudioContext)
-  vi.stubGlobal("AudioWorkletNode", FakeWorkletNode)
-  return microphone
-}
 
 /** What a test's recording was started with, and what it reported. */
 type RecordingProbe = {
@@ -224,29 +53,22 @@ function createRecordingProbe(): RecordingProbe {
  * @returns The running recording with its fakes.
  */
 async function startRecording() {
-  const microphone = startFakePlatform()
-  const stream = new FakeStream()
-  microphone.answer.resolve(stream)
+  const platform = startDictationPlatformFake()
   const probe = createRecordingProbe()
   const recorder = await startMicrophoneRecorder(probe.options)
-  const [context] = FakeAudioContext.created
-  const [node] = FakeWorkletNode.created
-  if (context === undefined || node === undefined)
+  const [stream] = platform.streams
+  const [context] = platform.contexts
+  const [node] = platform.nodes
+  if (stream === undefined || context === undefined || node === undefined)
     throw new Error("the recording built no audio graph")
-  return { microphone, stream, probe, recorder, context, node }
+  return { platform, stream, probe, recorder, context, node }
 }
-
-beforeEach(() => {
-  FakeAudioContext.created.length = 0
-  FakeAudioContext.moduleLoad = Promise.resolve()
-  FakeWorkletNode.created.length = 0
-})
 
 describe("startMicrophoneRecorder", () => {
   it("asks for one channel of the microphone without echo cancellation", async () => {
-    const { microphone } = await startRecording()
+    const { platform } = await startRecording()
 
-    expect(microphone.constraints).toEqual([
+    expect(platform.microphoneRequests).toEqual([
       { audio: { channelCount: 1, echoCancellation: false }, video: false }
     ])
   })
@@ -310,9 +132,9 @@ describe("startMicrophoneRecorder", () => {
   ] as const)(
     "fails with the cause when the platform refuses with %s",
     async (name, kind) => {
-      const microphone = startFakePlatform()
+      const platform = startDictationPlatformFake()
       const refusal = new DOMException("refused", name)
-      microphone.answer.reject(refusal)
+      platform.openMicrophone = () => Promise.reject(refusal)
 
       const failure = await startMicrophoneRecorder(
         createRecordingProbe().options
@@ -320,7 +142,7 @@ describe("startMicrophoneRecorder", () => {
 
       expect(failure).toBeInstanceOf(MicrophoneError)
       expect(failure).toMatchObject({ kind, cause: refusal })
-      expect(FakeAudioContext.created).toEqual([])
+      expect(platform.contexts).toEqual([])
     }
   )
 
@@ -333,47 +155,45 @@ describe("startMicrophoneRecorder", () => {
   })
 
   it("releases the microphone and the audio context when the worklet module cannot be loaded", async () => {
-    const microphone = startFakePlatform()
-    const stream = new FakeStream()
+    const platform = startDictationPlatformFake()
     const cause = new Error("no module")
-    FakeAudioContext.moduleLoad = Promise.reject(cause)
-    microphone.answer.resolve(stream)
+    platform.loadWorkletModule = () => Promise.reject(cause)
 
     await expect(
       startMicrophoneRecorder(createRecordingProbe().options)
     ).rejects.toMatchObject({ name: "MicrophoneError", kind: "failed", cause })
-    expect(stream.track.isStopped).toBe(true)
-    expect(FakeAudioContext.created[0]?.isClosed).toBe(true)
+    expect(platform.streams[0]?.track.isStopped).toBe(true)
+    expect(platform.contexts[0]?.isClosed).toBe(true)
   })
 
   it("releases a microphone that opens after the start was cancelled, and builds nothing", async () => {
-    const microphone = startFakePlatform()
-    const stream = new FakeStream()
+    const platform = startDictationPlatformFake()
+    const answer = createControlledPromise<FakeMicrophoneStream>()
+    platform.openMicrophone = () => answer.promise
+    const stream = new FakeMicrophoneStream()
     const probe = createRecordingProbe()
     const started = startMicrophoneRecorder(probe.options)
     probe.abort.abort()
-    microphone.answer.resolve(stream)
+    answer.resolve(stream)
 
     await expect(started).rejects.toBe(probe.abort.signal.reason)
     expect(stream.track.isStopped).toBe(true)
-    expect(FakeAudioContext.created).toEqual([])
+    expect(platform.contexts).toEqual([])
   })
 
   it("releases everything when the start is cancelled while the worklet module loads", async () => {
-    const microphone = startFakePlatform()
-    const stream = new FakeStream()
+    const platform = startDictationPlatformFake()
     const moduleLoad = createControlledPromise<void>()
-    FakeAudioContext.moduleLoad = moduleLoad.promise
+    platform.loadWorkletModule = () => moduleLoad.promise
     const probe = createRecordingProbe()
     const started = startMicrophoneRecorder(probe.options)
-    microphone.answer.resolve(stream)
     await waitForMicrotasks()
     probe.abort.abort()
     moduleLoad.resolve()
 
     await expect(started).rejects.toBe(probe.abort.signal.reason)
-    expect(stream.track.isStopped).toBe(true)
-    expect(FakeAudioContext.created[0]?.isClosed).toBe(true)
-    expect(FakeWorkletNode.created).toEqual([])
+    expect(platform.streams[0]?.track.isStopped).toBe(true)
+    expect(platform.contexts[0]?.isClosed).toBe(true)
+    expect(platform.nodes).toEqual([])
   })
 })

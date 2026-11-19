@@ -7,7 +7,7 @@ import { apiVoiceDictationRoute } from "./routes"
  * @remarks Five minutes of fast speech is under 10,000 characters, so the
  * bound only refuses a message that is not a dictation's text.
  */
-export const MAXIMUM_DICTATION_TEXT_LENGTH = 100_000
+const MAXIMUM_DICTATION_TEXT_LENGTH = 100_000
 
 /**
  * Validates the one text message a client sends on a dictation socket.
@@ -75,9 +75,11 @@ export type DictationServerMessage = z.infer<
  * final text was sent, `1001` the backend is shutting down, `1002` the client
  * sent a text message that is not a dictation message or audio that is not
  * whole samples, `1009` a client message was longer than
- * `SOCKET_MAX_CLIENT_MESSAGE_BYTES`, `1011` voice
- * failed, fell behind, or sent no final text in time, `4409` a newer
- * dictation socket replaced this one, `4503` voice is not ready. Closing the
+ * `SOCKET_MAX_CLIENT_MESSAGE_BYTES`, `1011` the dictation failed (voice
+ * could not be reached, failed, broke the protocol, or sent no final text in
+ * time, or more audio waited for voice, or more text for the client, than
+ * the backend holds), `4409` a newer dictation socket replaced this one,
+ * `4503` voice is not ready. Closing the
  * socket from the client at any time cancels the dictation. Changing the
  * method, path, or schemas requires coordinated consumers.
  */

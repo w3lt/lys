@@ -253,9 +253,10 @@ export const DICTATION_CLOSE_SHUTDOWN = SPEECH_CLOSE_SHUTDOWN
  */
 export const DICTATION_CLOSE_PROTOCOL_ERROR = 1002
 /**
- * Close code of a dictation socket whose dictation failed: voice failed,
- * fell behind the audio, or sent no final text in time after the stop. The
- * text sent so far stays valid.
+ * Close code of a dictation socket whose dictation failed: voice could not
+ * be reached, failed, broke the protocol, or sent no final text in time
+ * after the stop, or more audio waited for voice, or more text for the
+ * client, than the backend holds. The text sent so far stays valid.
  */
 export const DICTATION_CLOSE_FAILED = 1011
 /**

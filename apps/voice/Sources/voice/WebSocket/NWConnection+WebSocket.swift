@@ -41,11 +41,7 @@ extension NWConnection {
         let context = NWConnection.ContentContext(identifier: "voice", metadata: [metadata])
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
             send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
+                continuation.resume(with: error.map { .failure($0) } ?? .success(()))
             })
         }
     }
@@ -64,26 +60,31 @@ extension NWConnection {
     func readSocketMessage() async throws -> SocketMessage {
         try await withCheckedThrowingContinuation { continuation in
             receiveMessage { content, context, _, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                let metadata = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata
-                if metadata?.opcode == .close {
-                    continuation.resume(returning: .close)
-                    return
-                }
-                guard let content, !content.isEmpty else {
-                    continuation.resume(throwing: ConnectionClosedError())
-                    return
-                }
-                if metadata?.opcode == .binary {
-                    continuation.resume(returning: .binary(content))
-                    return
-                }
-                continuation.resume(returning: .text(String(decoding: content, as: UTF8.self)))
+                continuation.resume(with: Self.readReceivedMessage(content: content, context: context, error: error))
             }
         }
+    }
+
+    /// Reads what one receive delivered as a WebSocket message.
+    ///
+    /// - Parameters:
+    ///   - content: The message's payload, if any.
+    ///   - context: The receive's context, which carries the opcode.
+    ///   - error: The receive's error, if it failed.
+    /// - Returns: The message, or the failure ``readSocketMessage()``
+    ///   throws: the receive's error, or ``ConnectionClosedError`` for a
+    ///   payload that is missing or empty outside a close frame.
+    private static func readReceivedMessage(
+        content: Data?,
+        context: NWConnection.ContentContext?,
+        error: NWError?
+    ) -> Result<SocketMessage, any Error> {
+        if let error { return .failure(error) }
+        let metadata = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata
+        if metadata?.opcode == .close { return .success(.close) }
+        guard let content, !content.isEmpty else { return .failure(ConnectionClosedError()) }
+        if metadata?.opcode == .binary { return .success(.binary(content)) }
+        return .success(.text(String(decoding: content, as: UTF8.self)))
     }
 }
 
@@ -102,15 +103,21 @@ extension NWConnection {
     func waitForSender(_ sender: Task<Void, Never>, within timeout: Duration) async {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await sender.value }
-            group.addTask {
-                try? await Task.sleep(for: timeout)
-                guard !Task.isCancelled else { return }
-                print("voice: connection \(self.endpoint) took no message for \(timeout); cancelling it")
-                self.cancel()
-            }
+            group.addTask { await self.cancelStalledSend(after: timeout) }
             await group.next()
             group.cancelAll()
         }
+    }
+
+    /// Cancels this connection once `timeout` passed, and logs it; a wait
+    /// that was cancelled first does nothing.
+    ///
+    /// - Parameter timeout: Longest wait for the sending task.
+    private func cancelStalledSend(after timeout: Duration) async {
+        try? await Task.sleep(for: timeout)
+        guard !Task.isCancelled else { return }
+        print("voice: connection \(endpoint) took no message for \(timeout); cancelling it")
+        cancel()
     }
 
     /// Cancels this connection after a grace period, so a peer that never

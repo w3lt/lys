@@ -36,6 +36,55 @@ final class DictationConnection: Sendable {
         var pumpTask: Task<Void, Never>?
         /// Whether a close frame was sent or the peer went away.
         var closeSent = false
+
+        /// Forgets the dictation when it is the one named.
+        ///
+        /// - Parameter id: Identity of the dictation that ended.
+        /// - Returns: Whether the dictation was this connection's, and its
+        ///   session when it was.
+        mutating func removeDictation(_ id: UUID) -> (isCurrent: Bool, session: DictationSession?) {
+            guard dictationID == id else { return (false, nil) }
+            let ended = session
+            session = nil
+            dictationID = nil
+            pumpTask = nil
+            return (true, ended)
+        }
+
+        /// Forgets the dictation, whichever it is.
+        ///
+        /// - Returns: The session, the pump, and the identity it had.
+        mutating func removeDictation() -> (session: DictationSession?, pump: Task<Void, Never>?, id: UUID?) {
+            let ended = (session, pumpTask, dictationID)
+            session = nil
+            pumpTask = nil
+            dictationID = nil
+            return ended
+        }
+
+        /// Keeps a pump's handle while its dictation is still this
+        /// connection's. A pump that already completed its dictation
+        /// cleared it; its handle is not kept, so a close never waits for
+        /// the pump that runs it.
+        ///
+        /// - Parameters:
+        ///   - task: The pump.
+        ///   - id: Identity of the pump's dictation.
+        mutating func keepPump(_ task: Task<Void, Never>, of id: UUID) {
+            if dictationID == id { pumpTask = task }
+        }
+
+        /// Records that the close frame is being sent.
+        ///
+        /// - Returns: Whether this call is the first, and the pump to stop
+        ///   before the frame goes out.
+        mutating func startClose() -> (sends: Bool, pump: Task<Void, Never>?) {
+            if closeSent { return (false, nil) }
+            closeSent = true
+            let pump = pumpTask
+            pumpTask = nil
+            return (true, pump)
+        }
     }
 
     /// Longest wait for the update pump once a close cancelled it. A send to
@@ -153,14 +202,7 @@ final class DictationConnection: Sendable {
     ///   - id: Identity of the dictation that ended.
     ///   - failed: Whether recognition or sending failed.
     private func handleDictationCompleted(id: UUID, failed: Bool) async {
-        let (isCurrent, session) = state.withLock { state -> (Bool, DictationSession?) in
-            guard state.dictationID == id else { return (false, nil) }
-            let session = state.session
-            state.session = nil
-            state.dictationID = nil
-            state.pumpTask = nil
-            return (true, session)
-        }
+        let (isCurrent, session) = state.withLock { state in state.removeDictation(id) }
         guard isCurrent else { return }
         if failed {
             session?.cancel()
@@ -183,30 +225,35 @@ final class DictationConnection: Sendable {
     ///   - session: The dictation's session.
     ///   - id: Identity of the dictation, for the hub.
     private func startPump(session: DictationSession, id: UUID) {
-        let task = Task { [weak self] in
-            guard let self else { return }
-            do {
-                for try await update in session.updates {
-                    if Task.isCancelled || self.isCloseSent { return }
-                    try await self.connection.sendSocketMessage(buildDictationUpdateMessage(update), opcode: .text)
-                    if case .final = update {
-                        await self.handleDictationCompleted(id: id, failed: false)
-                    }
-                }
-            } catch {
-                // A send that fails after this side closed the socket follows
-                // from that close and is not a failure of its own.
-                if !self.isCloseSent {
-                    print("voice: dictation \(id) failed: \(error)")
-                }
-                await self.handleDictationCompleted(id: id, failed: true)
-            }
+        let task = Task<Void, Never> { [weak self] in
+            await self?.forwardUpdates(of: session, id: id)
         }
-        // A pump that already completed its dictation cleared it; its
-        // handle is not stored, so a close never waits for the pump that
-        // runs it.
-        state.withLock { state in
-            if state.dictationID == id { state.pumpTask = task }
+        state.withLock { state in state.keepPump(task, of: id) }
+    }
+
+    /// Forwards the session's updates to the socket until the final text
+    /// was sent, the pump was cancelled, the close frame went out, or a
+    /// failure ended the dictation.
+    ///
+    /// - Parameters:
+    ///   - session: The dictation's session.
+    ///   - id: Identity of the dictation, for the hub.
+    private func forwardUpdates(of session: DictationSession, id: UUID) async {
+        do {
+            for try await update in session.updates {
+                if Task.isCancelled || isCloseSent { return }
+                try await connection.sendSocketMessage(buildDictationUpdateMessage(update), opcode: .text)
+                if case .final = update {
+                    await handleDictationCompleted(id: id, failed: false)
+                }
+            }
+        } catch {
+            // A send that fails after this side closed the socket follows
+            // from that close and is not a failure of its own.
+            if !isCloseSent {
+                print("voice: dictation \(id) failed: \(error)")
+            }
+            await handleDictationCompleted(id: id, failed: true)
         }
     }
 
@@ -238,13 +285,7 @@ final class DictationConnection: Sendable {
     ///
     /// - Parameter code: Close code the peer receives.
     private func startClose(_ code: NWProtocolWebSocket.CloseCode) async {
-        let (sends, pump) = state.withLock { state -> (Bool, Task<Void, Never>?) in
-            if state.closeSent { return (false, nil) }
-            state.closeSent = true
-            let pump = state.pumpTask
-            state.pumpTask = nil
-            return (true, pump)
-        }
+        let (sends, pump) = state.withLock { state in state.startClose() }
         if let pump {
             pump.cancel()
             await connection.waitForSender(pump, within: Self.pumpStopTimeout)
@@ -265,13 +306,7 @@ final class DictationConnection: Sendable {
 
     /// Cancels the session and the pump and unregisters from the hub.
     private func cancelDictation() {
-        let (session, pump, id) = state.withLock { state -> (DictationSession?, Task<Void, Never>?, UUID?) in
-            let values = (state.session, state.pumpTask, state.dictationID)
-            state.session = nil
-            state.pumpTask = nil
-            state.dictationID = nil
-            return values
-        }
+        let (session, pump, id) = state.withLock { state in state.removeDictation() }
         session?.cancel()
         pump?.cancel()
         if let id {

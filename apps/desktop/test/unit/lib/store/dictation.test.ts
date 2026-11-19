@@ -20,6 +20,7 @@ import {
   startDictationPlatformFake,
   type DictationPlatformFake
 } from "../../support/dictationPlatformFake"
+import { startNativeHostFake } from "../../support/nativeHostFake"
 import { waitForMicrotasks } from "../../support/settlement"
 
 /**
@@ -126,6 +127,45 @@ describe("useDictationStore", () => {
     expect(platform.microphoneRequests).toEqual([])
     expect(useDictationStore.getState().status).toBe("idle")
   })
+
+  it("stops the running dictation on a press while Lys may no longer listen", async () => {
+    const platform = startDictationPlatformFake()
+    await startListening()
+    getDictationSocket(platform).open()
+    useSpeechActivityStore.setState({ isTalking: true })
+    useDictationStore.getState().toggleDictation(0)
+
+    expect(countSentStops(platform)).toBe(1)
+    expect(useDictationStore.getState().status).toBe("stopping")
+  })
+
+  it.each([
+    [
+      4503,
+      "voice-not-ready",
+      { reads: ["get_voice_status"], shown: "stopped" }
+    ],
+    [1011, "voice-stopped", { reads: ["get_voice_status"], shown: "stopped" }],
+    [1006, "stopped", { reads: [], shown: "running" }],
+    [4409, "stopped", { reads: [], shown: "running" }]
+  ] as const)(
+    "reads voice's status again only when the socket closes because voice was not ready or failed (%i)",
+    async (code, notice, voice) => {
+      const host = startNativeHostFake({
+        get_voice_status: () => ({ status: "stopped" })
+      })
+      const platform = startDictationPlatformFake()
+      await startListening()
+      getDictationSocket(platform).closeFromBackend(code)
+      await waitForMicrotasks()
+
+      expect(useDictationStore.getState().notice).toBe(notice)
+      expect(host.commands.map((invoked) => invoked.command)).toEqual(
+        voice.reads
+      )
+      expect(useLysStore.getState().voiceServerInfo.status).toBe(voice.shown)
+    }
+  )
 
   it("listens after a reply completed while its stream stays open for a title", async () => {
     const platform = startDictationPlatformFake()

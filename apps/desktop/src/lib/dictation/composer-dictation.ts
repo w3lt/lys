@@ -7,7 +7,7 @@
  *
  * | What happens | Result |
  * |---|---|
- * | The button is pressed while nothing runs | The socket opens and the microphone is asked for; the dictation is `starting`, then `listening` once the microphone is open. Refused while Lys may not listen. |
+ * | The button is pressed while nothing runs | The socket opens and the microphone is asked for; the dictation is `starting`, then `listening` once the microphone is open. |
  * | The button is pressed while starting | The start is cancelled. |
  * | The button is pressed while listening | The microphone is released, `stop` is sent, and the dictation waits up to five seconds for the final text. |
  * | A `partial` arrives | The draft holds the typed text with everything dictated so far. |
@@ -18,7 +18,8 @@
  * | The draft is changed by anything else, or the dictation is cancelled | The dictation ends at once and writes nothing more. |
  *
  * The microphone is released on every path out of `listening`, and nothing
- * is sent or written for a dictation once it ended.
+ * is sent or written for a dictation once it ended. Whether Lys may listen
+ * when the button is pressed is the caller's rule, not this module's.
  */
 import {
   DICTATION_CLOSE_COMPLETE,
@@ -82,7 +83,7 @@ export type DictationView = Readonly<{
   isAtDraftEnd: boolean
 }>
 
-/** The backend's dictation socket, as the controller drives it. */
+/** The backend's dictation socket, as the composer's dictation drives it. */
 export type DictationSocket = Readonly<{
   /**
    * Sends one frame of dictation audio.
@@ -113,13 +114,8 @@ export type DictationSocketHandlers = Readonly<{
   onClose: (code: number) => void
 }>
 
-/** Dependencies the controller borrows. */
-export type DictationControllerDeps = Readonly<{
-  /**
-   * Whether Lys may listen now: voice is ready, and Lys neither answers nor
-   * talks.
-   */
-  canListen: () => boolean
+/** What the composer's dictation borrows. */
+export type ComposerDictationDeps = Readonly<{
   /** Reads the composer's draft. */
   readDraft: () => string
   /**
@@ -147,11 +143,6 @@ export type DictationControllerDeps = Readonly<{
    * @returns The socket, which takes messages at once.
    */
   openSocket: (handlers: DictationSocketHandlers) => DictationSocket
-  /**
-   * Asks the application to read voice's status again, after a socket
-   * closed because voice was not ready or failed.
-   */
-  updateVoiceServerInfo: () => void
   /**
    * Called with what the composer shows, on every change.
    *
@@ -182,8 +173,8 @@ type DictationSession = {
   draft: string
 }
 
-/** Where the controller stands, with what each stage holds. */
-type ControllerState =
+/** Where the composer's dictation stands, with what each stage holds. */
+type DictationStage =
   | {
       /** No dictation runs. */
       readonly phase: "idle"
@@ -244,27 +235,27 @@ function findCloseNotice(code: number): DictationNotice | undefined {
  * Runs one dictation at a time for the composer.
  *
  * @remarks Lifecycle: one instance for the application; the owner calls
- * {@link DictationController.cancel} before it lets the instance go, which
+ * {@link ComposerDictation.cancel} before it lets the instance go, which
  * releases the microphone, the socket, and the timer.
  * Concurrency model: serialized on the UI thread. A dictation's callbacks
  * carry its abort signal, and a callback whose signal aborted does nothing,
  * so a recording that starts late, a late message, and a late close of an
  * ended dictation change nothing.
  */
-export class DictationController {
-  /** Dependencies the controller borrows. */
-  readonly #deps: DictationControllerDeps
-  /** Where the controller stands. */
-  #state: ControllerState = { phase: "idle" }
+export class ComposerDictation {
+  /** What the instance borrows. */
+  readonly #deps: ComposerDictationDeps
+  /** Where the dictation stands. */
+  #state: DictationStage = { phase: "idle" }
   /** Why the last dictation ended on its own. */
   #notice: DictationNotice | undefined
 
   /**
-   * Creates an idle controller.
+   * Creates the composer's dictation, with none running.
    *
-   * @param deps - Dependencies the controller borrows.
+   * @param deps - What the instance borrows.
    */
-  public constructor(deps: DictationControllerDeps) {
+  public constructor(deps: ComposerDictationDeps) {
     this.#deps = deps
   }
 
@@ -274,8 +265,8 @@ export class DictationController {
    *
    * @param cursor - Offset of the cursor in the draft, where a new dictation
    * writes.
-   * @remarks A press while the final text is awaited does nothing. A start
-   * is refused while Lys may not listen.
+   * @remarks A press while the final text is awaited does nothing. The
+   * caller decides whether Lys may listen before it asks for a start.
    */
   public toggle(cursor: number): void {
     if (this.#state.phase === "idle") this.#start(cursor)
@@ -319,7 +310,6 @@ export class DictationController {
    * @param cursor - Offset of the cursor in the draft.
    */
   #start(cursor: number): void {
-    if (!this.#deps.canListen()) return
     const abort = new AbortController()
     const draft = this.#deps.readDraft()
     const socket = this.#deps.openSocket({
@@ -433,11 +423,7 @@ export class DictationController {
    */
   #handleClose(signal: AbortSignal, code: number): void {
     if (signal.aborted) return
-    const notice = findCloseNotice(code)
-    if (notice === "voice-not-ready" || notice === "voice-stopped") {
-      this.#deps.updateVoiceServerInfo()
-    }
-    this.#finish(notice ?? this.#notice)
+    this.#finish(findCloseNotice(code) ?? this.#notice)
   }
 
   /**

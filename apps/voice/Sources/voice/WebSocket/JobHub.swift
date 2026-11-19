@@ -45,9 +45,7 @@ final class JobHub: Sendable {
     /// - Parameter id: Identity the job was registered with.
     func remove(_ id: UUID) {
         active.withLock { current in
-            if current?.id == id {
-                current = nil
-            }
+            current = current?.id == id ? nil : current
         }
     }
 }

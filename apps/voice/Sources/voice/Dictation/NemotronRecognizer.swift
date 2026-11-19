@@ -80,11 +80,7 @@ final class NemotronRecognizer: StreamingRecognizer {
             let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
             let channel = buffer.floatChannelData?[0]
         else { throw AudioBufferError() }
-        samples.withUnsafeBufferPointer { source in
-            if let address = source.baseAddress {
-                channel.update(from: address, count: samples.count)
-            }
-        }
+        channel.update(from: samples, count: samples.count)
         buffer.frameLength = frameCount
         return buffer
     }

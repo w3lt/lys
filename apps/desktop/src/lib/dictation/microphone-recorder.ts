@@ -106,17 +106,39 @@ async function openMicrophoneStream(): Promise<MediaStream> {
 }
 
 /**
+ * Creates the recorder's audio context and asks it to run.
+ *
+ * @returns The context, which the caller must close.
+ * @throws {MicrophoneError} `failed` when the platform creates none, with
+ * the platform's failure as its cause.
+ * @remarks A start calls this before its first wait, so the context is
+ * created and asked to run inside the press that started the dictation,
+ * which is when every engine lets an audio context run.
+ */
+function createRecorderContext(): AudioContext {
+  try {
+    const context = new AudioContext()
+    context.resume().catch(() => {
+      // The context is asked again once the microphone is open.
+    })
+    return context
+  } catch (error) {
+    throw new MicrophoneError("failed", { cause: error })
+  }
+}
+
+/**
  * Releases the microphone and the audio context over it.
  *
- * @param stream - The microphone's stream.
- * @param context - The audio context, if one was created.
+ * @param stream - The microphone's stream, if it was opened.
+ * @param context - The audio context.
  */
 function closeCapture(
-  stream: MediaStream,
-  context: AudioContext | undefined
+  stream: MediaStream | undefined,
+  context: AudioContext
 ): void {
-  for (const track of stream.getTracks()) track.stop()
-  context?.close().catch(() => {
+  for (const track of stream?.getTracks() ?? []) track.stop()
+  context.close().catch(() => {
     // The context is already closed; nothing is held.
   })
 }
@@ -130,7 +152,9 @@ function closeCapture(
  * @param options - The frames' receiver and the microphone's end.
  * @returns The running recording, which owns the stream and the context.
  * @remarks The processor's silent output is connected to the context's
- * destination, so every engine keeps pulling audio through it.
+ * destination, so every engine keeps pulling audio through it. The context
+ * is asked to run once more, because an engine that kept it suspended lets
+ * it run while the microphone is open.
  */
 function connectRecorder(
   stream: MediaStream,
@@ -184,23 +208,26 @@ function connectRecorder(
  * recording cannot be set up, with the cause attached.
  * @throws The signal's reason when the signal aborted before the recording
  * ran.
- * @remarks The microphone and the audio context are released before any
- * failure is thrown. The first call asks macOS for access to the microphone.
+ * @remarks The audio context is created and the microphone is asked for
+ * before the first wait, so a caller that starts in a press does both
+ * inside that press. The microphone and the audio context are released
+ * before any failure is thrown. The first call asks macOS for access to the
+ * microphone.
  */
 export async function startMicrophoneRecorder(
   options: MicrophoneRecorderOptions
 ): Promise<MicrophoneRecorder> {
-  const stream = await openMicrophoneStream()
-  let context: AudioContext | undefined
+  const context = createRecorderContext()
+  let stream: MediaStream | undefined
   try {
+    stream = await openMicrophoneStream()
     options.signal.throwIfAborted()
-    context = new AudioContext()
     await context.audioWorklet.addModule(recorderWorkletUrl)
     options.signal.throwIfAborted()
     return connectRecorder(stream, context, options)
   } catch (error) {
     closeCapture(stream, context)
-    if (options.signal.aborted) throw error
+    if (options.signal.aborted || error instanceof MicrophoneError) throw error
     throw new MicrophoneError("failed", { cause: error })
   }
 }

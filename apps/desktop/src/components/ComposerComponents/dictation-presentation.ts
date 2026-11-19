@@ -63,20 +63,28 @@ const DICTATION_NOTICE_SENTENCES = Object.freeze({
 } satisfies Readonly<Record<DictationNotice, string>>)
 
 /**
- * Finds why a dictation cannot start while none runs.
+ * Determines what the dictation button offers while no dictation runs.
  *
  * @param situation - What the button reads.
- * @returns The first reason that applies: the field is off, a conversation
- * is opening, voice does not run, or Lys is busy; `null` when a dictation
- * can start. A conversation that opens gives `undefined`, a reason not said.
+ * @returns `unavailable` for the first cause that applies: the field is off,
+ * a conversation is opening (no reason said), voice does not run, or Lys is
+ * busy; `ready` when none does.
  */
-function findStartRefusal(
+function calculateIdleButtonState(
   situation: DictationButtonSituation
-): string | undefined | null {
-  if (situation.isFieldOff) return FIELD_OFF_REASON
-  if (situation.isOpeningConversation) return undefined
-  if (!situation.isVoiceRunning) return VOICE_STOPPED_REASON
-  return situation.isLysBusy ? LYS_BUSY_REASON : null
+): DictationButtonState {
+  if (situation.isFieldOff) {
+    return { kind: "unavailable", reason: FIELD_OFF_REASON }
+  }
+  if (situation.isOpeningConversation) {
+    return { kind: "unavailable", reason: undefined }
+  }
+  if (!situation.isVoiceRunning) {
+    return { kind: "unavailable", reason: VOICE_STOPPED_REASON }
+  }
+  return situation.isLysBusy
+    ? { kind: "unavailable", reason: LYS_BUSY_REASON }
+    : { kind: "ready" }
 }
 
 /**
@@ -98,8 +106,7 @@ export function calculateDictationButtonState(
   if (situation.status === "stopping") {
     return { kind: "unavailable", reason: undefined }
   }
-  const reason = findStartRefusal(situation)
-  return reason === null ? { kind: "ready" } : { kind: "unavailable", reason }
+  return calculateIdleButtonState(situation)
 }
 
 /**

@@ -15,6 +15,7 @@ import { chatNotificationApi, chatSpeechApi } from "@lys/protocol"
 import { useChatViewStore, type ChatRequestState } from "@/lib/store/chat-view"
 import type { ChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import { useLysStore } from "@/lib/store"
+import { readBackendSocketOrigin } from "@/lib/store/backend-socket-origin"
 import { useSpeechActivityStore } from "@/lib/store/speech-activity"
 import {
   SpeechController,
@@ -89,15 +90,6 @@ function followWindowFocus(onChange: (focused: boolean) => void): () => void {
       window.removeEventListener("blur", handleWindowBlur)
     }
   }
-}
-
-/**
- * Reads the backend's base as a WebSocket origin.
- *
- * @returns The backend URL with `http` replaced by `ws`.
- */
-function buildWebSocketOrigin(): string {
-  return useLysStore.getState().backendUrl.replace(/^http/, "ws")
 }
 
 /**
@@ -266,7 +258,7 @@ function openSpeechSocket(
   handlers: SpeechSocketHandlers,
   activity: SpeechActivityReport
 ): SpeechSocket {
-  const socket = new WebSocket(`${buildWebSocketOrigin()}${path}`)
+  const socket = new WebSocket(`${readBackendSocketOrigin()}${path}`)
   socket.binaryType = "arraybuffer"
   activity.handleSocketChange(1)
   socket.addEventListener("message", (event) => {

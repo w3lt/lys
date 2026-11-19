@@ -118,6 +118,22 @@ final class DictationEngine: Sendable {
         var isReady = false
         /// The worker of the dictation started last, if any.
         var latestWorker: Task<Void, Never>?
+
+        /// Starts a dictation's worker behind the worker of the dictation
+        /// before it, and keeps it as the latest.
+        ///
+        /// - Parameter work: What the worker does once the worker before
+        ///   it ended.
+        /// - Returns: The new worker.
+        mutating func startWorker(_ work: @escaping @Sendable () async -> Void) -> Task<Void, Never> {
+            let previous = latestWorker
+            let worker = Task {
+                await previous?.value
+                await work()
+            }
+            latestWorker = worker
+            return worker
+        }
     }
 
     /// Most audio messages that may wait for the recognizer in one
@@ -159,20 +175,17 @@ final class DictationEngine: Sendable {
             bufferingPolicy: .bufferingOldest(Self.maximumQueuedMessageCount)
         )
         let recognizer = self.recognizer
-        let worker = state.withLock { state -> Task<Void, Never> in
-            let previous = state.latestWorker
-            let worker = Task {
-                await previous?.value
+        let worker = state.withLock { state in
+            state.startWorker {
                 await Self.runDictation(with: recognizer, commands: commands, updates: updateOutput)
             }
-            state.latestWorker = worker
-            return worker
         }
         return DictationSession(updates: updates, updateOutput: updateOutput, commandInput: commandInput, worker: worker)
     }
 
-    /// Feeds one dictation's audio to the recognizer in order and reports
-    /// its text, until the dictation closes, is cancelled, or fails.
+    /// Runs one dictation and ends its updates: normally once the
+    /// dictation closed or was cancelled, and with the error when the
+    /// recognizer failed.
     ///
     /// - Parameters:
     ///   - recognizer: The model, which no other task uses meanwhile.
@@ -184,26 +197,43 @@ final class DictationEngine: Sendable {
         updates: AsyncThrowingStream<DictationUpdate, any Error>.Continuation
     ) async {
         do {
-            try Task.checkCancellation()
-            await recognizer.reset()
-            var heard = ""
-            for await command in commands {
-                try Task.checkCancellation()
-                switch command {
-                case .audio(let samples):
-                    let text = try await recognizer.addAudio(samples)
-                    guard text != heard else { continue }
-                    heard = text
-                    updates.yield(.partial(text))
-                case .close:
-                    updates.yield(.final(try await recognizer.closeAudio()))
-                }
-            }
+            try await hearDictation(with: recognizer, commands: commands, updates: updates)
             updates.finish()
         } catch is CancellationError {
             updates.finish()
         } catch {
             updates.finish(throwing: error)
+        }
+    }
+
+    /// Feeds one dictation's audio to the recognizer in order and reports
+    /// its text: a partial text whenever the text changed, and the final
+    /// text once the audio closed.
+    ///
+    /// - Parameters:
+    ///   - recognizer: The model, cleared before the first audio.
+    ///   - commands: The dictation's instructions, in order.
+    ///   - updates: Where the dictation's text goes.
+    /// - Throws: `CancellationError` when the dictation was cancelled, and
+    ///   the recognizer's error when it failed.
+    private static func hearDictation(
+        with recognizer: any StreamingRecognizer,
+        commands: AsyncStream<DictationCommand>,
+        updates: AsyncThrowingStream<DictationUpdate, any Error>.Continuation
+    ) async throws {
+        try Task.checkCancellation()
+        await recognizer.reset()
+        var heard = ""
+        for await command in commands {
+            try Task.checkCancellation()
+            switch command {
+            case .audio(let samples):
+                let text = try await recognizer.addAudio(samples)
+                if text != heard { updates.yield(.partial(text)) }
+                heard = text
+            case .close:
+                updates.yield(.final(try await recognizer.closeAudio()))
+            }
         }
     }
 }

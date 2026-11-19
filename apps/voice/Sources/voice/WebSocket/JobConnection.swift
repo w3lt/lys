@@ -56,15 +56,22 @@ final class JobConnection: Sendable {
     /// receive with an error.
     func handleConnection() async {
         await withTaskCancellationHandler {
-            self.connection.start(queue: DispatchQueue(label: "voice.WebSocket"))
-            guard let first = await self.readFirstMessage() else {
-                self.connection.cancel()
-                return
-            }
-            await self.handleJob(startingWith: first)
+            await self.serveConnection()
         } onCancel: {
             self.connection.cancel()
         }
+    }
+
+    /// Starts the connection, reads its first message, and serves the job
+    /// that message names; a connection that ends before its first message
+    /// is cancelled.
+    private func serveConnection() async {
+        connection.start(queue: DispatchQueue(label: "voice.WebSocket"))
+        guard let first = await readFirstMessage() else {
+            connection.cancel()
+            return
+        }
+        await handleJob(startingWith: first)
     }
 
     /// Reads the connection's first message, within the handshake timeout
@@ -109,16 +116,24 @@ final class JobConnection: Sendable {
     private func startHandshakeDeadline() -> Task<Void, Never> {
         let connection = self.connection
         let timeout = handshakeTimeout
-        return Task {
-            try? await Task.sleep(for: timeout)
-            guard !Task.isCancelled else { return }
-            switch connection.state {
-            case .setup, .waiting, .preparing:
-                print("voice: connection \(connection.endpoint) completed no handshake within \(timeout)")
-                connection.cancel()
-            default:
-                return
-            }
+        return Task { await Self.cancelUnfinishedHandshake(of: connection, after: timeout) }
+    }
+
+    /// Waits for the timeout, then cancels the connection when its
+    /// handshake has still not completed; a cancelled wait does nothing.
+    ///
+    /// - Parameters:
+    ///   - connection: The accepted connection.
+    ///   - timeout: Longest wait for the handshake.
+    private static func cancelUnfinishedHandshake(of connection: NWConnection, after timeout: Duration) async {
+        try? await Task.sleep(for: timeout)
+        guard !Task.isCancelled else { return }
+        switch connection.state {
+        case .setup, .waiting, .preparing:
+            print("voice: connection \(connection.endpoint) completed no handshake within \(timeout)")
+            connection.cancel()
+        default:
+            return
         }
     }
 }

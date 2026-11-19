@@ -89,7 +89,17 @@ describe("startMicrophoneRecorder", () => {
     expect(context.sourceStream).toBe(stream)
     expect(context.sourceConnections).toEqual([node])
     expect(node.connections).toEqual([context.destination])
-    expect(context.resumes).toBe(1)
+    expect(context.resumes).toBe(2)
+  })
+
+  it("creates its audio context, asks it to run, and asks for the microphone before its first wait, so all three happen in the press that started it", () => {
+    const platform = startDictationPlatformFake()
+    platform.openMicrophone = () =>
+      createControlledPromise<FakeMicrophoneStream>().promise
+    void startMicrophoneRecorder(createRecordingProbe().options)
+
+    expect(platform.contexts.map((context) => context.resumes)).toEqual([1])
+    expect(platform.microphoneRequests).toHaveLength(1)
   })
 
   it("hands each frame the processor posts to its caller", async () => {
@@ -142,16 +152,33 @@ describe("startMicrophoneRecorder", () => {
 
       expect(failure).toBeInstanceOf(MicrophoneError)
       expect(failure).toMatchObject({ kind, cause: refusal })
-      expect(platform.contexts).toEqual([])
+      expect(platform.contexts.map((context) => context.isClosed)).toEqual([
+        true
+      ])
     }
   )
 
-  it("fails when the platform has no microphone API", async () => {
-    vi.stubGlobal("navigator", {})
+  it("fails when the platform has no microphone API, and closes the audio context", async () => {
+    const platform = startDictationPlatformFake()
+    Reflect.deleteProperty(navigator, "mediaDevices")
 
     await expect(
       startMicrophoneRecorder(createRecordingProbe().options)
     ).rejects.toMatchObject({ name: "MicrophoneError", kind: "failed" })
+    expect(platform.contexts.map((context) => context.isClosed)).toEqual([true])
+  })
+
+  it("fails with the cause, and asks for no microphone, when the platform creates no audio context", async () => {
+    const platform = startDictationPlatformFake()
+    const cause = new Error("no audio output")
+    vi.stubGlobal("AudioContext", function createNoContext() {
+      throw cause
+    })
+
+    await expect(
+      startMicrophoneRecorder(createRecordingProbe().options)
+    ).rejects.toMatchObject({ name: "MicrophoneError", kind: "failed", cause })
+    expect(platform.microphoneRequests).toEqual([])
   })
 
   it("releases the microphone and the audio context when the worklet module cannot be loaded", async () => {
@@ -178,7 +205,9 @@ describe("startMicrophoneRecorder", () => {
 
     await expect(started).rejects.toBe(probe.abort.signal.reason)
     expect(stream.track.isStopped).toBe(true)
-    expect(platform.contexts).toEqual([])
+    expect(platform.contexts.map((context) => context.isClosed)).toEqual([true])
+    expect(platform.contexts[0]?.modules).toEqual([])
+    expect(platform.nodes).toEqual([])
   })
 
   it("releases everything when the start is cancelled while the worklet module loads", async () => {

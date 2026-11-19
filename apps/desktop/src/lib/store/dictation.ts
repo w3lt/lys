@@ -2,13 +2,14 @@ import { voiceDictationApi } from "@lys/protocol"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import {
-  DictationController,
-  type DictationControllerDeps,
+  ComposerDictation,
+  type ComposerDictationDeps,
   type DictationView
-} from "@/lib/dictation/dictation-controller"
+} from "@/lib/dictation/composer-dictation"
 import { openDictationSocket } from "@/lib/dictation/dictation-socket"
 import { startMicrophoneRecorder } from "@/lib/dictation/microphone-recorder"
 import { useLysStore } from "@/lib/store"
+import { readBackendSocketOrigin } from "@/lib/store/backend-socket-origin"
 import { useChatViewStore, type ChatViewStore } from "@/lib/store/chat-view"
 import { useSpeechActivityStore } from "@/lib/store/speech-activity"
 
@@ -16,7 +17,7 @@ import { useSpeechActivityStore } from "@/lib/store/speech-activity"
 export type DictationStore = DictationView & {
   /**
    * Handles a press of the dictation button: starts a dictation while none
-   * runs, and stops the running one otherwise.
+   * runs and Lys may listen, and stops the running one otherwise.
    *
    * @param cursor - Offset of the cursor in the draft, where a new dictation
    * writes.
@@ -37,51 +38,112 @@ export type DictationStore = DictationView & {
   readonly handleDraftChange: (draft: string) => void
 }
 
-/** What a dictation store borrows: the controller's dependencies but its view. */
-export type DictationStoreDeps = Omit<DictationControllerDeps, "onViewChange">
+/**
+ * What a dictation store borrows: what the composer's dictation borrows,
+ * except its view, and the two rules the store applies itself.
+ */
+export type DictationStoreDeps = Omit<ComposerDictationDeps, "onViewChange"> &
+  Readonly<{
+    /**
+     * Whether Lys may listen now: voice is ready, and Lys neither answers
+     * nor talks.
+     */
+    canListen: () => boolean
+    /**
+     * Asks the application to read voice's status again, after a dictation
+     * ended because voice was not ready or stopped.
+     */
+    updateVoiceServerInfo: () => void
+  }>
+
+/** A dictation store's state accessors. */
+type DictationStoreApi = Pick<StoreApi<DictationStore>, "getState" | "setState">
 
 /**
- * Creates a dictation store over one dictation controller.
+ * Answers whether a notice says that voice ended the dictation.
  *
- * @param deps - What the controller borrows; the store receives its view.
+ * @param notice - The notice of a view.
+ * @returns True for voice not being ready and for voice having stopped.
+ */
+function isVoiceNotice(notice: DictationView["notice"]): boolean {
+  return notice === "voice-not-ready" || notice === "voice-stopped"
+}
+
+/**
+ * Builds a dictation store's first state over a new composer's dictation.
+ *
+ * @param deps - What the store borrows.
+ * @param store - Reads and writes the store's state.
+ * @returns The idle view with the composer's requests.
+ */
+function createDictationStoreState(
+  deps: DictationStoreDeps,
+  store: DictationStoreApi
+): DictationStore {
+  /**
+   * Shows a view of the dictation, and has voice's status read again when
+   * the view first says that voice ended the dictation.
+   *
+   * @param view - The dictation's status and notice.
+   */
+  function handleViewChange(view: DictationView): void {
+    const isNewNotice = store.getState().notice !== view.notice
+    store.setState(view)
+    if (isNewNotice && isVoiceNotice(view.notice)) deps.updateVoiceServerInfo()
+  }
+
+  const dictation = new ComposerDictation({
+    readDraft: deps.readDraft,
+    writeDraft: deps.writeDraft,
+    startRecorder: deps.startRecorder,
+    openSocket: deps.openSocket,
+    onViewChange: handleViewChange
+  })
+
+  /**
+   * Handles a press of the dictation button.
+   *
+   * @param cursor - Offset of the cursor in the draft.
+   */
+  function toggleDictation(cursor: number): void {
+    if (store.getState().status === "idle" && !deps.canListen()) return
+    dictation.toggle(cursor)
+  }
+
+  return {
+    status: "idle",
+    notice: undefined,
+    isAtDraftEnd: false,
+    toggleDictation,
+    stopDictation: () => {
+      dictation.stop()
+    },
+    cancelDictation: () => {
+      dictation.cancel()
+    },
+    handleDraftChange: (draft) => {
+      dictation.handleDraftChange(draft)
+    }
+  }
+}
+
+/**
+ * Creates a dictation store over one composer's dictation.
+ *
+ * @param deps - What the store borrows.
  * @returns The store, idle and without a notice.
- * @remarks The store owns the controller, which owns the microphone and the
- * socket of the running dictation; {@link DictationStore.cancelDictation}
- * releases them.
+ * @remarks The store owns the composer's dictation, which owns the
+ * microphone and the socket of the running dictation;
+ * {@link DictationStore.cancelDictation} releases them. The store refuses a
+ * start while Lys may not listen, and has voice's status read again when a
+ * dictation ends because voice was not ready or stopped.
  */
 export function createDictationStore(
   deps: DictationStoreDeps
 ): UseBoundStore<StoreApi<DictationStore>> {
-  /**
-   * Builds the store's first state over a new controller.
-   *
-   * @param set - Writes the controller's view to the store.
-   * @returns The idle view with the composer's requests.
-   */
-  function createDictationStoreState(
-    set: StoreApi<DictationStore>["setState"]
-  ): DictationStore {
-    const controller = new DictationController({ ...deps, onViewChange: set })
-    return {
-      status: "idle",
-      notice: undefined,
-      isAtDraftEnd: false,
-      toggleDictation: (cursor) => {
-        controller.toggle(cursor)
-      },
-      stopDictation: () => {
-        controller.stop()
-      },
-      cancelDictation: () => {
-        controller.cancel()
-      },
-      handleDraftChange: (draft) => {
-        controller.handleDraftChange(draft)
-      }
-    }
-  }
-
-  return create<DictationStore>(createDictationStoreState)
+  return create<DictationStore>((setState, getState) =>
+    createDictationStoreState(deps, { getState, setState })
+  )
 }
 
 /**
@@ -130,7 +192,7 @@ export const useDictationStore: UseBoundStore<StoreApi<DictationStore>> =
     startRecorder: startMicrophoneRecorder,
     openSocket: (handlers) =>
       openDictationSocket(
-        `${useLysStore.getState().backendUrl.replace(/^http/, "ws")}${voiceDictationApi.path}`,
+        `${readBackendSocketOrigin()}${voiceDictationApi.path}`,
         handlers
       ),
     updateVoiceServerInfo: () => {

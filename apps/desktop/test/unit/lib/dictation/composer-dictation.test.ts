@@ -1,10 +1,10 @@
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import {
-  DictationController,
+  ComposerDictation,
   FINAL_TEXT_WAIT_MS,
   type DictationSocketHandlers,
   type DictationView
-} from "@/lib/dictation/dictation-controller"
+} from "@/lib/dictation/composer-dictation"
 import {
   MicrophoneError,
   type MicrophoneRecorder,
@@ -18,21 +18,21 @@ import {
 /** One frame of dictation audio. */
 const FRAME = new Uint8Array(3_200)
 
-/** The dictation socket the controller opened, as the test drives it. */
+/** The dictation socket the dictation opened, as the test drives it. */
 type FakeSocket = {
-  /** Frames the controller sent, in order. */
+  /** Frames the dictation sent, in order. */
   readonly audio: Uint8Array[]
   /** How many times `stop` was sent. */
   stops: number
-  /** Whether the controller closed the socket. */
+  /** Whether the dictation closed the socket. */
   isClosed: boolean
-  /** The controller's handlers, to play the backend. */
+  /** The dictation's handlers, to play the backend. */
   readonly handlers: DictationSocketHandlers
 }
 
-/** The microphone the controller asked for, as the test drives it. */
+/** The microphone the dictation asked for, as the test drives it. */
 type FakeMicrophone = {
-  /** What the controller started the recording with. */
+  /** What the dictation started the recording with. */
   readonly options: MicrophoneRecorderOptions
   /** Whether the recording was stopped. */
   isStopped: boolean
@@ -42,40 +42,33 @@ type FakeMicrophone = {
   fail: (error: unknown) => void
 }
 
-/** A controller over fakes, with everything it did. */
-type ControllerHarness = {
-  /** The controller under test. */
-  readonly controller: DictationController
+/** A composer's dictation over fakes, with everything it did. */
+type DictationHarness = {
+  /** The composer's dictation under test. */
+  readonly dictation: ComposerDictation
   /** The composer's draft. */
   draft: string
-  /** Whether Lys may listen. */
-  canListen: boolean
   /** Sockets opened, in order. */
   readonly sockets: FakeSocket[]
   /** Microphones asked for, in order. */
   readonly microphones: FakeMicrophone[]
   /** Views published, in order. */
   readonly views: DictationView[]
-  /** How many times voice's status was read again. */
-  voiceReads: number
 }
 
 /**
- * Creates a controller over a fake draft, socket, and microphone.
+ * Creates a composer's dictation over a fake draft, socket, and microphone.
  *
  * @param draft - The composer's draft before the dictation.
  * @returns The harness.
  */
-function createHarness(draft = ""): ControllerHarness {
-  const harness: ControllerHarness = {
+function createHarness(draft = ""): DictationHarness {
+  const harness: DictationHarness = {
     draft,
-    canListen: true,
     sockets: [],
     microphones: [],
     views: [],
-    voiceReads: 0,
-    controller: new DictationController({
-      canListen: () => harness.canListen,
+    dictation: new ComposerDictation({
       readDraft: () => harness.draft,
       writeDraft: (written) => {
         harness.draft = written
@@ -99,9 +92,6 @@ function createHarness(draft = ""): ControllerHarness {
           }
         }
       },
-      updateVoiceServerInfo: () => {
-        harness.voiceReads += 1
-      },
       onViewChange: (view) => harness.views.push(view)
     })
   }
@@ -112,11 +102,11 @@ function createHarness(draft = ""): ControllerHarness {
  * Starts a fake recording that the test opens or fails.
  *
  * @param harness - The harness that records the microphone.
- * @param options - What the controller started the recording with.
+ * @param options - What the dictation started the recording with.
  * @returns The recording, once the test opens the microphone.
  */
 function startFakeMicrophone(
-  harness: ControllerHarness,
+  harness: DictationHarness,
   options: MicrophoneRecorderOptions
 ): Promise<MicrophoneRecorder> {
   const started = createControlledPromise<MicrophoneRecorder>()
@@ -147,7 +137,7 @@ function startFakeMicrophone(
  */
 async function startListening(draft = "", cursor = draft.length) {
   const harness = createHarness(draft)
-  harness.controller.toggle(cursor)
+  harness.dictation.toggle(cursor)
   const [socket] = harness.sockets
   const [microphone] = harness.microphones
   if (socket === undefined || microphone === undefined)
@@ -180,10 +170,10 @@ function startFakeTimers(): void {
   })
 }
 
-describe("DictationController start", () => {
+describe("ComposerDictation start", () => {
   it("opens the socket and asks for the microphone on the first press, and listens once it is open", async () => {
     const harness = createHarness()
-    harness.controller.toggle(0)
+    harness.dictation.toggle(0)
 
     expect(harness.sockets).toHaveLength(1)
     expect(harness.microphones).toHaveLength(1)
@@ -197,16 +187,6 @@ describe("DictationController start", () => {
     })
   })
 
-  it("starts nothing while Lys may not listen", () => {
-    const harness = createHarness()
-    harness.canListen = false
-    harness.controller.toggle(0)
-
-    expect(harness.sockets).toEqual([])
-    expect(harness.microphones).toEqual([])
-    expect(harness.views).toEqual([])
-  })
-
   it("sends each frame of the open microphone to the socket", async () => {
     const { socket, microphone } = await startListening()
     microphone.options.onFrame(FRAME)
@@ -217,8 +197,8 @@ describe("DictationController start", () => {
 
   it("cancels the start on a second press before the microphone is open, and releases a microphone that opens late", async () => {
     const harness = createHarness()
-    harness.controller.toggle(0)
-    harness.controller.toggle(0)
+    harness.dictation.toggle(0)
+    harness.dictation.toggle(0)
 
     expect(harness.views.at(-1)?.status).toBe("idle")
     expect(harness.sockets[0]?.isClosed).toBe(true)
@@ -237,7 +217,7 @@ describe("DictationController start", () => {
     "ends with a notice when the microphone is %s",
     async (kind, notice) => {
       const harness = createHarness("typed")
-      harness.controller.toggle(5)
+      harness.dictation.toggle(5)
       harness.microphones[0]?.fail(new MicrophoneError(kind))
       await waitForMicrotasks()
 
@@ -253,7 +233,7 @@ describe("DictationController start", () => {
 
   it("ends with the microphone-failed notice for a failure that is not a microphone error", async () => {
     const harness = createHarness()
-    harness.controller.toggle(0)
+    harness.dictation.toggle(0)
     harness.microphones[0]?.fail(new Error("worklet"))
     await waitForMicrotasks()
 
@@ -262,10 +242,10 @@ describe("DictationController start", () => {
 
   it("clears the last notice when the next dictation starts", async () => {
     const harness = createHarness()
-    harness.controller.toggle(0)
+    harness.dictation.toggle(0)
     harness.microphones[0]?.fail(new MicrophoneError("denied"))
     await waitForMicrotasks()
-    harness.controller.toggle(0)
+    harness.dictation.toggle(0)
 
     expect(harness.views.at(-1)).toEqual({
       status: "starting",
@@ -276,13 +256,13 @@ describe("DictationController start", () => {
 
   it("says whether the dictation writes at the draft's end", () => {
     const harness = createHarness("Hello world")
-    harness.controller.toggle(5)
+    harness.dictation.toggle(5)
 
     expect(harness.views.at(-1)?.isAtDraftEnd).toBe(false)
   })
 })
 
-describe("DictationController text", () => {
+describe("ComposerDictation text", () => {
   it("writes each update where the cursor was, keeping what was typed", async () => {
     const { harness, socket } = await startListening("Dear Ana, bye", 9)
     sendUpdate(socket, "partial", "thanks for")
@@ -294,7 +274,7 @@ describe("DictationController text", () => {
 
   it("stops on a press while listening: releases the microphone, sends stop, and waits for the final text", async () => {
     const { harness, socket, microphone } = await startListening()
-    harness.controller.toggle(0)
+    harness.dictation.toggle(0)
 
     expect(microphone.isStopped).toBe(true)
     expect(socket.stops).toBe(1)
@@ -304,7 +284,7 @@ describe("DictationController text", () => {
 
   it("sends no frame after the stop", async () => {
     const { harness, socket, microphone } = await startListening()
-    harness.controller.stop()
+    harness.dictation.stop()
     microphone.options.onFrame(FRAME)
 
     expect(socket.audio).toEqual([])
@@ -313,7 +293,7 @@ describe("DictationController text", () => {
   it("writes the final text and ends without a notice", async () => {
     const { harness, socket } = await startListening("Note:")
     sendUpdate(socket, "partial", "by milk")
-    harness.controller.stop()
+    harness.dictation.stop()
     sendUpdate(socket, "final", "Buy milk.")
 
     expect(harness.draft).toBe("Note: Buy milk.")
@@ -327,8 +307,8 @@ describe("DictationController text", () => {
 
   it("ignores a press while the final text is awaited", async () => {
     const { harness, socket } = await startListening()
-    harness.controller.stop()
-    harness.controller.toggle(0)
+    harness.dictation.stop()
+    harness.dictation.toggle(0)
 
     expect(socket.stops).toBe(1)
     expect(harness.sockets).toHaveLength(1)
@@ -339,7 +319,7 @@ describe("DictationController text", () => {
     startFakeTimers()
     const { harness, socket } = await startListening()
     sendUpdate(socket, "partial", "so far")
-    harness.controller.stop()
+    harness.dictation.stop()
     vi.advanceTimersByTime(FINAL_TEXT_WAIT_MS - 1)
     expect(harness.views.at(-1)?.status).toBe("stopping")
     vi.advanceTimersByTime(1)
@@ -364,7 +344,7 @@ describe("DictationController text", () => {
 
   it("writes nothing for a message that arrives after the dictation ended", async () => {
     const { harness, socket } = await startListening()
-    harness.controller.stop()
+    harness.dictation.stop()
     sendUpdate(socket, "final", "Done.")
     sendUpdate(socket, "partial", "late")
     socket.handlers.onClose(1000)
@@ -386,23 +366,22 @@ describe("DictationController text", () => {
   )
 })
 
-describe("DictationController endings", () => {
+describe("ComposerDictation endings", () => {
   it.each([
-    [4503, "voice-not-ready", 1],
-    [1011, "voice-stopped", 1],
-    [1006, "stopped", 0],
-    [4409, "stopped", 0],
-    [1001, "stopped", 0]
+    [4503, "voice-not-ready"],
+    [1011, "voice-stopped"],
+    [1006, "stopped"],
+    [4409, "stopped"],
+    [1001, "stopped"]
   ] as const)(
     "keeps the text so far and ends with a notice when the socket closes with %i",
-    async (code, notice, voiceReads) => {
+    async (code, notice) => {
       const { harness, socket, microphone } = await startListening()
       sendUpdate(socket, "partial", "so far")
       socket.handlers.onClose(code)
 
       expect(harness.draft).toBe("so far")
       expect(microphone.isStopped).toBe(true)
-      expect(harness.voiceReads).toBe(voiceReads)
       expect(harness.views.at(-1)).toEqual({
         status: "idle",
         notice,
@@ -413,7 +392,7 @@ describe("DictationController endings", () => {
 
   it("ends a start with the voice-not-ready notice when the socket closes with 4503, and cancels the microphone", async () => {
     const harness = createHarness()
-    harness.controller.toggle(0)
+    harness.dictation.toggle(0)
     harness.sockets[0]?.handlers.onClose(4503)
 
     expect(harness.views.at(-1)?.notice).toBe("voice-not-ready")
@@ -423,7 +402,7 @@ describe("DictationController endings", () => {
   it("ends the wait for the final text when the socket closes first", async () => {
     startFakeTimers()
     const { harness, socket } = await startListening()
-    harness.controller.stop()
+    harness.dictation.stop()
     socket.handlers.onClose(1011)
     vi.advanceTimersByTime(FINAL_TEXT_WAIT_MS)
 
@@ -454,7 +433,7 @@ describe("DictationController endings", () => {
 
   it("cancels at once: releases everything, clears the notice, and writes nothing more", async () => {
     const { harness, socket, microphone } = await startListening("typed")
-    harness.controller.cancel()
+    harness.dictation.cancel()
     sendUpdate(socket, "partial", "late")
     microphone.options.onFrame(FRAME)
 
@@ -473,7 +452,7 @@ describe("DictationController endings", () => {
   it("clears a notice on cancel while nothing runs", async () => {
     const { harness, socket } = await startListening()
     socket.handlers.onClose(1011)
-    harness.controller.cancel()
+    harness.dictation.cancel()
 
     expect(harness.views.at(-1)?.notice).toBeUndefined()
   })
@@ -481,9 +460,9 @@ describe("DictationController endings", () => {
   it("cancels when something else changed the draft, and not for its own writes", async () => {
     const { harness, socket, microphone } = await startListening("typed")
     sendUpdate(socket, "partial", "words")
-    harness.controller.handleDraftChange(harness.draft)
+    harness.dictation.handleDraftChange(harness.draft)
     expect(harness.views.at(-1)?.status).toBe("listening")
-    harness.controller.handleDraftChange("")
+    harness.dictation.handleDraftChange("")
 
     expect(microphone.isStopped).toBe(true)
     expect(harness.views.at(-1)?.status).toBe("idle")
@@ -491,18 +470,18 @@ describe("DictationController endings", () => {
 
   it("does nothing on stop, cancel, or a draft change while nothing runs", () => {
     const harness = createHarness()
-    harness.controller.stop()
-    harness.controller.cancel()
-    harness.controller.handleDraftChange("typed")
+    harness.dictation.stop()
+    harness.dictation.cancel()
+    harness.dictation.handleDraftChange("typed")
 
     expect(harness.views).toEqual([])
   })
 
   it("starts a new dictation after one ended, on its own socket", async () => {
     const { harness, socket } = await startListening()
-    harness.controller.stop()
+    harness.dictation.stop()
     sendUpdate(socket, "final", "One.")
-    harness.controller.toggle(harness.draft.length)
+    harness.dictation.toggle(harness.draft.length)
     harness.microphones[1]?.open()
     await waitForMicrotasks()
     const second = harness.sockets[1]

@@ -73,8 +73,10 @@ export type DictationConnectionOptions = Readonly<{
  * @remarks Closes the socket with the code the UI understands: the final
  * text was sent (`1000`), the client sent a text message that is not `stop`
  * or audio that is not whole samples (`1002`), voice is not ready (`4503`),
- * or voice failed, fell behind, or sent no final text in time (`1011`). A
- * newer dictation socket closes this one with `4409` first. The socket's
+ * or the dictation failed (`1011`): voice could not be reached, failed,
+ * broke the protocol, or sent no final text in time, or more audio waited
+ * for voice, or more text for the UI, than the relay holds. A newer
+ * dictation socket closes this one with `4409` first. The socket's
  * messages are read from the moment it opens, so audio sent while voice is
  * asked and dialed waits in order. A socket closed before voice answers
  * starts no dictation, and one closed later cancels its dictation at voice.

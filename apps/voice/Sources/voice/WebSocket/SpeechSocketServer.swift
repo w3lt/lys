@@ -4,6 +4,10 @@ import Synchronization
 
 /// Serves voice's WebSockets, one speech or one dictation per connection.
 ///
+/// The class keeps the name it had while it served speech only: the
+/// handbook's record of where voice's socket address is declared, and the
+/// test that guards that address, both name this class and this file.
+///
 /// Two guards run before any connection is accepted: a handshake that
 /// carries an `Origin` header — every browser request does, the backend's
 /// does not — is refused, so no web page can make voice speak or listen;

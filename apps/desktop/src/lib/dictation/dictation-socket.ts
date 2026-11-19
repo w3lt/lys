@@ -1,5 +1,5 @@
 /**
- * Opens the backend's dictation WebSocket for the dictation controller.
+ * Opens the backend's dictation WebSocket for the composer's dictation.
  *
  * @remarks The socket carries audio up and text down. Messages sent while
  * the socket is still connecting wait, in order, and are sent once it opens,
@@ -8,7 +8,7 @@
 import type {
   DictationSocket,
   DictationSocketHandlers
-} from "./dictation-controller"
+} from "./composer-dictation"
 
 /** The message that asks for the final text. */
 const STOP_MESSAGE = JSON.stringify({ type: "stop" })
@@ -58,7 +58,7 @@ function sendWaitingMessages(
  * Passes one text message of the platform's socket to the handler.
  *
  * @param event - The message event the socket received.
- * @param handlers - The controller's socket handlers.
+ * @param handlers - The socket handlers of the composer's dictation.
  */
 function sendTextMessage(
   event: MessageEvent<unknown>,

@@ -628,9 +628,11 @@ scheduled, so the pause between two sentences does not count as silence.
 
 The composer's microphone button writes what the person says into the
 message field. The dictation store (`lib/store/dictation.ts`) owns when Lys
-listens, a controller (`lib/dictation/dictation-controller.ts`) owns one
-dictation at a time, and the backend and voice own the words: the UI sends
-audio and shows the text that comes back.
+listens: it refuses a start while she may not, and ends a dictation when
+she no longer may. The composer's dictation
+(`lib/dictation/composer-dictation.ts`) owns one dictation at a time, with
+its microphone, its socket, and its place in the draft. The backend and
+voice own the words: the UI sends audio and shows the text that comes back.
 
 The button sits between the message field and Send. It is named Dictate, and
 Stop dictation while Lys listens, when it is also pressed (`aria-pressed`).
@@ -645,16 +647,20 @@ It is off, with its reason as its description and its hover text:
 
 A press starts a dictation:
 
-- The controller remembers the draft on each side of the field's cursor, or
-  of a selection's end, and writes every text that arrives between the two
+- The composer's dictation remembers the draft on each side of the field's
+  cursor, or of a selection's end, and writes every text that arrives
+  between the two
   parts (`lib/dictation/dictated-draft.ts`). What was typed stays; a
   selection is not replaced. One space joins the dictated text to a word
   before or after it, and none after an opening bracket or before
   punctuation.
 - In the same step it asks for the microphone and opens the dictation
   socket, `GET /api/v1/voice/dictation`. The recorder
-  (`lib/dictation/microphone-recorder.ts`) asks `getUserMedia` for one
-  channel without echo cancellation and connects it to an audio worklet
+  (`lib/dictation/microphone-recorder.ts`) creates its audio context and
+  asks `getUserMedia` for one channel without echo cancellation, both
+  inside the press, because WebKit lets a context run only from a user
+  gesture or while the microphone is open. It connects the microphone to an
+  audio worklet
   (`recorder-worklet.ts`), which converts the context's rate to 16 kHz with
   a windowed-sinc low-pass filter (`pcm-downsampler.ts`) and posts frames of
   1,600 samples, 100 ms, as 16-bit little-endian PCM. Frames recorded before
@@ -688,14 +694,14 @@ text, the text so far stays, the field and Send turn back on, and a polite
 status line under the field says why until the next dictation starts or
 another conversation is shown:
 
-| Cause                                         | Sentence                                                                                       |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| The socket closed with `4503`                 | "voice isn't ready yet."                                                                       |
-| The socket closed with `1011`                 | "Listening stopped because voice stopped."                                                     |
-| Any other close without a final text          | "Listening stopped."                                                                           |
-| `getUserMedia` refused access                 | "Lys can't use the microphone. Allow it in System Settings → Privacy & Security → Microphone." |
-| No microphone exists                          | "No microphone found."                                                                         |
-| The microphone or the worklet could not start | "The microphone could not be started."                                                         |
+| Cause                                                             | Sentence                                                                                       |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| The socket closed with `4503`                                     | "voice isn't ready yet."                                                                       |
+| The socket closed with `1011`                                     | "Listening stopped because voice stopped."                                                     |
+| Any other close without a final text                              | "Listening stopped."                                                                           |
+| `getUserMedia` refused access                                     | "Lys can't use the microphone. Allow it in System Settings → Privacy & Security → Microphone." |
+| No microphone exists                                              | "No microphone found."                                                                         |
+| The microphone, the audio context, or the worklet could not start | "The microphone could not be started."                                                         |
 
 A `4503` or `1011` close also makes the store read voice's status again, as
 a speech socket's does. The microphone is released, its tracks stopped and

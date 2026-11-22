@@ -3,24 +3,41 @@ import fastifyWebsocket from "@fastify/websocket"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import type { WebSocket as ServerSocket } from "ws"
 import {
+  openVoiceDictation,
   openVoiceSpeech,
   isVoiceReady,
   VoiceUnavailableError,
+  type VoiceDictationHandlers,
   type VoiceSpeechHandlers
 } from "../../../../src/modules/voice/voiceClient"
 import { createTestFastify } from "../../support/fastifyTestApp"
 
 /** What a fake voice server saw from the backend. */
 type FakeVoiceServer = Readonly<{
-  /** URL of its speech socket. */
+  /** URL of its socket. */
   url: string
   /** Text messages received, parsed, in order. */
   messages: unknown[]
+  /** Binary messages received, in order. */
+  audio: Buffer[]
   /** Resolves with the socket once the backend connected. */
   connected: Promise<ServerSocket>
   /** Resolves once the backend's socket closed. */
   closed: Promise<void>
 }>
+
+/**
+ * Records one message the fake voice received: a text message parsed, and a
+ * binary one as its bytes.
+ */
+function addReceivedMessage(
+  received: Pick<FakeVoiceServer, "messages" | "audio">,
+  data: unknown,
+  isBinary: boolean
+): void {
+  if (!isBinary) received.messages.push(JSON.parse(String(data)))
+  else if (Buffer.isBuffer(data)) received.audio.push(data)
+}
 
 /**
  * Starts a fake voice speech server on an ephemeral port.
@@ -33,6 +50,7 @@ async function startFakeVoice(
   const { app } = createTestFastify()
   await app.register(fastifyWebsocket)
   const messages: unknown[] = []
+  const audio: Buffer[] = []
   const connected = Promise.withResolvers<ServerSocket>()
   const closed = Promise.withResolvers<void>()
   app.get(
@@ -45,7 +63,9 @@ async function startFakeVoice(
       }
     },
     (socket: ServerSocket) => {
-      socket.on("message", (data) => messages.push(JSON.parse(String(data))))
+      socket.on("message", (data, isBinary) =>
+        addReceivedMessage({ messages, audio }, data, isBinary)
+      )
       socket.on("close", () => closed.resolve())
       connected.resolve(socket)
     }
@@ -57,6 +77,7 @@ async function startFakeVoice(
   return {
     url: `ws://127.0.0.1:${port}/`,
     messages,
+    audio,
     connected: connected.promise,
     closed: closed.promise
   }
@@ -171,6 +192,85 @@ describe("openVoiceSpeech", () => {
     await vi.waitFor(() => expect(sockets).toHaveLength(1))
     vi.advanceTimersByTime(2_000)
     await expect(speech).rejects.toBeInstanceOf(VoiceUnavailableError)
+    expect(handlers.closeCodes).toEqual([])
+  })
+})
+
+/** Handlers that record what voice sent on a dictation. */
+function createRecordingDictationHandlers(): VoiceDictationHandlers &
+  Readonly<{ texts: string[]; closeCodes: number[] }> {
+  const texts: string[] = []
+  const closeCodes: number[] = []
+  return {
+    texts,
+    closeCodes,
+    onText: (text) => texts.push(text),
+    onClose: (code) => closeCodes.push(code)
+  }
+}
+
+describe("openVoiceDictation", () => {
+  it("sends the dictation messages and the audio, and relays text and the close", async () => {
+    const voice = await startFakeVoice()
+    const handlers = createRecordingDictationHandlers()
+    const dictation = await openVoiceDictation(handlers, voice.url)
+    const socket = await voice.connected
+    dictation.start()
+    dictation.sendAudio(Buffer.from([1, 2, 3, 4]))
+    dictation.sendStop()
+    await vi.waitFor(() => expect(voice.messages).toHaveLength(2))
+    expect(voice.messages).toEqual([{ type: "transcribe" }, { type: "stop" }])
+    expect(voice.audio).toEqual([Buffer.from([1, 2, 3, 4])])
+    socket.send(JSON.stringify({ type: "final", text: "Hello." }))
+    await vi.waitFor(() => expect(handlers.texts).toHaveLength(1))
+    expect(handlers.texts).toEqual(['{"type":"final","text":"Hello."}'])
+    socket.close(1000)
+    await vi.waitFor(() => expect(handlers.closeCodes).toEqual([1000]))
+  })
+
+  it("ignores a binary frame, which voice never sends on a dictation", async () => {
+    const voice = await startFakeVoice()
+    const handlers = createRecordingDictationHandlers()
+    await openVoiceDictation(handlers, voice.url)
+    const socket = await voice.connected
+    socket.send(Buffer.from([1, 2]))
+    socket.send("after")
+    await vi.waitFor(() => expect(handlers.texts).toEqual(["after"]))
+  })
+
+  it("counts the bytes voice has not taken yet", async () => {
+    const voice = await startFakeVoice()
+    const dictation = await openVoiceDictation(
+      createRecordingDictationHandlers(),
+      voice.url
+    )
+    await voice.connected
+    expect(dictation.getBufferedBytes()).toBe(0)
+    dictation.sendAudio(Buffer.alloc(3_200))
+    expect(dictation.getBufferedBytes()).toBeGreaterThanOrEqual(3_200)
+  })
+
+  it("hangs up on cancel, and drops what is sent afterwards", async () => {
+    const voice = await startFakeVoice()
+    const dictation = await openVoiceDictation(
+      createRecordingDictationHandlers(),
+      voice.url
+    )
+    await voice.connected
+    dictation.cancel()
+    dictation.sendAudio(Buffer.from([1, 2]))
+    dictation.sendStop()
+    await expect(voice.closed).resolves.toBeUndefined()
+    expect(voice.messages).toEqual([])
+    expect(voice.audio).toEqual([])
+  })
+
+  it("fails with VoiceUnavailableError when voice refuses the handshake", async () => {
+    const voice = await startFakeVoice("refuse")
+    const handlers = createRecordingDictationHandlers()
+    await expect(
+      openVoiceDictation(handlers, voice.url)
+    ).rejects.toBeInstanceOf(VoiceUnavailableError)
     expect(handlers.closeCodes).toEqual([])
   })
 })

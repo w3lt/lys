@@ -1,4 +1,7 @@
-import { SPEECH_CLOSE_SHUTDOWN } from "@lys/protocol"
+import {
+  SOCKET_MAX_CLIENT_MESSAGE_BYTES,
+  SPEECH_CLOSE_SHUTDOWN
+} from "@lys/protocol"
 import type { FastifyInstance } from "fastify"
 import fastifySse from "@fastify/sse"
 import fastifyWebsocket from "@fastify/websocket"
@@ -13,8 +16,11 @@ import { DESKTOP_ORIGINS } from "./httpOrigins"
  * @throws If a transport plugin cannot be registered.
  * @remarks CORS admits the development and Tauri desktop origins, including DELETE
  * preflights. It does not authenticate non-browser callers; the host binds loopback.
- * When the application closes, every open WebSocket, which is always a speech
- * socket, is closed with the shutdown code before requests are drained.
+ * A WebSocket client's message may carry at most
+ * `SOCKET_MAX_CLIENT_MESSAGE_BYTES`; a longer one closes its socket with `1009`.
+ * When the application closes, every open WebSocket, a speech socket or a
+ * dictation socket, is closed with the shutdown code the two share before
+ * requests are drained.
  */
 export async function updateFastifyWithHttpTransport(
   app: FastifyInstance
@@ -25,7 +31,10 @@ export async function updateFastifyWithHttpTransport(
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
   })
   await app.register(fastifySse)
-  await app.register(fastifyWebsocket, { preClose: closeSocketsForShutdown })
+  await app.register(fastifyWebsocket, {
+    options: { maxPayload: SOCKET_MAX_CLIENT_MESSAGE_BYTES },
+    preClose: closeSocketsForShutdown
+  })
 }
 
 /**

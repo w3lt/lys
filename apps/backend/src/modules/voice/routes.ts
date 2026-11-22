@@ -1,6 +1,9 @@
 import {
   chatNotificationApi,
   chatSpeechApi,
+  DICTATION_CLOSE_SUPERSEDED,
+  SPEECH_CLOSE_SUPERSEDED,
+  voiceDictationApi,
   type ChatNotificationApiRoute,
   type ChatSpeechApiRoute
 } from "@lys/protocol"
@@ -12,47 +15,60 @@ import type {
 } from "fastify"
 import type { WebSocket } from "ws"
 import { isAllowedOrigin } from "../../httpOrigins"
+import {
+  handleDictationConnection,
+  type DictationConnectionDependencies
+} from "./dictationConnection"
 import { getNotificationLine } from "./notificationLines"
-import { SpeechSocketRegistry } from "./speechSocketRegistry"
+import { SingleSocketRegistry } from "./singleSocketRegistry"
 import {
   handleSpeechConnection,
   type SpeechConnectionDependencies
 } from "./speechConnection"
-import { openVoiceSpeech, isVoiceReady } from "./voiceClient"
+import {
+  isVoiceReady,
+  openVoiceDictation,
+  openVoiceSpeech
+} from "./voiceClient"
 
 /** Problem Details media type of the origin refusal. */
 const PROBLEM_MEDIA_TYPE = "application/problem+json"
 
-/** Options the speech routes borrow; defaults speak to the real voice. */
-export type SpeechRouteOptions = Readonly<{
+/** Options the voice routes borrow; defaults talk to the real voice. */
+export type VoiceRouteOptions = Readonly<{
   /** Probe whether voice is ready; defaults to the real health check. */
   isReady?: () => Promise<boolean>
   /** Open a speech at voice; defaults to the real connection. */
   openVoiceSpeech?: typeof openVoiceSpeech
+  /** Open a dictation at voice; defaults to the real connection. */
+  openVoiceDictation?: typeof openVoiceDictation
 }>
 
 /**
- * Registers the speech and notification WebSocket routes.
+ * Registers the speech, notification, and dictation WebSocket routes.
  *
  * @param app - Application with WebSocket support, the conversation history
  * reader, and the reply generation registry every turn start registers its
  * generation with; the registry's owner disposes of it.
- * @param options - Test seams for the voice probe and connection; empty in
+ * @param options - Test seams for the voice probe and connections; empty in
  * the application.
  * @returns A promise that resolves after route registration completes.
  * @throws If Fastify cannot register a route. The failure rejects the
  * promise, so `app.register` reports it rather than an uncaught exception.
- * @remarks The two sockets speak for one reply each, and one socket speaks
- * at a time across both. They accept the backend's desktop origins only; a
- * browser page sending another `Origin` is refused before the upgrade, and
- * everything else is local, as with the HTTP routes.
+ * @remarks The speech and notification sockets speak for one reply each,
+ * and one socket speaks at a time across both. The dictation socket turns
+ * what the person says into text, one dictation at a time. All three accept
+ * the backend's desktop origins only; a browser page sending another
+ * `Origin` is refused before the upgrade, and everything else is local, as
+ * with the HTTP routes.
  */
 export default function registerVoiceRoutes(
   app: FastifyInstance,
-  options: SpeechRouteOptions = {}
+  options: VoiceRouteOptions = {}
 ): Promise<void> {
   return new Promise((resolve) => {
     registerSpeechSocketRoutes(app, createSpeechDependencies(app, options))
+    registerDictationSocketRoute(app, createDictationDependencies(options))
     resolve()
   })
 }
@@ -67,14 +83,52 @@ export default function registerVoiceRoutes(
  */
 function createSpeechDependencies(
   app: FastifyInstance,
-  options: SpeechRouteOptions
+  options: VoiceRouteOptions
 ): SpeechConnectionDependencies {
   return Object.freeze({
     history: app.conversationHistoryReader,
     generations: app.replyGenerations,
-    registry: new SpeechSocketRegistry(),
+    registry: new SingleSocketRegistry(SPEECH_CLOSE_SUPERSEDED),
     isReady: options.isReady ?? isVoiceReady,
     openVoiceSpeech: options.openVoiceSpeech ?? openVoiceSpeech
+  })
+}
+
+/**
+ * Gathers the dependencies of the dictation endpoint.
+ *
+ * @param options - Test seams for the voice probe and connection.
+ * @returns The dependencies, with one new socket registry.
+ */
+function createDictationDependencies(
+  options: VoiceRouteOptions
+): DictationConnectionDependencies {
+  return Object.freeze({
+    registry: new SingleSocketRegistry(DICTATION_CLOSE_SUPERSEDED),
+    isReady: options.isReady ?? isVoiceReady,
+    openVoiceDictation: options.openVoiceDictation ?? openVoiceDictation
+  })
+}
+
+/**
+ * Registers the dictation endpoint.
+ *
+ * @param app - Application with WebSocket support.
+ * @param deps - The endpoint's dependencies, including the socket registry
+ * that lets a single socket dictate at a time.
+ * @throws If route registration fails.
+ */
+function registerDictationSocketRoute(
+  app: FastifyInstance,
+  deps: DictationConnectionDependencies
+): void {
+  app.route({
+    method: voiceDictationApi.method,
+    url: voiceDictationApi.path,
+    websocket: true,
+    preValidation: handleSocketPreValidation,
+    handler: (socket: WebSocket, request: FastifyRequest) =>
+      handleDictationConnection({ socket, deps, log: request.log })
   })
 }
 
@@ -165,7 +219,7 @@ function handleSocketPreValidation(
   }
   request.log.warn(
     { origin: request.headers.origin },
-    "Speech socket refused a foreign origin"
+    "Voice socket refused a foreign origin"
   )
   void reply.type(PROBLEM_MEDIA_TYPE).code(403).send({
     type: "about:blank",

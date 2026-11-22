@@ -41,7 +41,7 @@ const VOICE_STATUS_TONES = Object.freeze({
 
 /** What off means for voice's startup switch. */
 const VOICE_AUTO_START_DESCRIPTION =
-  "voice reads Lys's replies aloud. Off means Lys stays silent until you press start. The first start downloads about 780 MB of models."
+  "voice reads Lys's replies aloud and writes down what you dictate. Off means Lys stays silent and cannot listen until you press start. The first start downloads about 1.4 GB of models."
 
 /**
  * Formats the problem line of the last start or stop of voice.

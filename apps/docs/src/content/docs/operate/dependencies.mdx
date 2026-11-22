@@ -72,12 +72,19 @@ Settings → Runtime, and stops it when Lys quits. Development builds run
 toolchain and installs; see [Packaging and releases](/operate/releases/).
 
 voice listens at `127.0.0.1:9090` for its health route and at `127.0.0.1:9091`
-for its speech WebSocket and needs:
+for its WebSocket server, which speaks and hears dictation, and needs:
 
 - macOS 15 or later, the platform `apps/voice/Package.swift` declares
-- network access to download its PocketTTS models on the first start, about
-  780 MB, which it stores in `~/.lys/voice/models`; later starts need none
+- network access to download its models on the first start, about 1.4 GB:
+  the PocketTTS models it speaks with, about 780 MB, and the Nemotron model
+  it hears dictation with, about 600 MB, which it stores in
+  `~/.lys/voice/models`; later starts need none
 - no Linux kernel, unlike vmo
+
+Dictation also needs a microphone and the person's permission: macOS asks
+"Lys listens only while the microphone button is on." the first time the
+composer's microphone button is pressed, and System Settings → Privacy &
+Security → Microphone keeps the answer.
 
 ## Email MCP server
 

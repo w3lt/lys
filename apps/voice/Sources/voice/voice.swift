@@ -9,7 +9,7 @@ private enum MainChild: Sendable {
     case service
 }
 
-/// The speech models could not be loaded, so voice could never speak.
+/// The models could not be loaded, so voice could never speak or listen.
 ///
 /// It ends ``serveVoice(loadModels:services:)``, so voice exits instead of
 /// answering `503` for good, and the host reports it stopped.
@@ -18,17 +18,17 @@ struct ModelLoadError: Error, CustomStringConvertible {
     let cause: any Error
 
     /// The message voice prints before it exits.
-    var description: String { "could not load the speech models: \(cause)" }
+    var description: String { "could not load the models: \(cause)" }
 }
 
 /// Command-line entry point of voice.
 @main
 struct voice {
-    /// Starts the speech socket server and the `/health` HTTP server, and
-    /// loads the PocketTTS models in the background.
+    /// Starts the socket server and the `/health` HTTP server, and loads
+    /// the PocketTTS and Nemotron models in the background.
     ///
-    /// The sockets serve at once; `/health` answers `503` and the speech
-    /// socket refuses handshakes until the models are loaded, which happens
+    /// The servers serve at once; `/health` answers `503` and the socket
+    /// server refuses handshakes until both models are loaded, which happens
     /// once, here. voice stops on `SIGINT` or `SIGTERM`, or when a server
     /// stops. It prints the error and exits with status 1 when startup or a
     /// server fails, or when the models cannot be loaded.
@@ -42,13 +42,19 @@ struct voice {
             modelsDirectory: modelsDirectory,
             clonedVoiceFile: findClonedVoiceURL()
         )
+        let dictationEngine = DictationEngine(recognizer: NemotronRecognizer(modelsDirectory: modelsDirectory))
         do {
-            let router = try Router(routes: [.buildHealth(isReady: { engine.isReady })])
+            let router = try Router(routes: [
+                .buildHealth(isReady: { engine.isReady && dictationEngine.isReady }),
+            ])
             let httpServer = WebServer(router: router)
-            let socketServer = SpeechSocketServer(engine: engine)
+            let socketServer = SpeechSocketServer(
+                jobs: VoiceJobs(speechEngine: engine, dictationEngine: dictationEngine)
+            )
             try await serveVoice(
                 loadModels: {
                     try await engine.loadModels()
+                    try await dictationEngine.loadModels()
                     print("voice: models ready")
                 },
                 services: [
@@ -76,8 +82,8 @@ struct voice {
     }
 }
 
-/// Keeps the logs in which FluidAudio quotes the text it speaks out of
-/// voice's output.
+/// Keeps the logs in which FluidAudio quotes the text it speaks or hears
+/// out of voice's output.
 ///
 /// FluidAudio logs every sentence a session receives at the info level, and
 /// a debug build, such as the one `run.sh` and `pnpm dev` start, copies every
@@ -95,7 +101,7 @@ func configureSpeechEngineLogging() {
 /// call returns or throws.
 ///
 /// - Parameters:
-///   - loadModels: Loads the speech models, once.
+///   - loadModels: Loads the models, once.
 ///   - services: The servers and the signal wait.
 /// - Throws: ``ModelLoadError`` when `loadModels` fails, or the error of the
 ///   first service that fails.

@@ -1171,7 +1171,7 @@ describe("speech sockets over their lifecycle", () => {
     await expect(closed).resolves.toBe(1006)
     expect(fake.speeches).toHaveLength(0)
     expect(app.log.records).toContainEqual(
-      matchLogEntry("warn", "Speech socket refused a foreign origin", {
+      matchLogEntry("warn", "Voice socket refused a foreign origin", {
         origin: "https://evil.example"
       })
     )

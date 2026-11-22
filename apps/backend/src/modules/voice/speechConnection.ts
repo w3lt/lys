@@ -16,8 +16,9 @@ import ReplyEventSubscription from "../chat/replyEventSubscription"
 import type ReplyGenerationRegistry from "../chat/replyGenerationRegistry"
 import { ReplyGenerationRegistryClosedError } from "../chat/replyGenerationRegistry"
 import type { ConversationReader } from "../conversation/capabilities"
-import type { SpeechSocketRegistry } from "./speechSocketRegistry"
+import type { SingleSocketRegistry } from "./singleSocketRegistry"
 import {
+  VOICE_CLOSE_COMPLETE,
   VoiceUnavailableError,
   type openVoiceSpeech,
   type VoiceSpeech
@@ -34,9 +35,6 @@ import {
  * cut off. At 48 KB/s of audio this is about twenty seconds of speech.
  */
 const MAX_BUFFERED_BYTES = 1_000_000
-
-/** Close code voice ends a speech with once everything was spoken. */
-const VOICE_CLOSE_COMPLETE = 1000
 
 /** Which reply a speech socket speaks for. */
 export type SpeechTarget = Readonly<{
@@ -70,7 +68,7 @@ export type SpeechConnectionDependencies = Readonly<{
   /** Finds a running generation for the reply. */
   generations: ReplyGenerationRegistry
   /** Holds the one socket that may speak and supersedes older ones. */
-  registry: SpeechSocketRegistry
+  registry: SingleSocketRegistry
   /**
    * Asks voice whether it can speak; resolves `false` for a stopped,
    * starting, or broken voice and never rejects.

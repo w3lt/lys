@@ -30,7 +30,10 @@ The docs publication workflow runs independently of desktop releases:
 
 The repository has no desktop build or release workflow under
 `.github/workflows`, and the Tauri configuration sets up no code signing or
-notarization. Desktop builds are made locally with `build.sh`.
+notarization. Desktop builds are made locally with `build.sh`. The bundle's
+`Info.plist` carries the microphone usage text from
+`apps/desktop/src-tauri/Info.plist`, which dictation needs; see
+[Microphone access](/architecture/host/#microphone-access).
 
 ## Local macOS install with `build.sh`
 

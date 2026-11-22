@@ -29,6 +29,7 @@ presentation state, not durable conversation storage.
 | Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend and vmo run, and settings loaded from Tauri; `vmo-runtime.ts` owns vmo's state and its start and stop, and `runtime-autostart-settings.ts` saves the two startup switches.                                                                                                                                                                       |
 | Model lifecycle     | `src/lib/store/model-actions.ts` owns each provider's inventory, load, unload, and health requests, shared by settings and the composer; `provider-status.ts` reads and reconnects each provider's connection, `provider-settings.ts` saves which providers are on, their addresses, and their keys, and `src/lib/hooks/conversationModel.ts` finds the model a conversation uses.                                       |
 | SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops, jobs stops, approval answers, and tool results; `activity.ts` opens the activity stream.                                                                                                                                                                                                          |
+| Dictation           | `src/lib/dictation` records the microphone, converts its audio in an audio worklet, drives the dictation socket, and places the dictated text in the draft; `src/lib/store/dictation.ts` owns when Lys listens; see [Dictation](#dictation).                                                                                                                                                                             |
 | Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                                                                                                                                                                                                                                                                                            |
 
 ## Chat state split
@@ -85,7 +86,9 @@ The desktop keeps no replay log and does not reconnect a dropped stream on its
 own. Showing a conversation whose reply is still generating, after an open or a
 failed open, follows that reply again from a stored `reply-snapshot`. Quitting
 the app also ends the backend; a reply still generating then keeps its
-persisted parts and is marked interrupted when the backend next starts.
+persisted parts and is marked interrupted when the backend next starts. The
+audio a reply is read with travels on its own WebSocket, described in
+[Speech playback](#speech-playback).
 
 ## Context meter
 
@@ -560,12 +563,167 @@ without polling. The composer banner names the first missing prerequisite
 of the conversation's model and offers the action that fixes it; see
 [The conversation's model](#the-conversations-model).
 
-`initialize` shows the shell as soon as settings load; the backend and vmo
-then start in the background, together and without waiting for each other,
-each when its startup switch is on or the host already owns its process. A
-vmo the host is still stopping, as after a window reload during Stop, is
-joined instead: the card shows the stop, and vmo stays stopped whatever its
-switch says.
+`initialize` shows the shell as soon as settings load; the backend, vmo, and
+voice then start in the background, together and without waiting for each
+other, each when its startup switch is on or the host already owns its
+process. A vmo or voice the host is still stopping, as after a window reload
+during Stop, is joined instead: the card shows the stop, and the process
+stays stopped whatever its switch says.
+
+## Speech playback
+
+Lys reads a reply aloud while it streams, as long as voice is running. A
+speech controller (`lib/speech/speech-controller.ts`) owns when, a Web Audio
+player (`lib/speech/pcm-player.ts`) owns how, and neither owns any reply
+text: the backend turns the reply into speech-ready sentences and relays the
+audio, so a broken or slow reply costs audio, never text.
+
+The controller follows the chat store, the window's focus, and voice's
+readiness, and applies these rules:
+
+- A reply that starts streaming while the window is focused and voice is
+  ready is read from its first word. One the view joined that was already
+  running is read from the sentence being written.
+- A blur before the first word is spoken closes the speech socket and waits
+  silently; the read resumes at the sentence being written when the window
+  regains focus, when voice becomes ready, or when the conversation is
+  opened. Losing focus while she is reading changes nothing.
+- A reply that finishes with `done` while the window is focused is read to
+  its end: the socket stays open until the backend closes it with `1000`,
+  also after the chat request that streamed it has ended.
+- A reply that finishes with `done` before anything of it was said, with the
+  window in the background and voice ready, earns one spoken line through
+  the notification socket. If anything of it was said, also on a socket that
+  closed early or before voice stopped, it does not, and while voice is
+  stopped, starting, or down, nothing is opened.
+- A stopped or failed reply, a new message, a switched or closed conversation,
+  or voice stopping all stop the playback, and any notification, at once and
+  drop the unplayed frames, also frames still queued after a `1000`.
+- Only `1000` keeps the queued audio playing out; any other close stops it.
+  After such a close the reply is joined again only when the window regains
+  focus, voice becomes ready, or the conversation is opened, never on an
+  ordinary chat update. A `4503` or `1011` close also makes the store read
+  voice's status again, so a voice that died shows as stopped or not
+  responding on its card.
+
+The player decodes the 24 kHz mono 16-bit little-endian PCM the backend
+relays, decoding every whole sample and dropping a trailing odd byte, and
+schedules it back to back on a Web Audio context. The context is created on
+the first update that finds voice ready, and resumed on every update and
+every frame, since WebKit keeps a context suspended until a user gesture.
+One WebSocket per speech goes to
+`GET /api/v1/chat/:conversationId/replies/:assistantMessageId/speech?from=start|current`;
+the notification line goes to the sibling `notification` socket, and at most
+one of the two is open at a time. Nothing is retried or buffered across a
+reconnect. The application shell's cleanup closes both sockets and the audio
+context, and the controller then ignores every later change.
+
+The speech wiring (`lib/speech/speech.ts`) also keeps whether Lys is talking
+in the speech-activity store (`lib/store/speech-activity.ts`): she talks
+while a speech or notification socket is open or the player still has audio
+scheduled, so the pause between two sentences does not count as silence.
+[Dictation](#dictation) reads it.
+
+## Dictation
+
+The composer's microphone button writes what the person says into the
+message field. The dictation store (`lib/store/dictation.ts`) owns when Lys
+listens: it refuses a start while she may not, and ends a dictation when
+she no longer may. The composer's dictation
+(`lib/dictation/composer-dictation.ts`) owns one dictation at a time, with
+its microphone, its socket, and its place in the draft. The backend and
+voice own the words: the UI sends audio and shows the text that comes back.
+
+The button sits between the message field and Send. It is named Dictate, and
+Stop dictation while Lys listens, when it also shows a selected frame in the
+brand tint. Its name carries the state, as Send's does when it turns into
+Stop, so it is no toggle and has no pressed state (`aria-pressed`). It is
+off, with its reason as its description and its hover text:
+
+| While                                                             | The button says                    |
+| ----------------------------------------------------------------- | ---------------------------------- |
+| The message field is off: no model, a deleted agent, or a job     | "The message field is off."        |
+| voice is not running                                              | "Start voice in Settings to talk." |
+| Lys answers or talks                                              | "Wait for Lys to finish."          |
+| A conversation is opening, or a dictation's final text is awaited | nothing; both pass on their own    |
+
+A press starts a dictation:
+
+- The composer's dictation remembers the draft on each side of the field's
+  cursor, or of a selection's end, and writes every text that arrives
+  between the two
+  parts (`lib/dictation/dictated-draft.ts`). What was typed stays; a
+  selection is not replaced. One space joins the dictated text to a word
+  before or after it, and none after an opening bracket or before
+  punctuation.
+- In the same step it asks for the microphone and opens the dictation
+  socket, `GET /api/v1/voice/dictation`. The recorder
+  (`lib/dictation/microphone-recorder.ts`) creates its audio context and
+  asks `getUserMedia` for one channel without echo cancellation, both
+  inside the press, because WebKit lets a context run only from a user
+  gesture or while the microphone is open. It connects the microphone to an
+  audio worklet
+  (`recorder-worklet.ts`), which converts the context's rate to 16 kHz with
+  a windowed-sinc low-pass filter (`pcm-downsampler.ts`) and posts frames of
+  1,600 samples, 100 ms, as 16-bit little-endian PCM. Frames recorded before
+  the socket opens wait in the socket adapter, at most 50 of them; the
+  `stop` message always waits, so a dictation whose socket opens late still
+  asks for its final text.
+- From the press until the final text arrived, the message field is
+  read-only and Send and Enter are off, so typing cannot fight the dictated
+  text and nothing is sent while Lys listens. While the dictation writes at
+  the draft's end, the field keeps its last line in view.
+
+A second press stops it: the recorder stops at once, which releases the
+microphone and drops the last partial frame, the UI sends `stop`, and focus
+moves to the message field. The final text replaces the partial text. If
+none arrives within five seconds, the UI closes the socket and keeps the
+last partial text. A dictation never sends the message; the person presses
+Send.
+
+The store ends a dictation on its own:
+
+- A reply that starts, Lys starting to talk, voice no longer running, or
+  another view than the chat view being shown, such as Settings, where the
+  button cannot be seen, stops it, as a press does. The final text still
+  arrives and stays in the draft.
+- The shown conversation changing, a conversation opening, a new or deleted
+  conversation, or anything other than the dictation changing the draft,
+  such as a tool-call rejection that takes the draft as its reason, cancels
+  it at once: the socket closes, the microphone is released, and nothing
+  more is written.
+- The microphone ending by itself, such as an unplugged device, stops it and
+  says "Listening stopped."
+
+A dictation that already runs when the message field turns off, as when the
+model's provider disconnects, keeps running: the button still says Stop
+dictation, and what is said stays in the draft for when the field is back.
+
+When the microphone cannot be opened or the socket closes without a final
+text, the text so far stays, the field and Send turn back on, and a polite
+status line under the field says why until the next dictation starts or
+another conversation is shown:
+
+| Cause                                                             | Sentence                                                                                       |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| The socket closed with `4503`                                     | "voice isn't ready yet."                                                                       |
+| The socket closed with `1011`                                     | "Listening stopped because voice stopped."                                                     |
+| Any other close without a final text                              | "Listening stopped."                                                                           |
+| `getUserMedia` refused access                                     | "Lys can't use the microphone. Allow it in System Settings → Privacy & Security → Microphone." |
+| No microphone exists                                              | "No microphone found."                                                                         |
+| The microphone, the audio context, or the worklet could not start | "The microphone could not be started."                                                         |
+
+A `4503` or `1011` close also makes the store read voice's status again, as
+a speech socket's does. The microphone is released, its tracks stopped and
+its audio context closed, on every way out of listening. Neither the audio
+nor the text is stored or logged by the UI; the text lives on only as the
+draft.
+
+Two failures are not expected, and the UI also hands them to the WebView's
+`reportError`, as an uncaught error is, because the desktop has no logger: a
+microphone that could not be started for another reason than a refusal or a
+missing device, with its cause, and a message from the backend that is not a
+dictation message, without the message's text.
 
 ## vmo status
 
@@ -603,16 +761,33 @@ progress; otherwise it shows **vmo stopped** with it.
 Once vmo is `running`, the card stops checking, as the backend card does: a
 vmo that stops answering later is noticed when a turn offers `read_page`.
 
-The switches "Start it when Lys opens" and "Start vmo when Lys opens" change
-the settings at once and save both to the `runtime` group of `settings.json`,
-serialized with the other group saves; the latest switches win. A status line
-under the two cards says "Lys couldn't save the startup switches. The next
+The switches "Start it when Lys opens", "Start vmo when Lys opens", and
+"Start voice when Lys opens" change the settings at once and save the three
+to the `runtime` group of `settings.json`, serialized with the other group
+saves; the latest switches win. A status line
+under the cards says "Lys couldn't save the startup switches. The next
 launch follows the switches last saved; changing a switch tries again." when
 the save fails. The line is a polite status region that stays mounted and
 empties when a later save starts. Under each switch's heading, the line saying
 what off means is the switch's accessible description. The switches are read
 from disk at each launch and each window reload, so an unsaved switch applies
 to no later session.
+
+## voice status
+
+voice, the speech server Lys reads her replies with and hears dictation
+with, has its own card in the
+Runtime pane, under the vmo card. The Tauri host owns the process; the
+store's voice slice owns what the card shows: `starting`, `running`,
+`stopping`, `stopped`, or `unresponsive` (**voice not responding**), the same
+lifecycle, readiness, and stop semantics as vmo, including joining a stop in
+progress, except that a started voice is waited for twenty minutes instead
+of ten. voice downloads about 1.4 GB of models on its first start, which
+is why the switch that starts it with Lys, "Start voice when Lys opens", is
+off by default. The card warns about the download in its switch's
+description. Speech playback itself is described in
+[Speech playback](#speech-playback), and dictation in
+[Dictation](#dictation).
 
 ## Model settings
 

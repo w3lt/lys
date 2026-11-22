@@ -130,9 +130,75 @@ didn't stop in time and was killed. It may have left VMs running."
 Lys cannot remove those VMs yet; a restart of the Mac ends them. Quitting Lys
 waits for vmo the same way, so quitting can take up to a minute.
 
+## Voice is not speaking
+
+Replies are always shown as text; voice only adds the sound. The speech
+socket closes with `4503` when voice is not ready, and the card in
+Settings → Runtime says why:
+
+- **voice starting**: its models are loading, or downloading on the first
+  start (about 1.4 GB into `~/.lys/voice/models`). Lys waits up to twenty
+  minutes.
+- **voice not responding**: the process stayed up for twenty minutes without
+  answering, or a start or stop failed while voice still ran or its status
+  could not be read. Press **Stop**, then **Start**. voice needs macOS 15 or
+  later; see
+  [voice's requirements](/operate/dependencies/#voice).
+- **voice stopped** after Start: the process exited before it was ready,
+  for example because its models could not be downloaded or loaded, in which
+  case voice prints the cause and exits. In development, voice's build and
+  error output appear in the terminal that runs `pnpm dev`. If the model
+  download was interrupted, delete `~/.lys/voice/models` and start voice
+  again.
+
+Sound also depends on the window's focus: Lys reads a reply aloud while the
+window is focused, waits silently if it loses focus before the first word,
+joins at the sentence being written when it regains focus, and says one
+short line instead of the reply when it finishes in the background. A reply
+that stops or is interrupted stops the sound at once; the text is unaffected.
+
+## Dictation does not work
+
+The microphone button, between the message field and Send, writes what you
+say into the field. When it is off, resting the pointer on it says why:
+
+- **Start voice in Settings to talk.** voice is not running: start it in
+  Settings → Runtime. After an update that added dictation, voice's next
+  start downloads one more model, about 600 MB, and the card shows **voice
+  starting** until it is loaded.
+- **Wait for Lys to finish.** Lys is answering or talking. The button turns
+  on again once the reply and its sound have ended.
+- **The message field is off.** Nothing can be typed either: no model can
+  answer, the conversation's agent was deleted, or the conversation is a
+  job.
+
+When a dictation ends on its own, the text so far stays in the field and a
+line under it says why:
+
+- **Lys can't use the microphone.** macOS refused access. Allow Lys in
+  System Settings → Privacy & Security → Microphone, then press the button
+  again.
+- **No microphone found.** Connect a microphone, or choose an input device
+  in System Settings → Sound.
+- **The microphone could not be started.** Another failure of the microphone
+  or of the audio conversion; try again, and restart Lys if it stays.
+- **voice isn't ready yet.** voice was starting or had just stopped; see
+  [Voice is not speaking](#voice-is-not-speaking).
+- **Listening stopped because voice stopped.** voice failed, fell behind, or
+  exited during the dictation; its card in Settings → Runtime shows its
+  state, and the backend's log names the cause under
+  [Dictation socket entries](/operate/logging/#dictation-socket-entries).
+- **Listening stopped.** The connection to the backend closed, the
+  microphone was disconnected, or another dictation started.
+
+A dictation stops by itself after five minutes, with its text complete, and
+when Lys starts answering or talking. Switching to another conversation
+ends it at once and writes nothing more. Lys hears English only, and never
+sends a dictated message herself: press Send.
+
 ## A vmo or backend keeps running after Lys died
 
-Lys stops vmo and the backend when it quits. When it dies without quitting,
+Lys stops vmo, voice, and the backend when it quits. When it dies without quitting,
 after a crash, Force Quit, or `kill -9`, or when a development rebuild restarts
 the desktop host, both keep running
 ([#202](https://github.com/w3lt/lys/issues/202)). The next Lys cannot start its

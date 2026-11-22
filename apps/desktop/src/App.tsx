@@ -22,8 +22,10 @@ const SettingsView = lazy(() => import("@/views/SettingsView/SettingsView"))
 import "./App.scss"
 import { useLysStore } from "./lib/store"
 import { registerActivityFollow } from "./lib/store/activity"
+import { registerDictationRules } from "./lib/store/dictation"
 import { registerMcpServerRefresh } from "./lib/store/mcp-servers"
 import { registerToolListRefresh } from "./lib/store/tools"
+import { startSpeech } from "./lib/speech"
 
 /**
  * Composes the initialized desktop shell and switches between its main views.
@@ -39,7 +41,9 @@ import { registerToolListRefresh } from "./lib/store/tools"
  * servers add in step with the backend through
  * {@link registerMcpServerRefresh}, and the tool calls and the shown
  * conversation in step with the replies the backend starts itself through
- * {@link registerActivityFollow}, unsubscribing all three on unmount. The
+ * {@link registerActivityFollow}, unsubscribing all three on unmount. It
+ * also ends a running dictation when what allowed it ends, through
+ * {@link registerDictationRules}, and cancels it on unmount. The
  * initialization promise is detached from the effect, so a rejected
  * initialization is unhandled by this component. Only a failed settings load leaves the store in
  * its blank initializing state; a rejected backend start or status check
@@ -56,6 +60,8 @@ export default function App() {
   useEffect(() => registerToolListRefresh(), [])
   useEffect(() => registerMcpServerRefresh(), [])
   useEffect(() => registerActivityFollow(), [])
+  useEffect(() => startSpeech(), [])
+  useEffect(() => registerDictationRules(), [])
 
   const { activeView, setActiveView } = useLysStore((state) => state)
 

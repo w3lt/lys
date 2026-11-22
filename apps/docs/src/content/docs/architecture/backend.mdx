@@ -404,6 +404,188 @@ state and context lengths the model list adds. A model the inventory does
 not list has neither capability: an image attached for it is refused, and no
 reader is offered.
 
+## Speech sockets
+
+The backend relays a reply's audio to the UI over two WebSocket routes, both
+on the same Fastify server as the HTTP API and registered by the voice
+module's plugin, `registerVoiceRoutes` in `modules/voice/routes.ts`, which
+also registers the [dictation socket](#dictation-socket), under
+`/api/v1/chat/:conversationId/replies/:assistantMessageId/`:
+
+- `speech?from=start|current`, `chatSpeechApi`: streams the reply as audio.
+- `notification`, `chatNotificationApi`: speaks one short line announcing
+  that a reply finished, for a reply that ended unheard in the background;
+  the backend picks the line at random and never stores it.
+
+Only the desktop origin may open either socket: requests whose `Origin`
+header is not one of the backend's HTTP origins are refused before the
+upgrade with a `403` Problem Details body, as with CORS on the HTTP routes. A
+socket is bound to one reply for its whole life. Lys speaks one speech at a
+time, as voice does: one registry, shared by both routes, holds the socket
+that speaks, and opening a socket closes the older one with `4409`, for this
+reply or another, which cancels the older speech at voice.
+
+After the upgrade, the backend asks voice's `GET /health`, waiting at most
+two seconds; a voice that is not ready closes the socket with `4503`, and a
+socket the UI closed meanwhile starts nothing. Then, in one synchronous step,
+it reads the stored reply and starts following the reply's generation, so no
+fragment falls between the snapshot and the live events. A missing reply
+closes the socket with `4404`, a store that cannot be read with `1011`, and a
+backend that is shutting down with `1001`. `from=current` is refused with
+`4410` when no generation is writing the reply. The backend then opens a
+speech at voice's speech socket, waiting at most two seconds for the
+handshake: a refused, closed, or unanswered handshake closes the socket with
+`4503`. Events that arrive in the meantime wait in order, and a UI socket
+that closed in the meantime cancels the new speech at voice.
+
+`from=start` speaks the reply from its first word, even one that already
+finished; `from=current` speaks from the sentence being written, or from the
+next round's text when a tool call ended the stored reply's last text. The
+speech turns markdown into plain text: links read as their text and inline code
+as its words; code blocks, math, tables, images, bare URLs, emoji and other
+pictographs, such as `☀`, `❤`, and `©`, and citation markers, by the renderer's
+own `CITATION_MARKER_PATTERN`, are dropped, while other symbols, such as `$`,
+`+`, `✓`, `★`, arrows such as `→` and `↔`, also in emoji form, and punctuation
+such as `‼`, are read as written; list items, paragraphs, and headings end a
+sentence. A reference reads the same before its definition arrives as after,
+because reference syntax is read over each block's text outside inline code: a
+link reference by its text, and a citation marker, an image, or a footnote
+reference not at all. A bracket or a `!` that an escape or a character reference
+writes is never reference syntax, as the renderer never reads it as one; a
+citation marker written with such brackets is still dropped, as the renderer
+still shows it as a citation, unless its other bracket opens or closes a
+reference, as in `[see \[1]`, where it reads as that reference's text, the same
+before the definition arrives as after. Any other citation marker is dropped
+wherever it stands outside code, a link's text included, where the renderer
+shows it as text. Sentences are cut with `Intl.Segmenter`. Each model round's
+text is read as a markdown document of its own, its text parts joined as the
+chat shows them, so a code fence or another block that one round leaves open
+ends with it and never silences the rounds after it. While the reply streams, a
+sentence is sent to voice once a later sentence holding a letter follows it, a
+later sentence of any kind follows it after a line break, or the first line of
+the block after its block ends, so `$3.50`, `2.5`, and `Fig. 3` are never cut at
+their period; a round's last sentence is sent once a tool call ends the round,
+and the rest at `done`. A sentence longer than 2,000 characters is sent in
+pieces, cut at a space, because voice refuses a message over 16 KiB. An
+unterminated code fence holds the text after it back until it closes. A
+paragraph or heading being written waits until it ends when it holds a `|`,
+because its next line may make it a table header, or when it starts with
+`[label]:`, because a closing title quote may make it a link definition; and
+from its first `$`, `![`, unclosed backtick, opening `*`, `_`, or `~`, or a `[^`
+that no bracket closes yet, counting nested pairs, or an inline HTML start such
+as `<br` outside code on, because a later `$` may make that text inline math,
+the `![` may begin an image, a closing mark may make it inline code or
+formatting, whose marks are not read, and a `]` may complete a footnote
+reference and a `>` a tag or a comment, whose letters are not read. The last
+word being written waits too while more letters may make it a bare URL, such as
+`htt`, and so does inline code whose closing run ends the text, since one more
+backtick would make it text again. Three kinds of block hold the block before
+them while on their first line, since more text on that line may make some of
+them the block's next line, as the backtick of `` ```a` `` or the letter of `#x`
+does: a block never spoken, such as a code fence; a heading or list item with no
+content, such as `#`; and a list holding only such list items. The hold covers
+every block of these kinds, even one that no more text can join, such as a tilde
+fence or a `#` followed by a space; the sentences before it then only wait until
+that line ends. A block with content after its marker, such as `# <b>` or a
+quote holding a code fence, holds nothing. Such a hold delays the sentences it
+covers, not only its marks: in "It takes ~5 minutes. Then do X.", nothing from
+the `~` on is read until the paragraph ends or a closing `~` arrives. Likewise,
+in `a<b` written without spaces, nothing from the `<` on is read until the
+paragraph ends or the text after it becomes a tag. When more text changes how
+earlier text reads, speech resumes after the last sentence sent that is still
+there, matched in order, so no sentence is skipped or spoken twice. Once a
+block's next block, or a list item's next item, has a whole first line, and a
+table its delimiter row, no later text changes how the block reads, so each
+fragment parses only the text from the block or item still being written on,
+unless that text parses into other blocks alone, as `- 42.` does right after a
+paragraph, where `42.` is text but alone an empty numbered list; then nothing
+settles until a later block's first line ends. A fragment's cost grows with that
+block, not with the reply: a reply of paragraphs and flat list items costs the
+same per fragment however long it grows, about 0.3 s of parsing in all for
+20 KB, while one long block costs more per fragment the longer it grows, such as
+a 5 KB table about 1.3 s in all and a 20 KB table about 20 s, spread over its
+streaming. Reasoning, tool calls, and their results are never spoken.
+
+Audio arrives from voice as binary frames of 24 kHz mono 16-bit little-endian
+PCM and is relayed to the socket unchanged. A UI that falls more than 1 MB of
+unsent audio behind, about twenty seconds, is disconnected with `1008` and its
+speech cancelled. Voice's own close codes map to the UI's: `1000` stays
+`1000`, anything else becomes `1011`. A `done` event lets the speech finish
+with `1000`; an `interrupted` or `error` event, or a generation that ends
+without either, closes the socket with `4410` and cancels the speech. When the
+backend shuts down, every open WebSocket is closed with `1001`. The UI
+closing its socket, for any reason, cancels the speech at voice. Every open,
+close, and failure is logged; see
+[Speech socket entries](/operate/logging/#speech-socket-entries).
+
+The close codes are `SPEECH_CLOSE_*` in `@lys/protocol`, next to the routes,
+and the [API reference](/reference/api/#speech-sockets) lists them.
+
+## Dictation socket
+
+The backend relays a dictation between the UI and voice over one WebSocket
+route, `GET /api/v1/voice/dictation`, `voiceDictationApi`, registered by the
+same plugin as the speech sockets. The UI sends the microphone's audio and a
+`stop`; voice's text comes back. The backend reads nothing into the audio or
+the text: it checks each message's shape, relays it, and keeps neither.
+
+Only the desktop origin may open the socket, by the same check as the speech
+sockets: any other `Origin` is refused before the upgrade with a `403`
+Problem Details body, so no web page can make Lys listen. Lys listens to one
+dictation at a time: a registry of its own holds the socket that dictates,
+and opening a socket closes the older one with `4409`, which cancels the
+older dictation at voice. A dictation and a speech do not close each other.
+
+`handleDictationConnection` in `modules/voice/dictationConnection.ts` reads
+the socket's messages from the moment it opens. It asks voice's `GET /health`
+and then opens a dictation at voice's socket, each waiting at most two
+seconds: a voice that is not ready, or a refused, closed, or unanswered
+handshake, closes the socket with `4503`, and any other failure to reach
+voice with `1011`. Audio that arrives in the meantime waits in order, for at
+most five seconds of audio, 160,000 bytes; more closes the socket with
+`1011`. A socket the UI closed in the meantime starts no dictation, or
+cancels the one voice just accepted.
+
+The messages are the same on both hops, and `@lys/protocol` holds their
+schemas:
+
+| Direction       | Message                              | Meaning                                                          |
+| --------------- | ------------------------------------ | ---------------------------------------------------------------- |
+| UI → voice      | binary                               | 16 kHz mono 16-bit little-endian PCM, one or more whole samples. |
+| UI → voice      | `{ "type": "stop" }`                 | Send the final text.                                             |
+| voice → UI      | `{ "type": "partial", "text": "…" }` | The whole text so far.                                           |
+| voice → UI      | `{ "type": "final", "text": "…" }`   | The finished text; the socket then closes with `1000`.           |
+| backend → voice | `{ "type": "transcribe" }`           | The first message, which starts a dictation at voice.            |
+
+A text message that is not `stop`, or audio that is empty or not whole
+samples, closes the socket with `1002`; the backend never relays an empty
+message, which voice reads as a connection that went away. The WebSocket server refuses any client
+message over 8 KiB, `SOCKET_MAX_CLIENT_MESSAGE_BYTES`, on every socket route,
+and closes that socket with `1009`; an audio message of the UI is 3,200
+bytes. A `stop` that arrives before voice accepted the dictation is kept and
+sent after the waiting audio. After the first `stop`, further audio and
+further `stop` messages are dropped.
+
+The backend counts five minutes, `DICTATION_MAX_DURATION_MS`, from the
+moment the socket opens, and then stops the dictation as a `stop` from the
+UI does. Once it has relayed a `stop`, voice has ten seconds to send the
+final text; after that the socket closes with `1011`. A `final` that voice
+sends before any `stop`, or a message of voice that is not a dictation
+message, closes it with `1011` too. Voice closing the dictation with `1000`
+after its final text closes the socket with `1000`; any other close of
+voice's becomes `1011`.
+
+Neither side may fall behind: when more than 1 MB of audio waits for voice,
+about thirty seconds, or more than 1 MB of text waits for the UI, the socket
+closes with `1011`. Whenever the UI's socket closes, for any reason, the
+backend closes voice's socket, which cancels the recognition. When the
+backend shuts down, the socket is closed with `1001`. Every open, close, and
+failure is logged, without audio or text; see
+[Dictation socket entries](/operate/logging/#dictation-socket-entries).
+
+The close codes are `DICTATION_CLOSE_*` in `@lys/protocol`, and the
+[API reference](/reference/api/#dictation-socket) lists them.
+
 ## Tool call policy
 
 Every checked call of every turn passes one gateway step, `startToolCall` in

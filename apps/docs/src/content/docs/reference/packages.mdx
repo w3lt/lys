@@ -85,8 +85,12 @@ crate of the email MCP server Lys ships.
   list, get, rename, delete, and missing-conversation contracts, and the agent
   list, create, get, update, delete, missing-agent, and taken-code contracts
 - Defines the backend loopback host and port constants used by both backend and
-  desktop, and the Tavily host that `web_search` sends queries to and the
-  approval card names
+  desktop, the voice host and ports used by the backend and the desktop's voice
+  checks, the speech audio format the desktop's player decodes, the dictation
+  audio format the desktop's recorder sends, the dictation route with its
+  messages, limits, and close codes, and the Tavily
+  host that
+  `web_search` sends queries to and the approval card names
 - Describes the backend tool list with each tool's availability, the
   `web_search` key check, and the backend-tool-unavailable chat problem
 - Describes the MCP server list, sync, and reconnect routes, each server's

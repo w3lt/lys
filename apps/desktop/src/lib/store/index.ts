@@ -46,6 +46,10 @@ import {
 import { getBackendReadiness, type BackendReadiness } from "./backend-readiness"
 import { createVmoRuntimeSlice, type VmoRuntimeSlice } from "./vmo-runtime"
 import {
+  createVoiceRuntimeSlice,
+  type VoiceRuntimeSlice
+} from "./voice-runtime"
+import {
   createProviderStatusSlice,
   type ProviderBackendConnection,
   type ProviderModelsState,
@@ -60,6 +64,7 @@ import {
 } from "@lys/share"
 import { getBackendStatus, startBackend, stopBackend } from "../apis"
 import { getVmoStatus } from "@/lib/apis/tauri/vmo"
+import { getVoiceStatus } from "@/lib/apis/tauri/voice"
 import { sendWebSearchKeyCheck } from "../apis/http/tools"
 import { sendEmailAccountCheck } from "../apis/http/email"
 import { isLoadConfigurationSettingsEqual } from "../models/model-load-configuration"
@@ -157,16 +162,19 @@ type LysActions = {
    */
   setSettings: (settings: LysSettings) => void
   /**
-   * Loads settings, shows the shell, then starts or checks the backend and
-   * vmo at once.
+   * Loads settings, shows the shell, then starts or checks the backend, vmo,
+   * and voice at once.
    *
-   * @returns A promise resolving after settings load and both starts settle.
-   * @throws The settings Tauri rejection; otherwise, after both settle, the
-   * backend's status or start rejection, or else the vmo status rejection.
+   * @returns A promise resolving after settings load and the three starts
+   * settle.
+   * @throws The settings Tauri rejection; otherwise, after the three
+   * settle, the backend's status or start rejection, or else the vmo or
+   * voice status rejection.
    * @remarks Each starts when its autostart switch is on or the desktop
    * already owns its process; either way readiness is established through
-   * its health route. A vmo stop still in progress is joined instead. Neither
-   * waits for the other, and vmo's start and stop never reject.
+   * its health route. A vmo or voice stop still in progress is joined
+   * instead. Neither waits for another, and neither start nor stop of vmo or
+   * voice ever rejects.
    */
   initialize: () => Promise<void>
   /**
@@ -217,6 +225,7 @@ type LysStore = LysState &
   ToolSettingsSlice &
   RuntimeAutoStartSettingsSlice &
   VmoRuntimeSlice &
+  VoiceRuntimeSlice &
   ProviderStatusActions
 
 /** Settings slices of {@link LysStore}, each saving its own group. */
@@ -445,6 +454,26 @@ function createLysStoreState(
   }
 
   /**
+   * Updates voice for a launch: joins a stop that a reloaded window finds
+   * still in progress, and otherwise starts voice when its autostart is on
+   * or adopts the running voice the desktop already owns.
+   *
+   * @param isAutoStartOn - Whether the saved switch starts it with Lys.
+   * @returns A promise resolving after any start or stop settles.
+   * @throws The Tauri status rejection; the start and the stop never reject.
+   * @remarks A stop in progress wins over the switch, so a window reloaded
+   * while voice stops shows the stop rather than a start the host refuses.
+   */
+  async function updateVoiceForLaunch(isAutoStartOn: boolean): Promise<void> {
+    const { status } = await getVoiceStatus()
+    if (status === "stopping") {
+      await get().stopVoice()
+    } else if (isAutoStartOn || status === "running") {
+      await get().startVoice()
+    }
+  }
+
+  /**
    * Refreshes a provider's model observations when it connects and releases
    * them otherwise.
    *
@@ -483,6 +512,7 @@ function createLysStoreState(
     ...initialState,
     ...createLysSettingsSlices(set, get),
     ...createVmoRuntimeSlice(set, get),
+    ...createVoiceRuntimeSlice(set, get),
     ...createModelSlice(set, get, {
       getBackendConnection,
       handleModelRequestFailure: async (provider) => {
@@ -630,13 +660,16 @@ function createLysStoreState(
     initialize: async () => {
       const settings = await loadSettings()
       set({ settings, initializing: false })
-      const [backendStart, vmoStart] = await Promise.allSettled([
+      const [backendStart, vmoStart, voiceStart] = await Promise.allSettled([
         startBackendWhenNeeded(settings.runtime.autoStartBackend),
-        updateVmoForLaunch(settings.runtime.autoStartVmo)
+        updateVmoForLaunch(settings.runtime.autoStartVmo),
+        updateVoiceForLaunch(settings.runtime.autoStartVoice)
       ])
-      // vmo's start and stop never reject; only its status check can.
+      // vmo's and voice's start and stop never reject; only their status
+      // checks can.
       if (backendStart.status === "rejected") throw backendStart.reason
       if (vmoStart.status === "rejected") throw vmoStart.reason
+      if (voiceStart.status === "rejected") throw voiceStart.reason
     }
   }
 }

@@ -117,6 +117,12 @@ impl LysHome {
         self.prod_runtime_dir().join("vmo/vmo")
     }
 
+    /// Returns the voice binary that release builds run as Lys's speech
+    /// server, `runtime/voice/voice` under the Lys home.
+    pub fn voice_executable_path(&self) -> PathBuf {
+        self.prod_runtime_dir().join("voice/voice")
+    }
+
     /// Returns the email MCP server that the backend of a release build
     /// starts and runs account checks with, `runtime/email/email` under the
     /// Lys home.

@@ -341,8 +341,9 @@ after the same sign-in, Remove mailbox removes it as Remove account does, and
 Use this mailbox saves only her mailbox's switch. The Profile pane saves the
 location only on Save location or Enter, replacing only the `location`
 group.
-Changing either startup switch in the
-Runtime pane, for the backend or for vmo, autosaves both switches and keeps
+Changing any startup switch in the
+Runtime pane, for the backend, for vmo, or for voice, autosaves the three
+switches and keeps
 the rest of the `runtime` group as it is on disk; after a failed save, the
 pane says that the next launch follows the switches last saved, and changing a
 switch tries the save again.
@@ -360,6 +361,8 @@ documented user-editable configuration source:
 
 - backend HTTP address: `127.0.0.1:12345`
 - vmo address, used by the backend and the desktop host: `127.0.0.1:8080`
+- voice addresses, used by the backend (speech and dictation sockets, health check) and
+  the desktop host (health check): `127.0.0.1:9090` and `127.0.0.1:9091`
 
 The default model provider addresses, LM Studio's `127.0.0.1:1234` and
 Ollama's `127.0.0.1:11434`, are compiled in too, but Settings → Providers

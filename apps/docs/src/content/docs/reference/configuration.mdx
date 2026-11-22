@@ -12,25 +12,40 @@ preference.
 
 ## Shared constants
 
-| Constant                | Value          | Used by                                                                 |
-| ----------------------- | -------------- | ----------------------------------------------------------------------- |
-| `API_PREFIX_V1`         | `/api/v1`      | Route path composition                                                  |
-| `BACKEND_HOST`          | `127.0.0.1`    | Backend bind host and desktop backend URL                               |
-| `BACKEND_PORT`          | `12345`        | Backend bind port and desktop backend URL                               |
-| `LMSTUDIO_HOST`         | `127.0.0.1`    | LM Studio's default address, while `providers.lmStudio.address` is null |
-| `LMSTUDIO_PORT`         | `1234`         | LM Studio's default address, while `providers.lmStudio.address` is null |
-| `OLLAMA_HOST`           | `127.0.0.1`    | Ollama's default address, while `providers.ollama.address` is null      |
-| `OLLAMA_PORT`           | `11434`        | Ollama's default address, while `providers.ollama.address` is null      |
-| `OLLAMA_CLOUD_API_HOST` | `ollama.com`   | Host of Ollama Cloud's API, reached over HTTPS                          |
-| `GROQ_API_HOST`         | `api.groq.com` | Host of Groq's API, reached over HTTPS                                  |
-| `VMO_HOST`              | `127.0.0.1`    | Backend page reads and health checks, desktop vmo card                  |
-| `VMO_PORT`              | `8080`         | Backend page reads and health checks, desktop vmo card                  |
+| Constant                          | Value          | Used by                                                                                     |
+| --------------------------------- | -------------- | ------------------------------------------------------------------------------------------- |
+| `API_PREFIX_V1`                   | `/api/v1`      | Route path composition                                                                      |
+| `BACKEND_HOST`                    | `127.0.0.1`    | Backend bind host and desktop backend URL                                                   |
+| `BACKEND_PORT`                    | `12345`        | Backend bind port and desktop backend URL                                                   |
+| `LMSTUDIO_HOST`                   | `127.0.0.1`    | LM Studio's default address, while `providers.lmStudio.address` is null                     |
+| `LMSTUDIO_PORT`                   | `1234`         | LM Studio's default address, while `providers.lmStudio.address` is null                     |
+| `OLLAMA_HOST`                     | `127.0.0.1`    | Ollama's default address, while `providers.ollama.address` is null                          |
+| `OLLAMA_PORT`                     | `11434`        | Ollama's default address, while `providers.ollama.address` is null                          |
+| `OLLAMA_CLOUD_API_HOST`           | `ollama.com`   | Host of Ollama Cloud's API, reached over HTTPS                                              |
+| `GROQ_API_HOST`                   | `api.groq.com` | Host of Groq's API, reached over HTTPS                                                      |
+| `VMO_HOST`                        | `127.0.0.1`    | Backend page reads and health checks, desktop vmo card                                      |
+| `VMO_PORT`                        | `8080`         | Backend page reads and health checks, desktop vmo card                                      |
+| `VOICE_HOST`                      | `127.0.0.1`    | Backend health checks and desktop voice card                                                |
+| `VOICE_PORT`                      | `9090`         | Backend health checks and desktop voice card                                                |
+| `VOICE_SOCKET_PORT`               | `9091`         | The backend's speech, notification, and dictation sockets to voice                          |
+| `VOICE_AUDIO_SAMPLE_RATE_HZ`      | `24000`        | Speech audio format on the speech and notification sockets                                  |
+| `VOICE_AUDIO_CHANNELS`            | `1`            | Speech audio format on the speech and notification sockets                                  |
+| `VOICE_AUDIO_BYTES_PER_SAMPLE`    | `2`            | Audio format on the speech, notification, and dictation sockets                             |
+| `DICTATION_AUDIO_SAMPLE_RATE_HZ`  | `16000`        | Dictation audio format: the desktop's recorder, the backend's relay, and voice's recognizer |
+| `DICTATION_AUDIO_FRAME_SAMPLES`   | `1600`         | Samples in one audio message the desktop sends, 100 ms                                      |
+| `DICTATION_MAX_DURATION_MS`       | `300000`       | Longest time one dictation listens, counted by the backend                                  |
+| `SOCKET_MAX_CLIENT_MESSAGE_BYTES` | `8192`         | Largest message the backend accepts from a client on any WebSocket route                    |
 
 The Tauri host's health check of vmo and vmo's own listener are Rust and
 Swift, so they declare `127.0.0.1:8080` again. A desktop unit test fails when
 either copy differs from `VMO_HOST` and `VMO_PORT`, so changing vmo's address
 means changing all three; see the
 [vmo address copy exception](/reference/standard-application/#vmo-address-copy-exception).
+The same holds for voice: the host, voice's HTTP listener, and voice's
+speech socket declare `127.0.0.1:9090` and `127.0.0.1:9091` again, and a
+desktop unit test fails when any copy differs from `VOICE_HOST`, `VOICE_PORT`,
+or `VOICE_SOCKET_PORT`; see the
+[voice address copy exception](/reference/standard-application/#voice-address-copy-exception).
 
 ## Lys home directory
 
@@ -60,10 +75,11 @@ at startup; loading settings creates it when `settings.json` is missing.
 | `runtime/node/bin/node`       | Release builds | Node.js executable that runs the backend                                                                                                                                                                                                                                  |
 | `runtime/backend/backend.mjs` | Release builds | Backend bundle that the release Node.js executable runs                                                                                                                                                                                                                   |
 | `runtime/vmo/vmo`             | Release builds | vmo, the page reader the desktop starts, signed with the virtualization entitlement                                                                                                                                                                                       |
+| `runtime/voice/voice`         | Release builds | voice, the speech server the desktop starts, which speaks and hears dictation; the first start downloads its models to `~/.lys/voice/models`                                                                                                                              |
 | `runtime/email/email`         | Backend        | The email MCP server Lys ships, which the backend starts once a mailbox is switched on in Settings → MCP or Settings → Lys and runs for each email account check; in development, `LYS_EMAIL_SERVER_PATH`, which the desktop host sets, names the workspace build instead |
 | `logs/backend-YYYY-MM-DD.log` | Backend        | The backend's log lines of one UTC day, appended by every run that day and never deleted; see [the backend log files](/operate/logging/#the-backend-log-files)                                                                                                            |
 
-On macOS, `build.sh` installs the four `runtime/` entries under
+On macOS, `build.sh` installs the five `runtime/` entries under
 `${LYS_HOME:-$HOME/.lys}`. It treats an empty value as unset but does not reject
 a relative path.
 
@@ -153,6 +169,7 @@ defaults:
   "runtime": {
     "autoStartBackend": true,
     "autoStartVmo": true,
+    "autoStartVoice": false,
     "defaultModel": null,
     "backendAddress": "http://127.0.0.1:12345"
   },
@@ -198,33 +215,34 @@ defaults:
 }
 ```
 
-| Key                            | Type                    | Meaning                                                                                                                                                                                                   |
-| ------------------------------ | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runtime.autoStartBackend`     | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically                                                                                                                        |
-| `runtime.autoStartVmo`         | `boolean`               | Whether desktop initialization should ask Tauri to start vmo, the page reader `read_page` uses                                                                                                            |
-| `runtime.defaultModel`         | `string \|null`         | Key of the model a new conversation starts with, read as a model of the first provider that is on, in provider order; without one, the first loaded model in provider order; the desktop never changes it |
-| `runtime.backendAddress`       | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address                                                                                                               |
-| `generation.temperature`       | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                                                                                                                                      |
-| `generation.replyCeiling`      | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                                                                                                                |
-| `loadConfiguration`            | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                                                                                                         |
-| `secrets.tavilyApiKey`         | `string \|null`         | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets)                                                                                          |
-| `secrets.ollamaApiKey`         | `string \|null`         | API key of Ollama Cloud, under the same rule; see [Secrets](#secrets)                                                                                                                                     |
-| `secrets.groqApiKey`           | `string \|null`         | Groq API key, under the same rule; see [Secrets](#secrets)                                                                                                                                                |
-| `secrets.emailPassword`        | `string \|null`         | Password of the person's saved email account, 1 to 1,024 characters without a control character, stored as plain text; see [Secrets](#secrets)                                                            |
-| `secrets.lysEmailPassword`     | `string \|null`         | Password of Lys's own saved email account, under the same rule; see [Secrets](#secrets)                                                                                                                   |
-| `providers`                    | object                  | The model providers that are on, and where to find them; see [Providers](#providers)                                                                                                                      |
-| `tools.justRun`                | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                                                                                                         |
-| `tools.switches`               | object of `boolean`     | Whether each tool the person switched is on, by tool name; any other tool starts at its default; see [Tools](#tools)                                                                                      |
-| `tools.approvedFolders`        | array of absolute paths | Folders tool calls may name paths in; absent or empty lets them name any path; see [Approved folders](#approved-folders)                                                                                  |
-| `location.city`                | `string \|null`         | City the person saved for `get_location`; see [Location](#location)                                                                                                                                       |
-| `location.region`              | `string \|null`         | State, province, or other region the person saved; see [Location](#location)                                                                                                                              |
-| `location.country`             | `string \|null`         | Country the person saved; see [Location](#location)                                                                                                                                                       |
-| `mcp.servers`                  | array of server objects | MCP servers Lys connects to, in the order Settings → MCP lists them; see [MCP servers](#mcp-servers)                                                                                                      |
-| `mcp.servers[].enabled`        | `boolean`               | Whether Lys connects to that server and offers its tools; on when omitted; see [MCP servers](#mcp-servers)                                                                                                |
-| `mcp.builtIn.email.enabled`    | `boolean`               | Whether the email MCP server Lys ships serves the person's mailbox; off when omitted; see [MCP servers](#mcp-servers)                                                                                     |
-| `mcp.builtIn.email.lysEnabled` | `boolean`               | Whether it serves Lys's own mailbox; off when omitted; see [MCP servers](#mcp-servers)                                                                                                                    |
-| `email.account`                | object or `null`        | The person's email account, which the email MCP server works with; see [Email account](#email-account)                                                                                                    |
-| `email.lysAccount`             | object or `null`        | Lys's own email account, a mailbox of its own; see [Email account](#email-account)                                                                                                                        |
+| Key                            | Type                    | Meaning                                                                                                                                                                                                       |
+| ------------------------------ | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime.autoStartBackend`     | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically                                                                                                                            |
+| `runtime.autoStartVmo`         | `boolean`               | Whether desktop initialization should ask Tauri to start vmo, the page reader `read_page` uses                                                                                                                |
+| `runtime.autoStartVoice`       | `boolean`               | Whether desktop initialization should ask Tauri to start voice, the speech server Lys reads replies with and hears dictation with; off unless saved, because the first start downloads about 1.4 GB of models |
+| `runtime.defaultModel`         | `string \|null`         | Key of the model a new conversation starts with, read as a model of the first provider that is on, in provider order; without one, the first loaded model in provider order; the desktop never changes it     |
+| `runtime.backendAddress`       | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address                                                                                                                   |
+| `generation.temperature`       | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                                                                                                                                          |
+| `generation.replyCeiling`      | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                                                                                                                    |
+| `loadConfiguration`            | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                                                                                                             |
+| `secrets.tavilyApiKey`         | `string \|null`         | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets)                                                                                              |
+| `secrets.ollamaApiKey`         | `string \|null`         | API key of Ollama Cloud, under the same rule; see [Secrets](#secrets)                                                                                                                                         |
+| `secrets.groqApiKey`           | `string \|null`         | Groq API key, under the same rule; see [Secrets](#secrets)                                                                                                                                                    |
+| `secrets.emailPassword`        | `string \|null`         | Password of the person's saved email account, 1 to 1,024 characters without a control character, stored as plain text; see [Secrets](#secrets)                                                                |
+| `secrets.lysEmailPassword`     | `string \|null`         | Password of Lys's own saved email account, under the same rule; see [Secrets](#secrets)                                                                                                                       |
+| `providers`                    | object                  | The model providers that are on, and where to find them; see [Providers](#providers)                                                                                                                          |
+| `tools.justRun`                | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                                                                                                             |
+| `tools.switches`               | object of `boolean`     | Whether each tool the person switched is on, by tool name; any other tool starts at its default; see [Tools](#tools)                                                                                          |
+| `tools.approvedFolders`        | array of absolute paths | Folders tool calls may name paths in; absent or empty lets them name any path; see [Approved folders](#approved-folders)                                                                                      |
+| `location.city`                | `string \|null`         | City the person saved for `get_location`; see [Location](#location)                                                                                                                                           |
+| `location.region`              | `string \|null`         | State, province, or other region the person saved; see [Location](#location)                                                                                                                                  |
+| `location.country`             | `string \|null`         | Country the person saved; see [Location](#location)                                                                                                                                                           |
+| `mcp.servers`                  | array of server objects | MCP servers Lys connects to, in the order Settings → MCP lists them; see [MCP servers](#mcp-servers)                                                                                                          |
+| `mcp.servers[].enabled`        | `boolean`               | Whether Lys connects to that server and offers its tools; on when omitted; see [MCP servers](#mcp-servers)                                                                                                    |
+| `mcp.builtIn.email.enabled`    | `boolean`               | Whether the email MCP server Lys ships serves the person's mailbox; off when omitted; see [MCP servers](#mcp-servers)                                                                                         |
+| `mcp.builtIn.email.lysEnabled` | `boolean`               | Whether it serves Lys's own mailbox; off when omitted; see [MCP servers](#mcp-servers)                                                                                                                        |
+| `email.account`                | object or `null`        | The person's email account, which the email MCP server works with; see [Email account](#email-account)                                                                                                        |
+| `email.lysAccount`             | object or `null`        | Lys's own email account, a mailbox of its own; see [Email account](#email-account)                                                                                                                            |
 
 A missing group, or a missing field in one of them, uses the host defaults;
 for `loadConfiguration` that default is empty, for `secrets` it holds no
@@ -792,14 +810,16 @@ way; emptying every field, or sharing down to Nothing, and saving writes
 save, `get_location` keeps returning the location last saved, and the pane
 says the save failed.
 
-The Runtime pane's two startup switches, "Start it when Lys opens" for the
-backend and "Start vmo when Lys opens", are saved automatically the same way
-whenever either changes. The save writes both switches and keeps the rest of
+The Runtime pane's startup switches, "Start it when Lys opens" for the
+backend, "Start vmo when Lys opens", and "Start voice when Lys opens", are
+saved automatically the same way whenever any of them changes. The save
+writes the three switches and keeps the rest of
 the `runtime` group as it is in the file; the latest switches win. They apply
 the next time Lys opens, or the window reloads, because both read them from
 the file. After a failed save, that next launch follows the switches last
 saved, the pane says so, and changing a switch tries the save again. A file
-saved before `autoStartVmo` existed loads with it on.
+saved before `autoStartVmo` existed loads with it on, and one saved before
+`autoStartVoice` existed loads with it off.
 
 The MCP pane saves the servers only when the person saves a server in its
 editor or confirms removing one, replacing only the `mcp` group in the same
@@ -834,7 +854,7 @@ the value is missing, invalid, or unavailable.
 ## Current caveats
 
 - The React shell loads runtime settings from Tauri, but runtime edits other
-  than the two startup switches, including `runtime.defaultModel`, are not
+  than the three startup switches, including `runtime.defaultModel`, are not
   persisted back through `save_settings`.
 - LM Studio applies its own settings when it loads a model by itself, for
   example when a chat request names a model that is not loaded. The load

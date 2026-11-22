@@ -1,48 +1,51 @@
 ---
 title: Backend API contracts
-description: The current loopback HTTP and SSE endpoints exposed by the Fastify backend.
+description: The current loopback HTTP, SSE, and WebSocket endpoints exposed by the Fastify backend.
 docType: reference
 sidebar:
   order: 1
 ---
 
 The current backend surface is small and lives entirely under the `@lys/protocol`
-route definitions.
+route definitions. Three of the routes are WebSockets, marked `WS` below.
 
 ## Routes
 
-| Method   | Path                                                                              | Request body                                                                                         | Response                                                                   |
-| -------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `GET`    | `/api/v1/heath`                                                                   | none                                                                                                 | `{ ok: true }`                                                             |
-| `GET`    | `/api/v1/llm/:provider/list`                                                      | none                                                                                                 | `{ llms: LlmInfo[], modelLoading: "lys" \| "provider" }`                   |
-| `GET`    | `/api/v1/llm/:provider/:modelId/health`                                           | none                                                                                                 | Loaded-state health observation                                            |
-| `POST`   | `/api/v1/llm/:provider/load`                                                      | `{ modelId: string, configuration?: ModelLoadConfiguration }`                                        | `LlmInfo`                                                                  |
-| `PATCH`  | `/api/v1/llm/:provider/unload`                                                    | `{ modelId: string }`                                                                                | `204` or typed Problem Details                                             |
-| `GET`    | `/api/v1/llm/:provider/runtime`                                                   | none                                                                                                 | `{ status: "connecting" \| "connected" \| "unreachable" \| "off" }`        |
-| `POST`   | `/api/v1/llm/:provider/runtime/connect`                                           | none                                                                                                 | Settled `{ status }`, or service-busy Problem Details                      |
-| `GET`    | `/api/v1/conversations`                                                           | none; optional `query`, `cursor`, `limit` query parameters                                           | Conversation list page                                                     |
-| `GET`    | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Conversation with ordered messages and numbered sources                    |
-| `PATCH`  | `/api/v1/conversations/:conversationId`                                           | `{ title: string }`                                                                                  | Conversation metadata, or `409` for a job                                  |
-| `DELETE` | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Bodyless `204` once its work has ended, or `409` for a job                 |
-| `GET`    | `/api/v1/agents`                                                                  | none; optional `cursor`, `limit` query parameters                                                    | Built-in agents and a page of stored agents                                |
-| `POST`   | `/api/v1/agents`                                                                  | `{ code?, name, bio, systemPrompt }`                                                                 | `201` agent with `Location`, or `409` Problem Details                      |
-| `GET`    | `/api/v1/agents/:agentCode`                                                       | none                                                                                                 | Agent with its system prompt                                               |
-| `PATCH`  | `/api/v1/agents/:agentCode`                                                       | at least one of `{ name, bio, systemPrompt }`                                                        | Changed agent, or `409` for a built-in agent                               |
-| `DELETE` | `/api/v1/agents/:agentCode`                                                       | none                                                                                                 | Bodyless `204`, or `409` for a built-in agent                              |
-| `GET`    | `/api/v1/tools`                                                                   | none                                                                                                 | `{ tools: ToolDefinition[], unavailableTools }`                            |
-| `POST`   | `/api/v1/tools/web_search/key-check`                                              | `{}`                                                                                                 | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }`     |
-| `GET`    | `/api/v1/mcp/servers`                                                             | none                                                                                                 | `{ settings, servers: McpServerStatus[] }`                                 |
-| `POST`   | `/api/v1/mcp/servers/sync`                                                        | `{}`                                                                                                 | The server list right after applying the `mcp` settings group              |
-| `POST`   | `/api/v1/mcp/servers/:serverName/reconnect`                                       | `{}`                                                                                                 | The server list, or `404` or `409` Problem Details                         |
-| `POST`   | `/api/v1/mcp/email/account-check`                                                 | `{ account, password }`                                                                              | `{ status: "checked", imap, smtp }` or `{ status: "unavailable", reason }` |
-| `POST`   | `/api/v1/chat`                                                                    | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` and `attachments` | `text/event-stream`                                                        |
-| `POST`   | `/api/v1/chat/context`                                                            | `conversation`, `model`, optional `tools`                                                            | `ChatContextMeasurement`, or typed Problem Details                         |
-| `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`                 | none                                                                                                 | `text/event-stream` (reply snapshot, then live events)                     |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                   | none                                                                                                 | Bodyless `204`, or `409` Problem Details                                   |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`   | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                                   |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId` | `{ status, reason?, content?, approvalToken }`                                                       | Bodyless `204`, or `409` Problem Details                                   |
-| `POST`   | `/api/v1/chat/:conversationId/jobs/stop`                                          | none                                                                                                 | Bodyless `204`, or `404` Problem Details                                   |
-| `GET`    | `/api/v1/activity/events`                                                         | none                                                                                                 | `text/event-stream` (activity snapshot, then live events)                  |
+| Method   | Path                                                                                  | Request body                                                                                         | Response                                                                   |
+| -------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `GET`    | `/api/v1/heath`                                                                       | none                                                                                                 | `{ ok: true }`                                                             |
+| `GET`    | `/api/v1/llm/:provider/list`                                                          | none                                                                                                 | `{ llms: LlmInfo[], modelLoading: "lys" \| "provider" }`                   |
+| `GET`    | `/api/v1/llm/:provider/:modelId/health`                                               | none                                                                                                 | Loaded-state health observation                                            |
+| `POST`   | `/api/v1/llm/:provider/load`                                                          | `{ modelId: string, configuration?: ModelLoadConfiguration }`                                        | `LlmInfo`                                                                  |
+| `PATCH`  | `/api/v1/llm/:provider/unload`                                                        | `{ modelId: string }`                                                                                | `204` or typed Problem Details                                             |
+| `GET`    | `/api/v1/llm/:provider/runtime`                                                       | none                                                                                                 | `{ status: "connecting" \| "connected" \| "unreachable" \| "off" }`        |
+| `POST`   | `/api/v1/llm/:provider/runtime/connect`                                               | none                                                                                                 | Settled `{ status }`, or service-busy Problem Details                      |
+| `GET`    | `/api/v1/conversations`                                                               | none; optional `query`, `cursor`, `limit` query parameters                                           | Conversation list page                                                     |
+| `GET`    | `/api/v1/conversations/:conversationId`                                               | none                                                                                                 | Conversation with ordered messages and numbered sources                    |
+| `PATCH`  | `/api/v1/conversations/:conversationId`                                               | `{ title: string }`                                                                                  | Conversation metadata, or `409` for a job                                  |
+| `DELETE` | `/api/v1/conversations/:conversationId`                                               | none                                                                                                 | Bodyless `204` once its work has ended, or `409` for a job                 |
+| `GET`    | `/api/v1/agents`                                                                      | none; optional `cursor`, `limit` query parameters                                                    | Built-in agents and a page of stored agents                                |
+| `POST`   | `/api/v1/agents`                                                                      | `{ code?, name, bio, systemPrompt }`                                                                 | `201` agent with `Location`, or `409` Problem Details                      |
+| `GET`    | `/api/v1/agents/:agentCode`                                                           | none                                                                                                 | Agent with its system prompt                                               |
+| `PATCH`  | `/api/v1/agents/:agentCode`                                                           | at least one of `{ name, bio, systemPrompt }`                                                        | Changed agent, or `409` for a built-in agent                               |
+| `DELETE` | `/api/v1/agents/:agentCode`                                                           | none                                                                                                 | Bodyless `204`, or `409` for a built-in agent                              |
+| `GET`    | `/api/v1/tools`                                                                       | none                                                                                                 | `{ tools: ToolDefinition[], unavailableTools }`                            |
+| `POST`   | `/api/v1/tools/web_search/key-check`                                                  | `{}`                                                                                                 | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }`     |
+| `GET`    | `/api/v1/mcp/servers`                                                                 | none                                                                                                 | `{ settings, servers: McpServerStatus[] }`                                 |
+| `POST`   | `/api/v1/mcp/servers/sync`                                                            | `{}`                                                                                                 | The server list right after applying the `mcp` settings group              |
+| `POST`   | `/api/v1/mcp/servers/:serverName/reconnect`                                           | `{}`                                                                                                 | The server list, or `404` or `409` Problem Details                         |
+| `POST`   | `/api/v1/mcp/email/account-check`                                                     | `{ account, password }`                                                                              | `{ status: "checked", imap, smtp }` or `{ status: "unavailable", reason }` |
+| `POST`   | `/api/v1/chat`                                                                        | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` and `attachments` | `text/event-stream`                                                        |
+| `POST`   | `/api/v1/chat/context`                                                                | `conversation`, `model`, optional `tools`                                                            | `ChatContextMeasurement`, or typed Problem Details                         |
+| `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`                     | none                                                                                                 | `text/event-stream` (reply snapshot, then live events)                     |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                       | none                                                                                                 | Bodyless `204`, or `409` Problem Details                                   |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`       | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                                   |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`     | `{ status, reason?, content?, approvalToken }`                                                       | Bodyless `204`, or `409` Problem Details                                   |
+| `WS`     | `/api/v1/chat/:conversationId/replies/:assistantMessageId/speech?from=start\|current` | none; `from` is `start` when omitted                                                                 | Binary PCM (24 kHz, mono, 16-bit little-endian), then a close code         |
+| `WS`     | `/api/v1/chat/:conversationId/replies/:assistantMessageId/notification`               | none                                                                                                 | Binary PCM, then a close code                                              |
+| `WS`     | `/api/v1/voice/dictation`                                                             | none; binary PCM (16 kHz, mono, 16-bit little-endian) and `{ type: "stop" }` as messages             | `{ type: "partial" \| "final", text }` messages, then a close code         |
+| `POST`   | `/api/v1/chat/:conversationId/jobs/stop`                                              | none                                                                                                 | Bodyless `204`, or `404` Problem Details                                   |
+| `GET`    | `/api/v1/activity/events`                                                             | none                                                                                                 | `text/event-stream` (activity snapshot, then live events)                  |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
@@ -391,6 +394,82 @@ title, and the conversation's sources; live events follow while the
 generation runs. A missing conversation
 returns the conversation-not-found problem and a missing reply returns `404`
 with `urn:lys:problem:chat:reply-not-found`.
+
+## Speech sockets
+
+`GET /api/v1/chat/:conversationId/replies/:assistantMessageId/speech?from=start|current`
+is a WebSocket for Lys's desktop. The backend accepts the upgrade only from
+a desktop `Origin`; a request with another `Origin` is refused before the
+upgrade with a `403` Problem Details body. A request without an `Origin`, from
+a local process, is accepted, as on the HTTP routes. `from=start`, the
+default, reads the reply from its first word, even one that already finished;
+`from=current` joins at the sentence being written and is refused when the
+reply is not being written. The reply's sentences are synthesized by the
+voice service and relayed as binary messages of raw 24 kHz mono 16-bit
+little-endian PCM. There are no text messages: the close code is the whole
+signal.
+
+Lys speaks one speech at a time: opening a socket closes every older one,
+for this reply or another, on either endpoint. The socket closes with:
+
+| Code   | Meaning                                                                                                                                                                                                                                                        |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1000` | Everything to say was spoken and its whole audio was sent.                                                                                                                                                                                                     |
+| `1001` | The backend is shutting down.                                                                                                                                                                                                                                  |
+| `1008` | The client fell more than about 1 MB of audio behind, and the speech was cut off.                                                                                                                                                                              |
+| `1011` | The voice service failed during the speech, or the backend could not read the reply.                                                                                                                                                                           |
+| `4404` | The conversation or reply does not exist.                                                                                                                                                                                                                      |
+| `4409` | A newer socket opened, for this reply or another.                                                                                                                                                                                                              |
+| `4410` | While the socket followed the reply, it was interrupted or failed, or stopped being written without an end; or `from=current` names a reply that is not being written. A stored reply that already stopped or failed is spoken as stored and ends with `1000`. |
+| `4503` | Voice is not ready, or refused or did not answer the speech within two seconds; nothing was sent.                                                                                                                                                              |
+
+`GET /api/v1/chat/:conversationId/replies/:assistantMessageId/notification`
+is the same socket without the `from` query, and speaks one short line chosen
+by the backend at random, for a reply that finished in the background. Its
+line is never stored. Its close codes are the same, except `4410`, which it
+never sends. Neither socket accepts a message from the client; the PCM frames
+are the only payload, one direction. A client message over 8 KiB closes
+either socket with `1009`.
+
+## Dictation socket
+
+`GET /api/v1/voice/dictation` is a WebSocket for Lys's desktop, which
+dictates into the message field through it. The backend accepts the upgrade
+by the same `Origin` rule as the [speech sockets](#speech-sockets): another
+`Origin` is refused with a `403` Problem Details body, and a request without
+one is accepted. The route takes no parameter. The client sends audio, the
+voice service turns it into text, and the text comes back on the same
+socket:
+
+| Direction | Message                              | Meaning                                                                                                                    |
+| --------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| Client    | binary                               | Raw 16 kHz mono 16-bit little-endian PCM, one or more whole samples, at most 8 KiB; the desktop sends 100 ms, 3,200 bytes. |
+| Client    | `{ "type": "stop" }`                 | Asks for the final text. Audio and `stop` messages after the first `stop` are dropped.                                     |
+| Server    | `{ "type": "partial", "text": "…" }` | The whole text so far, sent whenever it changes; each one replaces the one before.                                         |
+| Server    | `{ "type": "final", "text": "…" }`   | The finished text, once, after a `stop` or at five minutes; the socket then closes with `1000`.                            |
+
+`text` holds at most 100,000 characters. Audio may be sent from the moment
+the socket opens; what arrives before the voice service accepted the
+dictation waits, in order, up to five seconds of audio. A dictation listens
+for at most five minutes, counted from the socket's opening; the backend
+then stops it as a `stop` does.
+
+Lys listens to one dictation at a time: opening a socket closes the older
+one. A dictation and a speech do not close each other. The socket closes
+with:
+
+| Code   | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1000` | The final text was sent.                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `1001` | The backend is shutting down; no final text follows.                                                                                                                                                                                                                                                                                                                                                                      |
+| `1002` | The client sent a text message that is not `stop`, or audio that is empty or not whole samples.                                                                                                                                                                                                                                                                                                                           |
+| `1009` | The client sent a message over 8 KiB.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `1011` | The dictation failed: the handshake with the voice service failed for another reason than a refusal, the voice service failed, broke the protocol, or sent no final text within ten seconds of the `stop`; more than five seconds of audio waited for it to accept the dictation, or more than 1 MB of audio waited for it afterwards; or more than 1 MB of text waited for the client. The text sent so far stays valid. |
+| `4409` | A newer dictation socket opened.                                                                                                                                                                                                                                                                                                                                                                                          |
+| `4503` | Voice is not ready, or refused or did not answer the dictation within two seconds.                                                                                                                                                                                                                                                                                                                                        |
+
+Closing the socket from the client cancels the dictation at once; no final
+text follows. Neither the audio nor the text is stored or logged.
 
 ## Chat context measurement
 

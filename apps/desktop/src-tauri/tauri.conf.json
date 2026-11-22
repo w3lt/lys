@@ -37,7 +37,10 @@
       "icons/icon.icns",
       "icons/icon.ico",
       "icons/Assets.car"
-    ]
+    ],
+    "macOS": {
+      "entitlements": "Entitlements.plist"
+    }
   },
   "version": "0.4.0"
 }

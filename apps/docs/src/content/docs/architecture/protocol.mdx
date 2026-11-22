@@ -21,8 +21,9 @@ The public backend surface is small and explicit:
 
 | Concern                                                                                                                           | Contract source                                    |
 | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| API prefix and loopback constants                                                                                                 | `packages/protocol/src/constant.ts`                |
-| Chat and reply routes, requests, and SSE payloads                                                                                 | `packages/protocol/src/apis/chat/*.ts`             |
+| API prefix, loopback constants, voice host, ports, and audio formats, the dictation limits, and the socket close codes            | `packages/protocol/src/constant.ts`                |
+| Chat and reply routes, requests, SSE payloads, and the speech and notification WebSocket routes                                   | `packages/protocol/src/apis/chat/*.ts`             |
+| Dictation WebSocket route and its messages                                                                                        | `packages/protocol/src/apis/voice/*.ts`            |
 | Tool offer, tool-approval and tool-call events, and tool-approval and tool-result routes                                          | `packages/protocol/src/apis/chat/*.ts`             |
 | Jobs-stop route                                                                                                                   | `packages/protocol/src/apis/chat/stopJobsRoute.ts` |
 | Activity stream route and its events                                                                                              | `packages/protocol/src/apis/activity/*.ts`         |

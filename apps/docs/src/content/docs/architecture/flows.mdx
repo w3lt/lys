@@ -1,6 +1,6 @@
 ---
 title: End-to-end flows
-description: "The concrete runtime flows that exist today: backend and vmo startup, MCP server connections, chat streaming, user-initiated stop, and opening a past conversation."
+description: "The concrete runtime flows that exist today: backend, vmo, and voice startup, MCP server connections, chat streaming, speech playback, dictation, user-initiated stop, and opening a past conversation."
 docType: architecture
 sidebar:
   order: 9
@@ -15,7 +15,8 @@ This page documents only the flows implemented in the current codebase.
    the shell.
 3. If `autoStartBackend` is enabled, or a backend process already runs, the
    store starts or checks the backend in the background. vmo starts at the
-   same time; see [Start vmo](#start-vmo).
+   same time; see [Start vmo](#start-vmo). Voice starts at the same time too;
+   see [Start voice](#start-voice).
 4. For a stopped backend, the store sets `starting` and calls `start_backend`.
    The Tauri host starts the backend with `LYS_HOME` set to the Lys home it
    resolved at startup: `pnpm run dev` in `apps/backend` for development builds,
@@ -73,6 +74,113 @@ A manual Start follows steps 4–8.
 A manual Start follows steps 2–5. A stop sends vmo `SIGTERM` through
 `stop_vmo`, shows `stopping` while vmo deletes its VMs, and kills it after 60
 seconds. Quitting Lys stops vmo and the backend together.
+
+## Start voice
+
+1. During `initialize`, if `autoStartVoice` is enabled, or the host already owns
+   a voice, the store starts or checks voice in the background, without
+   waiting for the backend. Voice does not start by default; a first start
+   downloads its models, which can take a while. When the host is still
+   stopping voice, as after a window reload during Stop, the store joins that
+   stop instead, and voice stays stopped.
+2. The store sets `starting` and reads `get_voice_status`. For a stopped voice
+   it calls `start_voice`, and the Tauri host runs `bash run.sh` in
+   `apps/voice` for development builds, or `$LYS_HOME/runtime/voice/voice`
+   for release builds.
+3. voice starts serving `GET /health` on `127.0.0.1:9090` and its WebSocket
+   server on `127.0.0.1:9091` at once, and loads its PocketTTS models and
+   then its Nemotron model from `~/.lys/voice/models`, which it downloads on
+   the first start. Until both are loaded, `/health` answers `503` and the
+   socket server refuses handshakes. When they cannot be loaded, voice prints
+   the cause and exits with status 1.
+4. Every second, for up to twenty minutes, the store reads `get_voice_status`
+   and, while voice runs, `get_voice_health`. voice becomes `running` once it
+   answers, `stopped` when its process exits first, and `unresponsive` after
+   twenty minutes.
+
+A manual Start follows steps 2–4. A stop sends voice `SIGTERM` through
+`stop_voice`, and kills it after five seconds. Quitting Lys stops voice, vmo,
+and the backend together.
+
+## Read a reply aloud
+
+1. The chat view's speech controller watches the chat store, the window's
+   focus, and voice's readiness. When a reply starts streaming and the window
+   is focused with voice ready, it opens the reply's speech socket,
+   `GET /api/v1/chat/:conversationId/replies/:assistantMessageId/speech?from=start`,
+   with `from=start` for a reply the person asked for.
+2. The backend asks voice whether it is ready, then reads the stored reply
+   and follows the reply's generation in one step, as the reply event stream
+   does. It cleans the markdown into sentences, hands each completed sentence
+   to voice, and relays 24 kHz mono 16-bit little-endian PCM frames from
+   voice to the UI. The UI decodes and plays them back to back through a Web
+   Audio context, created once voice is ready and resumed on every update and
+   frame.
+3. When the window is not focused, the controller waits silently. When it
+   regains focus mid-reply, or the conversation is opened while a reply is
+   streaming, or voice becomes ready mid-reply, the controller opens the
+   socket with `from=current`, which makes the backend skip the sentences
+   already complete and join at the sentence being written.
+4. When the window loses focus before anything was said, the controller
+   closes the socket and nothing is said until it joins again, as in step 3.
+   Losing focus while reading changes nothing: the reply is read to the end,
+   and a reply that ends with `done` while the window is focused is read to
+   the end too.
+5. When the reply ends with `done` before anything was said and the window is
+   in the background, the controller opens the notification socket,
+   `.../notification`, and plays the one line it speaks.
+6. The reply stopping or failing, a new message being sent, the conversation
+   being switched or closed, or voice stopping: the UI closes its socket, and
+   any notification socket, and drops queued audio at once. If voice is down,
+   the speech socket closes with `4503` and nothing is said; the text still
+   arrives as usual, and the store reads voice's status again so the Voice
+   card shows why.
+7. A socket that a newer one replaces (`4409`) or a reply that stopped
+   (`4410`) silences the audio; only `1000` keeps the queued frames playing
+   to the end.
+
+## Dictate a message
+
+1. The person presses the microphone button in the composer. The button can
+   be pressed only while voice runs, Lys neither answers nor talks, and the
+   message field is on. The dictation store remembers the draft on each side
+   of the field's cursor, and the message field turns read-only and Send
+   turns off.
+2. In the same step the UI asks for the microphone with `getUserMedia` and
+   opens the dictation socket, `GET /api/v1/voice/dictation`. An audio
+   worklet converts the microphone's audio to 16 kHz mono 16-bit
+   little-endian PCM, and the UI sends it as one binary message per 100 ms.
+   macOS asks for microphone access the first time.
+3. The backend asks voice whether it is ready, opens a WebSocket to
+   `127.0.0.1:9091`, and sends `{ "type": "transcribe" }`. Audio that arrives
+   before voice accepted waits in the backend, in order, for at most five
+   seconds of it. From then on the backend relays each audio message to
+   voice.
+4. voice feeds the audio to its Nemotron model and, whenever the text
+   changes, sends `{ "type": "partial", "text": "…" }` with the whole text so
+   far. The backend relays it, and the UI writes it into the draft between
+   the two remembered parts, with a space where the words would touch.
+5. The person presses the button again. The UI stops the microphone at once
+   and sends `{ "type": "stop" }`, which the backend relays. voice decodes
+   what it still holds, sends `{ "type": "final", "text": "…" }`, and closes
+   with `1000`; the backend does the same toward the UI. The final text
+   replaces the partial text, the field can be typed in again, and Send is
+   on. Nothing is sent to Lys unless the person presses Send.
+6. A dictation that reaches five minutes is stopped by the backend, as in
+   step 5. A reply that starts, Lys starting to talk, or voice stopping makes
+   the UI stop, as in step 5. When no final text arrives within five seconds
+   of the stop, the UI closes the socket and keeps the last partial text; the
+   backend waits ten seconds for voice and then closes with `1011`.
+7. The shown conversation changing, a new conversation, a deleted one, or
+   anything else changing the draft cancels the dictation at once: the UI
+   closes the socket, releases the microphone, and writes nothing more. The
+   backend closes voice's socket whenever the UI's socket closes, which
+   cancels the recognition.
+8. When voice is not ready, the socket closes with `4503`; when voice fails,
+   falls behind, or stops, with `1011`. The UI keeps the text so far, turns
+   the field and Send back on, releases the microphone, and says what
+   happened in a status line under the field. A second dictation socket
+   closes the first with `4409`.
 
 ## Connect MCP servers
 

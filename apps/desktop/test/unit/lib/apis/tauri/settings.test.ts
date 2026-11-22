@@ -1157,7 +1157,7 @@ describe("saveToolSettings", () => {
 })
 
 describe("saveRuntimeAutoStartSettings", () => {
-  it("replaces only the two startup switches, keeping the default model and backend address on disk", async () => {
+  it("replaces only the three startup switches, keeping the default model and backend address on disk", async () => {
     const host = startNativeHostFake({
       load_settings: () => STORED_SETTINGS_DOCUMENT,
       save_settings: () => null
@@ -1165,12 +1165,14 @@ describe("saveRuntimeAutoStartSettings", () => {
 
     await saveRuntimeAutoStartSettings({
       autoStartBackend: true,
-      autoStartVmo: true
+      autoStartVmo: true,
+      autoStartVoice: true
     })
 
     const savedRuntime: SettingsDocument["runtime"] = {
       autoStartBackend: true,
       autoStartVmo: true,
+      autoStartVoice: true,
       defaultModel: STORED_SETTINGS_DOCUMENT.runtime.defaultModel,
       backendAddress: STORED_SETTINGS_DOCUMENT.runtime.backendAddress
     }
@@ -1197,7 +1199,8 @@ describe("saveRuntimeAutoStartSettings", () => {
 
     await saveRuntimeAutoStartSettings({
       autoStartBackend: true,
-      autoStartVmo: false
+      autoStartVmo: false,
+      autoStartVoice: false
     })
 
     expect(host.commands[1]).toEqual({
@@ -1208,7 +1211,8 @@ describe("saveRuntimeAutoStartSettings", () => {
           runtime: {
             ...STORED_SETTINGS_DOCUMENT.runtime,
             autoStartBackend: true,
-            autoStartVmo: false
+            autoStartVmo: false,
+            autoStartVoice: STORED_SETTINGS_DOCUMENT.runtime.autoStartVoice
           }
         }
       }
@@ -1224,7 +1228,8 @@ describe("saveRuntimeAutoStartSettings", () => {
     await expect(
       saveRuntimeAutoStartSettings({
         autoStartBackend: true,
-        autoStartVmo: false
+        autoStartVmo: false,
+        autoStartVoice: false
       })
     ).rejects.toBe("Failed to read settings.json")
     expect(host.commands.map((invoked) => invoked.command)).toEqual([
@@ -1241,7 +1246,8 @@ describe("saveRuntimeAutoStartSettings", () => {
     await expect(
       saveRuntimeAutoStartSettings({
         autoStartBackend: true,
-        autoStartVmo: false
+        autoStartVmo: false,
+        autoStartVoice: false
       })
     ).rejects.toBe("Disk full")
   })
